@@ -751,7 +751,9 @@
       row.querySelector(".order-patient").textContent = o.patient || o.patient_name || "(no patient)";
       row.querySelector(".hist-meta").textContent = [
         o.patient_id ? "ID " + o.patient_id : "",
+        [fmtDate(o.patient_birthdate), o.patient_sex].filter(Boolean).join(" "),
         o.modality || "",
+        o.station_aet ? "→ " + o.station_aet : "",
         o.study_desc || "(no study description)",
         o.scheduled_dt ? "@ " + o.scheduled_dt : "",
       ].filter(Boolean).join("  ·  ");
@@ -762,9 +764,15 @@
       }
       if (o.referring) bits.push("ref: " + o.referring);
       sub.textContent = bits.join("  ·  ");
+      const captureBtn = row.querySelector(".order-capture");
       const cancelBtn = row.querySelector(".order-cancel");
-      if (o.status === "closed") cancelBtn.hidden = true;
-      else cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+      if (o.status === "closed") {
+        captureBtn.hidden = true;
+        cancelBtn.hidden = true;
+      } else {
+        captureBtn.addEventListener("click", () => captureForOrder(o, captureBtn));
+        cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+      }
       row.querySelector(".order-del").addEventListener("click", () =>
         orderAction("delete", o, "Delete this order permanently? This removes it from the audit trail."));
       list.appendChild(row);
@@ -781,7 +789,10 @@
       accession: $("ordAcc").value.trim(),
       patient: $("ordPatient").value.trim(),
       patient_id: $("ordPid").value.trim(),
+      patient_birthdate: $("ordDob").value.trim(),
+      patient_sex: $("ordSex").value,
       modality: $("ordMod").value.trim(),
+      station_aet: $("ordStation").value.trim(),
       study_desc: $("ordDesc").value.trim(),
       scheduled_dt: $("ordWhen").value.trim(),
       referring: $("ordRef").value.trim(),
@@ -795,7 +806,7 @@
       const r = await post("/api/ris/orders", fields);
       flashNote(r.message || "Order queued", r.ok !== false);
       if (r.ok !== false) {
-        ["ordAcc", "ordPatient", "ordPid", "ordMod", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
+        ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
         orderStatus = "open";
         document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.toggle("active", t.dataset.ostatus === "open"));
         loadOrders();
@@ -815,6 +826,32 @@
       loadOrders();
       pollStatus();
     } catch (e) { flashNote(e.message, false); }
+  }
+
+  // Use-case-B bridge: pick an exported PDF/image and relate it to this order.
+  // The server wraps it as DICOM (inheriting the order's identity + Study UID),
+  // queues it to outgoing, and closes the order.
+  function captureForOrder(o, btn) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/*";
+    input.addEventListener("change", async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append("id", o.id);
+      fd.append("file", f);
+      const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+      try {
+        const res = await fetch("/api/ris/orders/capture", { method: "POST", body: fd });
+        let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
+        flashNote(body.message || (res.ok ? "Study created" : "Capture failed"), res.ok && body.ok !== false);
+        if (res.ok) { loadOrders(); pollStatus(); }
+      } catch (e) {
+        flashNote(e.message, false);
+      } finally { btn.disabled = false; btn.textContent = old; }
+    });
+    input.click();
   }
 
   async function purgeClosedOrders() {

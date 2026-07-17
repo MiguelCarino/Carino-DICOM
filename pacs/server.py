@@ -149,12 +149,14 @@ class PacsServer:
         instance is already stored; this only reconciles order tracking."""
         accession = str(getattr(ds, "AccessionNumber", "") or "")
         patient_id = str(getattr(ds, "PatientID", "") or "")
-        if not accession and not patient_id:
+        study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
+        if not accession and not patient_id and not study_uid:
             return
-        order = self.orders.match(accession, patient_id)
+        # Study Instance UID is the strongest key (exact when the exam was made
+        # from a Carino order via MWL); accession / patient id are fallbacks.
+        order = self.orders.match(accession, patient_id, study_uid)
         if not order:
             return
-        study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
         if self.cfg.ris.get("auto_close", True):
             self.orders.close(order["id"], reason="matched", matched_study=study_uid)
             self.log.info(
@@ -201,6 +203,55 @@ class PacsServer:
         n = self.orders.purge_closed()
         self.log.info(f"Purged {n} closed RIS order(s)", kind="ris")
         return {"ok": True, "removed": n, "message": f"Removed {n} closed order(s)"}
+
+    def create_study_from_order(self, order_id: str, filename: str, data: bytes) -> dict:
+        """Use-case-B bridge: wrap an exported PDF/image as a DICOM study that
+        inherits THIS order's identity (patient, IDs, accession, and the order's
+        pre-generated Study Instance UID), drop it into the outgoing folder for
+        the normal auto-send/hold-and-forward pipeline, and close the order as
+        fulfilled. The tech captured the study in a legacy tool and relates the
+        export to the on-screen order — no hand-typed identity."""
+        from . import ingest
+        order = self.orders.get(order_id)
+        if not order:
+            return {"ok": False, "message": "order not found"}
+        if order.get("status") != "open":
+            return {"ok": False, "message": "order is already closed"}
+        kind = ingest.detect_kind_bytes(data, filename)
+        if not kind:
+            return {"ok": False, "message": "unsupported file — capture a PDF, JPEG or PNG"}
+        base = os.path.splitext(os.path.basename(filename))[0]
+        meta = {
+            "patient": order.get("patient", ""),
+            "patient_name": order.get("patient_name", ""),
+            "patient_id": order.get("patient_id", ""),
+            "patient_birthdate": order.get("patient_birthdate", ""),
+            "patient_sex": order.get("patient_sex", ""),
+            "study_uid": order.get("study_uid", ""),
+            "study_date": order.get("scheduled_dt", ""),
+            "study_desc": order.get("study_desc", ""),
+            "accession": order.get("accession", ""),
+            "referring": order.get("referring", ""),
+            "series_desc": base or order.get("study_desc") or "Captured study",
+            "source": "RIS order " + (order.get("accession") or order_id),
+        }
+        watch = self.cfg.resolved("scu", "watch_dir")
+        try:
+            ds = ingest.build_from_bytes(data, kind, meta)
+            out = ingest.save_instance(ds, watch)
+        except Exception as exc:
+            return {"ok": False, "message": f"could not convert: {exc}"}
+        self.orders.close(order_id, reason="captured", matched_study=order.get("study_uid", ""))
+        self.log.info(
+            f"Captured study for order [acc {order.get('accession') or '—'}] "
+            f"→ {os.path.basename(out)} into outgoing; order closed",
+            kind="ris",
+        )
+        if self.watcher.running:
+            msg = "Study created and queued — Auto-send will forward it (held until the PACS is reachable)."
+        else:
+            msg = "Study created in the outgoing folder — start Auto-send to forward it."
+        return {"ok": True, "message": msg, "file": os.path.basename(out)}
 
     # ---- watcher (auto-send) ----------------------------------------------
     def start_watcher(self) -> None:

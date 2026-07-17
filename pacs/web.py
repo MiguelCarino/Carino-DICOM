@@ -153,6 +153,17 @@ def create_app(server: PacsServer) -> Flask:
     def api_ris_purge_orders():
         return jsonify(server.purge_closed_orders())
 
+    @app.post("/api/ris/orders/capture")
+    def api_ris_capture():
+        """Multipart: an order 'id' and a 'file' (PDF/JPEG/PNG) exported from a
+        legacy tool, wrapped as a DICOM study inheriting the order's identity."""
+        oid = request.form.get("id")
+        up = request.files.get("file")
+        if not oid or up is None or not up.filename:
+            return jsonify(ok=False, message="need an order 'id' and a 'file'"), 400
+        res = server.create_study_from_order(oid, up.filename, up.read())
+        return jsonify(res), (200 if res.get("ok") else 400)
+
     @app.post("/api/watcher")
     def api_watcher():
         action = (request.get_json(silent=True) or {}).get("action")

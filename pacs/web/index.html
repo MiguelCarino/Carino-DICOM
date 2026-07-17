@@ -133,7 +133,17 @@
               <label>Accession # <input id="ordAcc" placeholder="the value the tech types into the modality" /></label>
               <label>Patient name <input id="ordPatient" placeholder="e.g. Jane Doe" /></label>
               <label>Patient ID <input id="ordPid" /></label>
+              <label>Date of birth <input id="ordDob" placeholder="YYYY-MM-DD" /></label>
+              <label>Sex
+                <select id="ordSex">
+                  <option value=""></option>
+                  <option value="F">F</option>
+                  <option value="M">M</option>
+                  <option value="O">O</option>
+                </select>
+              </label>
               <label>Modality <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
+              <label>Target modality AE <input id="ordStation" placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
               <label class="wide">Study description <input id="ordDesc" placeholder="e.g. Ultrasound Abdomen" /></label>
               <label>Scheduled <input id="ordWhen" placeholder="YYYY-MM-DD HH:MM" /></label>
               <label>Referring <input id="ordRef" placeholder="ordering physician" /></label>
@@ -368,6 +378,7 @@
         <div class="order-sub"></div>
       </div>
       <div class="hist-actions">
+        <button class="btn tiny order-capture" title="Relate an exported PDF/image to this order → DICOM → send, then close the order">📎 Capture study</button>
         <button class="btn tiny danger order-cancel" title="Cancel this order (keeps it in Closed for the audit trail)">Cancel</button>
         <button class="btn tiny ghost order-del" title="Delete permanently">Delete</button>
       </div>
