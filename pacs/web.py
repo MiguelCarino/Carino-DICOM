@@ -112,6 +112,12 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(error=f"could not start RIS listener: {exc}"), 400
         return jsonify(ok=True, ris=server.status()["ris"])
 
+    @app.post("/api/emergency")
+    def api_emergency():
+        action = (request.get_json(silent=True) or {}).get("action")
+        res = server.emergency_action(action)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
     @app.post("/api/mwl")
     def api_mwl():
         action = (request.get_json(silent=True) or {}).get("action")

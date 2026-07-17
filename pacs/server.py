@@ -12,6 +12,7 @@ import threading
 from typing import Optional
 
 from .config import Config
+from .emergency import EmergencyController
 from .logbuf import LogBuffer
 from .mwl import MwlSCP
 from .print_scp import PrintSCP
@@ -38,6 +39,7 @@ class PacsServer:
             match_on=cfg.ris.get("match_on", "accession"),
         )
         self.watcher = FolderWatcher(cfg, self.log)
+        self.emergency = EmergencyController(self, self.log)
 
     # ---- receiver (Storage SCP) -------------------------------------------
     def start_receiver(self) -> None:
@@ -77,6 +79,20 @@ class PacsServer:
         with self._lock:
             if self.scp:
                 self.scp.stop()
+
+    def _probe(self, dest: dict):
+        """Quiet C-ECHO to a destination for the emergency health monitor —
+        returns (ok, message) without logging (it runs every probe interval)."""
+        from .scu import Destination, c_echo
+        d = Destination.from_dict(dest)
+        ctx = None
+        if d.tls:
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return False, f"TLS config error: {exc}"
+        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx)
+        return res.ok, res.message
 
     # ---- print receiver (virtual DICOM film printer) ----------------------
     def _ingest_print(self, data: bytes, kind: str, identity: dict, name: str) -> None:
@@ -177,6 +193,12 @@ class PacsServer:
         accession = str(getattr(ds, "AccessionNumber", "") or "")
         patient_id = str(getattr(ds, "PatientID", "") or "")
         study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
+        # Hold-and-forward: while emergency failover is active, copy every
+        # received instance into the outgoing folder so the watcher forwards it
+        # to the primary (retrying/holding until it's back). Independent of
+        # whether the study matches an order.
+        if self.emergency.active and self.cfg.emergency.get("hold_and_forward", True):
+            self._queue_for_forward(path)
         if not accession and not patient_id and not study_uid:
             return
         # Study Instance UID is the strongest key (exact when the exam was made
@@ -197,6 +219,35 @@ class PacsServer:
                 f"{order.get('patient') or '?'} [acc {order.get('accession') or '—'}]",
                 kind="ris",
             )
+
+    def _queue_for_forward(self, path: str) -> None:
+        """Copy a received instance into the outgoing watch folder so the normal
+        auto-send/retry pipeline forwards it to the primary (used by emergency
+        hold-and-forward). Best-effort — never break the C-STORE on a copy error."""
+        import shutil as _sh
+        try:
+            watch = self.cfg.resolved("scu", "watch_dir")
+            os.makedirs(watch, exist_ok=True)
+            dst = os.path.join(watch, os.path.basename(path))
+            if os.path.abspath(dst) != os.path.abspath(path) and not os.path.exists(dst):
+                _sh.copy2(path, dst)
+        except OSError as exc:
+            self.log.warn(f"Emergency hold-and-forward: could not queue {os.path.basename(path)}: {exc}",
+                          kind="emergency")
+
+    # ---- emergency failover (health monitor + state machine) --------------
+    def emergency_action(self, action: str) -> dict:
+        """Drive the failover state machine from the dashboard."""
+        fn = {
+            "arm": self.emergency.arm,
+            "disarm": self.emergency.disarm,
+            "activate": self.emergency.activate,
+            "dismiss": self.emergency.dismiss,
+            "resume": self.emergency.resume,
+        }.get(action)
+        if not fn:
+            return {"ok": False, "message": "action must be arm|disarm|activate|dismiss|resume"}
+        return {"ok": True, "emergency": fn()}
 
     # ---- RIS orders (CRUD over the store) ---------------------------------
     def list_orders(self, status: Optional[str] = None) -> dict:
@@ -564,6 +615,9 @@ class PacsServer:
             self.start_ris()
         if was_mwl:
             self.start_mwl()
+        # Re-sync the health monitor to the new config (armed flag / trigger set).
+        self.emergency.stop()
+        self.emergency.start()
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
@@ -749,6 +803,7 @@ class PacsServer:
                 "errors": mwl.error_count if mwl else 0,
                 "tls": bool(mcfg.get("tls", False)),
             },
+            "emergency": self.emergency.status(),
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
@@ -761,6 +816,7 @@ class PacsServer:
         }
 
     def shutdown(self) -> None:
+        self.emergency.stop()
         self.stop_watcher()
         self.stop_receiver()
         self.stop_printer()

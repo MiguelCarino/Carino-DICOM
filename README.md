@@ -35,6 +35,18 @@ the exam, so the study the modality sends back reconciles to the order exactly.
 Start it from the **Worklist** card, the Settings → *Modality Worklist* fieldset,
 or head-less with `pacs mwl`.
 
+### Emergency failover (automatic)
+
+Rather than run the worklist all the time, Carino can **watch your primary PACS
+and offer to take over when it fails**. In *Destinations*, tick a node's 🚨 box
+to mark it a primary, and in *Settings → Emergency failover* **arm** the monitor.
+It then C-ECHOes that node periodically (and watches for forward failures); if it
+stays unreachable past the threshold you get a **pop-up: "Primary PACS
+unreachable — activate emergency RIS?"**. Activating starts the local Modality
+Worklist so techs keep scanning, and **holds** every study received during the
+outage, **auto-forwarding** it once the primary is back. You click *Resume
+normal* to stand down. (Set *Activate automatically* to skip the prompt.)
+
 Built on [`pynetdicom`](https://github.com/pydicom/pynetdicom) + [`pydicom`](https://github.com/pydicom/pydicom), so it runs identically on **Windows, macOS, and Linux (Debian & Fedora)**.
 
 ---

@@ -101,6 +101,12 @@
     <!-- ── Low-disk warning (hidden unless the storage volume is low) ── -->
     <div class="disk-warn" id="diskWarn" hidden></div>
 
+    <!-- ── Emergency-failover banner (hidden unless triggered/active) ── -->
+    <div class="emg-banner" id="emgBanner" hidden>
+      <div class="emg-text" id="emgBannerText"></div>
+      <div class="emg-actions" id="emgBannerActions"></div>
+    </div>
+
     <!-- ── Tab strip: each button reveals its panel in the workspace ── -->
     <nav class="actions-row" id="tabStrip">
       <button class="btn action tabbtn active" id="openHistory" data-panel="dlgHistory">🗂 History</button>
@@ -228,7 +234,7 @@
           <div class="table-scroll">
             <table class="grid" id="destTable">
               <thead>
-                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th></th></tr>
+                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th title="Watch this node for emergency failover">🚨</th><th></th></tr>
               </thead>
               <tbody id="destBody"></tbody>
             </table>
@@ -299,6 +305,16 @@
               <p class="hint" style="margin:2px 0 0">Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
             </fieldset>
             <fieldset>
+              <legend>Emergency failover</legend>
+              <label class="check"><input id="emgArmed" type="checkbox" /> Arm failover — monitor the 🚨 destinations and prompt if one goes offline</label>
+              <label>Probe interval (s) <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
+              <label>Offline after (s) <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
+              <label>Recovery — good probes to declare back <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
+              <label class="check"><input id="emgAuto" type="checkbox" /> Activate automatically (skip the prompt)</label>
+              <label class="check"><input id="emgHold" type="checkbox" /> Hold &amp; forward — queue received studies for the primary while active</label>
+              <p class="hint" style="margin:2px 0 0">Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
+            </fieldset>
+            <fieldset>
               <legend>Modality Worklist (MWL)</legend>
               <label class="check"><input id="mwlEnabled" type="checkbox" /> Start the worklist SCP on launch</label>
               <label>Worklist AE title <input id="mwlAet" maxlength="16" /></label>
@@ -364,6 +380,19 @@
 
   <!-- global toast -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- Emergency activation prompt (pops when a primary goes offline) -->
+  <div class="emg-modal" id="emgPrompt" hidden>
+    <div class="emg-modal-card">
+      <h2>⚠ Primary PACS unreachable</h2>
+      <p id="emgPromptMsg"></p>
+      <p class="hint">Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
+      <div class="emg-modal-actions">
+        <button class="btn" id="emgActivate">Activate emergency RIS</button>
+        <button class="btn ghost" id="emgDismiss">Not now</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Row template for a study in the history list -->
   <template id="histRowTpl">
@@ -449,6 +478,7 @@
       <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
       <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
       <td style="text-align:center"><input type="checkbox" class="d-tls" title="Connect to this node over TLS" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-emg" title="Trigger emergency failover if this node goes offline" /></td>
       <td class="row-actions">
         <button class="btn tiny echo" title="C-ECHO test">Echo</button>
         <button class="btn tiny danger del" title="Remove">✕</button>

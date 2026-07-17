@@ -16,7 +16,7 @@
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
   // so an omitted key would otherwise silently reset.
-  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {};
+  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {}, loadedEmg = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
@@ -129,6 +129,73 @@
     $("mwMatches").textContent = mw.matches || 0;
     $("mwTls").textContent = mw.tls ? "TLS" : "plaintext";
     setToggle($("mwToggle"), mw.running);
+
+    renderEmergency(s.emergency || {}, rs, mw);
+  }
+
+  /* ── Emergency failover: banner, activation pop-up, card visibility ──── */
+  let emgPromptShown = false;
+  function renderEmergency(emg, rs, mw) {
+    // The Worklist + Emergency-RIS cards are advanced/emergency services — keep
+    // them off the normal dashboard unless they're running or failover is armed.
+    const rsCard = $("risCard"), mwCard = $("mwlCard");
+    if (rsCard) rsCard.hidden = !((rs && rs.running) || emg.armed);
+    if (mwCard) mwCard.hidden = !((mw && mw.running) || emg.armed);
+
+    const banner = $("emgBanner");
+    const state = emg.state || "off";
+    const who = emg.trigger_dest || "primary";
+    if (state === "triggered" || state === "active" || state === "recovering") {
+      banner.hidden = false;
+      banner.className = "emg-banner " + state;
+      let text, actions;
+      if (state === "active") {
+        text = `🚨 EMERGENCY ACTIVE — '${who}' unreachable. Worklist is serving; received studies are held for forward.`;
+        actions = [["Resume normal", "resume", "btn"]];
+      } else if (state === "recovering") {
+        text = `↩ '${who}' is back — flushing held studies to it. Click Resume when done.`;
+        actions = [["Resume normal", "resume", "btn"]];
+      } else {  // triggered (prompt may be dismissed)
+        text = `⚠ Primary '${who}' is unreachable — emergency RIS not activated.`;
+        actions = [["Activate", "activate", "btn"], ["Disarm", "disarm", "btn ghost"]];
+      }
+      $("emgBannerText").textContent = text;
+      const wrap = $("emgBannerActions");
+      wrap.innerHTML = "";
+      actions.forEach(([label, action, cls]) => {
+        const b = document.createElement("button");
+        b.className = cls + " tiny";
+        b.textContent = label;
+        b.addEventListener("click", () => emergencyAction(action));
+        wrap.appendChild(b);
+      });
+    } else {
+      banner.hidden = true;
+    }
+
+    // The activation pop-up — only while triggered and not dismissed.
+    const prompt = $("emgPrompt");
+    if (emg.prompt) {
+      if (!emgPromptShown) {
+        $("emgPromptMsg").textContent =
+          `The primary PACS '${who}' has been unreachable past the failover threshold.`;
+        prompt.hidden = false;
+        emgPromptShown = true;
+      }
+    } else {
+      prompt.hidden = true;
+      emgPromptShown = false;
+    }
+  }
+
+  async function emergencyAction(action) {
+    try {
+      const r = await post("/api/emergency", { action });
+      flashNote(r.message || ("Emergency: " + action), r.ok !== false);
+      $("emgPrompt").hidden = true;
+      emgPromptShown = false;
+      pollStatus();
+    } catch (e) { flashNote(e.message, false); }
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
@@ -196,6 +263,7 @@
     loadedPrint = c.print || {};
     loadedRis = c.ris || {};
     loadedMwl = c.mwl || {};
+    loadedEmg = c.emergency || {};
     loadedWeb = c.web || loadedWeb;
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
@@ -248,6 +316,13 @@
     $("mwlTlsCert").value = mi.tls_cert || "";
     $("mwlTlsKey").value = mi.tls_key || "";
     $("mwlTlsCa").value = mi.tls_ca || "";
+    const eg = c.emergency || {};
+    $("emgArmed").checked = !!eg.armed;
+    $("emgProbe").value = eg.probe_interval_sec != null ? eg.probe_interval_sec : 30;
+    $("emgThreshold").value = eg.offline_threshold_sec != null ? eg.offline_threshold_sec : 120;
+    $("emgRecovery").value = eg.recovery_successes != null ? eg.recovery_successes : 2;
+    $("emgAuto").checked = !!eg.auto_activate;
+    $("emgHold").checked = eg.hold_and_forward !== false;
     renderDests(c.destinations || []);
     reflowActive();
   }
@@ -267,6 +342,7 @@
     tr.querySelector(".d-port").value = d.port || "";
     tr.querySelector(".d-aet").value = d.aet || "";
     tr.querySelector(".d-tls").checked = !!d.tls;
+    tr.querySelector(".d-emg").checked = !!d.emergency_trigger;
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
     $("destBody").appendChild(tr);
@@ -280,6 +356,7 @@
         port: parseInt(tr.querySelector(".d-port").value, 10),
         aet: tr.querySelector(".d-aet").value.trim(),
         tls: tr.querySelector(".d-tls").checked,
+        emergency_trigger: tr.querySelector(".d-emg").checked,
       }))
       .filter((d) => d.host && d.aet && d.port);
   }
@@ -340,6 +417,15 @@
         tls_cert: $("mwlTlsCert").value.trim(),
         tls_key: $("mwlTlsKey").value.trim(),
         tls_ca: $("mwlTlsCa").value.trim(),
+      },
+      emergency: {
+        ...loadedEmg,
+        armed: $("emgArmed").checked,
+        probe_interval_sec: parseInt($("emgProbe").value, 10) || 30,
+        offline_threshold_sec: parseInt($("emgThreshold").value, 10) || 0,
+        recovery_successes: parseInt($("emgRecovery").value, 10) || 1,
+        auto_activate: $("emgAuto").checked,
+        hold_and_forward: $("emgHold").checked,
       },
       ris: {
         ...loadedRis,
@@ -981,6 +1067,8 @@
       if (e.target.dataset.on !== "true") $("mwlEnabled").checked = true;
       toggle("mwl", e.target);
     });
+    $("emgActivate").addEventListener("click", () => emergencyAction("activate"));
+    $("emgDismiss").addEventListener("click", () => emergencyAction("dismiss"));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
     $("saveDests").addEventListener("click", () => saveConfig());

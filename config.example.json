@@ -55,6 +55,14 @@
     "auto_close": true,
     "allowed_hosts": []
   },
+  "emergency": {
+    "armed": false,
+    "probe_interval_sec": 30,
+    "offline_threshold_sec": 120,
+    "recovery_successes": 2,
+    "auto_activate": false,
+    "hold_and_forward": true
+  },
   "destinations": [
     {
       "name": "Example PACS",
@@ -62,7 +70,8 @@
       "port": 104,
       "aet": "REMOTEPACS",
       "enabled": false,
-      "tls": false
+      "tls": false,
+      "emergency_trigger": false
     }
   ],
   "web": {

@@ -303,8 +303,10 @@ by direction, make Orders the hub.
 2. ✅ **Done** — B bridge: create-study-from-order + close-on-fulfil. Shared by A and B.
 3. ✅ **Done** — A1 MWL SCP (`pacs/mwl.py`): C-FIND worklist provider over the open
    orders, lenient matching, station/modality/date filters, Study-UID carried through.
-4. **Next** — Hold-and-forward + health monitor + emergency state machine (A2 + the
-   failover trigger) — the core of the emergency protocol.
-5. UI: emergency banner + arm control + service regroup (inbound/outbound +
-   Orders hub), folding the new pieces in.
+4. ✅ **Done** — Health monitor + emergency state machine (`pacs/emergency.py`) +
+   hold-and-forward. Refinement: no permanent emergency card — a monitored
+   destination going offline raises a **pop-up asking to activate** (default;
+   `auto_activate` skips it). Worklist/Emergency-RIS cards hidden unless running
+   or armed. Banner shows triggered/active/recovering with Activate/Resume.
+5. **Next** — UI polish: service regroup (inbound/outbound + Orders hub).
 6. **HL7-out** — only if kept (optional, last).

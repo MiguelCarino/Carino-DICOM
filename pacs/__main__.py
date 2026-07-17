@@ -110,6 +110,11 @@ def cmd_serve(args) -> int:
         except Exception as exc:
             server.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
             print(f"WARNING: worklist SCP did not start: {exc}", file=sys.stderr)
+    # Emergency failover monitor auto-starts if armed in config.
+    try:
+        server.emergency.start()
+    except Exception as exc:
+        server.log.error(f"Could not start emergency monitor: {exc}", kind="emergency")
 
     host = args.host or cfg.web.get("host", "127.0.0.1")
     port = args.port or int(cfg.web.get("port", 8042))
