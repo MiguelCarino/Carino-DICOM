@@ -13,6 +13,7 @@ from typing import Optional
 
 from .config import Config
 from .logbuf import LogBuffer
+from .mwl import MwlSCP
 from .print_scp import PrintSCP
 from .ris import OrderStore, RisListener
 from .scp import StorageSCP
@@ -28,6 +29,7 @@ class PacsServer:
         self.scp: Optional[StorageSCP] = None
         self.print_scp: Optional[PrintSCP] = None
         self.ris: Optional[RisListener] = None
+        self.mwl_scp: Optional[MwlSCP] = None
         # The order store is always live (manual entry works even with the HL7
         # listener stopped); the listener is an optional front door onto it.
         self.orders = OrderStore(
@@ -141,6 +143,31 @@ class PacsServer:
         with self._lock:
             if self.ris:
                 self.ris.stop()
+
+    # ---- Modality Worklist SCP (serve orders to modalities) ---------------
+    def start_mwl(self) -> None:
+        with self._lock:
+            if self.mwl_scp and self.mwl_scp.running:
+                return
+            m = self.cfg.mwl
+            self.mwl_scp = MwlSCP(
+                aet=m.get("aet", "CARINOMWL"),
+                bind=m.get("bind", "0.0.0.0"),
+                port=int(m.get("port", 11114)),
+                log=self.log,
+                get_orders=lambda: self.orders.list("open"),
+                allowed_aets=m.get("allowed_aets", []),
+                tls=bool(m.get("tls", False)),
+                tls_cert=self.cfg.resolve_path(m.get("tls_cert", "")),
+                tls_key=self.cfg.resolve_path(m.get("tls_key", "")),
+                tls_ca=self.cfg.resolve_path(m.get("tls_ca", "")),
+            )
+            self.mwl_scp.start()
+
+    def stop_mwl(self) -> None:
+        with self._lock:
+            if self.mwl_scp:
+                self.mwl_scp.stop()
 
     def _reconcile_study(self, ds, path: str) -> None:
         """Called for every C-STORE'd instance: try to match it to an open RIS
@@ -519,9 +546,11 @@ class PacsServer:
         was_receiving = bool(self.scp and self.scp.running)
         was_printing = bool(self.print_scp and self.print_scp.running)
         was_ris = bool(self.ris and self.ris.running)
+        was_mwl = bool(self.mwl_scp and self.mwl_scp.running)
         self.stop_receiver()
         self.stop_printer()
         self.stop_ris()
+        self.stop_mwl()
         self.cfg.replace(new_data)
         self.log.log_dir = self.cfg.logs_dir   # logs_dir may have changed
         # store_dir / match_on may have changed — repoint the live order store.
@@ -533,6 +562,8 @@ class PacsServer:
             self.start_printer()
         if was_ris:
             self.start_ris()
+        if was_mwl:
+            self.start_mwl()
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
@@ -659,6 +690,8 @@ class PacsServer:
         pr = self.cfg.printer
         ris = self.ris
         rcfg = self.cfg.ris
+        mwl = self.mwl_scp
+        mcfg = self.cfg.mwl
         return {
             "receiver": {
                 "running": bool(scp and scp.running),
@@ -705,6 +738,17 @@ class PacsServer:
                 "errors": ris.error_count if ris else 0,
                 "counts": self.orders.counts(),
             },
+            "mwl": {
+                "enabled": bool(mcfg.get("enabled", False)),
+                "running": bool(mwl and mwl.running),
+                "aet": mcfg.get("aet", "CARINOMWL"),
+                "bind": mcfg.get("bind", "0.0.0.0"),
+                "port": int(mcfg.get("port", 11114)),
+                "queries": mwl.query_count if mwl else 0,
+                "matches": mwl.match_count if mwl else 0,
+                "errors": mwl.error_count if mwl else 0,
+                "tls": bool(mcfg.get("tls", False)),
+            },
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
@@ -721,3 +765,4 @@ class PacsServer:
         self.stop_receiver()
         self.stop_printer()
         self.stop_ris()
+        self.stop_mwl()

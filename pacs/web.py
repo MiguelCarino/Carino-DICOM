@@ -112,6 +112,20 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(error=f"could not start RIS listener: {exc}"), 400
         return jsonify(ok=True, ris=server.status()["ris"])
 
+    @app.post("/api/mwl")
+    def api_mwl():
+        action = (request.get_json(silent=True) or {}).get("action")
+        try:
+            if action == "start":
+                server.start_mwl()
+            elif action == "stop":
+                server.stop_mwl()
+            else:
+                return jsonify(error="action must be start|stop"), 400
+        except OSError as exc:
+            return jsonify(error=f"could not start worklist SCP: {exc}"), 400
+        return jsonify(ok=True, mwl=server.status()["mwl"])
+
     # ---- RIS orders (emergency RIS: intake + reconciliation) --------------
     @app.get("/api/ris/orders")
     def api_ris_orders():

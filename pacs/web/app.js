@@ -16,14 +16,14 @@
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
   // so an omitted key would otherwise silently reset.
-  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {};
+  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
-    const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {};
+    const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
 
     // This machine's network identity (what remote nodes send to).
     const ni = $("netInfo");
@@ -121,6 +121,14 @@
     $("rsRecv").textContent = rs.received || 0;
     $("rsErr").textContent = rs.errors || 0;
     setToggle($("rsToggle"), rs.running);
+
+    setDot($("mwDot"), mw.running);
+    $("mwAet").textContent = mw.aet || "—";
+    $("mwAddr").textContent = `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`;
+    $("mwQueries").textContent = mw.queries || 0;
+    $("mwMatches").textContent = mw.matches || 0;
+    $("mwTls").textContent = mw.tls ? "TLS" : "plaintext";
+    setToggle($("mwToggle"), mw.running);
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
@@ -148,13 +156,14 @@
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false;
+      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false, sawMwl = false;
       for (const e of data.entries) {
         logSeq = e.seq;
         if (e.kind === "store") sawStore = true;   // a file was received
         if (e.kind === "send") sawSend = true;      // a file was forwarded
         if (e.kind === "print") sawPrint = true;    // a print job / event
         if (e.kind === "ris") sawRis = true;        // an HL7 order / match event
+        if (e.kind === "mwl") sawMwl = true;        // a worklist query
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -173,6 +182,7 @@
         if (sawSend) blink($("wxDot"));
         if (sawPrint) blink($("pxDot"));
         if (sawRis) blink($("rsDot"));
+        if (sawMwl) blink($("mwDot"));
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -185,6 +195,7 @@
     loadedScu = c.scu || {};
     loadedPrint = c.print || {};
     loadedRis = c.ris || {};
+    loadedMwl = c.mwl || {};
     loadedWeb = c.web || loadedWeb;
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
@@ -227,6 +238,16 @@
     $("risMatch").value = ri.match_on === "accession_or_patient" ? "accession_or_patient" : "accession";
     $("risAutoClose").checked = ri.auto_close !== false;
     $("risHosts").value = (ri.allowed_hosts || []).join(", ");
+    const mi = c.mwl || {};
+    $("mwlEnabled").checked = !!mi.enabled;
+    $("mwlAet").value = mi.aet || "CARINOMWL";
+    $("mwlBind").value = mi.bind || "0.0.0.0";
+    $("mwlPort").value = mi.port != null ? mi.port : 11114;
+    $("mwlAllowed").value = (mi.allowed_aets || []).join(", ");
+    $("mwlTls").checked = !!mi.tls;
+    $("mwlTlsCert").value = mi.tls_cert || "";
+    $("mwlTlsKey").value = mi.tls_key || "";
+    $("mwlTlsCa").value = mi.tls_ca || "";
     renderDests(c.destinations || []);
     reflowActive();
   }
@@ -307,6 +328,18 @@
         tls_cert: $("prnTlsCert").value.trim(),
         tls_key: $("prnTlsKey").value.trim(),
         tls_ca: $("prnTlsCa").value.trim(),
+      },
+      mwl: {
+        ...loadedMwl,
+        enabled: $("mwlEnabled").checked,
+        aet: $("mwlAet").value.trim() || "CARINOMWL",
+        bind: $("mwlBind").value.trim() || "0.0.0.0",
+        port: parseInt($("mwlPort").value, 10),
+        allowed_aets: $("mwlAllowed").value.split(",").map((s) => s.trim()).filter(Boolean),
+        tls: $("mwlTls").checked,
+        tls_cert: $("mwlTlsCert").value.trim(),
+        tls_key: $("mwlTlsKey").value.trim(),
+        tls_ca: $("mwlTlsCa").value.trim(),
       },
       ris: {
         ...loadedRis,
@@ -943,6 +976,10 @@
       // persists the config before starting, like the printer card).
       if (e.target.dataset.on !== "true") $("risEnabled").checked = true;
       toggle("ris", e.target);
+    });
+    $("mwToggle").addEventListener("click", (e) => {
+      if (e.target.dataset.on !== "true") $("mwlEnabled").checked = true;
+      toggle("mwl", e.target);
     });
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));

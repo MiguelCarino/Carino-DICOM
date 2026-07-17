@@ -36,6 +36,16 @@
     "tls_cert": "",
     "tls_key": ""
   },
+  "mwl": {
+    "enabled": false,
+    "aet": "CARINOMWL",
+    "bind": "0.0.0.0",
+    "port": 11114,
+    "allowed_aets": [],
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": ""
+  },
   "ris": {
     "enabled": false,
     "bind": "0.0.0.0",

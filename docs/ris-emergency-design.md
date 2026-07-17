@@ -299,11 +299,11 @@ by direction, make Orders the hub.
 
 ## Proposed build order (once approved)
 
-1. Extend the order model (fields + lifecycle) + generate `study_uid` on create.
-2. **B bridge** (small, high value): create/relate-study-from-order + close-on-send.
-   Shared by A and B.
-3. **A1 MWL SCP** (worklist source).
-4. **Hold-and-forward + health monitor + emergency state machine** (A2 + the
+1. ✅ **Done** — Extend the order model (fields + `study_uid` on create) + UID-first matching.
+2. ✅ **Done** — B bridge: create-study-from-order + close-on-fulfil. Shared by A and B.
+3. ✅ **Done** — A1 MWL SCP (`pacs/mwl.py`): C-FIND worklist provider over the open
+   orders, lenient matching, station/modality/date filters, Study-UID carried through.
+4. **Next** — Hold-and-forward + health monitor + emergency state machine (A2 + the
    failover trigger) — the core of the emergency protocol.
 5. UI: emergency banner + arm control + service regroup (inbound/outbound +
    Orders hub), folding the new pieces in.

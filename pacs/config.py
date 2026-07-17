@@ -58,6 +58,17 @@ DEFAULTS: dict[str, Any] = {
         "tls_key": "",
         "tls_ca": "",
     },
+    "mwl": {                    # Modality Worklist SCP — serve orders to modalities
+        "enabled": False,       # opt-in — off by default
+        "aet": "CARINOMWL",
+        "bind": "0.0.0.0",
+        "port": 11114,          # distinct from scp (11112) and print (11113)
+        "allowed_aets": [],
+        "tls": False,
+        "tls_cert": "",
+        "tls_key": "",
+        "tls_ca": "",
+    },
     "ris": {                    # emergency RIS: HL7/MLLP order intake + manual entry
         "enabled": False,       # opt-in — off by default
         "bind": "0.0.0.0",
@@ -143,6 +154,10 @@ class Config:
         return self.data["print"]
 
     @property
+    def mwl(self) -> dict:
+        return self.data["mwl"]
+
+    @property
     def ris(self) -> dict:
         return self.data["ris"]
 
@@ -213,6 +228,20 @@ def validate(data: dict) -> None:
             raise ValueError("print.layout must be 'pdf' or 'image'")
         if pr.get("tls") and (not str(pr.get("tls_cert", "")).strip() or not str(pr.get("tls_key", "")).strip()):
             raise ValueError("print.tls is on but tls_cert / tls_key are not set")
+
+    mwl = data.get("mwl")
+    if mwl is not None:
+        if not isinstance(mwl, dict):
+            raise ValueError("'mwl' must be an object")
+        mp = mwl.get("port", 11114)
+        if not (isinstance(mp, int) and 1 <= mp <= 65535):
+            raise ValueError("mwl.port must be 1..65535")
+        if mwl.get("enabled") and mp in (data["scp"]["port"], data.get("print", {}).get("port")):
+            raise ValueError("mwl.port must differ from the scp / print ports")
+        if len(str(mwl.get("aet", ""))) > 16:
+            raise ValueError("mwl.aet must be 16 characters or fewer")
+        if mwl.get("tls") and (not str(mwl.get("tls_cert", "")).strip() or not str(mwl.get("tls_key", "")).strip()):
+            raise ValueError("mwl.tls is on but tls_cert / tls_key are not set")
 
     ris = data.get("ris")
     if ris is not None:

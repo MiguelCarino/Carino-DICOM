@@ -23,6 +23,18 @@ For **testing** a RIS→PACS feed without a live RIS, and as an **emergency fall
 
 Start it from the **Emergency RIS** card, the Settings → *Emergency RIS* fieldset (start-on-launch), or head-less with `pacs ris`.
 
+### Modality Worklist (serve orders to modalities)
+
+The flip side: Carino can **serve** those orders to modalities as a DICOM
+**Modality Worklist**. Point a modality at the **Worklist** AE / port (default
+`11114`) as its worklist source and it pulls every **open** order by C-FIND. Set
+an order's **Target modality AE** to steer it to one station (blank = every
+station sees it). The order's pre-generated **Study Instance UID** is burned into
+the exam, so the study the modality sends back reconciles to the order exactly.
+
+Start it from the **Worklist** card, the Settings → *Modality Worklist* fieldset,
+or head-less with `pacs mwl`.
+
 Built on [`pynetdicom`](https://github.com/pydicom/pynetdicom) + [`pydicom`](https://github.com/pydicom/pydicom), so it runs identically on **Windows, macOS, and Linux (Debian & Fedora)**.
 
 ---
@@ -126,7 +138,7 @@ via MDM / Group Policy and trust it centrally (no public cert needed), or use
 The dashboard is optional — every function has a head-less command:
 
 ```bash
-./run.sh serve [--receive] [--watch] [--print] [--ris] [--host H] [--port P]
+./run.sh serve [--receive] [--watch] [--print] [--ris] [--mwl] [--host H] [--port P]
                      # web dashboard; flags also auto-start the workers
 ./run.sh receive [--port 11112] [--aet CARINOPACS] [--out ./received]
                      # Storage SCP only, runs until Ctrl+C
@@ -134,6 +146,8 @@ The dashboard is optional — every function has a head-less command:
                      # folder watcher / auto-forward only, runs until Ctrl+C
 ./run.sh ris [--port 2575]
                      # emergency-RIS HL7/MLLP order listener only, runs until Ctrl+C
+./run.sh mwl [--port 11114] [--aet CARINOMWL]
+                     # Modality Worklist SCP (serve orders to modalities), until Ctrl+C
 ./run.sh echo --name "Example PACS"
 ./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS
                      # connectivity test

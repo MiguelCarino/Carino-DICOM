@@ -77,6 +77,22 @@
         </dl>
         <div class="drop-hint">orders appear under 📋 Orders — key the accession into the modality to match</div>
       </article>
+
+      <article class="card" id="mwlCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="mwDot"></span> Worklist <small>Modality Worklist SCP</small></div>
+          <button class="btn toggle" id="mwToggle" data-on="false">Start</button>
+        </header>
+        <dl class="kv">
+          <div><dt>AE title</dt><dd id="mwAet">—</dd></div>
+          <div><dt>Listening</dt><dd id="mwAddr">—</dd></div>
+          <div><dt>Serving</dt><dd id="mwServing">open orders</dd></div>
+          <div><dt>Queries</dt><dd id="mwQueries">0</dd></div>
+          <div><dt>Matches</dt><dd id="mwMatches">0</dd></div>
+          <div><dt>Security</dt><dd id="mwTls">—</dd></div>
+        </dl>
+        <div class="drop-hint">point a modality here as its worklist source — it pulls open orders by C-FIND</div>
+      </article>
     </section>
 
     <!-- ── This machine's network identity ──────────────────────────── -->
@@ -281,6 +297,19 @@
               <label>TLS private key (PEM) <input id="prnTlsKey" placeholder="path to server.key" /></label>
               <label>Client-cert CA — mutual TLS <input id="prnTlsCa" placeholder="blank = don't require client certs" /></label>
               <p class="hint" style="margin:2px 0 0">Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
+            </fieldset>
+            <fieldset>
+              <legend>Modality Worklist (MWL)</legend>
+              <label class="check"><input id="mwlEnabled" type="checkbox" /> Start the worklist SCP on launch</label>
+              <label>Worklist AE title <input id="mwlAet" maxlength="16" /></label>
+              <label>Bind address <input id="mwlBind" /></label>
+              <label>Port <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
+              <label>Accept only these AEs <input id="mwlAllowed" placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="mwlTls" type="checkbox" /> Serve worklist over TLS</label>
+              <label>TLS certificate (PEM) <input id="mwlTlsCert" placeholder="path to server.crt" /></label>
+              <label>TLS private key (PEM) <input id="mwlTlsKey" placeholder="path to server.key" /></label>
+              <label>Client-cert CA — mutual TLS <input id="mwlTlsCa" placeholder="blank = don't require client certs" /></label>
+              <p class="hint" style="margin:2px 0 0">Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
             </fieldset>
             <fieldset>
               <legend>Emergency RIS</legend>
