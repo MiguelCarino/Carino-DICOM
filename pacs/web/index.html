@@ -8,12 +8,39 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Carino navbar self-injects at the top of <body> -->
+  <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
   <script src="carino-navbar.js" data-app="PACS" defer></script>
+  <div class="net-info" id="netInfo" data-carino-actions>Checking network…</div>
 
   <main class="wrap">
-    <!-- ── Live status: receiver + auto-send ─────────────────────────── -->
-    <section class="cards">
+    <!-- Low-disk warning (hidden unless the storage volume is low) -->
+    <div class="disk-warn" id="diskWarn" hidden></div>
+    <!-- Emergency-failover banner (hidden unless triggered/active) -->
+    <div class="emg-banner" id="emgBanner" hidden>
+      <div class="emg-text" id="emgBannerText"></div>
+      <div class="emg-actions" id="emgBannerActions"></div>
+    </div>
+
+    <div class="shell">
+      <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
+      <nav class="sidebar" id="sidebar">
+        <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> Services</button>
+        <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> History</button>
+        <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> Orders<span class="badge" id="ordersBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> Destinations</button>
+        <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> Settings</button>
+        <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> Logs</button>
+      </nav>
+
+      <div id="workspace">
+
+        <!-- Services (default) — live status cards -->
+        <section class="panel workpanel" id="dlgServices">
+          <header class="modal-head"><h2>Services <small>receive · send · worklist</small></h2></header>
+          <div class="modal-body">
+            <section class="cards">
       <article class="card" id="receiverCard">
         <header class="card-head">
           <div class="card-title"><span class="dot" id="rxDot"></span> Receiver <small>Storage SCP</small></div>
@@ -93,40 +120,15 @@
         </dl>
         <div class="drop-hint">point a modality here as its worklist source — it pulls open orders by C-FIND</div>
       </article>
-    </section>
+            </section>
+          </div>
+        </section>
 
-    <!-- ── This machine's network identity ──────────────────────────── -->
-    <div class="net-info" id="netInfo">Checking network…</div>
-
-    <!-- ── Low-disk warning (hidden unless the storage volume is low) ── -->
-    <div class="disk-warn" id="diskWarn" hidden></div>
-
-    <!-- ── Emergency-failover banner (hidden unless triggered/active) ── -->
-    <div class="emg-banner" id="emgBanner" hidden>
-      <div class="emg-text" id="emgBannerText"></div>
-      <div class="emg-actions" id="emgBannerActions"></div>
-    </div>
-
-    <!-- ── Tab strip: each button reveals its panel in the workspace ── -->
-    <nav class="actions-row" id="tabStrip">
-      <button class="btn action tabbtn active" id="openHistory" data-panel="dlgHistory">🗂 History</button>
-      <button class="btn action tabbtn" id="openOrders" data-panel="dlgOrders">📋 Orders<span class="badge" id="ordersBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openPending" data-panel="dlgPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openStuck" data-panel="dlgStuck">⚠ Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openDests" data-panel="dlgDests">🌐 Destinations</button>
-      <button class="btn action tabbtn" id="openSettings" data-panel="dlgSettings">⚙ Settings</button>
-      <button class="btn action tabbtn" id="openLogs" data-panel="dlgLogs">📋 Logs</button>
-    </nav>
-
-    <!-- ── Workspace: the selected tab's content renders inline here ── -->
-    <div id="workspace">
-
-      <!-- History (default) -->
-      <section class="panel workpanel" id="dlgHistory">
-        <header class="modal-head">
-          <h2>Transaction history <small>received &amp; sent studies</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
-        </header>
+        <!-- History -->
+        <section class="panel workpanel" id="dlgHistory" hidden>
+          <header class="modal-head">
+            <h2>Transaction history <small>received &amp; sent studies</small></h2>
+          </header>
         <div class="modal-body">
           <div class="hist-bar">
             <div class="hist-tabs">
@@ -372,11 +374,9 @@
         </div>
       </section>
 
+      </div>
     </div>
   </main>
-
-  <!-- backdrop shown behind a popped-out (overflowing) panel or Settings -->
-  <div id="panelBackdrop" hidden></div>
 
   <!-- global toast -->
   <div class="toast" id="toast" hidden></div>

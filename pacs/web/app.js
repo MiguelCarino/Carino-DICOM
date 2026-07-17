@@ -29,21 +29,18 @@
     const ni = $("netInfo");
     if (ni) {
       ni.textContent = "";
-      // Prefer the full list (multi-homed hosts / device subnets); fall back to
-      // the single primary IP for older engines.
+      // Compact, since this now lives in the top navbar. First IP + count, and
+      // the receiver AE:port (what a modality connects to).
       const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
       if (ips.length) {
         ni.classList.remove("offline");
         const v = (t) => { const el = document.createElement("span"); el.className = "v"; el.textContent = t; return el; };
-        ni.append(ips.length > 1 ? "Reachable at " : "Your IP is ");
-        ips.forEach((ip, i) => { if (i) ni.append(" · "); ni.append(v(ip)); });
-        ni.append(" · AE title ", v(rx.aet), " · port ", v(String(rx.port)));
-        if (px.running || px.enabled) {
-          ni.append(" · print ", v(px.aet), " : ", v(String(px.port)));
-        }
+        ni.append(v(ips[0]));
+        if (ips.length > 1) ni.append(" +" + (ips.length - 1));
+        ni.append(" · ", v(rx.aet + ":" + rx.port));
       } else {
         ni.classList.add("offline");
-        ni.textContent = "You're offline — no network detected";
+        ni.textContent = "offline";
       }
     }
 
@@ -986,66 +983,21 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
-  /* ── Workspace panels: inline tabs that pop out only on overflow ──
-     Settings is ALWAYS a popup. History / Destinations / Logs / Pending /
-     Stuck render inline in the workspace, and auto-promote to a centered
-     popup only when their content is too tall to fit the viewport. Closing
-     the popup (✕ / backdrop / Esc) keeps that panel inline (scrolling) for
-     the rest of this activation. */
-  const INLINE_PANELS = ["dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgLogs"];
-  const SETTINGS_PANEL = "dlgSettings";
+  /* ── Sidebar workspace: each nav button expands its panel in the pane ──
+     Every panel renders inline in the viewport-bound workspace and scrolls its
+     own content; there is no popup/backdrop anymore. */
+  const PANELS = ["dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgSettings", "dlgLogs"];
   const loaders = { dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck };
-  let activeInline = "dlgHistory";
-  let overlayId = null;
-  const dismissed = new Set();
+  let activePanel = "dlgServices";
 
-  function highlightTab(id) {
-    document.querySelectorAll(".tabbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
+  function showPanel(id) {
+    if (!PANELS.includes(id)) return;
+    activePanel = id;
+    PANELS.forEach((pid) => { const p = $(pid); if (p) p.hidden = pid !== id; });
+    document.querySelectorAll(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
+    if (loaders[id]) loaders[id]();
   }
-  function setBackdrop(on) { const b = $("panelBackdrop"); if (b) b.hidden = !on; }
-
-  function openOverlay(id) {
-    const p = $(id); if (!p) return;
-    p.hidden = false; p.classList.add("as-modal");
-    overlayId = id; setBackdrop(true);
-  }
-  function closeOverlay() {
-    if (!overlayId) return;
-    const p = $(overlayId);
-    if (p) p.classList.remove("as-modal");
-    if (overlayId === SETTINGS_PANEL) { if (p) p.hidden = true; }
-    else { dismissed.add(overlayId); }   // user prefers inline scroll this time
-    overlayId = null; setBackdrop(false);
-    highlightTab(activeInline);
-  }
-
-  function panelOverflows(id) {
-    // Inline panels now fill the viewport-bound workspace and scroll their own
-    // list internally (see styles.css), so they never need to pop out to a
-    // centered overlay. Only Settings is an explicit overlay (showSettings).
-    return false;
-  }
-  function maybeOverflow(id) {
-    if (id !== activeInline || overlayId === id || dismissed.has(id)) return;
-    if (panelOverflows(id)) openOverlay(id);
-  }
-  function reflowActive() { maybeOverflow(activeInline); }
-
-  function showInline(id) {
-    closeOverlay();
-    activeInline = id;
-    dismissed.delete(id);
-    INLINE_PANELS.forEach((pid) => { const p = $(pid); if (p) { p.classList.remove("as-modal"); p.hidden = pid !== id; } });
-    $(SETTINGS_PANEL).hidden = true;
-    highlightTab(id);
-    if (loaders[id]) loaders[id]();                     // async panels re-check on render
-    requestAnimationFrame(() => maybeOverflow(id));     // sync panels (Logs/Dests) check now
-  }
-  function showSettings() {
-    $(SETTINGS_PANEL).hidden = false;
-    openOverlay(SETTINGS_PANEL);
-    highlightTab(SETTINGS_PANEL);
-  }
+  function reflowActive() { /* no-op: panels scroll internally now (kept for callers) */ }
 
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
@@ -1071,22 +1023,14 @@
     $("emgActivate").addEventListener("click", () => emergencyAction("activate"));
     $("emgDismiss").addEventListener("click", () => emergencyAction("dismiss"));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
-    $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
+    $("saveCfg").addEventListener("click", () => saveConfig());
     $("saveDests").addEventListener("click", () => saveConfig());
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
 
-    // Tab strip: Settings always pops; the rest render inline (pop out on overflow).
-    document.querySelectorAll(".tabbtn").forEach((b) =>
-      b.addEventListener("click", () => {
-        const id = b.dataset.panel;
-        if (id === SETTINGS_PANEL) showSettings(); else showInline(id);
-      }));
-    // Close an open popup: ✕ button, backdrop click, or Escape.
-    document.querySelectorAll("[data-demote]").forEach((x) => x.addEventListener("click", closeOverlay));
-    $("panelBackdrop").addEventListener("click", closeOverlay);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && overlayId) closeOverlay(); });
-    window.addEventListener("resize", reflowActive);
+    // Sidebar: each button expands its panel in the right-hand pane.
+    document.querySelectorAll(".navbtn").forEach((b) =>
+      b.addEventListener("click", () => showPanel(b.dataset.panel)));
 
     // History Received/Sent sub-tabs.
     document.querySelectorAll(".hist-tab").forEach((tab) =>
@@ -1114,7 +1058,11 @@
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
-    showInline("dlgHistory");   // default workspace view
+    // Deep-link: #dlgSettings etc. opens that panel; default is the cards.
+    const fromHash = (location.hash || "").replace("#", "");
+    showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
+    document.querySelectorAll(".navbtn").forEach((b) =>
+      b.addEventListener("click", () => { try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {} }));
     pollStatus();
     pollLog();
     statusTimer = setInterval(pollStatus, 2000);

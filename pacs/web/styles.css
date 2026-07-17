@@ -120,18 +120,42 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .log::-webkit-scrollbar { width: 9px; }
 .log::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 
-/* ── Network identity banner ────────────────────────────────────── */
+/* ── Network identity — compact, lives in the top navbar ────────── */
 .net-info {
-  font-family: var(--mono); font-size: .82rem; color: var(--muted);
-  background: linear-gradient(180deg, var(--panel), #080808);
-  border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 16px; text-align: center;
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-family: var(--mono); font-size: .72rem; color: var(--muted);
 }
 .net-info .v { color: var(--accent); font-weight: 700; }
-.net-info.offline {
-  color: var(--bad); border-color: var(--bad);
-  background: rgba(239, 68, 68, .07); font-weight: 700;
+.net-info.offline { color: var(--bad); font-weight: 700; }
+@media (max-width: 760px) { .net-info { display: none; } }
+
+/* ── Sidebar shell: left nav + right content pane ───────────────── */
+.shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
+.sidebar { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px;
+  overflow-y: auto; min-height: 0; }
+.navbtn {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  font-family: var(--sans); font-size: .92rem; font-weight: 600; color: var(--text);
+  background: linear-gradient(180deg, var(--panel), #080808);
+  border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px;
+  cursor: pointer; transition: .15s;
 }
+.navbtn:hover { border-color: var(--accent); color: var(--accent); }
+.navbtn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+.navbtn .nav-ico { width: 1.15em; text-align: center; flex-shrink: 0; }
+.navbtn .badge {
+  margin-left: auto; min-width: 20px; padding: 0 6px; text-align: center;
+  font-family: var(--mono); font-size: .68rem; font-weight: 700; line-height: 19px;
+  color: #050505; background: var(--accent); border-radius: 10px;
+}
+.navbtn .badge.warn { background: var(--warn); }
+@media (max-width: 640px) {
+  .shell { flex-direction: column; }
+  .sidebar { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; }
+  .navbtn { width: auto; flex: 1 1 auto; }
+}
+/* Services panel: let the cards grid flow and scroll normally */
+#dlgServices .modal-body { display: block; overflow-y: auto; }
 
 /* ── Low-disk warning banner ────────────────────────────────────── */
 .disk-warn {
@@ -176,7 +200,7 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .workpanel .modal-head { border-bottom: 1px solid var(--border); }
 /* inline: flex-fill + scroll the inner list, not the body */
 .workpanel:not(.as-modal) .modal-body {
-  flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow: hidden;
+  flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow-y: auto;
 }
 .workpanel:not(.as-modal) .modal-body .log { height: auto; flex: 1 1 auto; min-height: 0; }
 .workpanel:not(.as-modal) .modal-body .table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
