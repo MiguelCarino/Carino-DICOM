@@ -104,7 +104,7 @@ def cmd_serve(args) -> int:
         except Exception as exc:
             server.log.error(f"Could not start RIS listener: {exc}", kind="ris")
             print(f"WARNING: RIS listener did not start: {exc}", file=sys.stderr)
-    if args.mwl or cfg.mwl.get("enabled"):
+    if args.mwl or server.worklist_wanted():
         try:
             server.start_mwl()
         except Exception as exc:

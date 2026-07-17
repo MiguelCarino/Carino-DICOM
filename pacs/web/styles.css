@@ -17,9 +17,13 @@
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-  min-height: 100vh; display: flex; flex-direction: column;
+  height: 100dvh; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
-.wrap { width: min(1100px, 92%); margin: 0 auto; padding: 28px 0 60px; display: flex; flex-direction: column; gap: 22px; }
+/* The dashboard fills the viewport: fixed-height header rows (cards, net-info,
+   tab strip) and a flex workspace that takes the rest and scrolls internally —
+   so the PAGE itself never scrolls. */
+.wrap { width: min(1180px, 94%); margin: 0 auto; padding: 16px 0 18px; display: flex;
+  flex-direction: column; gap: 14px; flex: 1 1 auto; min-height: 0; }
 
 /* ---- status cards ---- */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
@@ -161,11 +165,21 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 @media (max-width: 620px) { .btn.action { flex-basis: calc(50% - 8px); } }
 
 /* ── Inline workspace (the selected tab renders here) ───────────── */
+/* The workspace takes all leftover viewport height; the active inline panel
+   fills it and scrolls its own list, so the page body never scrolls. */
+#workspace { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .workpanel { overflow: hidden; }
 .workpanel[hidden] { display: none; }
+#workspace > .workpanel:not(.as-modal):not([hidden]) {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+}
 .workpanel .modal-head { border-bottom: 1px solid var(--border); }
-.workpanel .modal-body { max-height: min(64vh, 620px); overflow-y: auto; }
-.workpanel .modal-body .log { height: min(58vh, 560px); }
+/* inline: flex-fill + scroll the inner list, not the body */
+.workpanel:not(.as-modal) .modal-body {
+  flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow: hidden;
+}
+.workpanel:not(.as-modal) .modal-body .log { height: auto; flex: 1 1 auto; min-height: 0; }
+.workpanel:not(.as-modal) .modal-body .table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .workpanel .modal-foot { border-top: 1px solid var(--border); }
 .head-right { display: flex; align-items: center; gap: 10px; }
 
@@ -232,7 +246,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .hist-tab.active { background: var(--accent); color: #050505; border-color: var(--accent); font-weight: 700; }
 .hist-tools { display: flex; gap: 8px; }
 
-.hist-list { display: flex; flex-direction: column; gap: 8px; max-height: min(58vh, 520px); overflow-y: auto; padding-right: 4px; }
+.hist-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.workpanel.as-modal .hist-list { flex: 0 1 auto; max-height: 62vh; }
 .hist-list::-webkit-scrollbar { width: 9px; }
 .hist-list::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 .hist-empty { color: var(--muted); font-family: var(--mono); font-size: .82rem; text-align: center; padding: 30px 10px; }
@@ -331,8 +346,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 
 /* Emergency-failover banner + activation pop-up */
 .emg-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 11px 16px; border-radius: 8px; margin-bottom: 14px; font-weight: 600;
-  border: 1px solid; }
+  padding: 11px 16px; border-radius: 8px; font-weight: 600; border: 1px solid; }
+.emg-banner[hidden] { display: none; }
 .emg-banner .emg-text { min-width: 0; }
 .emg-banner .emg-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .emg-banner.triggered { background: rgba(245,158,11,.12); border-color: #f59e0b; color: #f59e0b; }
@@ -344,6 +359,7 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .emg-modal { position: fixed; inset: 0; z-index: 2147483000; display: flex;
   align-items: center; justify-content: center; padding: 24px;
   background: rgba(5,5,5,.75); backdrop-filter: blur(3px); }
+.emg-modal[hidden] { display: none; }
 .emg-modal-card { max-width: 460px; background: var(--card, #141414); border: 1px solid #ef4444;
   border-radius: 12px; padding: 22px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
 .emg-modal-card h2 { margin: 0 0 10px; color: #f87171; }

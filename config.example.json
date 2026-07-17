@@ -71,6 +71,7 @@
       "aet": "REMOTEPACS",
       "enabled": false,
       "tls": false,
+      "no_ris": false,
       "emergency_trigger": false
     }
   ],

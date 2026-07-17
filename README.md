@@ -33,7 +33,9 @@ station sees it). The order's pre-generated **Study Instance UID** is burned int
 the exam, so the study the modality sends back reconciles to the order exactly.
 
 Start it from the **Worklist** card, the Settings → *Modality Worklist* fieldset,
-or head-less with `pacs mwl`.
+or head-less with `pacs mwl`. If a destination PACS simply **has no RIS**, tick
+its **No RIS** box in *Destinations* — Carino then runs the worklist for it
+**permanently** (no need to enable the SCP separately).
 
 ### Emergency failover (automatic)
 

@@ -185,6 +185,23 @@ class PacsServer:
             if self.mwl_scp:
                 self.mwl_scp.stop()
 
+    def worklist_wanted(self) -> bool:
+        """True if the Modality Worklist should run as a permanent service: the
+        SCP is explicitly enabled, OR any enabled destination is flagged
+        ``no_ris`` (that PACS has no RIS, so Carino is its worklist source)."""
+        if self.cfg.mwl.get("enabled"):
+            return True
+        return any(d.get("no_ris") for d in self.cfg.enabled_destinations())
+
+    def sync_worklist(self) -> None:
+        """Start the worklist SCP if it's wanted and not already running
+        (called on launch and after a config change)."""
+        if self.worklist_wanted() and not (self.mwl_scp and self.mwl_scp.running):
+            try:
+                self.start_mwl()
+            except Exception as exc:
+                self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
+
     def _reconcile_study(self, ds, path: str) -> None:
         """Called for every C-STORE'd instance: try to match it to an open RIS
         order by Accession Number (or Patient ID fallback). On a hit, close +
@@ -615,6 +632,7 @@ class PacsServer:
             self.start_ris()
         if was_mwl:
             self.start_mwl()
+        self.sync_worklist()   # a no_ris destination may now want a permanent worklist
         # Re-sync the health monitor to the new config (armed flag / trigger set).
         self.emergency.stop()
         self.emergency.start()
@@ -802,6 +820,7 @@ class PacsServer:
                 "matches": mwl.match_count if mwl else 0,
                 "errors": mwl.error_count if mwl else 0,
                 "tls": bool(mcfg.get("tls", False)),
+                "wanted": self.worklist_wanted(),   # permanent (enabled or a no_ris destination)
             },
             "emergency": self.emergency.status(),
             "destinations": self.cfg.destinations,

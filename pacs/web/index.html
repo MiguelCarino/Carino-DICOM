@@ -234,7 +234,7 @@
           <div class="table-scroll">
             <table class="grid" id="destTable">
               <thead>
-                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th title="Watch this node for emergency failover">🚨</th><th></th></tr>
+                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th title="Watch this node for emergency failover">🚨</th><th></th></tr>
               </thead>
               <tbody id="destBody"></tbody>
             </table>
@@ -478,6 +478,7 @@
       <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
       <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
       <td style="text-align:center"><input type="checkbox" class="d-tls" title="Connect to this node over TLS" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-noris" title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
       <td style="text-align:center"><input type="checkbox" class="d-emg" title="Trigger emergency failover if this node goes offline" /></td>
       <td class="row-actions">
         <button class="btn tiny echo" title="C-ECHO test">Echo</button>

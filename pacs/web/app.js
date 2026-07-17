@@ -140,7 +140,8 @@
     // them off the normal dashboard unless they're running or failover is armed.
     const rsCard = $("risCard"), mwCard = $("mwlCard");
     if (rsCard) rsCard.hidden = !((rs && rs.running) || emg.armed);
-    if (mwCard) mwCard.hidden = !((mw && mw.running) || emg.armed);
+    // Worklist card shows when running, armed, or a no_ris destination makes it permanent.
+    if (mwCard) mwCard.hidden = !((mw && (mw.running || mw.wanted)) || emg.armed);
 
     const banner = $("emgBanner");
     const state = emg.state || "off";
@@ -342,6 +343,7 @@
     tr.querySelector(".d-port").value = d.port || "";
     tr.querySelector(".d-aet").value = d.aet || "";
     tr.querySelector(".d-tls").checked = !!d.tls;
+    tr.querySelector(".d-noris").checked = !!d.no_ris;
     tr.querySelector(".d-emg").checked = !!d.emergency_trigger;
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
@@ -356,6 +358,7 @@
         port: parseInt(tr.querySelector(".d-port").value, 10),
         aet: tr.querySelector(".d-aet").value.trim(),
         tls: tr.querySelector(".d-tls").checked,
+        no_ris: tr.querySelector(".d-noris").checked,
         emergency_trigger: tr.querySelector(".d-emg").checked,
       }))
       .filter((d) => d.host && d.aet && d.port);
@@ -1017,12 +1020,10 @@
   }
 
   function panelOverflows(id) {
-    // "Overflow" = the content is taller than the panel's inline scroll area
-    // (the CSS max-height on .modal-body). Measured inline only, so it's
-    // independent of viewport quirks and how tall the cards above happen to be.
-    const p = $(id); if (!p || p.hidden || p.classList.contains("as-modal")) return false;
-    const body = p.querySelector(".modal-body"); if (!body) return false;
-    return body.scrollHeight > body.clientHeight + 4;
+    // Inline panels now fill the viewport-bound workspace and scroll their own
+    // list internally (see styles.css), so they never need to pop out to a
+    // centered overlay. Only Settings is an explicit overlay (showSettings).
+    return false;
   }
   function maybeOverflow(id) {
     if (id !== activeInline || overlayId === id || dismissed.has(id)) return;
