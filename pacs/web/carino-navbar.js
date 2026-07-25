@@ -29,9 +29,11 @@
     + '#carinoNav .brand-name{font-family:"Red Hat Display",var(--cn-sans);font-weight:900;font-size:1.5rem;line-height:1;'
     + 'background:linear-gradient(130deg,#fef08a 0%,#eab308 50%,#b45309 100%);-webkit-background-clip:text;background-clip:text;'
     + '-webkit-text-fill-color:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;}'
+    + '#carinoNav .cn-brand{display:flex;align-items:center;flex-shrink:0;}'
     + '#carinoNav .app-tag{-webkit-text-fill-color:var(--cn-accent);color:var(--cn-accent);font-family:var(--cn-mono);'
     + 'font-size:.6rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--cn-border);'
-    + 'border-radius:4px;padding:3px 6px;margin-left:10px;vertical-align:middle;}'
+    + 'border-radius:4px;padding:3px 6px;margin-left:10px;text-decoration:none;transition:.2s;}'
+    + '#carinoNav .app-tag:hover{border-color:var(--cn-accent);background:rgba(234,179,8,.12);}'
     + '#carinoNav .app-tag:empty{display:none;}'
     + '#carinoNav .header-clock{display:flex;align-items:baseline;gap:8px;border-left:1px solid var(--cn-border);padding-left:18px;min-width:0;overflow:hidden;cursor:pointer;user-select:none;}'
     + '#carinoNav .header-clock:hover .clock-tz{filter:brightness(1.12);}'
@@ -55,7 +57,10 @@
   var MARKUP = ''
     + '<header class="top-header" id="carinoNav">'
     + '<div class="cn-left">'
-    + '<a class="brand-name" href="https://carino.systems/" target="_blank" title="Carino Systems — back to hub">Carino<span class="app-tag"></span></a>'
+    + '<span class="cn-brand">'
+    + '<a class="brand-name" href="https://carino.systems/" target="_blank" title="Carino Systems — back to hub">Carino</a>'
+    + '<a class="app-tag" href="./"></a>'
+    + '</span>'
     + '<div class="header-clock" id="cnClockWrap" role="button" tabindex="0" title="Click to toggle Local / UTC / Epoch / TAI / .beats">'
     + '<span class="clock-time" id="cnClock">00:00:00</span>'
     + '<span class="clock-tz" id="cnTz">LOCAL</span>'
@@ -188,7 +193,7 @@
     wrap.innerHTML = MARKUP;
     var nav = wrap.firstElementChild;
     document.body.insertBefore(nav, document.body.firstChild);
-    if (TAG) { var t = nav.querySelector('.app-tag'); if (t) t.textContent = TAG; }
+    if (TAG) { var t = nav.querySelector('.app-tag'); if (t) { t.textContent = TAG; t.title = TAG + ' — reload'; } }
     relocateActions(nav);
     wireClock();
     tick();
