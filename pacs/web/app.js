@@ -11,7 +11,7 @@
     return body;
   };
   const post = (url, data) =>
-    api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data || {}) });
+    api(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Carino": "1" }, body: JSON.stringify(data || {}) });
 
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
@@ -783,7 +783,7 @@
       fd.append("path", s.path);
       fd.append("file", f);
       try {
-        const res = await fetch("/api/studies/attach", { method: "POST", body: fd });
+        const res = await fetch("/api/studies/attach", { method: "POST", headers: { "X-Carino": "1" }, body: fd });
         let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
         flashNote(body.message || (res.ok ? "Attached" : "Attach failed"), res.ok && body.ok !== false);
         if (res.ok) loadHistory();
@@ -1051,7 +1051,7 @@
       fd.append("file", f);
       const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
       try {
-        const res = await fetch("/api/ris/orders/capture", { method: "POST", body: fd });
+        const res = await fetch("/api/ris/orders/capture", { method: "POST", headers: { "X-Carino": "1" }, body: fd });
         let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
         flashNote(body.message || (res.ok ? "Study created" : "Capture failed"), res.ok && body.ok !== false);
         if (res.ok) { loadOrders(); pollStatus(); }

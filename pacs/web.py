@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
 
@@ -26,6 +27,21 @@ if not os.path.isdir(WEB_DIR) and hasattr(sys, "_MEIPASS"):
 
 def create_app(server: PacsServer) -> Flask:
     app = Flask(__name__, static_folder=None)
+
+    # ---- cross-site write protection --------------------------------------
+    # The API is localhost-only and unauthenticated, so the one realistic
+    # attack is a cross-site request fired from a web page the operator has
+    # open: multipart forms and no-cors POSTs never trigger a CORS preflight,
+    # which is how /api/shutdown or /api/studies/attach could be hit remotely.
+    # Requiring a custom header on every write forces a preflight that no
+    # foreign origin passes, with zero auth ceremony for the dashboard itself.
+    @app.before_request
+    def _require_write_header():
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        if request.headers.get("X-Carino") != "1":
+            return jsonify(ok=False, message="missing X-Carino header"), 403
+        return None
 
     # ---- static UI --------------------------------------------------------
     @app.get("/")
@@ -259,26 +275,43 @@ def create_app(server: PacsServer) -> Flask:
         res = server.attach_to_study(group, path, up.filename, up.read())
         return jsonify(res), (200 if res.get("ok") else 400)
 
-    # ---- DICOM-editor deep-link (CORS-open, GET-only) ---------------------
-    # The editor is a separate origin (a public HTTPS site like
-    # dicom.carino.systems, or file://), so these two GET endpoints allow
-    # cross-origin reads. When the editor is a PUBLIC page fetching this
-    # (private/localhost) PACS, Chrome's Private Network Access sends a CORS
-    # preflight expecting `Access-Control-Allow-Private-Network: true`, so we
-    # answer OPTIONS and echo that header. Consistent with the dashboard's
-    # localhost-only, no-auth posture; nothing here mutates state.
+    # ---- DICOM-editor deep-link (CORS restricted to the editor, GET-only) --
+    # The editor may be a separate origin (a public HTTPS site like
+    # dicom.carino.systems), so these two GET endpoints allow cross-origin
+    # reads — but ONLY from the origin configured as web.editor_url. A
+    # wildcard here would let any page the operator visits enumerate and
+    # download stored studies from their localhost PACS. The bundled
+    # same-origin editor ("/editor/") needs no CORS at all, so a relative or
+    # empty editor_url emits no CORS headers. When the editor is a PUBLIC
+    # page fetching this (private/localhost) PACS, Chrome's Private Network
+    # Access sends a CORS preflight expecting
+    # `Access-Control-Allow-Private-Network: true`, so we answer OPTIONS and
+    # echo that header.
+    def _editor_origin():
+        url = (server.cfg.web.get("editor_url") or "").strip()
+        p = urlsplit(url)
+        if p.scheme in ("http", "https") and p.netloc:
+            return f"{p.scheme}://{p.netloc}"
+        return None
+
     def _cors(resp):
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+        origin = _editor_origin()
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Private-Network"] = "true"
+            resp.headers["Vary"] = "Origin"
         return resp
 
     def _preflight():
         resp = app.make_default_options_response()
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "*"
-        resp.headers["Access-Control-Allow-Private-Network"] = "true"
-        resp.headers["Access-Control-Max-Age"] = "600"
+        origin = _editor_origin()
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "*"
+            resp.headers["Access-Control-Allow-Private-Network"] = "true"
+            resp.headers["Access-Control-Max-Age"] = "600"
+            resp.headers["Vary"] = "Origin"
         return resp
 
     @app.route("/api/studies/files", methods=["GET", "OPTIONS"])

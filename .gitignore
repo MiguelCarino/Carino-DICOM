@@ -29,3 +29,6 @@ desktop/out/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Local runtime config (contains machine-specific paths)
+/config.json
