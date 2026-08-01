@@ -58,6 +58,8 @@
   }
 
   var vEl = document.getElementById("version");
+  // i18n.js (deferred) defines window.t; guard in case it hasn't run yet.
+  var tt = function (s) { return (typeof window.t === "function") ? window.t(s) : s; };
   fetch("https://api.github.com/repos/" + REPO + "/releases/latest",
     { headers: { Accept: "application/vnd.github+json" } })
     .then(function (res) { if (!res.ok) throw new Error(String(res.status)); return res.json(); })
@@ -69,11 +71,11 @@
       });
       if (vEl) {
         vEl.innerHTML = found
-          ? 'Latest release: <strong>' + rel.tag_name + '</strong> · <a href="' + RELEASES + '">all versions &amp; notes</a>'
-          : 'Latest release <strong>' + rel.tag_name + '</strong> has no installers yet — <a href="' + RELEASES + '">see releases</a>.';
+          ? tt('Latest release:') + ' <strong>' + rel.tag_name + '</strong> · <a href="' + RELEASES + '">' + tt('all versions & notes') + '</a>'
+          : tt('Latest release') + ' <strong>' + rel.tag_name + '</strong> ' + tt('has no installers yet —') + ' <a href="' + RELEASES + '">' + tt('see releases') + '</a>.';
       }
     })
     .catch(function () {
-      if (vEl) vEl.innerHTML = 'Version <strong>' + PINNED_TAG + '</strong> · <a href="' + RELEASES + '">all versions &amp; notes</a>';
+      if (vEl) vEl.innerHTML = tt('Version') + ' <strong>' + PINNED_TAG + '</strong> · <a href="' + RELEASES + '">' + tt('all versions & notes') + '</a>';
     });
 })();
