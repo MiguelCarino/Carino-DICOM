@@ -6,14 +6,23 @@
   var REPO = "MiguelCarino/Carino-PACS";
   var RELEASES = "https://github.com/" + REPO + "/releases";
 
+  // Pinned v1.0.0 assets — the default links; the latest-release fetch below
+  // replaces them when a newer release with matching assets exists.
+  var PINNED_TAG = "v1.0.0";
+  var PINNED = {
+    windows: RELEASES + "/download/v1.0.0/carinopacs-windows-v.1.0.0.zip",
+    macos: RELEASES + "/download/v1.0.0/carinopacs-macos-v.1.0.0.zip",
+    linux: RELEASES + "/download/v1.0.0/carinopacs-ubuntu-latest-v1.0.0.zip",
+  };
+
   var cards = {
     windows: document.querySelector('.dl-btn[data-os="windows"]'),
     macos: document.querySelector('.dl-btn[data-os="macos"]'),
     linux: document.querySelector('.dl-btn[data-os="linux"]'),
   };
 
-  // Works even before JS / before any release exists.
-  Object.keys(cards).forEach(function (k) { if (cards[k]) cards[k].href = RELEASES; });
+  // Works even before JS / before the API call resolves.
+  Object.keys(cards).forEach(function (k) { if (cards[k]) cards[k].href = PINNED[k]; });
 
   function detectOS() {
     var s = ((navigator.userAgentData && navigator.userAgentData.platform) ||
@@ -32,6 +41,12 @@
     if (n.slice(-4) === ".exe") return "windows";
     if (n.slice(-4) === ".dmg") return "macos";
     if (n.slice(-9) === ".appimage") return "linux";
+    // Release zips are named carinopacs-<runner>-v<version>.zip
+    if (n.slice(-4) === ".zip") {
+      if (n.indexOf("windows") >= 0) return "windows";
+      if (n.indexOf("macos") >= 0 || n.indexOf("darwin") >= 0) return "macos";
+      if (n.indexOf("linux") >= 0 || n.indexOf("ubuntu") >= 0) return "linux";
+    }
     return null;
   }
 
@@ -59,6 +74,6 @@
       }
     })
     .catch(function () {
-      if (vEl) vEl.innerHTML = 'No public release yet. <a href="' + RELEASES + '">Check releases</a>, or build it from source below.';
+      if (vEl) vEl.innerHTML = 'Version <strong>' + PINNED_TAG + '</strong> · <a href="' + RELEASES + '">all versions &amp; notes</a>';
     });
 })();
