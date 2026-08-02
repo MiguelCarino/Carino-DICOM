@@ -7,6 +7,10 @@
 
 const I18N = {
     es: {
+        'Late shift.': 'Turno nocturno.',
+        'Good morning.': 'Buenos días.',
+        'Good afternoon.': 'Buenas tardes.',
+        'Good evening.': 'Buenas noches.',
         // Hero
         'Your PACS systems are down? Urgent patients cannot wait.': '¿Tu PACS está caído? Los pacientes urgentes no pueden esperar.',
         'Send & receive medical images,': 'Envía y recibe imágenes médicas,',
@@ -42,6 +46,10 @@ const I18N = {
         'Version': 'Versión',
     },
     'pt-BR': {
+        'Late shift.': 'Turno da noite.',
+        'Good morning.': 'Bom dia.',
+        'Good afternoon.': 'Boa tarde.',
+        'Good evening.': 'Boa noite.',
         'Your PACS systems are down? Urgent patients cannot wait.': 'Seu PACS caiu? Pacientes urgentes não podem esperar.',
         'Send & receive medical images,': 'Envie e receba imagens médicas,',
         'without the headache.': 'sem dor de cabeça.',
@@ -70,6 +78,10 @@ const I18N = {
         'Version': 'Versão',
     },
     ja: {
+        'Late shift.': '夜勤お疲れさま。',
+        'Good morning.': 'おはようございます。',
+        'Good afternoon.': 'こんにちは。',
+        'Good evening.': 'こんばんは。',
         'Your PACS systems are down? Urgent patients cannot wait.': 'PACSがダウン？急患は待ってくれません。',
         'Send & receive medical images,': '医用画像の送受信を、',
         'without the headache.': '面倒なしで。',
@@ -98,6 +110,10 @@ const I18N = {
         'Version': 'バージョン',
     },
     ru: {
+        'Late shift.': 'Ночная смена.',
+        'Good morning.': 'Доброе утро.',
+        'Good afternoon.': 'Добрый день.',
+        'Good evening.': 'Добрый вечер.',
         'Your PACS systems are down? Urgent patients cannot wait.': 'PACS не работает? Экстренные пациенты не могут ждать.',
         'Send & receive medical images,': 'Отправляйте и получайте медицинские изображения,',
         'without the headache.': 'без головной боли.',
