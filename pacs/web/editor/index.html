@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DICOM Tag Editor — Carino Systems</title>
   <script src="vendor/dcmjs.min.js"></script>
+  <script src="carino-bridge.js" defer></script>
   <script src="carino-clock.js" defer></script>
   <script src="deid-profile.js"></script>
   <script src="dicom-dictionary.js"></script>
@@ -5031,7 +5032,7 @@ function showLoading(visible, text = 'Loading…', progress, count) {
 }
 
 // ── Confirm dialog for destructive actions ───────────────────────
-function confirmDanger(message, onConfirm, confirmLabel = 'Confirm') {
+function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel) {
   const ov = document.getElementById('confirmOverlay');
   const ok = document.getElementById('confirmOk');
   const cancel = document.getElementById('confirmCancel');
@@ -5042,12 +5043,14 @@ function confirmDanger(message, onConfirm, confirmLabel = 'Confirm') {
     ok.onclick = null; cancel.onclick = null;
     document.removeEventListener('keydown', onKey);
   };
+  // Backing out is an answer too, and a caller waiting on one needs to hear it.
+  const dismiss = () => { close(); onCancel?.(); };
   const onKey = e => {
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape') dismiss();
     else if (e.key === 'Enter') { close(); onConfirm(); }
   };
   ok.onclick = () => { close(); onConfirm(); };
-  cancel.onclick = close;
+  cancel.onclick = dismiss;
   document.addEventListener('keydown', onKey);
   ov.classList.add('visible');
   ok.focus();
@@ -5761,34 +5764,56 @@ function validateDicom(d, meta) {
 // ================================================================
 // DEEP-LINK LOADER  —  open a study straight from Carino PACS.
 // Two modes:
-//  (A) postMessage BRIDGE  (#carino-bridge) — used when this editor is a
-//      remote HTTPS page and the PACS is http://localhost. The editor CANNOT
-//      fetch the PACS's http API from an https page (mixed content, blocked in
-//      Safari), so the PACS fetches the DICOM itself and posts the bytes to us.
-//      We tell the opener we're ready, then receive { files:[{name,buf}] }.
+//  (A) CARINO BRIDGE  (#carino-bridge, carino-bridge.js) — used when this
+//      editor is a remote HTTPS page and the PACS is http://localhost. The
+//      editor CANNOT fetch the PACS's http API from an https page (mixed
+//      content, blocked in Safari), so the PACS fetches the DICOM itself and
+//      posts the bytes to us. The bridge does the handshake; we say what we
+//      will accept and where the files go.
 //  (B) direct fetch  (#load=<manifestUrl>) — used for a same-origin / localhost
 //      editor, where fetching the PACS manifest+files directly is allowed.
+//
+// Who may deliver: the copy of this editor bundled inside Carino PACS is
+// served from the PACS's own origin, so same-origin is the ordinary case and
+// goes through unasked. A separately hosted editor (dicom.carino.systems) is
+// reached from whatever host the operator configured, and there is no list of
+// those to keep — so an unknown origin is named to the user and let in only by
+// hand. Waving every opener through, as this once did, would have let any page
+// on the web open this editor and fill it with files of its own choosing.
 // ================================================================
 window.addEventListener('load', () => {
   const hash = location.hash || location.search || '';
 
-  // (A) postMessage bridge
-  if (/[#&?]carino-bridge/.test(hash) && window.opener) {
-    showLoading?.(true, 'Copying study from Carino PACS…');       // spinner until the bytes arrive
-    const giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino PACS'); }, 60000);
-    const onMsg = async (ev) => {
-      if (ev.source !== window.opener || !ev.data || ev.data.type !== 'carino-pacs-files') return;
-      window.removeEventListener('message', onMsg); clearTimeout(giveUp);
+  // (A) Carino Bridge
+  let giveUp = null;
+  const armed = window.CarinoBridge && CarinoBridge.receive({
+    legacy: true,                 // PACS builds older than the bridge still speak carino-pacs-*
+    allow: ['same-origin'],       // the editor Carino PACS serves itself
+    otherwise: 'ask',             // anyone else: shown to the user, by origin
+    remember: true,               // and only asked about once per browser
+    ask: (origin, count) => new Promise(resolve => {
+      clearTimeout(giveUp);
+      showLoading?.(false);       // the spinner has nothing to say over a question
+      confirmDanger(
+        `${new URL(origin).host} wants to open ${count} file(s) in this editor.`,
+        () => resolve(true), 'Load files', () => resolve(false));
+    }),
+    onFiles: async (files, info) => {
+      clearTimeout(giveUp);
+      showLoading?.(true, 'Copying study from Carino PACS…');
       try {
-        const loaded = (ev.data.files || []).map(f => new File([f.buf], f.name || 'study.dcm'));
-        if (!loaded.length) throw new Error('no files received');
-        await handleFiles(loaded);          // shows its own per-image progress
+        await handleFiles(files);           // shows its own per-image progress
         switchTab('editor');
-        toast?.(`Loaded ${loaded.length} image(s) from Carino PACS`);
+        // Named by where it actually came from, not by whether we trust it:
+        // an origin the user approved once is still not the bundled PACS.
+        const from = info.origin === location.origin ? 'Carino PACS' : new URL(info.origin).host;
+        toast?.(`Loaded ${files.length} image(s) from ${from}`);
       } catch (err) { showLoading?.(false); toast?.('PACS hand-off failed: ' + (err.message || err)); }
-    };
-    window.addEventListener('message', onMsg);
-    try { window.opener.postMessage({ type: 'carino-pacs-ready' }, '*'); } catch { /* opener gone */ }
+    },
+  });
+  if (armed) {
+    showLoading?.(true, 'Copying study from Carino PACS…');       // spinner until the bytes arrive
+    giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino PACS'); }, 60000);
     return;
   }
 

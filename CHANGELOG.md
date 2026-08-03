@@ -32,6 +32,14 @@ unchanged.
 - Interface redesign and shared Carino navbar/clock.
 
 ### Changed
+- **Carino Bridge** — the ✎ *Edit tags* hand-off to DICOM-editor now goes
+  through the shared `carino-bridge.js` used across the fleet, instead of a
+  hand-rolled exchange on each side. The bundled same-origin editor behaves as
+  before; an editor on another origin (`web.editor_url` pointing at a public
+  build) now names the sending host and asks the operator once before loading
+  a study, since the editor previously accepted files from any page that
+  opened it. Older builds on either side keep working — the two ends settle on
+  the old message format when one of them only speaks that.
 - Description updated from "store-only PACS" to "store-and-reconcile PACS."
 - Desktop package license corrected from **MIT** to **AGPL-3.0-or-later** to
   match the repository LICENSE.

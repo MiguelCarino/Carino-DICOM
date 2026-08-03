@@ -352,7 +352,7 @@
               <label>DICOM-editor URL
                 <input id="webEditorUrl" placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
               </label>
-              <p class="hint" style="margin:2px 0 0">Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor.</p>
+              <p class="hint" style="margin:2px 0 0">Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
             </fieldset>
           </div>
         </div>
@@ -489,6 +489,7 @@
     </tr>
   </template>
 
+  <script src="carino-bridge.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

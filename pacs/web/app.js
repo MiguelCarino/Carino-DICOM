@@ -730,44 +730,38 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
-  // Open a study in DICOM-editor via a postMessage BRIDGE. A remote HTTPS
-  // editor cannot fetch our http://localhost API (mixed content — hard-blocked
-  // in Safari), so instead WE fetch the DICOM from our own origin (http→http,
-  // fine) and hand the bytes to the editor window via postMessage, which is not
-  // subject to mixed-content rules. Works in every browser.
+  // Open a study in DICOM-editor over the CARINO BRIDGE (carino-bridge.js). A
+  // remote HTTPS editor cannot fetch our http://localhost API (mixed content —
+  // hard-blocked in Safari), so instead WE fetch the DICOM from our own origin
+  // (http→http, fine) and hand the bytes to the editor window by postMessage,
+  // which is not subject to mixed-content rules. Works in every browser.
   function histEdit(s) {
     if (!editorUrl) return;
     // Resolve relative ("/editor/" = the bundled same-origin editor) or absolute URLs alike.
-    let editorAbs, editorOrigin;
-    try { const u = new URL(editorUrl, location.origin); editorAbs = u.href; editorOrigin = u.origin; }
+    let editorAbs;
+    try { editorAbs = new URL(editorUrl, location.origin).href; }
     catch (e) { flashNote("Editor URL is not valid", false); return; }
+    if (!window.CarinoBridge) { flashNote("Bridge script missing — reload the page", false); return; }
     const manifestUrl = "/api/studies/files?group=" + encodeURIComponent(histGroup) + "&path=" + encodeURIComponent(s.path);
-    const sep = editorAbs.includes("#") ? "&" : "#";
-    const win = window.open(editorAbs + sep + "carino-bridge", "_blank");   // NOT noopener — we need window.opener on the editor side
-    if (!win) { flashNote("Pop-up blocked — allow pop-ups to open the editor", false); return; }
-    let done = false;
-    async function onMsg(ev) {
-      if (ev.source !== win || !ev.data || ev.data.type !== "carino-pacs-ready" || done) return;
-      done = true;
-      window.removeEventListener("message", onMsg);
-      try {
-        const man = await api(manifestUrl);                 // same-origin fetch (http→http)
-        const entries = man.files || [];
-        if (!entries.length) throw new Error(man.message || "no DICOM files in study");
-        const files = [];
-        for (const e of entries) {
-          const r = await fetch(e.url);
-          if (r.ok) files.push({ name: e.name, buf: await r.arrayBuffer() });
-        }
-        if (!files.length) throw new Error("could not read any DICOM file");
-        win.postMessage({ type: "carino-pacs-files", files: files }, editorOrigin, files.map((f) => f.buf));
-        flashNote("Opened " + files.length + " file(s) in the editor", true);
-      } catch (err) {
-        flashNote("Editor hand-off failed: " + err.message, false);
+
+    // The study is read only once the editor says it is listening: a window the
+    // browser blocked, or one the user closed again, costs us nothing.
+    CarinoBridge.send(editorAbs, async () => {
+      const man = await api(manifestUrl);                   // same-origin fetch (http→http)
+      const entries = man.files || [];
+      if (!entries.length) throw new Error(man.message || "no DICOM files in study");
+      const files = [];
+      for (const e of entries) {
+        const r = await fetch(e.url);
+        if (r.ok) files.push({ name: e.name, buf: await r.arrayBuffer() });
       }
-    }
-    window.addEventListener("message", onMsg);
-    setTimeout(() => { if (!done) window.removeEventListener("message", onMsg); }, 60000);
+      if (!files.length) throw new Error("could not read any DICOM file");
+      return files;
+    }, { legacy: true })                                    // editors older than the bridge
+      .then((res) => flashNote("Opened " + res.count + " file(s) in the editor", true))
+      .catch((err) => flashNote(
+        /pop-up/i.test(err.message) ? "Pop-up blocked — allow pop-ups to open the editor"
+                                    : "Editor hand-off failed: " + err.message, false));
   }
 
   // Attach a PDF/image to an existing study (inherits its identity, new series).
