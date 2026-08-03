@@ -16,6 +16,12 @@
 
   var TAG = (document.currentScript && document.currentScript.getAttribute('data-app')) || '';
 
+  // The GitHub button points at THIS project's repository, not the profile.
+
+  var REPO = (document.currentScript && document.currentScript.getAttribute('data-repo')) || TAG;
+
+  var GH_URL = 'https://github.com/MiguelCarino' + (REPO ? '/' + REPO : '');
+
   var CSS = ''
     + '#carinoNav{--cn-accent:#eab308;--cn-bg:#050505;--cn-border:#262626;--cn-text:#fff;--cn-muted:#8a8a8a;'
     + '--cn-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;'
@@ -47,7 +53,12 @@
     + '#carinoNav .icon-btn svg{width:15px;height:15px;}'
     + '#carinoNav .cn-right{gap:12px;min-width:0;}'
     + '#carinoNav .cn-actions{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0;}'
-    + '#carinoNav .cn-actions + .social-row{border-left:1px solid var(--cn-border);padding-left:12px;}'
+    // Slot order, independent of which script inserted what first.
+    + '#carinoNav .cn-right > *{order:1;}'
+    + '#carinoNav .cn-right > #cnDiagBtn,#carinoNav .cn-right > .status-toggle{order:2;}'
+    + '#carinoNav .cn-right > #cnLangBtn{order:3;}'
+    + '#carinoNav .cn-right > .social-row{order:4;}'
+    + '#carinoNav .cn-right > .social-row:not(:only-child){border-left:1px solid var(--cn-border);padding-left:12px;}'
     + '@media(max-width:900px){#carinoNav .header-clock{display:none;}}'
     + '@media(max-width:640px){#carinoNav .app-tag{display:none;}}';
 
@@ -68,7 +79,7 @@
     + '</div></div>'
     + '<div class="cn-right">'
     + '<div class="social-row">'
-    + '<a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
+    + '<a href="' + GH_URL + '" target="_blank" rel="noopener" class="icon-btn" title="' + (REPO ? REPO + ' on GitHub' : 'GitHub') + '" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
     + '<a href="https://www.linkedin.com/in/miguelcarino94/" target="_blank" rel="noopener" class="icon-btn" title="LinkedIn" aria-label="LinkedIn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + LI + '"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg></a>'
     + '</div>'
     + '</div>'
