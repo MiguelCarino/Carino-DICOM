@@ -5788,7 +5788,8 @@ window.addEventListener('load', () => {
   let giveUp = null;
   const armed = window.CarinoBridge && CarinoBridge.receive({
     legacy: true,                 // PACS builds older than the bridge still speak carino-pacs-*
-    allow: ['same-origin'],       // the editor Carino PACS serves itself
+    allow: ['same-origin',        // the editor Carino PACS serves itself
+            'https://media.carino.systems'],   // and the fleet's file screen
     otherwise: 'ask',             // anyone else: shown to the user, by origin
     remember: true,               // and only asked about once per browser
     ask: (origin, count) => new Promise(resolve => {
@@ -5798,15 +5799,19 @@ window.addEventListener('load', () => {
         `${new URL(origin).host} wants to open ${count} file(s) in this editor.`,
         () => resolve(true), 'Load files', () => resolve(false));
     }),
-    onFiles: async (files, info) => {
+    onFiles: async (incoming, info) => {
       clearTimeout(giveUp);
       showLoading?.(true, 'Copying study from Carino PACS…');
       try {
-        await handleFiles(files);           // shows its own per-image progress
-        switchTab('editor');
+        await handleFiles(incoming);        // shows its own per-image progress
         // Named by where it actually came from, not by whether we trust it:
         // an origin the user approved once is still not the bundled PACS.
         const from = info.origin === location.origin ? 'Carino PACS' : new URL(info.origin).host;
+        // Counted from what parsed, not from what arrived — a hand-off of files
+        // dcmjs cannot read must not report itself as a study loaded. Whatever
+        // failed is already itemised in the banner handleFiles raises.
+        if (!files.length) { toast?.(`Nothing from ${from} could be read as DICOM`); return; }
+        switchTab('editor');
         toast?.(`Loaded ${files.length} image(s) from ${from}`);
       } catch (err) { showLoading?.(false); toast?.('PACS hand-off failed: ' + (err.message || err)); }
     },

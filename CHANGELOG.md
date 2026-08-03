@@ -39,7 +39,9 @@ unchanged.
   build) now names the sending host and asks the operator once before loading
   a study, since the editor previously accepted files from any page that
   opened it. Older builds on either side keep working — the two ends settle on
-  the old message format when one of them only speaks that.
+  the old message format when one of them only speaks that. The editor now
+  reports what it managed to parse rather than what it was handed, so a study
+  `dcmjs` cannot read no longer announces itself as loaded.
 - Description updated from "store-only PACS" to "store-and-reconcile PACS."
 - Desktop package license corrected from **MIT** to **AGPL-3.0-or-later** to
   match the repository LICENSE.
