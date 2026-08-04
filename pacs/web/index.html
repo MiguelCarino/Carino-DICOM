@@ -12,6 +12,10 @@
 <body>
   <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
   <script src="carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <!-- Fleet language preference + switcher, then this app's dictionary. Both
+       deferred and in this order: i18n.js reads window.CarinoLang. -->
+  <script src="carino-lang.js" defer></script>
+  <script src="i18n.js" defer></script>
   <div class="net-info" id="netInfo" data-carino-actions>Checking network…</div>
 
   <main class="wrap">
@@ -26,101 +30,101 @@
     <div class="shell">
       <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
       <nav class="sidebar" id="sidebar">
-        <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> Services</button>
-        <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> History</button>
-        <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> Orders<span class="badge" id="ordersBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> Destinations</button>
-        <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> Settings</button>
-        <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> Logs</button>
+        <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
+        <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> <span data-i18n>History</span></button>
+        <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> <span data-i18n>Orders</span><span class="badge" id="ordersBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> <span data-i18n>Pending</span><span class="badge" id="pendingBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> <span data-i18n>Stuck</span><span class="badge warn" id="stuckBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> <span data-i18n>Destinations</span></button>
+        <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> <span data-i18n>Settings</span></button>
+        <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> <span data-i18n>Logs</span></button>
       </nav>
 
       <div id="workspace">
 
         <!-- Services (default) — live status cards -->
         <section class="panel workpanel" id="dlgServices">
-          <header class="modal-head"><h2>Services <small>receive · send · worklist</small></h2></header>
+          <header class="modal-head"><h2><span data-i18n>Services</span> <small data-i18n>receive · send · worklist</small></h2></header>
           <div class="modal-body">
             <section class="cards">
       <article class="card" id="receiverCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="rxDot"></span> Receiver <small>Storage SCP</small></div>
+          <div class="card-title"><span class="dot" id="rxDot"></span> <span data-i18n>Receiver</span> <small data-i18n>Storage SCP</small></div>
           <button class="btn toggle" id="rxToggle" data-on="false">Start</button>
         </header>
         <dl class="kv">
-          <div><dt>AE title</dt><dd id="rxAet">—</dd></div>
-          <div><dt>Listening</dt><dd id="rxAddr">—</dd></div>
-          <div><dt>Store to</dt><dd id="rxDir" class="path">—</dd></div>
-          <div><dt>Received</dt><dd id="rxCount">0</dd></div>
-          <div><dt>Errors</dt><dd id="rxErr">0</dd></div>
-          <div><dt>Security</dt><dd id="rxTls">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="rxAet">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="rxAddr">—</dd></div>
+          <div><dt data-i18n>Store to</dt><dd id="rxDir" class="path">—</dd></div>
+          <div><dt data-i18n>Received</dt><dd id="rxCount">0</dd></div>
+          <div><dt data-i18n>Errors</dt><dd id="rxErr">0</dd></div>
+          <div><dt data-i18n>Security</dt><dd id="rxTls">—</dd></div>
         </dl>
-        <div class="drop-hint">⤓ drop a folder here to set the storage location</div>
+        <div class="drop-hint" data-i18n>⤓ drop a folder here to set the storage location</div>
       </article>
 
       <article class="card" id="watcherCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="wxDot"></span> Auto-send <small>folder watcher</small></div>
+          <div class="card-title"><span class="dot" id="wxDot"></span> <span data-i18n>Auto-send</span> <small data-i18n>folder watcher</small></div>
           <button class="btn toggle" id="wxToggle" data-on="false">Start</button>
         </header>
         <dl class="kv">
-          <div><dt>Watching</dt><dd id="wxDir" class="path">—</dd></div>
-          <div><dt>Calling AE</dt><dd id="wxAet">—</dd></div>
-          <div><dt>On success</dt><dd id="wxMode">—</dd></div>
-          <div><dt>Sent</dt><dd id="wxSent">0</dd></div>
-          <div><dt>Failed</dt><dd id="wxFailed">0</dd></div>
-          <div><dt>Last</dt><dd id="wxLast">—</dd></div>
+          <div><dt data-i18n>Watching</dt><dd id="wxDir" class="path">—</dd></div>
+          <div><dt data-i18n>Calling AE</dt><dd id="wxAet">—</dd></div>
+          <div><dt data-i18n>On success</dt><dd id="wxMode">—</dd></div>
+          <div><dt data-i18n>Sent</dt><dd id="wxSent">0</dd></div>
+          <div><dt data-i18n>Failed</dt><dd id="wxFailed">0</dd></div>
+          <div><dt data-i18n>Last</dt><dd id="wxLast">—</dd></div>
         </dl>
-        <div class="drop-hint">⤓ drop a folder here to set the watched location</div>
+        <div class="drop-hint" data-i18n>⤓ drop a folder here to set the watched location</div>
       </article>
 
       <article class="card" id="printerCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="pxDot"></span> Print receiver <small>virtual film printer</small></div>
+          <div class="card-title"><span class="dot" id="pxDot"></span> <span data-i18n>Print receiver</span> <small data-i18n>virtual film printer</small></div>
           <button class="btn toggle" id="pxToggle" data-on="false">Start</button>
         </header>
         <dl class="kv">
-          <div><dt>AE title</dt><dd id="pxAet">—</dd></div>
-          <div><dt>Listening</dt><dd id="pxAddr">—</dd></div>
-          <div><dt>Mode</dt><dd id="pxMode">—</dd></div>
-          <div><dt>Printed</dt><dd id="pxCount">0</dd></div>
-          <div><dt>Errors</dt><dd id="pxErr">0</dd></div>
-          <div><dt>Security</dt><dd id="pxTls">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="pxAet">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="pxAddr">—</dd></div>
+          <div><dt data-i18n>Mode</dt><dd id="pxMode">—</dd></div>
+          <div><dt data-i18n>Printed</dt><dd id="pxCount">0</dd></div>
+          <div><dt data-i18n>Errors</dt><dd id="pxErr">0</dd></div>
+          <div><dt data-i18n>Security</dt><dd id="pxTls">—</dd></div>
         </dl>
-        <div class="drop-hint">captured films land in 📎 Pending for review</div>
+        <div class="drop-hint" data-i18n>captured films land in 📎 Pending for review</div>
       </article>
 
       <article class="card" id="risCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="rsDot"></span> Emergency RIS <small>HL7 order intake</small></div>
+          <div class="card-title"><span class="dot" id="rsDot"></span> <span data-i18n>Emergency RIS</span> <small data-i18n>HL7 order intake</small></div>
           <button class="btn toggle" id="rsToggle" data-on="false">Start</button>
         </header>
         <dl class="kv">
-          <div><dt>Listening</dt><dd id="rsAddr">—</dd></div>
-          <div><dt>Protocol</dt><dd>HL7 / MLLP</dd></div>
-          <div><dt>Match on</dt><dd id="rsMatch">—</dd></div>
-          <div><dt>Open orders</dt><dd id="rsOpen">0</dd></div>
-          <div><dt>Received</dt><dd id="rsRecv">0</dd></div>
-          <div><dt>Errors</dt><dd id="rsErr">0</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="rsAddr">—</dd></div>
+          <div><dt data-i18n>Protocol</dt><dd>HL7 / MLLP</dd></div>
+          <div><dt data-i18n>Match on</dt><dd id="rsMatch">—</dd></div>
+          <div><dt data-i18n>Open orders</dt><dd id="rsOpen">0</dd></div>
+          <div><dt data-i18n>Received</dt><dd id="rsRecv">0</dd></div>
+          <div><dt data-i18n>Errors</dt><dd id="rsErr">0</dd></div>
         </dl>
-        <div class="drop-hint">orders appear under 📋 Orders — key the accession into the modality to match</div>
+        <div class="drop-hint" data-i18n>orders appear under 📋 Orders — key the accession into the modality to match</div>
       </article>
 
       <article class="card" id="mwlCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="mwDot"></span> Worklist <small>Modality Worklist SCP</small></div>
+          <div class="card-title"><span class="dot" id="mwDot"></span> <span data-i18n>Worklist</span> <small data-i18n>Modality Worklist SCP</small></div>
           <button class="btn toggle" id="mwToggle" data-on="false">Start</button>
         </header>
         <dl class="kv">
-          <div><dt>AE title</dt><dd id="mwAet">—</dd></div>
-          <div><dt>Listening</dt><dd id="mwAddr">—</dd></div>
-          <div><dt>Serving</dt><dd id="mwServing">open orders</dd></div>
-          <div><dt>Queries</dt><dd id="mwQueries">0</dd></div>
-          <div><dt>Matches</dt><dd id="mwMatches">0</dd></div>
-          <div><dt>Security</dt><dd id="mwTls">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="mwAet">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="mwAddr">—</dd></div>
+          <div><dt data-i18n>Serving</dt><dd id="mwServing" data-i18n>open orders</dd></div>
+          <div><dt data-i18n>Queries</dt><dd id="mwQueries">0</dd></div>
+          <div><dt data-i18n>Matches</dt><dd id="mwMatches">0</dd></div>
+          <div><dt data-i18n>Security</dt><dd id="mwTls">—</dd></div>
         </dl>
-        <div class="drop-hint">point a modality here as its worklist source — it pulls open orders by C-FIND</div>
+        <div class="drop-hint" data-i18n>point a modality here as its worklist source — it pulls open orders by C-FIND</div>
       </article>
             </section>
           </div>
@@ -129,17 +133,17 @@
         <!-- History -->
         <section class="panel workpanel" id="dlgHistory" hidden>
           <header class="modal-head">
-            <h2>Transaction history <small>received &amp; sent studies</small></h2>
+            <h2><span data-i18n>Transaction history</span> <small data-i18n-html>received &amp; sent studies</small></h2>
           </header>
         <div class="modal-body">
           <div class="hist-bar">
             <div class="hist-tabs">
-              <button class="hist-tab active" data-group="received">📥 Received</button>
-              <button class="hist-tab" data-group="sent">📤 Sent / Archived</button>
+              <button class="hist-tab active" data-group="received" data-i18n>📥 Received</button>
+              <button class="hist-tab" data-group="sent" data-i18n>📤 Sent / Archived</button>
             </div>
             <div class="hist-tools">
-              <button class="btn ghost tiny" id="histRefresh" title="Rescan folder">↻ Refresh</button>
-              <button class="btn tiny danger" id="histDeleteAll">🗑 Delete all</button>
+              <button class="btn ghost tiny" id="histRefresh" data-i18n-title title="Rescan folder" data-i18n>↻ Refresh</button>
+              <button class="btn tiny danger" id="histDeleteAll" data-i18n>🗑 Delete all</button>
             </div>
           </div>
           <div class="hist-list" id="histList"></div>
@@ -149,18 +153,18 @@
       <!-- RIS orders (emergency RIS: intake + reconciliation) -->
       <section class="panel workpanel" id="dlgOrders" hidden>
         <header class="modal-head">
-          <h2>RIS orders <small>received &amp; hand-keyed — matched when the study arrives</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
+          <h2><span data-i18n>RIS orders</span> <small data-i18n-html>received &amp; hand-keyed — matched when the study arrives</small></h2>
+          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <details class="order-new" id="orderNew">
-            <summary>➕ New order (manual entry)</summary>
+            <summary data-i18n>➕ New order (manual entry)</summary>
             <div class="order-form">
-              <label>Accession # <input id="ordAcc" placeholder="the value the tech types into the modality" /></label>
-              <label>Patient name <input id="ordPatient" placeholder="e.g. Jane Doe" /></label>
-              <label>Patient ID <input id="ordPid" /></label>
-              <label>Date of birth <input id="ordDob" type="date" title="Patient date of birth" /></label>
-              <label>Sex
+              <label><span data-i18n>Accession #</span> <input id="ordAcc" data-i18n-placeholder placeholder="the value the tech types into the modality" /></label>
+              <label><span data-i18n>Patient name</span> <input id="ordPatient" data-i18n-placeholder placeholder="e.g. Jane Doe" /></label>
+              <label><span data-i18n>Patient ID</span> <input id="ordPid" /></label>
+              <label><span data-i18n>Date of birth</span> <input id="ordDob" type="date" data-i18n-title title="Patient date of birth" /></label>
+              <label><span data-i18n>Sex</span>
                 <select id="ordSex">
                   <option value=""></option>
                   <option value="F">F</option>
@@ -168,25 +172,25 @@
                   <option value="O">O</option>
                 </select>
               </label>
-              <label>Modality <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
-              <label>Target modality AE <input id="ordStation" placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
-              <label class="wide">Study description <input id="ordDesc" placeholder="e.g. Ultrasound Abdomen" /></label>
-              <label>Scheduled <input id="ordWhen" type="datetime-local" title="Scheduled exam date &amp; time" /></label>
-              <label>Referring <input id="ordRef" placeholder="ordering physician" /></label>
+              <label><span data-i18n>Modality</span> <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
+              <label><span data-i18n>Target modality AE</span> <input id="ordStation" data-i18n-placeholder placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
+              <label class="wide"><span data-i18n>Study description</span> <input id="ordDesc" data-i18n-placeholder placeholder="e.g. Ultrasound Abdomen" /></label>
+              <label><span data-i18n>Scheduled</span> <input id="ordWhen" type="datetime-local" data-i18n-title title="Scheduled exam date &amp; time" /></label>
+              <label><span data-i18n>Referring</span> <input id="ordRef" data-i18n-placeholder placeholder="ordering physician" /></label>
             </div>
             <div class="order-form-foot">
-              <span class="hint">An order needs at least an accession, patient name or ID. Accession is what matches the study back to this order.</span>
-              <button class="btn" id="ordAdd">Queue order</button>
+              <span class="hint" data-i18n>An order needs at least an accession, patient name or ID. Accession is what matches the study back to this order.</span>
+              <button class="btn" id="ordAdd" data-i18n>Queue order</button>
             </div>
           </details>
           <div class="hist-bar">
             <div class="hist-tabs">
-              <button class="hist-tab active" data-ostatus="open">🟢 Open</button>
-              <button class="hist-tab" data-ostatus="closed">✓ Closed</button>
+              <button class="hist-tab active" data-ostatus="open" data-i18n>🟢 Open</button>
+              <button class="hist-tab" data-ostatus="closed" data-i18n>✓ Closed</button>
             </div>
             <div class="hist-tools">
-              <button class="btn ghost tiny" id="ordRefresh" title="Reload orders">↻ Refresh</button>
-              <button class="btn tiny danger" id="ordPurge" title="Delete all closed orders" hidden>🗑 Purge closed</button>
+              <button class="btn ghost tiny" id="ordRefresh" data-i18n-title title="Reload orders" data-i18n>↻ Refresh</button>
+              <button class="btn tiny danger" id="ordPurge" data-i18n-title title="Delete all closed orders" hidden data-i18n>🗑 Purge closed</button>
             </div>
           </div>
           <div class="hist-list" id="ordersList"></div>
@@ -196,14 +200,14 @@
       <!-- Pending imports -->
       <section class="panel workpanel" id="dlgPending" hidden>
         <header class="modal-head">
-          <h2>Pending imports <small>non-DICOM awaiting review</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
+          <h2><span data-i18n>Pending imports</span> <small data-i18n>non-DICOM awaiting review</small></h2>
+          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:60ch">PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
+            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
             <div class="hist-tools">
-              <button class="btn ghost tiny" id="pendRefresh" title="Rescan the pending folder">↻ Refresh</button>
+              <button class="btn ghost tiny" id="pendRefresh" data-i18n-title title="Rescan the pending folder" data-i18n>↻ Refresh</button>
             </div>
           </div>
           <div class="hist-list" id="pendingList"></div>
@@ -213,15 +217,15 @@
       <!-- Stuck sends -->
       <section class="panel workpanel" id="dlgStuck" hidden>
         <header class="modal-head">
-          <h2>Stuck sends <small>forwards that failed and are retrying</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
+          <h2><span data-i18n>Stuck sends</span> <small data-i18n>forwards that failed and are retrying</small></h2>
+          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:60ch">Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
+            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
             <div class="hist-tools">
-              <button class="btn tiny" id="stuckRetryAll" title="Clear backoff on all stuck sends">↻ Retry all now</button>
-              <button class="btn ghost tiny" id="stuckRefresh" title="Refresh">↻ Refresh</button>
+              <button class="btn tiny" id="stuckRetryAll" data-i18n-title title="Clear backoff on all stuck sends" data-i18n>↻ Retry all now</button>
+              <button class="btn ghost tiny" id="stuckRefresh" data-i18n-title title="Refresh" data-i18n>↻ Refresh</button>
             </div>
           </div>
           <div class="hist-list" id="stuckList"></div>
@@ -231,144 +235,144 @@
       <!-- Destinations -->
       <section class="panel workpanel" id="dlgDests" hidden>
         <header class="modal-head">
-          <h2>Destinations <small>remote DICOM nodes</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
+          <h2><span data-i18n>Destinations</span> <small data-i18n>remote DICOM nodes</small></h2>
+          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <div class="table-scroll">
             <table class="grid" id="destTable">
               <thead>
-                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th title="Watch this node for emergency failover">🚨</th><th></th></tr>
+                <tr><th data-i18n>On</th><th data-i18n>Name</th><th data-i18n>Host</th><th data-i18n>Port</th><th data-i18n>AE title</th><th>TLS</th><th data-i18n data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th data-i18n-title title="Watch this node for emergency failover">🚨</th><th></th></tr>
               </thead>
               <tbody id="destBody"></tbody>
             </table>
           </div>
-          <p class="hint">New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
+          <p class="hint" data-i18n-html>New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
         </div>
         <footer class="modal-foot">
-          <button class="btn ghost" id="addDest">+ Add node</button>
-          <button class="btn" id="saveDests">Save destinations</button>
+          <button class="btn ghost" id="addDest" data-i18n>+ Add node</button>
+          <button class="btn" id="saveDests" data-i18n>Save destinations</button>
         </footer>
       </section>
 
       <!-- Settings -->
       <section class="panel workpanel" id="dlgSettings" hidden>
-        <header class="modal-head"><h2>Settings</h2><button class="modal-x" data-demote aria-label="Close">✕</button></header>
+        <header class="modal-head"><h2 data-i18n>Settings</h2><button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button></header>
         <div class="modal-body">
           <div class="settings">
             <fieldset>
-              <legend>Receiver (SCP)</legend>
-              <label>AE title <input id="scpAet" maxlength="16" /></label>
-              <label>Bind address <input id="scpBind" /></label>
-              <label>Port <input id="scpPort" type="number" min="1" max="65535" /></label>
-              <label>Storage folder <input id="scpDir" /></label>
-              <label class="check"><input id="scpOrganize" type="checkbox" /> Organize by Patient / Study / Series</label>
-              <label>Refuse when free space below (GB) <input id="scpMinFree" type="number" min="0" step="1" placeholder="0 = off" /></label>
-              <label>Accept only these AEs <input id="scpAllowed" placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="scpTls" type="checkbox" /> Serve DICOM over TLS</label>
-              <label>TLS certificate (PEM) <input id="scpTlsCert" placeholder="path to server.crt" /></label>
-              <label>TLS private key (PEM) <input id="scpTlsKey" placeholder="path to server.key" /></label>
-              <label>Client-cert CA — mutual TLS <input id="scpTlsCa" placeholder="blank = don't require client certs" /></label>
+              <legend data-i18n>Receiver (SCP)</legend>
+              <label><span data-i18n>AE title</span> <input id="scpAet" maxlength="16" /></label>
+              <label><span data-i18n>Bind address</span> <input id="scpBind" /></label>
+              <label><span data-i18n>Port</span> <input id="scpPort" type="number" min="1" max="65535" /></label>
+              <label><span data-i18n>Storage folder</span> <input id="scpDir" /></label>
+              <label class="check"><input id="scpOrganize" type="checkbox" /> <span data-i18n>Organize by Patient / Study / Series</span></label>
+              <label><span data-i18n>Refuse when free space below (GB)</span> <input id="scpMinFree" type="number" min="0" step="1" data-i18n-placeholder placeholder="0 = off" /></label>
+              <label><span data-i18n>Accept only these AEs</span> <input id="scpAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="scpTls" type="checkbox" /> <span data-i18n>Serve DICOM over TLS</span></label>
+              <label><span data-i18n>TLS certificate (PEM)</span> <input id="scpTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+              <label><span data-i18n>TLS private key (PEM)</span> <input id="scpTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="scpTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
             </fieldset>
             <fieldset>
-              <legend>Auto-send (SCU)</legend>
-              <label>Calling AE title <input id="scuAet" maxlength="16" /></label>
-              <label>Watch folder <input id="scuDir" /></label>
-              <label>Poll interval (s) <input id="scuPoll" type="number" min="1" step="1" /></label>
-              <label>After a file is sent
+              <legend data-i18n>Auto-send (SCU)</legend>
+              <label><span data-i18n>Calling AE title</span> <input id="scuAet" maxlength="16" /></label>
+              <label><span data-i18n>Watch folder</span> <input id="scuDir" /></label>
+              <label><span data-i18n>Poll interval (s)</span> <input id="scuPoll" type="number" min="1" step="1" /></label>
+              <label><span data-i18n>After a file is sent</span>
                 <select id="scuMode">
-                  <option value="keep">Keep it in place</option>
-                  <option value="move">Move to archive folder</option>
-                  <option value="delete">Delete it</option>
+                  <option value="keep" data-i18n>Keep it in place</option>
+                  <option value="move" data-i18n>Move to archive folder</option>
+                  <option value="delete" data-i18n>Delete it</option>
                 </select>
               </label>
-              <label>Archive folder <input id="scuSent" /></label>
-              <label class="check"><input id="scuTlsVerify" type="checkbox" /> Verify remote TLS certificate</label>
-              <label>Trusted CA bundle <input id="scuTlsCa" placeholder="blank = system trust store" /></label>
-              <label>Client certificate (PEM) <input id="scuTlsCert" placeholder="optional — for mutual TLS" /></label>
-              <label>Client private key (PEM) <input id="scuTlsKey" placeholder="optional" /></label>
+              <label><span data-i18n>Archive folder</span> <input id="scuSent" /></label>
+              <label class="check"><input id="scuTlsVerify" type="checkbox" /> <span data-i18n>Verify remote TLS certificate</span></label>
+              <label><span data-i18n>Trusted CA bundle</span> <input id="scuTlsCa" data-i18n-placeholder placeholder="blank = system trust store" /></label>
+              <label><span data-i18n>Client certificate (PEM)</span> <input id="scuTlsCert" data-i18n-placeholder placeholder="optional — for mutual TLS" /></label>
+              <label><span data-i18n>Client private key (PEM)</span> <input id="scuTlsKey" data-i18n-placeholder placeholder="optional" /></label>
             </fieldset>
             <fieldset>
-              <legend>Print receiver</legend>
-              <label class="check"><input id="prnEnabled" type="checkbox" /> Start the print receiver on launch</label>
-              <label>Printer AE title <input id="prnAet" maxlength="16" /></label>
-              <label>Bind address <input id="prnBind" /></label>
-              <label>Port <input id="prnPort" type="number" min="1" max="65535" /></label>
-              <label>Store each captured film as
+              <legend data-i18n>Print receiver</legend>
+              <label class="check"><input id="prnEnabled" type="checkbox" /> <span data-i18n>Start the print receiver on launch</span></label>
+              <label><span data-i18n>Printer AE title</span> <input id="prnAet" maxlength="16" /></label>
+              <label><span data-i18n>Bind address</span> <input id="prnBind" /></label>
+              <label><span data-i18n>Port</span> <input id="prnPort" type="number" min="1" max="65535" /></label>
+              <label><span data-i18n>Store each captured film as</span>
                 <select id="prnLayout">
-                  <option value="pdf">PDF document (Encapsulated PDF)</option>
-                  <option value="image">Image (Secondary Capture)</option>
+                  <option value="pdf" data-i18n>PDF document (Encapsulated PDF)</option>
+                  <option value="image" data-i18n>Image (Secondary Capture)</option>
                 </select>
               </label>
-              <label class="check"><input id="prnColor" type="checkbox" /> Also accept color print jobs</label>
-              <label>Accept only these AEs <input id="prnAllowed" placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="prnTls" type="checkbox" /> Serve print over TLS</label>
-              <label>TLS certificate (PEM) <input id="prnTlsCert" placeholder="path to server.crt" /></label>
-              <label>TLS private key (PEM) <input id="prnTlsKey" placeholder="path to server.key" /></label>
-              <label>Client-cert CA — mutual TLS <input id="prnTlsCa" placeholder="blank = don't require client certs" /></label>
-              <p class="hint" style="margin:2px 0 0">Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
+              <label class="check"><input id="prnColor" type="checkbox" /> <span data-i18n>Also accept color print jobs</span></label>
+              <label><span data-i18n>Accept only these AEs</span> <input id="prnAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="prnTls" type="checkbox" /> <span data-i18n>Serve print over TLS</span></label>
+              <label><span data-i18n>TLS certificate (PEM)</span> <input id="prnTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+              <label><span data-i18n>TLS private key (PEM)</span> <input id="prnTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="prnTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
             </fieldset>
             <fieldset>
-              <legend>Emergency failover</legend>
-              <label class="check"><input id="emgArmed" type="checkbox" /> Arm failover — monitor the 🚨 destinations and prompt if one goes offline</label>
-              <label>Probe interval (s) <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
-              <label>Offline after (s) <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
-              <label>Recovery — good probes to declare back <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
-              <label class="check"><input id="emgAuto" type="checkbox" /> Activate automatically (skip the prompt)</label>
-              <label class="check"><input id="emgHold" type="checkbox" /> Hold &amp; forward — queue received studies for the primary while active</label>
-              <p class="hint" style="margin:2px 0 0">Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
+              <legend data-i18n>Emergency failover</legend>
+              <label class="check"><input id="emgArmed" type="checkbox" /> <span data-i18n>Arm failover — monitor the 🚨 destinations and prompt if one goes offline</span></label>
+              <label><span data-i18n>Probe interval (s)</span> <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
+              <label><span data-i18n>Offline after (s)</span> <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
+              <label><span data-i18n>Recovery — good probes to declare back</span> <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
+              <label class="check"><input id="emgAuto" type="checkbox" /> <span data-i18n>Activate automatically (skip the prompt)</span></label>
+              <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
+              <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
             </fieldset>
             <fieldset>
-              <legend>Modality Worklist (MWL)</legend>
-              <label class="check"><input id="mwlEnabled" type="checkbox" /> Start the worklist SCP on launch</label>
-              <label>Worklist AE title <input id="mwlAet" maxlength="16" /></label>
-              <label>Bind address <input id="mwlBind" /></label>
-              <label>Port <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
-              <label>Accept only these AEs <input id="mwlAllowed" placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="mwlTls" type="checkbox" /> Serve worklist over TLS</label>
-              <label>TLS certificate (PEM) <input id="mwlTlsCert" placeholder="path to server.crt" /></label>
-              <label>TLS private key (PEM) <input id="mwlTlsKey" placeholder="path to server.key" /></label>
-              <label>Client-cert CA — mutual TLS <input id="mwlTlsCa" placeholder="blank = don't require client certs" /></label>
-              <p class="hint" style="margin:2px 0 0">Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
+              <legend data-i18n>Modality Worklist (MWL)</legend>
+              <label class="check"><input id="mwlEnabled" type="checkbox" /> <span data-i18n>Start the worklist SCP on launch</span></label>
+              <label><span data-i18n>Worklist AE title</span> <input id="mwlAet" maxlength="16" /></label>
+              <label><span data-i18n>Bind address</span> <input id="mwlBind" /></label>
+              <label><span data-i18n>Port</span> <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
+              <label><span data-i18n>Accept only these AEs</span> <input id="mwlAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="mwlTls" type="checkbox" /> <span data-i18n>Serve worklist over TLS</span></label>
+              <label><span data-i18n>TLS certificate (PEM)</span> <input id="mwlTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+              <label><span data-i18n>TLS private key (PEM)</span> <input id="mwlTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="mwlTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
             </fieldset>
             <fieldset>
-              <legend>Emergency RIS</legend>
-              <label class="check"><input id="risEnabled" type="checkbox" /> Start the HL7/MLLP order listener on launch</label>
-              <label>Bind address <input id="risBind" /></label>
-              <label>Port <input id="risPort" type="number" min="1" max="65535" placeholder="2575" /></label>
-              <label>Order store folder <input id="risDir" placeholder="where orders.json is kept" /></label>
-              <label>Match a study to an order by
+              <legend data-i18n>Emergency RIS</legend>
+              <label class="check"><input id="risEnabled" type="checkbox" /> <span data-i18n>Start the HL7/MLLP order listener on launch</span></label>
+              <label><span data-i18n>Bind address</span> <input id="risBind" /></label>
+              <label><span data-i18n>Port</span> <input id="risPort" type="number" min="1" max="65535" placeholder="2575" /></label>
+              <label><span data-i18n>Order store folder</span> <input id="risDir" data-i18n-placeholder placeholder="where orders.json is kept" /></label>
+              <label><span data-i18n>Match a study to an order by</span>
                 <select id="risMatch">
-                  <option value="accession">Accession number only (recommended)</option>
-                  <option value="accession_or_patient">Accession, else Patient ID</option>
+                  <option value="accession" data-i18n>Accession number only (recommended)</option>
+                  <option value="accession_or_patient" data-i18n>Accession, else Patient ID</option>
                 </select>
               </label>
-              <label class="check"><input id="risAutoClose" type="checkbox" /> Auto-close a matched order when its study arrives</label>
-              <label>Accept HL7 only from these hosts <input id="risHosts" placeholder="comma-separated IPs, blank = any" /></label>
-              <p class="hint" style="margin:2px 0 0">Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
+              <label class="check"><input id="risAutoClose" type="checkbox" /> <span data-i18n>Auto-close a matched order when its study arrives</span></label>
+              <label><span data-i18n>Accept HL7 only from these hosts</span> <input id="risHosts" data-i18n-placeholder placeholder="comma-separated IPs, blank = any" /></label>
+              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
             </fieldset>
             <fieldset>
-              <legend>Integrations</legend>
-              <label>DICOM-editor URL
-                <input id="webEditorUrl" placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
+              <legend data-i18n>Integrations</legend>
+              <label><span data-i18n>DICOM-editor URL</span>
+                <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
               </label>
-              <p class="hint" style="margin:2px 0 0">Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
+              <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
             </fieldset>
           </div>
         </div>
         <footer class="modal-foot">
-          <button class="btn kill" id="killSvc" title="Stop the receiver, watcher and the whole engine process">⏻ Shut down service</button>
-          <button class="btn" id="saveCfg">Save configuration</button>
+          <button class="btn kill" id="killSvc" data-i18n-title title="Stop the receiver, watcher and the whole engine process" data-i18n>⏻ Shut down service</button>
+          <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
         </footer>
       </section>
 
       <!-- Logs -->
       <section class="panel workpanel" id="dlgLogs" hidden>
         <header class="modal-head">
-          <h2>Activity</h2>
+          <h2 data-i18n>Activity</h2>
           <div class="head-right">
-            <button class="btn ghost tiny" id="clearLog">Clear view</button>
-            <button class="modal-x" data-demote aria-label="Close">✕</button>
+            <button class="btn ghost tiny" id="clearLog" data-i18n>Clear view</button>
+            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
           </div>
         </header>
         <div class="modal-body">
@@ -386,17 +390,20 @@
   <!-- Emergency activation prompt (pops when a primary goes offline) -->
   <div class="emg-modal" id="emgPrompt" hidden>
     <div class="emg-modal-card">
-      <h2>⚠ Primary PACS unreachable</h2>
+      <h2 data-i18n>⚠ Primary PACS unreachable</h2>
       <p id="emgPromptMsg"></p>
-      <p class="hint">Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
+      <p class="hint" data-i18n-html>Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
       <div class="emg-modal-actions">
-        <button class="btn" id="emgActivate">Activate emergency RIS</button>
-        <button class="btn ghost" id="emgDismiss">Not now</button>
+        <button class="btn" id="emgActivate" data-i18n>Activate emergency RIS</button>
+        <button class="btn ghost" id="emgDismiss" data-i18n>Not now</button>
       </div>
     </div>
   </div>
 
-  <!-- Row template for a study in the history list -->
+  <!-- Row template for a study in the history list.
+       Template content is inert to document.querySelectorAll, so app.js runs
+       window.applyI18nIn() on each clone. The Send button's label is set by
+       app.js (Send / Resend), so it carries no data-i18n. -->
   <template id="histRowTpl">
     <div class="hist-row">
       <div class="hist-main">
@@ -405,11 +412,11 @@
         <div class="hist-series"></div>
       </div>
       <div class="hist-actions">
-        <button class="btn tiny hist-send" title="Forward to enabled destinations">Send</button>
-        <button class="btn tiny ghost hist-attach" title="Attach a PDF/image as a new series">📎 Attach</button>
-        <button class="btn tiny ghost hist-edit" title="Open this study in DICOM-editor" hidden>✎ Edit tags</button>
-        <button class="btn tiny ghost hist-open" title="Open the folder on disk">Go to file</button>
-        <button class="btn tiny danger hist-del" title="Delete from disk">Delete</button>
+        <button class="btn tiny hist-send" data-i18n-title title="Forward to enabled destinations">Send</button>
+        <button class="btn tiny ghost hist-attach" data-i18n-title title="Attach a PDF/image as a new series" data-i18n>📎 Attach</button>
+        <button class="btn tiny ghost hist-edit" data-i18n-title title="Open this study in DICOM-editor" hidden data-i18n>✎ Edit tags</button>
+        <button class="btn tiny ghost hist-open" data-i18n-title title="Open the folder on disk" data-i18n>Go to file</button>
+        <button class="btn tiny danger hist-del" data-i18n-title title="Delete from disk" data-i18n>Delete</button>
       </div>
     </div>
   </template>
@@ -424,7 +431,7 @@
       </div>
       <div class="stuck-actions">
         <span class="stuck-next"></span>
-        <button class="btn tiny stuck-retry" title="Clear backoff and retry this destination now">Retry now</button>
+        <button class="btn tiny stuck-retry" data-i18n-title title="Clear backoff and retry this destination now" data-i18n>Retry now</button>
       </div>
     </div>
   </template>
@@ -438,9 +445,9 @@
         <div class="order-sub"></div>
       </div>
       <div class="hist-actions">
-        <button class="btn tiny order-capture" title="Relate an exported PDF/image to this order → DICOM → send, then close the order">📎 Capture study</button>
-        <button class="btn tiny danger order-cancel" title="Cancel this order (keeps it in Closed for the audit trail)">Cancel</button>
-        <button class="btn tiny ghost order-del" title="Delete permanently">Delete</button>
+        <button class="btn tiny order-capture" data-i18n-title title="Relate an exported PDF/image to this order → DICOM → send, then close the order" data-i18n>📎 Capture study</button>
+        <button class="btn tiny danger order-cancel" data-i18n-title title="Cancel this order (keeps it in Closed for the audit trail)" data-i18n>Cancel</button>
+        <button class="btn tiny ghost order-del" data-i18n-title title="Delete permanently" data-i18n>Delete</button>
       </div>
     </div>
   </template>
@@ -451,21 +458,21 @@
       <div class="pend-head">
         <span class="pend-kind"></span>
         <span class="pend-file"></span>
-        <a class="pend-preview" target="_blank" rel="noopener">Preview</a>
+        <a class="pend-preview" target="_blank" rel="noopener" data-i18n>Preview</a>
       </div>
       <div class="pend-fields">
-        <label>Patient name <input class="pf-patient" /></label>
-        <label>Patient ID <input class="pf-pid" /></label>
-        <label>Accession # <input class="pf-acc" placeholder="order / accession" /></label>
-        <label>Study date <input class="pf-date" placeholder="YYYY-MM-DD" /></label>
-        <label>Study description <input class="pf-sdesc" /></label>
-        <label class="wide">Series description <input class="pf-serdesc" placeholder="e.g. Ultrasound report" /></label>
+        <label><span data-i18n>Patient name</span> <input class="pf-patient" /></label>
+        <label><span data-i18n>Patient ID</span> <input class="pf-pid" /></label>
+        <label><span data-i18n>Accession #</span> <input class="pf-acc" data-i18n-placeholder placeholder="order / accession" /></label>
+        <label><span data-i18n>Study date</span> <input class="pf-date" placeholder="YYYY-MM-DD" /></label>
+        <label><span data-i18n>Study description</span> <input class="pf-sdesc" /></label>
+        <label class="wide"><span data-i18n>Series description</span> <input class="pf-serdesc" data-i18n-placeholder placeholder="e.g. Ultrasound report" /></label>
       </div>
       <div class="pend-foot">
         <span class="pend-src"></span>
         <span class="pend-actions">
-          <button class="btn tiny pend-approve" title="Convert to DICOM and send">Approve &amp; send</button>
-          <button class="btn tiny danger pend-discard" title="Delete without importing">Discard</button>
+          <button class="btn tiny pend-approve" data-i18n-title title="Convert to DICOM and send" data-i18n-html>Approve &amp; send</button>
+          <button class="btn tiny danger pend-discard" data-i18n-title title="Delete without importing" data-i18n>Discard</button>
         </span>
       </div>
     </div>
@@ -475,16 +482,16 @@
   <template id="destRowTpl">
     <tr>
       <td><input type="checkbox" class="d-en" /></td>
-      <td><input class="d-name" placeholder="Name" /></td>
-      <td><input class="d-host" placeholder="host / IP" /></td>
+      <td><input class="d-name" data-i18n-placeholder placeholder="Name" /></td>
+      <td><input class="d-host" data-i18n-placeholder placeholder="host / IP" /></td>
       <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
       <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-tls" title="Connect to this node over TLS" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-noris" title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-emg" title="Trigger emergency failover if this node goes offline" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-tls" data-i18n-title title="Connect to this node over TLS" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-noris" data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-emg" data-i18n-title title="Trigger emergency failover if this node goes offline" /></td>
       <td class="row-actions">
-        <button class="btn tiny echo" title="C-ECHO test">Echo</button>
-        <button class="btn tiny danger del" title="Remove">✕</button>
+        <button class="btn tiny echo" data-i18n-title title="C-ECHO test" data-i18n>Echo</button>
+        <button class="btn tiny danger del" data-i18n-title title="Remove">✕</button>
       </td>
     </tr>
   </template>

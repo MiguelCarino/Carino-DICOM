@@ -3,6 +3,26 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+
+  /* ── i18n ────────────────────────────────────────────────────────
+     Dictionaries and the [data-i18n] markup pass live in i18n.js, which is
+     deferred and loaded before this file. Everything below is rendered by JS,
+     so it is wrapped at render time instead:
+       T(s)            plain string
+       TF(s, vals)     string with {named} placeholders — keeps word order
+                       translatable rather than concatenating fragments
+       TN(n, s)        count-aware string ({n} placeholder); the dictionary
+                       supplies the plural forms, which matters for Russian
+       I18N_IN(root)   translate a <template> clone (template content is inert
+                       to document.querySelectorAll, so i18n.js never sees it)
+     All four fall back to the English literal when no dictionary is loaded, so
+     the dashboard still works if i18n.js is missing. Messages sent by the
+     engine (r.message) stay in the server's language on purpose. */
+  const T = (s) => (window.t || String)(s);
+  const TF = (s, vals) => T(s).replace(/\{(\w+)\}/g, (m, k) => (vals && vals[k] != null ? vals[k] : m));
+  const TN = (n, s) => (window.tn ? window.tn(n, s) : String(s).replace(/\{n\}/g, n));
+  const I18N_IN = (root) => { if (window.applyI18nIn) window.applyI18nIn(root); return root; };
+
   const api = async (url, opts) => {
     const res = await fetch(url, opts);
     let body = {};
@@ -41,7 +61,7 @@
         ni.append(" · ", v(rx.aet + ":" + rx.port));
       } else {
         ni.classList.add("offline");
-        ni.textContent = "offline";
+        ni.textContent = T("offline");
       }
     }
 
@@ -77,8 +97,9 @@
       const d = s.disk || {};
       if (d.low) {
         dw.hidden = false;
-        dw.textContent = "⚠ Low disk space — " + (d.free_gb != null ? d.free_gb + " GB" : "?") +
-          " free (below the " + d.floor_gb + " GB floor). New incoming studies will be refused until space is freed.";
+        dw.textContent = TF(
+          "⚠ Low disk space — {free} free (below the {floor} GB floor). New incoming studies will be refused until space is freed.",
+          { free: (d.free_gb != null ? d.free_gb + " GB" : "?"), floor: d.floor_gb });
       } else {
         dw.hidden = true;
       }
@@ -90,14 +111,14 @@
     $("rxDir").textContent = rx.storage_dir;
     $("rxCount").textContent = rx.received;
     $("rxErr").textContent = rx.errors;
-    $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? "TLS (mutual)" : "TLS") : "plaintext";
+    $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? T("TLS (mutual)") : "TLS") : T("plaintext");
     setToggle($("rxToggle"), rx.running);
     setChip("rx", rx.running);
 
     setDot($("wxDot"), wx.running);
     $("wxDir").textContent = wx.watch_dir;
     $("wxAet").textContent = wx.aet;
-    $("wxMode").textContent = wx.on_success;
+    $("wxMode").textContent = T(wx.on_success);
     $("wxSent").textContent = wx.sent;
     $("wxFailed").textContent = wx.failed;
     $("wxLast").textContent = wx.last_activity || "—";
@@ -107,17 +128,17 @@
     setDot($("pxDot"), px.running);
     $("pxAet").textContent = px.aet || "—";
     $("pxAddr").textContent = `${px.bind || "0.0.0.0"}:${px.port}`;
-    $("pxMode").textContent = (px.color ? "grayscale + color" : "grayscale") +
-      " · " + (px.layout === "image" ? "→ image" : "→ PDF");
+    $("pxMode").textContent = (px.color ? T("grayscale + color") : T("grayscale")) +
+      " · " + (px.layout === "image" ? T("→ image") : T("→ PDF"));
     $("pxCount").textContent = px.printed || 0;
     $("pxErr").textContent = px.errors || 0;
-    $("pxTls").textContent = px.tls ? "TLS" : "plaintext";
+    $("pxTls").textContent = px.tls ? "TLS" : T("plaintext");
     setToggle($("pxToggle"), px.running);
     setChip("px", px.running);
 
     setDot($("rsDot"), rs.running);
     $("rsAddr").textContent = `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`;
-    $("rsMatch").textContent = rs.match_on === "accession_or_patient" ? "accession / patient ID" : "accession";
+    $("rsMatch").textContent = rs.match_on === "accession_or_patient" ? T("accession / patient ID") : T("accession");
     $("rsOpen").textContent = (rs.counts && rs.counts.open) || 0;
     $("rsRecv").textContent = rs.received || 0;
     $("rsErr").textContent = rs.errors || 0;
@@ -129,7 +150,7 @@
     $("mwAddr").textContent = `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`;
     $("mwQueries").textContent = mw.queries || 0;
     $("mwMatches").textContent = mw.matches || 0;
-    $("mwTls").textContent = mw.tls ? "TLS" : "plaintext";
+    $("mwTls").textContent = mw.tls ? "TLS" : T("plaintext");
     setToggle($("mwToggle"), mw.running);
     setChip("mw", mw.running);
 
@@ -157,14 +178,14 @@
       banner.className = "emg-banner " + state;
       let text, actions;
       if (state === "active") {
-        text = `🚨 EMERGENCY ACTIVE — '${who}' unreachable. Worklist is serving; received studies are held for forward.`;
-        actions = [["Resume normal", "resume", "btn"]];
+        text = TF("🚨 EMERGENCY ACTIVE — '{who}' unreachable. Worklist is serving; received studies are held for forward.", { who });
+        actions = [[T("Resume normal"), "resume", "btn"]];
       } else if (state === "recovering") {
-        text = `↩ '${who}' is back — flushing held studies to it. Click Resume when done.`;
-        actions = [["Resume normal", "resume", "btn"]];
+        text = TF("↩ '{who}' is back — flushing held studies to it. Click Resume when done.", { who });
+        actions = [[T("Resume normal"), "resume", "btn"]];
       } else {  // triggered (prompt may be dismissed)
-        text = `⚠ Primary '${who}' is unreachable — emergency RIS not activated.`;
-        actions = [["Activate", "activate", "btn"], ["Disarm", "disarm", "btn ghost"]];
+        text = TF("⚠ Primary '{who}' is unreachable — emergency RIS not activated.", { who });
+        actions = [[T("Activate"), "activate", "btn"], [T("Disarm"), "disarm", "btn ghost"]];
       }
       $("emgBannerText").textContent = text;
       const wrap = $("emgBannerActions");
@@ -185,7 +206,7 @@
     if (emg.prompt) {
       if (!emgPromptShown) {
         $("emgPromptMsg").textContent =
-          `The primary PACS '${who}' has been unreachable past the failover threshold.`;
+          TF("The primary PACS '{who}' has been unreachable past the failover threshold.", { who });
         prompt.hidden = false;
         emgPromptShown = true;
       }
@@ -198,7 +219,7 @@
   async function emergencyAction(action) {
     try {
       const r = await post("/api/emergency", { action });
-      flashNote(r.message || ("Emergency: " + action), r.ok !== false);
+      flashNote(r.message || TF("Emergency: {action}", { action }), r.ok !== false);
       $("emgPrompt").hidden = true;
       emgPromptShown = false;
       pollStatus();
@@ -206,7 +227,7 @@
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
-    btn.textContent = on ? "Stop" : "Start";
+    btn.textContent = on ? T("Stop") : T("Start");
   }
   function setDot(el, on) {
     el.classList.toggle("on", on);
@@ -240,15 +261,26 @@
       chip.className = "svc-chip";
       chip.id = "nav_" + svc.key;
       chip.dataset.on = "false";
-      chip.title = svc.label + " — click to start/stop";
+      chip.dataset.svc = svc.label;               // English key, for retranslation
+      chip.title = TF("{svc} — click to start/stop", { svc: T(svc.label) });
       const dot = document.createElement("span"); dot.className = "svc-chip-dot";
-      const lab = document.createElement("span"); lab.className = "svc-chip-label"; lab.textContent = svc.label;
+      const lab = document.createElement("span"); lab.className = "svc-chip-label"; lab.textContent = T(svc.label);
       chip.append(dot, lab);
       chip.addEventListener("click", () => { const b = $(svc.toggle); if (b) b.click(); });
       box.appendChild(chip);
     });
     right.insertBefore(box, right.firstChild);
     return true;
+  }
+  // Re-label the already-mounted chips after a language switch.
+  function relabelServiceChips() {
+    NAV_SERVICES.forEach((svc) => {
+      const chip = document.getElementById("nav_" + svc.key);
+      if (!chip) return;
+      chip.title = TF("{svc} — click to start/stop", { svc: T(svc.label) });
+      const lab = chip.querySelector(".svc-chip-label");
+      if (lab) lab.textContent = T(svc.label);
+    });
   }
   function setChip(key, on) {
     const chip = document.getElementById("nav_" + key);
@@ -421,7 +453,7 @@
     if (!list.length) addDestRow({});
   }
   function addDestRow(d) {
-    const tpl = $("destRowTpl").content.cloneNode(true);
+    const tpl = I18N_IN($("destRowTpl").content.cloneNode(true));
     const tr = tpl.querySelector("tr");
     tr.querySelector(".d-en").checked = d.enabled !== false;
     tr.querySelector(".d-name").value = d.name || "";
@@ -540,7 +572,7 @@
       aet: tr.querySelector(".d-aet").value.trim(),
     };
     const btn = tr.querySelector(".echo");
-    if (!dest.host || !dest.port || !dest.aet) { flashNote("Fill host, port and AE first", false); return; }
+    if (!dest.host || !dest.port || !dest.aet) { flashNote(T("Fill host, port and AE first"), false); return; }
     const old = btn.textContent; btn.textContent = "…"; btn.disabled = true;
     try {
       const r = await post("/api/echo", dest);
@@ -562,7 +594,7 @@
   async function saveConfig() {
     try {
       await post("/api/config", collectConfig());
-      flashNote("Saved.", true);
+      flashNote(T("Saved."), true);
       pollStatus();
       return true;
     } catch (e) { flashNote(e.message, false); return false; }
@@ -607,18 +639,18 @@
         e.preventDefault();
         z.el.classList.remove("drop-active");
         const info = droppedFolder(e);
-        if (!info.path) { flashNote("Folder drop needs the desktop app (browsers hide the path).", false); return; }
-        if (info.isDir === false) { flashNote("Please drop a folder, not a file.", false); return; }
+        if (!info.path) { flashNote(T("Folder drop needs the desktop app (browsers hide the path)."), false); return; }
+        if (info.isDir === false) { flashNote(T("Please drop a folder, not a file."), false); return; }
         $(z.input).value = info.path;
         await saveConfig();
-        flashNote(z.label + " folder → " + info.path, true);
+        flashNote(TF("{label} folder → {path}", { label: T(z.label), path: info.path }), true);
       });
     });
   }
 
   /* ── Kill the whole service ──────────────────────────────────── */
   async function killService() {
-    if (!confirm("Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.")) return;
+    if (!confirm(T("Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits."))) return;
     $("killSvc").disabled = true;
     post("/api/shutdown", {}).catch(() => {});   // process may exit before responding
     if (statusTimer) clearInterval(statusTimer);
@@ -627,23 +659,38 @@
     setDot($("wxDot"), false);
     const ov = document.createElement("div");
     ov.className = "stopped-overlay";
-    ov.innerHTML = "<div><h2>Carino PACS has shut down</h2>" +
-      "<p>The service stopped. You can close this window, or restart it from your terminal / the desktop app.</p></div>";
+    const box = document.createElement("div");
+    const h = document.createElement("h2");
+    h.textContent = T("Carino PACS has shut down");
+    const p = document.createElement("p");
+    p.textContent = T("The service stopped. You can close this window, or restart it from your terminal / the desktop app.");
+    box.append(h, p);
+    ov.appendChild(box);
     document.body.appendChild(ov);
   }
 
   /* ── Transaction history ─────────────────────────────────────── */
   let histGroup = "received";
 
+  // Shared list placeholders (Loading… / load error) — same shape in every panel.
+  function listLoading(el) { el.innerHTML = ""; el.appendChild(emptyNote(T("Loading…"))); }
+  function listError(el, msg) { el.innerHTML = ""; el.appendChild(emptyNote(TF("Could not load: {err}", { err: msg }))); }
+  function emptyNote(text) {
+    const d = document.createElement("div");
+    d.className = "hist-empty";
+    d.textContent = text;
+    return d;
+  }
+
   async function loadHistory() {
     const list = $("histList");
-    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    listLoading(list);
     try {
       const data = await api("/api/studies?group=" + histGroup);
       renderHistory(data.studies || []);
       reflowActive();
     } catch (e) {
-      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+      listError(list, e.message);
     }
   }
 
@@ -651,19 +698,18 @@
     const list = $("histList");
     list.innerHTML = "";
     if (!studies.length) {
-      const label = histGroup === "sent" ? "archived" : "received";
-      list.innerHTML = "<div class='hist-empty'>No " + label + " studies yet.</div>";
+      list.appendChild(emptyNote(histGroup === "sent" ? T("No archived studies yet.") : T("No received studies yet.")));
       return;
     }
     studies.forEach((s) => {
-      const row = $("histRowTpl").content.cloneNode(true).querySelector(".hist-row");
+      const row = I18N_IN($("histRowTpl").content.cloneNode(true)).querySelector(".hist-row");
       row.querySelector(".hist-patient").textContent =
-        (s.patient || "(no name)") + (s.patient_id ? "  ·  " + s.patient_id : "");
+        (s.patient || T("(no name)")) + (s.patient_id ? "  ·  " + s.patient_id : "");
       const meta = [
-        s.study_date || "no date",
-        s.study_desc || "(no study description)",
+        s.study_date || T("no date"),
+        s.study_desc || T("(no study description)"),
         s.modality,
-        s.instances + (s.instances === 1 ? " image" : " images"),
+        TN(s.instances, "{n} images"),
       ].filter(Boolean).join("  ·  ");
       row.querySelector(".hist-meta").textContent = meta;
 
@@ -671,18 +717,18 @@
       (s.series || []).slice(0, 8).forEach((se) => {
         const chip = document.createElement("span");
         chip.className = "hist-chip";
-        chip.textContent = (se.desc || se.modality || "series") + " (" + se.count + ")";
+        chip.textContent = (se.desc || se.modality || T("series")) + " (" + se.count + ")";
         ser.appendChild(chip);
       });
       if ((s.series || []).length > 8) {
         const more = document.createElement("span");
         more.className = "hist-chip more";
-        more.textContent = "+" + (s.series.length - 8) + " more";
+        more.textContent = TF("+{n} more", { n: s.series.length - 8 });
         ser.appendChild(more);
       }
 
       const sendBtn = row.querySelector(".hist-send");
-      sendBtn.textContent = histGroup === "sent" ? "Resend" : "Send";
+      sendBtn.textContent = histGroup === "sent" ? T("Resend") : T("Send");
       sendBtn.addEventListener("click", () => histAction("send", s, sendBtn));
       row.querySelector(".hist-attach").addEventListener("click", () => histAttach(s));
       const editBtn = row.querySelector(".hist-edit");
@@ -701,7 +747,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "…"; }
     try {
       const r = await post("/api/studies/" + action, { group: histGroup, path: s.path });
-      flashNote(r.message || "OK", r.ok !== false);
+      flashNote(r.message || T("OK"), r.ok !== false);
     } catch (e) {
       flashNote(e.message, false);
     } finally {
@@ -710,22 +756,23 @@
   }
 
   async function histDelete(s) {
-    if (!confirm("Delete this study from disk?\n\n" + (s.patient || "(no name)") +
-                 "\n" + (s.study_desc || "") + "  —  " + s.instances + " image(s)")) return;
+    if (!confirm(T("Delete this study from disk?") + "\n\n" + (s.patient || T("(no name)")) +
+                 "\n" + (s.study_desc || "") + "  —  " + TN(s.instances, "{n} images"))) return;
     try {
       const r = await post("/api/studies/delete", { group: histGroup, path: s.path });
-      flashNote(r.message || "Deleted", r.ok !== false);
+      flashNote(r.message || T("Deleted"), r.ok !== false);
       loadHistory();
     } catch (e) { flashNote(e.message, false); }
   }
 
   async function histDeleteAll() {
-    const label = histGroup === "sent" ? "archived" : "received";
-    if (!confirm("Delete ALL " + label + " studies?\n\nThis permanently removes every study in the " +
-                 label + " folder from disk.")) return;
+    const msg = histGroup === "sent"
+      ? T("Delete ALL archived studies?\n\nThis permanently removes every study in the archived folder from disk.")
+      : T("Delete ALL received studies?\n\nThis permanently removes every study in the received folder from disk.");
+    if (!confirm(msg)) return;
     try {
       const r = await post("/api/studies/delete-all", { group: histGroup });
-      flashNote(r.message || ("Removed " + (r.removed || 0)), r.ok !== false);
+      flashNote(r.message || TF("Removed {n}", { n: r.removed || 0 }), r.ok !== false);
       loadHistory();
     } catch (e) { flashNote(e.message, false); }
   }
@@ -740,8 +787,8 @@
     // Resolve relative ("/editor/" = the bundled same-origin editor) or absolute URLs alike.
     let editorAbs;
     try { editorAbs = new URL(editorUrl, location.origin).href; }
-    catch (e) { flashNote("Editor URL is not valid", false); return; }
-    if (!window.CarinoBridge) { flashNote("Bridge script missing — reload the page", false); return; }
+    catch (e) { flashNote(T("Editor URL is not valid"), false); return; }
+    if (!window.CarinoBridge) { flashNote(T("Bridge script missing — reload the page"), false); return; }
     const manifestUrl = "/api/studies/files?group=" + encodeURIComponent(histGroup) + "&path=" + encodeURIComponent(s.path);
 
     // The study is read only once the editor says it is listening: a window the
@@ -749,19 +796,19 @@
     CarinoBridge.send(editorAbs, async () => {
       const man = await api(manifestUrl);                   // same-origin fetch (http→http)
       const entries = man.files || [];
-      if (!entries.length) throw new Error(man.message || "no DICOM files in study");
+      if (!entries.length) throw new Error(man.message || T("no DICOM files in study"));
       const files = [];
       for (const e of entries) {
         const r = await fetch(e.url);
         if (r.ok) files.push({ name: e.name, buf: await r.arrayBuffer() });
       }
-      if (!files.length) throw new Error("could not read any DICOM file");
+      if (!files.length) throw new Error(T("could not read any DICOM file"));
       return files;
     }, { legacy: true })                                    // editors older than the bridge
-      .then((res) => flashNote("Opened " + res.count + " file(s) in the editor", true))
+      .then((res) => flashNote(TN(res.count, "Opened {n} files in the editor"), true))
       .catch((err) => flashNote(
-        /pop-up/i.test(err.message) ? "Pop-up blocked — allow pop-ups to open the editor"
-                                    : "Editor hand-off failed: " + err.message, false));
+        /pop-up/i.test(err.message) ? T("Pop-up blocked — allow pop-ups to open the editor")
+                                    : TF("Editor hand-off failed: {err}", { err: err.message }), false));
   }
 
   // Attach a PDF/image to an existing study (inherits its identity, new series).
@@ -779,7 +826,7 @@
       try {
         const res = await fetch("/api/studies/attach", { method: "POST", headers: { "X-Carino": "1" }, body: fd });
         let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
-        flashNote(body.message || (res.ok ? "Attached" : "Attach failed"), res.ok && body.ok !== false);
+        flashNote(body.message || (res.ok ? T("Attached") : T("Attach failed")), res.ok && body.ok !== false);
         if (res.ok) loadHistory();
       } catch (e) { flashNote(e.message, false); }
     });
@@ -794,21 +841,21 @@
 
   function fmtWait(secs) {
     const n = Math.max(0, Number(secs) || 0);
-    if (n <= 0) return "due now";
-    if (n < 60) return "retry in " + n + "s";
-    if (n < 3600) return "retry in " + Math.round(n / 60) + "m";
-    return "retry in " + Math.round(n / 3600) + "h";
+    if (n <= 0) return T("due now");
+    if (n < 60) return TF("retry in {n}s", { n });
+    if (n < 3600) return TF("retry in {n}m", { n: Math.round(n / 60) });
+    return TF("retry in {n}h", { n: Math.round(n / 3600) });
   }
 
   async function loadStuck() {
     const list = $("stuckList");
-    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    listLoading(list);
     try {
       const data = await api("/api/stuck");
       renderStuck(data.destinations || []);
       reflowActive();
     } catch (e) {
-      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+      listError(list, e.message);
     }
   }
 
@@ -816,16 +863,15 @@
     const list = $("stuckList");
     list.innerHTML = "";
     if (!dests.length) {
-      list.innerHTML = "<div class='hist-empty'>Nothing stuck — every forward is up to date.</div>";
+      list.appendChild(emptyNote(T("Nothing stuck — every forward is up to date.")));
       return;
     }
     dests.forEach((d) => {
-      const row = $("stuckRowTpl").content.cloneNode(true).querySelector(".stuck-row");
-      row.querySelector(".stuck-dest").textContent = d.name || "(destination)";
+      const row = I18N_IN($("stuckRowTpl").content.cloneNode(true)).querySelector(".stuck-row");
+      row.querySelector(".stuck-dest").textContent = d.name || T("(destination)");
       row.querySelector(".stuck-meta").textContent =
-        d.instances + (d.instances === 1 ? " instance" : " instances") + " waiting  ·  " +
-        d.attempts + (d.attempts === 1 ? " attempt" : " attempts");
-      row.querySelector(".stuck-err").textContent = d.last_error ? ("last error: " + d.last_error) : "";
+        TN(d.instances, "{n} instances waiting") + "  ·  " + TN(d.attempts, "{n} attempts");
+      row.querySelector(".stuck-err").textContent = d.last_error ? TF("last error: {err}", { err: d.last_error }) : "";
       row.querySelector(".stuck-next").textContent = fmtWait(d.next_in);
       const btn = row.querySelector(".stuck-retry");
       btn.addEventListener("click", () => retryStuck(d.name, btn));
@@ -838,7 +884,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "…"; }
     try {
       const r = await post("/api/stuck/retry", dest ? { dest } : {});
-      flashNote(r.message || "Retrying…", r.ok !== false);
+      flashNote(r.message || T("Retrying…"), r.ok !== false);
       loadStuck();
       pollStatus();
     } catch (e) {
@@ -849,13 +895,13 @@
 
   async function loadPending() {
     const list = $("pendingList");
-    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    listLoading(list);
     try {
       const data = await api("/api/pending");
       renderPending(data.items || []);
       reflowActive();
     } catch (e) {
-      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+      listError(list, e.message);
     }
   }
 
@@ -863,15 +909,15 @@
     const list = $("pendingList");
     list.innerHTML = "";
     if (!items.length) {
-      list.innerHTML = "<div class='hist-empty'>Nothing waiting for review.</div>";
+      list.appendChild(emptyNote(T("Nothing waiting for review.")));
       return;
     }
     items.forEach((it) => {
-      const row = $("pendingRowTpl").content.cloneNode(true).querySelector(".pend-row");
+      const row = I18N_IN($("pendingRowTpl").content.cloneNode(true)).querySelector(".pend-row");
       const kind = row.querySelector(".pend-kind");
       kind.textContent = it.kind === "pdf" ? "PDF" : "IMAGE";
       kind.classList.add(it.kind === "pdf" ? "k-pdf" : "k-img");
-      row.querySelector(".pend-file").textContent = it.filename || "(file)";
+      row.querySelector(".pend-file").textContent = it.filename || T("(file)");
       row.querySelector(".pend-preview").href = "/api/pending/preview?id=" + encodeURIComponent(it.id);
       row.querySelector(".pf-patient").value = it.patient || "";
       row.querySelector(".pf-pid").value = it.patient_id || "";
@@ -879,7 +925,7 @@
       row.querySelector(".pf-date").value = fmtDate(it.study_date);
       row.querySelector(".pf-sdesc").value = it.study_desc || "";
       row.querySelector(".pf-serdesc").value = it.series_desc || "";
-      row.querySelector(".pend-src").textContent = it.source ? ("from " + it.source) : "";
+      row.querySelector(".pend-src").textContent = it.source ? TF("from {src}", { src: it.source }) : "";
       const appBtn = row.querySelector(".pend-approve");
       appBtn.addEventListener("click", () => approvePending(it.id, row, appBtn));
       row.querySelector(".pend-discard").addEventListener("click", () => discardPending(it.id, it));
@@ -900,7 +946,7 @@
     const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
     try {
       const r = await post("/api/pending/approve", edits);
-      flashNote(r.message || "Approved", r.ok !== false);
+      flashNote(r.message || T("Approved"), r.ok !== false);
       loadPending();
       pollStatus();
     } catch (e) {
@@ -910,11 +956,11 @@
   }
 
   async function discardPending(id, it) {
-    if (!confirm("Discard this file?\n\n" + (it.filename || "") +
-                 "\n\nIt is permanently deleted without importing.")) return;
+    if (!confirm(T("Discard this file?") + "\n\n" + (it.filename || "") +
+                 "\n\n" + T("It is permanently deleted without importing."))) return;
     try {
       const r = await post("/api/pending/discard", { id });
-      flashNote(r.message || "Discarded", r.ok !== false);
+      flashNote(r.message || T("Discarded"), r.ok !== false);
       loadPending();
       pollStatus();
     } catch (e) { flashNote(e.message, false); }
@@ -925,14 +971,14 @@
 
   async function loadOrders() {
     const list = $("ordersList");
-    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    listLoading(list);
     try {
       const data = await api("/api/ris/orders?status=" + orderStatus);
       renderOrders(data.orders || []);
       $("ordPurge").hidden = orderStatus !== "closed" || !(data.counts && data.counts.closed);
       reflowActive();
     } catch (e) {
-      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+      listError(list, e.message);
     }
   }
 
@@ -940,31 +986,33 @@
     const list = $("ordersList");
     list.innerHTML = "";
     if (!orders.length) {
-      list.innerHTML = "<div class='hist-empty'>" +
-        (orderStatus === "open" ? "No open orders. Send an ORM over HL7/MLLP or add one above."
-                                : "No closed orders yet.") + "</div>";
+      list.appendChild(emptyNote(orderStatus === "open"
+        ? T("No open orders. Send an ORM over HL7/MLLP or add one above.")
+        : T("No closed orders yet.")));
       return;
     }
     orders.forEach((o) => {
-      const row = $("orderRowTpl").content.cloneNode(true).querySelector(".order-row");
+      const row = I18N_IN($("orderRowTpl").content.cloneNode(true)).querySelector(".order-row");
       const acc = row.querySelector(".order-acc");
-      acc.textContent = o.accession ? ("ACC " + o.accession) : "no accession";
+      acc.textContent = o.accession ? TF("ACC {acc}", { acc: o.accession }) : T("no accession");
       if (!o.accession) acc.classList.add("order-noacc");
-      row.querySelector(".order-patient").textContent = o.patient || o.patient_name || "(no patient)";
+      row.querySelector(".order-patient").textContent = o.patient || o.patient_name || T("(no patient)");
       row.querySelector(".hist-meta").textContent = [
-        o.patient_id ? "ID " + o.patient_id : "",
+        o.patient_id ? TF("ID {id}", { id: o.patient_id }) : "",
         [fmtDate(o.patient_birthdate), o.patient_sex].filter(Boolean).join(" "),
         o.modality || "",
         o.station_aet ? "→ " + o.station_aet : "",
-        o.study_desc || "(no study description)",
+        o.study_desc || T("(no study description)"),
         o.scheduled_dt ? "@ " + String(o.scheduled_dt).replace("T", " ") : "",
       ].filter(Boolean).join("  ·  ");
       const sub = row.querySelector(".order-sub");
-      const bits = ["via " + (o.source || "?"), "queued " + fmtStamp(o.created)];
+      const bits = [TF("via {src}", { src: o.source || "?" }), TF("queued {ts}", { ts: fmtStamp(o.created) })];
       if (o.status === "closed") {
-        bits.push((o.close_reason === "matched" ? "✓ matched" : "cancelled") + " " + fmtStamp(o.closed));
+        bits.push(o.close_reason === "matched"
+          ? TF("✓ matched {ts}", { ts: fmtStamp(o.closed) })
+          : TF("cancelled {ts}", { ts: fmtStamp(o.closed) }));
       }
-      if (o.referring) bits.push("ref: " + o.referring);
+      if (o.referring) bits.push(TF("ref: {who}", { who: o.referring }));
       sub.textContent = bits.join("  ·  ");
       const captureBtn = row.querySelector(".order-capture");
       const cancelBtn = row.querySelector(".order-cancel");
@@ -973,10 +1021,10 @@
         cancelBtn.hidden = true;
       } else {
         captureBtn.addEventListener("click", () => captureForOrder(o, captureBtn));
-        cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+        cancelBtn.addEventListener("click", () => orderAction("cancel", o, T("Cancel this order? It moves to Closed (kept for the audit trail).")));
       }
       row.querySelector(".order-del").addEventListener("click", () =>
-        orderAction("delete", o, "Delete this order permanently? This removes it from the audit trail."));
+        orderAction("delete", o, T("Delete this order permanently? This removes it from the audit trail.")));
       list.appendChild(row);
     });
   }
@@ -1000,13 +1048,13 @@
       referring: $("ordRef").value.trim(),
     };
     if (!fields.accession && !fields.patient && !fields.patient_id) {
-      flashNote("An order needs at least an accession, patient name or ID", false);
+      flashNote(T("An order needs at least an accession, patient name or ID"), false);
       return;
     }
     const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
     try {
       const r = await post("/api/ris/orders", fields);
-      flashNote(r.message || "Order queued", r.ok !== false);
+      flashNote(r.message || T("Order queued"), r.ok !== false);
       if (r.ok !== false) {
         ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
         orderStatus = "open";
@@ -1020,11 +1068,11 @@
   }
 
   async function orderAction(action, o, confirmMsg) {
-    if (confirmMsg && !confirm(confirmMsg + "\n\n" + (o.patient || "(no patient)") +
-        (o.accession ? "  ·  ACC " + o.accession : ""))) return;
+    if (confirmMsg && !confirm(confirmMsg + "\n\n" + (o.patient || T("(no patient)")) +
+        (o.accession ? "  ·  " + TF("ACC {acc}", { acc: o.accession }) : ""))) return;
     try {
       const r = await post("/api/ris/orders/" + action, { id: o.id });
-      flashNote(r.message || "Done", r.ok !== false);
+      flashNote(r.message || T("Done"), r.ok !== false);
       loadOrders();
       pollStatus();
     } catch (e) { flashNote(e.message, false); }
@@ -1047,7 +1095,7 @@
       try {
         const res = await fetch("/api/ris/orders/capture", { method: "POST", headers: { "X-Carino": "1" }, body: fd });
         let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
-        flashNote(body.message || (res.ok ? "Study created" : "Capture failed"), res.ok && body.ok !== false);
+        flashNote(body.message || (res.ok ? T("Study created") : T("Capture failed")), res.ok && body.ok !== false);
         if (res.ok) { loadOrders(); pollStatus(); }
       } catch (e) {
         flashNote(e.message, false);
@@ -1057,10 +1105,10 @@
   }
 
   async function purgeClosedOrders() {
-    if (!confirm("Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.")) return;
+    if (!confirm(T("Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail."))) return;
     try {
       const r = await post("/api/ris/orders/purge", {});
-      flashNote(r.message || "Purged", r.ok !== false);
+      flashNote(r.message || T("Purged"), r.ok !== false);
       loadOrders();
       pollStatus();
     } catch (e) { flashNote(e.message, false); }
@@ -1141,7 +1189,15 @@
     $("stuckRefresh").addEventListener("click", loadStuck);
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
 
-    loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
+    // Language switch: i18n.js retranslates the static markup; everything this
+    // file rendered (status cards, list rows, navbar chips) is redrawn here.
+    window.addEventListener("carino:langchange", () => {
+      relabelServiceChips();
+      pollStatus();
+      if (loaders[activePanel]) loaders[activePanel]();
+    });
+
+    loadConfig().catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false));
     // Deep-link: #dlgSettings etc. opens that panel; default is the cards.
     const fromHash = (location.hash || "").replace("#", "");
     showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");

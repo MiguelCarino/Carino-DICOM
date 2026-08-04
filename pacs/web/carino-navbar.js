@@ -145,7 +145,11 @@
     set('cnClock', f.time);
     set('cnTz', f.tz);
     var h = d.getHours();
-    set('cnGreeting', h < 5 ? 'Late shift.' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.');
+    // Routed through window.t (i18n.js) so the greeting follows the fleet
+    // language. i18n.js is deferred and may not have run on the first tick,
+    // hence the guard — tick() re-runs every second, so it self-corrects.
+    var g = h < 5 ? 'Late shift.' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.';
+    set('cnGreeting', (typeof window.t === 'function') ? window.t(g) : g);
   }
 
   function wireClock() {
