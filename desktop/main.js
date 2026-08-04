@@ -21,7 +21,17 @@ const fs = require("fs");
 const os = require("os");
 // Shell-side dictionary (dialogs, tray, engine-failed page). The dashboard and
 // the bundled editor translate themselves in the renderer; nothing here can.
-const { init: initI18n, t } = require("./i18n");
+// Loaded defensively: every other layer falls back to English when its
+// dictionary is absent, and a missing translation file must never be the
+// reason the app won't start. If the module is left out of build.files the
+// shell just stays English (and this is why it is listed there).
+let initI18n = () => {};
+let t = (s, vals) => (vals ? String(s).replace(/\{(\w+)\}/g, (m, k) => (vals[k] != null ? vals[k] : m)) : s);
+try {
+  const i18n = require("./i18n");
+  initI18n = i18n.init;
+  t = i18n.t;
+} catch (e) { /* no dictionary shipped → English */ }
 
 const ROOT = path.join(__dirname, "..");
 const ASSETS = path.join(__dirname, "assets");
