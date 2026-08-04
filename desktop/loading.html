@@ -31,6 +31,30 @@
       points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
   </svg>
   <h1>Carino PACS</h1>
-  <p>Starting the DICOM engine…</p>
+  <p id="msg">Starting the DICOM engine…</p>
+
+  <!-- This splash is loaded from file:// before the server exists, so it can
+       reach neither the fleet cookie (.carino.systems) nor the dashboard's
+       localStorage. It resolves the browser language itself — the same prefix
+       matching and the same default (AUTO) as carino-lang.js. One string. -->
+  <script>
+    (function () {
+      var T = {
+        es: 'Iniciando el motor DICOM…',
+        'pt-BR': 'Iniciando o motor DICOM…',
+        ja: 'DICOMエンジンを起動しています…',
+        ru: 'Запуск движка DICOM…',
+      };
+      var l = String(navigator.language || '').toLowerCase(), c = '';
+      if (l.indexOf('es') === 0) c = 'es';
+      else if (l.indexOf('pt') === 0) c = 'pt-BR';
+      else if (l.indexOf('ja') === 0) c = 'ja';
+      else if (l.indexOf('ru') === 0) c = 'ru';
+      if (c) {
+        document.documentElement.lang = c;
+        document.getElementById('msg').textContent = T[c];
+      }
+    })();
+  </script>
 </body>
 </html>

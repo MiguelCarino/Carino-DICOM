@@ -19,6 +19,9 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+// Shell-side dictionary (dialogs, tray, engine-failed page). The dashboard and
+// the bundled editor translate themselves in the renderer; nothing here can.
+const { init: initI18n, t } = require("./i18n");
 
 const ROOT = path.join(__dirname, "..");
 const ASSETS = path.join(__dirname, "assets");
@@ -54,21 +57,20 @@ async function firstRunSetup() {
   const def = defaultDataDir();
   const r = await dialog.showMessageBox({
     type: "question",
-    title: "Carino PACS — choose data folder",
-    message: "Where should Carino PACS store its data?",
-    detail: "Received images, the outgoing queue and logs are saved here:\n\n" + def +
-            "\n\nUse this default, or choose another folder.",
-    buttons: ["Use default", "Choose another…", "Quit"],
+    title: t("Carino PACS — choose data folder"),
+    message: t("Where should Carino PACS store its data?"),
+    detail: t("Received images, the outgoing queue and logs are saved here:\n\n{dir}\n\nUse this default, or choose another folder.", { dir: def }),
+    buttons: [t("Use default"), t("Choose another…"), t("Quit")],
     defaultId: 0, cancelId: 2, noLink: true,
   });
   if (r.response === 2) return null;   // Quit
   let base = def;
   if (r.response === 1) {
     const pick = await dialog.showOpenDialog({
-      title: "Choose the Carino PACS data folder",
+      title: t("Choose the Carino PACS data folder"),
       defaultPath: os.homedir(),
       properties: ["openDirectory", "createDirectory"],
-      buttonLabel: "Use this folder",
+      buttonLabel: t("Use this folder"),
     });
     if (!pick.canceled && pick.filePaths[0]) base = pick.filePaths[0];
   }
@@ -195,8 +197,8 @@ function showError(msg) {
     "color:#f5f5f5;font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:24px}" +
     ".b{max-width:560px}h2{color:#ef4444;margin:0 0 12px}p{color:#8a8a8a;line-height:1.55}" +
     "code{color:#f5f5f5;background:#111;padding:2px 6px;border-radius:4px;font-size:.85em;word-break:break-all}</style>" +
-    "<div class=b><h2>Carino PACS couldn't start</h2><p>" + esc(msg).replace(/\n/g, "<br>") + "</p>" +
-    "<p>Details were written to:<br><code>" + esc(logPath) + "</code></p></div>";
+    "<div class=b><h2>" + esc(t("Carino PACS couldn't start")) + "</h2><p>" + esc(msg).replace(/\n/g, "<br>") + "</p>" +
+    "<p>" + esc(t("Details were written to:")) + "<br><code>" + esc(logPath) + "</code></p></div>";
   if (win && !win.isDestroyed()) {
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
     win.show();
@@ -207,21 +209,21 @@ function showWindow() { if (!win) createWindow(); win.show(); win.focus(); }
 
 function buildMenu() {
   return Menu.buildFromTemplate([
-    { label: "Open Carino PACS", click: showWindow },
+    { label: t("Open Carino PACS"), click: showWindow },
     { type: "separator" },
     {
-      label: "Start at login", type: "checkbox",
+      label: t("Start at login"), type: "checkbox",
       checked: app.getLoginItemSettings().openAtLogin,
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: "separator" },
-    { label: "Quit Carino PACS", click: quitApp },
+    { label: t("Quit Carino PACS"), click: quitApp },
   ]);
 }
 
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, "tray.png")));
-  tray.setToolTip("Carino PACS — DICOM store");
+  tray.setToolTip(t("Carino PACS — DICOM store"));
   tray.setContextMenu(buildMenu());
   tray.on("click", showWindow);
   tray.on("double-click", showWindow);
@@ -240,6 +242,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", showWindow);
 
   app.whenReady().then(async () => {
+    // app.getLocale() is only reliable once ready, and everything that draws
+    // shell text (first-run dialog, tray, error page) runs after this point.
+    initI18n(app);
     Menu.setApplicationMenu(null);
 
     let base = loadSavedDataDir();
