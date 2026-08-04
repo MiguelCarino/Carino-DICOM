@@ -8,6 +8,8 @@
   <script src="vendor/dcmjs.min.js"></script>
   <script src="carino-bridge.js" defer></script>
   <script src="carino-clock.js" defer></script>
+  <script src="carino-lang.js" defer></script>
+  <script src="i18n.js" defer></script>
   <script src="deid-profile.js"></script>
   <script src="dicom-dictionary.js"></script>
   <link href="fonts.css" rel="stylesheet">
@@ -100,6 +102,14 @@
     .header.top-header { position: relative; justify-content: space-between; }
     .header-left  { display: flex; align-items: center; gap: 18px; min-width: 0; flex-shrink: 0; }
     .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    /* Right-cluster slot order, fleet convention, read right-to-left:
+       GitHub + LinkedIn last, language beside them, then status, then
+       this app's own controls furthest from the edge. Set with `order`
+       because carino-lang.js injects itself asynchronously. */
+    .header-right > * { order: 1; }
+    .header-right > .status-toggle { order: 2; }
+    .header-right > #cnLangBtn { order: 3; }
+    .header-right > .social-row { order: 4; }
     .cn-brand { display: flex; align-items: center; flex-shrink: 0; }
     .brand-name {
       font-family: 'Red Hat Display', var(--font); font-weight: 900; font-size: 1.5rem; line-height: 1;
@@ -1322,11 +1332,11 @@
       </div>
 
       <nav class="tab-nav">
-        <button class="tab-btn active" id="overviewTabBtn">Overview</button>
-        <button class="tab-btn" id="editorTabBtn">Edit</button>
-        <button class="tab-btn" id="compareTabBtn">Compare</button>
-        <button class="tab-btn" id="extractorTabBtn">Extract</button>
-        <button class="tab-btn" id="createTabBtn">Create</button>
+        <button class="tab-btn active" id="overviewTabBtn" data-i18n>Overview</button>
+        <button class="tab-btn" id="editorTabBtn" data-i18n>Edit</button>
+        <button class="tab-btn" id="compareTabBtn" data-i18n>Compare</button>
+        <button class="tab-btn" id="extractorTabBtn" data-i18n>Extract</button>
+        <button class="tab-btn" id="createTabBtn" data-i18n>Create</button>
       </nav>
 
       <div class="header-right">
@@ -1339,22 +1349,22 @@
           </a>
         </div>
         <button class="status-toggle" id="diagToggle" title="File info" aria-label="File info" aria-haspopup="true" aria-expanded="false" aria-controls="diagBox">
-          <span>Info</span><div class="pulse-dot"></div>
+          <span data-i18n>Info</span><div class="pulse-dot"></div>
         </button>
       </div>
 
       <!-- Diagnostics dropdown -->
       <div class="diag-dropdown" id="diagBox">
-        <div class="diag-section">File</div>
-        <div class="diag-row"><span class="diag-lbl">Loaded</span><span class="diag-val" id="diagCount">0</span></div>
-        <div class="diag-row"><span class="diag-lbl">Current</span><span class="diag-val" id="diagName">—</span></div>
-        <div class="diag-section">Image</div>
-        <div class="diag-row"><span class="diag-lbl">Modality</span><span class="diag-val" id="diagModality">—</span></div>
-        <div class="diag-row"><span class="diag-lbl">Dimensions</span><span class="diag-val" id="diagDims">—</span></div>
-        <div class="diag-row"><span class="diag-lbl">Frames</span><span class="diag-val" id="diagFrames">—</span></div>
-        <div class="diag-row"><span class="diag-lbl">Transfer syntax</span><span class="diag-val" id="diagTs">—</span></div>
-        <div class="diag-section">Session</div>
-        <div class="diag-row"><span class="diag-lbl">Local time</span><span class="diag-val" id="diagClock">--:--:--</span></div>
+        <div class="diag-section" data-i18n>File</div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Loaded</span><span class="diag-val" id="diagCount">0</span></div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Current</span><span class="diag-val" id="diagName">—</span></div>
+        <div class="diag-section" data-i18n>Image</div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Modality</span><span class="diag-val" id="diagModality">—</span></div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Dimensions</span><span class="diag-val" id="diagDims">—</span></div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Frames</span><span class="diag-val" id="diagFrames">—</span></div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Transfer syntax</span><span class="diag-val" id="diagTs">—</span></div>
+        <div class="diag-section" data-i18n>Session</div>
+        <div class="diag-row"><span class="diag-lbl" data-i18n>Local time</span><span class="diag-val" id="diagClock">--:--:--</span></div>
       </div>
     </header>
 
@@ -1364,8 +1374,8 @@
       <div class="ov-empty" id="ovEmpty">
         <div class="ov-drop" id="ovDrop" tabindex="0" role="button" aria-label="Open a DICOM file">
           <div class="ov-drop-icon">🩻</div>
-          <h2>Open a DICOM file</h2>
-          <p>Drag &amp; drop a <code>.dcm</code> here, or click to browse.<br>You can load several studies at once.</p>
+          <h2 data-i18n>Open a DICOM file</h2>
+          <p><span data-i18n>Drag &amp; drop a</span> <code>.dcm</code> <span data-i18n>here, or click to browse.</span><br><span data-i18n>You can load several studies at once.</span></p>
         </div>
       </div>
 
@@ -1379,45 +1389,45 @@
           </div>
           <button class="ov-nav-btn hidden" id="ovPrevStudy" title="Previous study">◀</button>
           <button class="ov-nav-btn hidden" id="ovNextStudy" title="Next study">▶</button>
-          <button class="ov-print-btn" id="ovPrintBtn" title="Print / save this overview as a PDF">🖨 Print</button>
-          <button class="ov-open-btn" id="ovOpenBtn" title="Open another DICOM file">＋ Open</button>
+          <button class="ov-print-btn" id="ovPrintBtn" title="Print / save this overview as a PDF" data-i18n>🖨 Print</button>
+          <button class="ov-open-btn" id="ovOpenBtn" title="Open another DICOM file" data-i18n>＋ Open</button>
         </div>
 
         <div class="ov-grid">
           <!-- Image viewer -->
           <section class="ov-card ov-viewer-card">
-            <div class="ov-card-h">Image</div>
+            <div class="ov-card-h" data-i18n>Image</div>
             <div class="ov-viewer" id="ovViewer">
               <canvas id="ovCanvas"></canvas>
-              <div class="ov-noimg hidden" id="ovNoImg">No renderable pixel data in this file.</div>
+              <div class="ov-noimg hidden" id="ovNoImg" data-i18n>No renderable pixel data in this file.</div>
             </div>
             <div class="ov-frame hidden" id="ovFrameNav">
-              <span>Frame</span>
+              <span data-i18n>Frame</span>
               <input type="range" id="ovFrame" min="0" max="0" value="0">
               <span class="ov-frame-label" id="ovFrameLabel">1/1</span>
             </div>
             <div class="ov-tools" id="ovTools">
-              <button class="ov-tool" id="ovInvert" title="Invert grayscale">Invert</button>
+              <button class="ov-tool" id="ovInvert" title="Invert grayscale" data-i18n>Invert</button>
               <select class="ov-sel" id="ovColormap" title="Colormap">
-                <option value="gray">Gray</option>
-                <option value="hot">Hot</option>
-                <option value="jet">Jet</option>
-                <option value="bone">Bone</option>
+                <option value="gray" data-i18n>Gray</option>
+                <option value="hot" data-i18n>Hot</option>
+                <option value="jet" data-i18n>Jet</option>
+                <option value="bone" data-i18n>Bone</option>
               </select>
               <button class="ov-tool" id="ovRotate" title="Rotate 90°">⟳</button>
               <button class="ov-tool" id="ovFlipH" title="Flip horizontal">⇋</button>
               <button class="ov-tool" id="ovFlipV" title="Flip vertical">⇅</button>
-              <button class="ov-tool" id="ovResetView" title="Reset zoom / pan / rotation">Reset view</button>
+              <button class="ov-tool" id="ovResetView" title="Reset zoom / pan / rotation" data-i18n>Reset view</button>
             </div>
             <div class="ov-wl hidden" id="ovWL">
               <select id="ovPreset" class="ov-sel">
-                <option value="">— CT preset —</option>
-                <option value="40,400">Soft Tissue</option>
-                <option value="40,80">Brain</option>
-                <option value="400,1800">Bone</option>
-                <option value="-600,1500">Lung</option>
-                <option value="50,350">Liver</option>
-                <option value="60,360">Abdomen</option>
+                <option value="" data-i18n>— CT preset —</option>
+                <option value="40,400" data-i18n>Soft Tissue</option>
+                <option value="40,80" data-i18n>Brain</option>
+                <option value="400,1800" data-i18n>Bone</option>
+                <option value="-600,1500" data-i18n>Lung</option>
+                <option value="50,350" data-i18n>Liver</option>
+                <option value="60,360" data-i18n>Abdomen</option>
               </select>
               <div class="ov-wl-row">
                 <label>WC <b id="ovWCval">—</b></label>
@@ -1428,17 +1438,17 @@
                 <input type="range" id="ovWW" min="1" max="8192" step="1" value="400">
               </div>
             </div>
-            <div class="ov-hint">Scroll to zoom · drag to pan</div>
+            <div class="ov-hint" data-i18n>Scroll to zoom · drag to pan</div>
           </section>
 
           <!-- Info column -->
           <div class="ov-info">
             <section class="ov-card">
-              <div class="ov-card-h">Featured <span class="ov-card-sub">clinical</span></div>
+              <div class="ov-card-h"><span data-i18n>Featured</span> <span class="ov-card-sub" data-i18n>clinical</span></div>
               <div class="ov-kv" id="ovCore"></div>
             </section>
             <section class="ov-card">
-              <div class="ov-card-h">Technical</div>
+              <div class="ov-card-h" data-i18n>Technical</div>
               <div class="ov-kv" id="ovTech"></div>
             </section>
           </div>
@@ -1446,13 +1456,13 @@
 
         <!-- RIS / workflow -->
         <section class="ov-card">
-          <div class="ov-card-h">RIS / Workflow <span class="ov-card-sub">order &amp; scheduling</span></div>
+          <div class="ov-card-h"><span data-i18n>RIS / Workflow</span> <span class="ov-card-sub" data-i18n>order &amp; scheduling</span></div>
           <div class="ov-kv ov-kv-2col" id="ovRis"></div>
         </section>
 
         <!-- Validation / conformance -->
         <section class="ov-card" id="ovValCard">
-          <div class="ov-card-h">Validation <span class="ov-card-sub">conformance &amp; PHI</span></div>
+          <div class="ov-card-h"><span data-i18n>Validation</span> <span class="ov-card-sub" data-i18n>conformance &amp; PHI</span></div>
           <div class="val-summary" id="ovValSummary" style="display:none"></div>
           <div id="ovValIssues"></div>
         </section>
@@ -1461,7 +1471,7 @@
         <section class="ov-card ov-mfr" id="ovMfrCard">
           <div class="ov-mfr-imgwrap"><img class="ov-mfr-img" id="ovMfrImg" alt="Equipment model"></div>
           <div class="ov-mfr-body">
-            <div class="ov-card-h">Equipment</div>
+            <div class="ov-card-h" data-i18n>Equipment</div>
             <div class="ov-mfr-brand" id="ovMfrBrand">—</div>
             <div class="ov-mfr-model" id="ovMfrModel"></div>
             <div class="ov-kv ov-mfr-kv" id="ovMfrExtra"></div>
@@ -1470,10 +1480,10 @@
 
         <!-- Action launcher -->
         <section class="ov-actions">
-          <button class="ov-act" data-tab="editor"><b>✎ Edit tags</b><span>Browse &amp; edit every DICOM tag</span></button>
-          <button class="ov-act" data-tab="compare"><b>⇄ Compare</b><span>Diff two files side by side</span></button>
-          <button class="ov-act" data-tab="extractor"><b>⤓ Extract image</b><span>Export frames as PNG / JPEG</span></button>
-          <button class="ov-act" data-tab="create"><b>＋ Create DICOM</b><span>Build a new file from scratch</span></button>
+          <button class="ov-act" data-tab="editor"><b data-i18n>✎ Edit tags</b><span data-i18n>Browse &amp; edit every DICOM tag</span></button>
+          <button class="ov-act" data-tab="compare"><b data-i18n>⇄ Compare</b><span data-i18n>Diff two files side by side</span></button>
+          <button class="ov-act" data-tab="extractor"><b data-i18n>⤓ Extract image</b><span data-i18n>Export frames as PNG / JPEG</span></button>
+          <button class="ov-act" data-tab="create"><b data-i18n>＋ Create DICOM</b><span data-i18n>Build a new file from scratch</span></button>
         </section>
       </div>
     </div>
@@ -1485,10 +1495,10 @@
           <div class="pill" id="fileCountPill">0 files</div>
           
           <div class="uid-pattern" id="uidPattern" style="display:none">
-            <span class="uid-pattern-label">UID Pattern:</span>
+            <span class="uid-pattern-label" data-i18n>UID Pattern:</span>
             <input type="text" id="uidPrefixInput" placeholder="prefix..." />
             <span class="uid-pattern-value" id="uidPatternDisplay">—</span>
-            <button class="btn" id="applyPrefixBtn" style="padding:4px 10px;font-size:11px;">Apply</button>
+            <button class="btn" id="applyPrefixBtn" style="padding:4px 10px;font-size:11px;" data-i18n>Apply</button>
           </div>
         </div>
 
@@ -1510,19 +1520,19 @@
             <option value="LT">LT – Long Text</option>
           </select>
           <input id="addTagVal" placeholder="Value" style="flex:1;min-width:120px" />
-          <button class="btn primary" id="addTagConfirm" style="padding:6px 14px">Add</button>
+          <button class="btn primary" id="addTagConfirm" style="padding:6px 14px" data-i18n>Add</button>
           <button class="btn" id="addTagCancel" style="padding:6px 12px">✕</button>
         </div>
         <div class="filters-row">
-          <button class="filter-btn active" data-cat="all"><span class="dot"></span>All</button>
-          <button class="filter-btn" data-cat="patient"><span class="dot"></span>Patient</button>
-          <button class="filter-btn" data-cat="study"><span class="dot"></span>Study</button>
-          <button class="filter-btn" data-cat="series"><span class="dot"></span>Series</button>
-          <button class="filter-btn" data-cat="image"><span class="dot"></span>Image</button>
-          <button class="filter-btn" data-cat="equipment"><span class="dot"></span>Equipment</button>
-          <button class="filter-btn" data-cat="uid"><span class="dot"></span>UIDs</button>
-          <button class="filter-btn" data-cat="private"><span class="dot"></span>Private</button>
-          <button class="filter-btn" data-cat="other"><span class="dot"></span>Other</button>
+          <button class="filter-btn active" data-cat="all"><span class="dot"></span><span data-i18n>All</span></button>
+          <button class="filter-btn" data-cat="patient"><span class="dot"></span><span data-i18n>Patient</span></button>
+          <button class="filter-btn" data-cat="study"><span class="dot"></span><span data-i18n>Study</span></button>
+          <button class="filter-btn" data-cat="series"><span class="dot"></span><span data-i18n>Series</span></button>
+          <button class="filter-btn" data-cat="image"><span class="dot"></span><span data-i18n>Image</span></button>
+          <button class="filter-btn" data-cat="equipment"><span class="dot"></span><span data-i18n>Equipment</span></button>
+          <button class="filter-btn" data-cat="uid"><span class="dot"></span><span data-i18n>UIDs</span></button>
+          <button class="filter-btn" data-cat="private"><span class="dot"></span><span data-i18n>Private</span></button>
+          <button class="filter-btn" data-cat="other"><span class="dot"></span><span data-i18n>Other</span></button>
           
           <div style="flex:1"></div>
           
@@ -1539,9 +1549,9 @@
             <thead id="tagHead">
               <tr>
                 <th style="width:140px">Tag</th>
-                <th>Description</th>
+                <th data-i18n>Description</th>
                 <th style="width:50px">VR</th>
-                <th style="width:40%">Value</th>
+                <th style="width:40%" data-i18n>Value</th>
               </tr>
             </thead>
             <tbody id="tagBody"></tbody>
@@ -1549,16 +1559,16 @@
         </div>
 
         <div class="actions-row">
-          <button id="anonymizeBtn" class="btn">Anonymize All</button>
-          <button id="randomizeBtn" class="btn">Randomize All</button>
+          <button id="anonymizeBtn" class="btn" data-i18n>Anonymize All</button>
+          <button id="randomizeBtn" class="btn" data-i18n>Randomize All</button>
           <button id="undoBtn" class="btn" disabled title="Undo (Ctrl+Z)">↩</button>
           <button id="redoBtn" class="btn" disabled title="Redo (Ctrl+Y)">↪</button>
-          <button id="addTagBtn" class="btn" title="Add a new tag to this file">+ Tag</button>
+          <button id="addTagBtn" class="btn" title="Add a new tag to this file" data-i18n>+ Tag</button>
           <button id="exportJsonBtn" class="btn" title="Export tags as JSON">JSON</button>
           <button id="exportCsvBtn" class="btn" title="Export tags as CSV">CSV</button>
-          <button id="printTagsBtn" class="btn" title="Print / save all tags as a PDF">🖨 Print</button>
+          <button id="printTagsBtn" class="btn" title="Print / save all tags as a PDF" data-i18n>🖨 Print</button>
           <div class="actions-spacer"></div>
-          <button id="downloadAllBtn" class="btn primary hidden">⬇ Download All</button>
+          <button id="downloadAllBtn" class="btn primary hidden" data-i18n>⬇ Download All</button>
           <div id="batchButtons" class="hidden" style="display:flex;align-items:center;gap:6px"></div>
         </div>
       </div>
@@ -1566,17 +1576,17 @@
       <div class="sidebar">
       <input id="fileInput" type="file" multiple accept=".dcm,.dicom" hidden />
         <div class="card">
-          <div class="card-title">Load Files</div>
+          <div class="card-title" data-i18n>Load Files</div>
           <div class="drop-zone" id="dropZone">
-            <h4>Drop DICOM files</h4>
-            <p>or click to browse</p>
+            <h4 data-i18n>Drop DICOM files</h4>
+            <p data-i18n>or click to browse</p>
           </div>
         </div>
 
         <div class="card" id="previewCard" style="display:none">
           <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
-            <span>Preview</span>
-            <button class="sr-toggle-btn hidden" id="srToggleBtn">View Report</button>
+            <span data-i18n>Preview</span>
+            <button class="sr-toggle-btn hidden" id="srToggleBtn" data-i18n>View Report</button>
           </div>
           <div class="preview-box visible" id="previewBox" style="aspect-ratio:unset;min-height:200px;max-height:280px">
             <canvas id="preview" style="width:100%;height:100%;object-fit:contain"></canvas>
@@ -1590,24 +1600,24 @@
           </div>
           <div class="frame-nav hidden" id="frameNav">
             <div class="frame-nav-row">
-              <span>Frame</span>
+              <span data-i18n>Frame</span>
               <input type="range" id="frameSlider" min="0" max="0" value="0" />
               <span class="frame-nav-label" id="frameLabel">1/1</span>
             </div>
           </div>
           <div class="wl-section hidden" id="wlSection">
-            <div class="card-title" style="margin-bottom:8px">Window / Level</div>
+            <div class="card-title" style="margin-bottom:8px" data-i18n>Window / Level</div>
             <div style="display:flex;gap:4px;margin-bottom:8px">
               <select id="wlPreset" class="batch-select" style="flex:1;font-size:11px">
-                <option value="">— CT Preset —</option>
-                <option value="40,400">Soft Tissue</option>
-                <option value="40,80">Brain</option>
-                <option value="400,1800">Bone</option>
-                <option value="-600,1500">Lung</option>
-                <option value="50,350">Liver</option>
-                <option value="60,360">Abdomen</option>
+                <option value="" data-i18n>— CT Preset —</option>
+                <option value="40,400" data-i18n>Soft Tissue</option>
+                <option value="40,80" data-i18n>Brain</option>
+                <option value="400,1800" data-i18n>Bone</option>
+                <option value="-600,1500" data-i18n>Lung</option>
+                <option value="50,350" data-i18n>Liver</option>
+                <option value="60,360" data-i18n>Abdomen</option>
               </select>
-              <button class="btn" id="wlResetBtn" style="padding:5px 10px;font-size:11px">Reset</button>
+              <button class="btn" id="wlResetBtn" style="padding:5px 10px;font-size:11px" data-i18n>Reset</button>
             </div>
             <div class="wl-group">
               <div class="wl-label">WC <span class="wl-value" id="wcDisplay">—</span></div>
@@ -1628,7 +1638,7 @@
 
 
         <div class="card" id="logCard" style="display:none">
-          <div class="card-title">Log</div>
+          <div class="card-title" data-i18n>Log</div>
           <pre class="log-area" id="logArea"></pre>
         </div>
       </div>
@@ -1639,17 +1649,17 @@
     <div class="create-left">
       <div class="top-bar">
         <div class="pill" id="createImgCount">0 images</div>
-        <button class="btn" id="createAddBtn">+ Add Images</button>
+        <button class="btn" id="createAddBtn" data-i18n>+ Add Images</button>
         <input id="createFileInput" type="file" multiple accept="image/*" hidden />
         <div style="flex:1"></div>
-        <button class="btn" id="clearCreateBtn">Clear All</button>
+        <button class="btn" id="clearCreateBtn" data-i18n>Clear All</button>
       </div>
       <div class="img-grid-wrap" id="createImgWrap">
         <div id="createImgGrid">
           <div class="img-empty">
             <div class="img-empty-icon">🖼</div>
-            <span>Drop images here or click "+ Add Images"</span>
-            <span style="font-size:11px">PNG · JPEG · BMP · WebP supported</span>
+            <span data-i18n>Drop images here or click "+ Add Images"</span>
+            <span style="font-size:11px" data-i18n>PNG · JPEG · BMP · WebP supported</span>
           </div>
         </div>
       </div>
@@ -1657,55 +1667,55 @@
 
     <div class="create-sidebar">
       <div class="card">
-        <div class="card-title">Load Images</div>
+        <div class="card-title" data-i18n>Load Images</div>
         <div class="drop-zone" id="createSideDropZone">
-          <h4>Drop images here</h4>
+          <h4 data-i18n>Drop images here</h4>
           <p>PNG · JPEG · BMP · WebP</p>
         </div>
-        <button id="createSideAddBtn" class="btn" style="width:100%;margin-top:8px">+ Browse Files</button>
+        <button id="createSideAddBtn" class="btn" style="width:100%;margin-top:8px" data-i18n>+ Browse Files</button>
       </div>
       <div class="card">
-        <div class="card-title">Quick Fill</div>
+        <div class="card-title" data-i18n>Quick Fill</div>
         <div style="display:flex;gap:8px">
-          <button class="btn" id="cdAnonymizeBtn" style="flex:1">Anonymize</button>
-          <button class="btn" id="cdRandomizeBtn" style="flex:1">Randomize</button>
+          <button class="btn" id="cdAnonymizeBtn" style="flex:1" data-i18n>Anonymize</button>
+          <button class="btn" id="cdRandomizeBtn" style="flex:1" data-i18n>Randomize</button>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Patient</div>
+        <div class="card-title" data-i18n>Patient</div>
         <div class="meta-form">
           <div class="form-group">
-            <label class="form-label">Patient Name</label>
+            <label class="form-label" data-i18n>Patient Name</label>
             <input class="form-input" id="cdPatientName" placeholder="LAST^FIRST" />
           </div>
           <div class="form-group">
-            <label class="form-label">Patient ID</label>
+            <label class="form-label" data-i18n>Patient ID</label>
             <input class="form-input" id="cdPatientID" />
           </div>
           <div class="form-group">
-            <label class="form-label">Date of Birth</label>
+            <label class="form-label" data-i18n>Date of Birth</label>
             <input class="form-input" id="cdPatientDOB" type="date" />
           </div>
           <div class="form-group">
-            <label class="form-label">Sex</label>
+            <label class="form-label" data-i18n>Sex</label>
             <select class="form-input form-select" id="cdPatientSex">
-              <option value="">Unknown</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
-              <option value="O">Other</option>
+              <option value="" data-i18n>Unknown</option>
+              <option value="M" data-i18n>Male</option>
+              <option value="F" data-i18n>Female</option>
+              <option value="O" data-i18n>Other</option>
             </select>
           </div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Study</div>
+        <div class="card-title" data-i18n>Study</div>
         <div class="meta-form">
           <div class="form-group">
-            <label class="form-label">Study Date</label>
+            <label class="form-label" data-i18n>Study Date</label>
             <input class="form-input" id="cdStudyDate" type="date" />
           </div>
           <div class="form-group">
-            <label class="form-label">Modality</label>
+            <label class="form-label" data-i18n>Modality</label>
             <select class="form-input form-select" id="cdModality">
               <option value="OT">OT – Other</option>
               <option value="SC">SC – Secondary Capture</option>
@@ -1721,17 +1731,17 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Study Description</label>
+            <label class="form-label" data-i18n>Study Description</label>
             <input class="form-input" id="cdStudyDesc" placeholder="e.g. Chest X-Ray" />
           </div>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Series</div>
+        <div class="card-title" data-i18n>Series</div>
         <div class="series-list" id="seriesList"></div>
-        <button class="series-add-btn" id="addSeriesBtn">+ Add Series</button>
+        <button class="series-add-btn" id="addSeriesBtn" data-i18n>+ Add Series</button>
       </div>
-      <button class="btn primary" id="createDicomBtn">⬇ Create DICOM</button>
+      <button class="btn primary" id="createDicomBtn" data-i18n>⬇ Create DICOM</button>
     </div>
   </div>
   <!-- Extractor Tab -->
@@ -1739,17 +1749,17 @@
     <div class="extractor-left">
       <div class="top-bar">
         <div class="pill" id="extractorCount">0 files</div>
-        <button class="btn" id="extractorAddBtn">+ Load DCM Files</button>
+        <button class="btn" id="extractorAddBtn" data-i18n>+ Load DCM Files</button>
         <input id="extractorFileInput" type="file" multiple accept=".dcm,.dicom" hidden />
         <div style="flex:1"></div>
-        <button class="btn" id="clearExtractorBtn">Clear All</button>
+        <button class="btn" id="clearExtractorBtn" data-i18n>Clear All</button>
       </div>
       <div class="extractor-grid-wrap" id="extractorGridWrap">
         <div id="extractorGrid">
           <div class="img-empty">
             <div class="img-empty-icon">🩻</div>
-            <span>Drop .dcm files here or click to browse</span>
-            <span style="font-size:11px">Renders DICOM pixel data as PNG images</span>
+            <span data-i18n>Drop .dcm files here or click to browse</span>
+            <span style="font-size:11px" data-i18n>Renders DICOM pixel data as PNG images</span>
           </div>
         </div>
       </div>
@@ -1757,20 +1767,20 @@
 
     <div class="extractor-sidebar">
       <div class="card">
-        <div class="card-title">Load Files</div>
+        <div class="card-title" data-i18n>Load Files</div>
         <div class="drop-zone" id="extractorDropZone">
-          <h4>Drop .dcm files</h4>
-          <p>or click to browse</p>
+          <h4 data-i18n>Drop .dcm files</h4>
+          <p data-i18n>or click to browse</p>
         </div>
-        <button class="btn" id="extractorSideAddBtn" style="width:100%;margin-top:8px">+ Browse Files</button>
+        <button class="btn" id="extractorSideAddBtn" style="width:100%;margin-top:8px" data-i18n>+ Browse Files</button>
       </div>
       <div class="card">
-        <div class="card-title">Export</div>
-        <button class="btn primary" id="extractAllBtn" style="width:100%;margin-bottom:6px">&#8595; Extract All as PNG</button>
-        <button class="btn" id="extractSelectedBtn" style="width:100%">&#8595; Extract First Frames Only</button>
+        <div class="card-title" data-i18n>Export</div>
+        <button class="btn primary" id="extractAllBtn" style="width:100%;margin-bottom:6px" data-i18n>&#8595; Extract All as PNG</button>
+        <button class="btn" id="extractSelectedBtn" style="width:100%" data-i18n>&#8595; Extract First Frames Only</button>
       </div>
       <div class="card" id="extractorLogCard" style="display:none">
-        <div class="card-title">Log</div>
+        <div class="card-title" data-i18n>Log</div>
         <pre class="log-area" id="extractorLogArea"></pre>
       </div>
     </div>
@@ -1782,25 +1792,25 @@
       <div class="top-bar">
         <div class="pill" id="cmpStatusPill">Load two files to compare</div>
         <label style="font:500 11px var(--mono);color:var(--text-dim);cursor:pointer;display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="cmpDiffOnly" style="accent-color:var(--accent)" /> Diffs only
+          <input type="checkbox" id="cmpDiffOnly" style="accent-color:var(--accent)" /> <span data-i18n>Diffs only</span>
         </label>
         <div class="search-box">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input type="text" id="cmpSearch" placeholder="Search tags…" />
         </div>
         <div style="flex:1"></div>
-        <button class="btn" id="cmpClearAll">Clear All</button>
+        <button class="btn" id="cmpClearAll" data-i18n>Clear All</button>
       </div>
       <!-- Empty state: two drop zones -->
       <div class="cmp-empty-state" id="cmpEmptyState">
         <div class="cmp-drop-pane" id="cmpDropPaneA">
           <div class="cmp-pane-label">A</div>
-          <div class="cmp-pane-sub">Drop first .dcm file<br>or click to browse</div>
+          <div class="cmp-pane-sub"><span data-i18n>Drop first .dcm file</span><br><span data-i18n>or click to browse</span></div>
           <input type="file" id="cmpFileInputA" accept=".dcm,.dicom" hidden />
         </div>
         <div class="cmp-drop-pane" id="cmpDropPaneB">
           <div class="cmp-pane-label">B</div>
-          <div class="cmp-pane-sub">Drop second .dcm file<br>or click to browse</div>
+          <div class="cmp-pane-sub"><span data-i18n>Drop second .dcm file</span><br><span data-i18n>or click to browse</span></div>
           <input type="file" id="cmpFileInputB" accept=".dcm,.dicom" hidden />
         </div>
       </div>
@@ -1810,10 +1820,10 @@
           <thead>
             <tr>
               <th style="width:130px">Tag</th>
-              <th>Description</th>
+              <th data-i18n>Description</th>
               <th style="width:44px">VR</th>
-              <th>File A</th>
-              <th>File B</th>
+              <th data-i18n>File A</th>
+              <th data-i18n>File B</th>
               <th style="width:54px"></th>
             </tr>
           </thead>
@@ -1825,46 +1835,46 @@
     <div class="compare-tab-sidebar">
       <!-- File A card -->
       <div class="card">
-        <div class="card-title">File A</div>
-        <div class="compare-drop" id="cmpSideDropA" style="cursor:pointer">
+        <div class="card-title" data-i18n>File A</div>
+        <div class="compare-drop" id="cmpSideDropA" style="cursor:pointer" data-i18n>
           Drop .dcm or click
         </div>
         <div class="cmp-preview-mini" id="cmpPreviewA">
           <canvas id="cmpCanvasA"></canvas>
         </div>
         <div class="cmp-file-badge hidden" id="cmpBadgeA"></div>
-        <button class="btn hidden" id="cmpClearA" style="width:100%;margin-top:6px;font-size:11px">Clear A</button>
+        <button class="btn hidden" id="cmpClearA" style="width:100%;margin-top:6px;font-size:11px" data-i18n>Clear A</button>
       </div>
       <!-- File B card -->
       <div class="card">
-        <div class="card-title">File B</div>
-        <div class="compare-drop" id="cmpSideDropB" style="cursor:pointer">
+        <div class="card-title" data-i18n>File B</div>
+        <div class="compare-drop" id="cmpSideDropB" style="cursor:pointer" data-i18n>
           Drop .dcm or click
         </div>
         <div class="cmp-preview-mini" id="cmpPreviewB">
           <canvas id="cmpCanvasB"></canvas>
         </div>
         <div class="cmp-file-badge hidden" id="cmpBadgeB"></div>
-        <button class="btn hidden" id="cmpClearB" style="width:100%;margin-top:6px;font-size:11px">Clear B</button>
+        <button class="btn hidden" id="cmpClearB" style="width:100%;margin-top:6px;font-size:11px" data-i18n>Clear B</button>
       </div>
       <!-- Stats card -->
       <div class="card hidden" id="cmpStatsCard">
-        <div class="card-title">Summary</div>
+        <div class="card-title" data-i18n>Summary</div>
         <div class="cmp-stat-row" id="cmpStatRow"></div>
         <div class="compare-legend" style="margin-top:10px">
-          <span><span class="legend-dot match"></span>Match</span>
-          <span><span class="legend-dot diff"></span>Diff</span>
-          <span><span class="legend-dot only-a"></span>Only A</span>
-          <span><span class="legend-dot only-b"></span>Only B</span>
+          <span><span class="legend-dot match"></span><span data-i18n>Match</span></span>
+          <span><span class="legend-dot diff"></span><span data-i18n>Diff</span></span>
+          <span><span class="legend-dot only-a"></span><span data-i18n>Only A</span></span>
+          <span><span class="legend-dot only-b"></span><span data-i18n>Only B</span></span>
         </div>
       </div>
       <!-- Export card -->
       <div class="card hidden" id="cmpExportCard">
-        <div class="card-title">Apply &amp; Export</div>
-        <button class="btn" id="cmpApplyAtoB" style="width:100%;margin-bottom:6px">Apply all A→B diffs</button>
-        <button class="btn" id="cmpApplyBtoA" style="width:100%;margin-bottom:10px">Apply all B→A diffs</button>
-        <button class="btn primary" id="cmpDownloadA" style="width:100%;margin-bottom:6px">⬇ Download A</button>
-        <button class="btn primary" id="cmpDownloadB" style="width:100%">⬇ Download B</button>
+        <div class="card-title" data-i18n>Apply &amp; Export</div>
+        <button class="btn" id="cmpApplyAtoB" style="width:100%;margin-bottom:6px" data-i18n>Apply all A→B diffs</button>
+        <button class="btn" id="cmpApplyBtoA" style="width:100%;margin-bottom:10px" data-i18n>Apply all B→A diffs</button>
+        <button class="btn primary" id="cmpDownloadA" style="width:100%;margin-bottom:6px" data-i18n>⬇ Download A</button>
+        <button class="btn primary" id="cmpDownloadB" style="width:100%" data-i18n>⬇ Download B</button>
       </div>
     </div>
   </div>
@@ -1886,15 +1896,15 @@
     <div class="confirm-box">
       <div class="confirm-msg" id="confirmMsg"></div>
       <div class="confirm-actions">
-        <button class="btn" id="confirmCancel">Cancel</button>
-        <button class="btn danger" id="confirmOk">Confirm</button>
+        <button class="btn" id="confirmCancel" data-i18n>Cancel</button>
+        <button class="btn danger" id="confirmOk" data-i18n>Confirm</button>
       </div>
     </div>
   </div>
 
   <div class="fullscreen-overlay" id="fullscreenOverlay">
     <canvas id="fullscreenCanvas"></canvas>
-    <div class="fullscreen-hint">Click anywhere to close</div>
+    <div class="fullscreen-hint" data-i18n>Click anywhere to close</div>
   </div>
 
 <script>
@@ -2984,7 +2994,7 @@ function detectUIDPattern() {
 }
 
 function applyPrefixToAll(newP) {
-  if (!/^[0-9]+(\.[0-9]+)*$/.test(newP)) { alert('Invalid UID prefix'); return; }
+  if (!/^[0-9]+(\.[0-9]+)*$/.test(newP)) { alert((window.t||String)('Invalid UID prefix')); return; }
   const oldP = sharedUIDPrefix;
   for (const f of files) {
     walkEls(f.dict, (t, el) => {
@@ -3093,7 +3103,7 @@ window.carinoBrandedPrint = carinoBrandedPrint;
 
 // Print EVERY tag (meta + dataset) of the current file, with descriptions + values.
 function printAllTags() {
-  if (!dict) { if (window.toast) toast('Open a DICOM file first'); return; }
+  if (!dict) { if (window.toast) toast((window.t||String)('Open a DICOM file first')); return; }
   const isHex = t => t.startsWith('x') || /^[0-9a-f]{8}$/i.test(t);
   const metaEntries = Object.entries(meta || {}).filter(([t]) => isHex(t));
   const entries = [...metaEntries, ...Object.entries(dict)].filter(([t]) => isHex(t));
@@ -3195,7 +3205,7 @@ function rebuildBatch() {
 
   const lbl = document.createElement('span');
   lbl.style.cssText = 'font-size:11px;color:var(--text-muted);white-space:nowrap';
-  lbl.textContent = 'Range:';
+  lbl.textContent = (window.t||String)('Range:');
 
   const sel = document.createElement('select');
   sel.className = 'batch-select';
@@ -3209,7 +3219,7 @@ function rebuildBatch() {
 
   const btn = document.createElement('button');
   btn.className = 'btn';
-  btn.textContent = '⬇ Range';
+  btn.textContent = (window.t||String)('⬇ Range');
   btn.onclick = () => {
     const [s, e] = sel.value.split(',').map(Number);
     downloadRange(s, e);
@@ -4262,7 +4272,7 @@ async function renderExtractorGrid() {
   if (extractorFiles.length === 0) {
     extractorGrid.className = '';
     extractorGridWrap.classList.remove('has-files');
-    extractorGrid.innerHTML = `<div class="img-empty"><div class="img-empty-icon">🩻</div><span>Drop .dcm files here or click to browse</span><span style="font-size:11px">Renders DICOM pixel data as PNG images</span></div>`;
+    extractorGrid.innerHTML = `<div class="img-empty"><div class="img-empty-icon">🩻</div><span>${(window.t||String)('Drop .dcm files here or click to browse')}</span><span style="font-size:11px">${(window.t||String)('Renders DICOM pixel data as PNG images')}</span></div>`;
     return;
   }
   extractorGrid.className = 'extractor-grid';
@@ -4293,7 +4303,7 @@ async function renderExtractorGrid() {
 
     const dl = document.createElement('button');
     dl.className = 'dcm-card-dl';
-    dl.textContent = '\u2193 Save PNG';
+    dl.textContent = (window.t||String)('\u2193 Save PNG');
     dl.addEventListener('click', e => {
       e.stopPropagation();
       const base = item.name.replace(/\.[^.]+$/, '');
@@ -4426,7 +4436,7 @@ function renderSeriesPanel() {
     const input = document.createElement('input');
     input.className = 'form-input';
     input.style.cssText = 'flex:1;font-size:12px;padding:5px 8px';
-    input.placeholder = 'Description';
+    input.placeholder = (window.t||String)('Description');
     input.value = s.description;
     input.addEventListener('input', () => { s.description = input.value; });
 
@@ -4469,8 +4479,8 @@ function renderCreateGrid() {
     createImgGrid.innerHTML = `
       <div class="img-empty">
         <div class="img-empty-icon">🖼</div>
-        <span>Drop images here or click "+ Add Images"</span>
-        <span style="font-size:11px">PNG · JPEG · BMP · WebP supported</span>
+        <span>${(window.t||String)('Drop images here or click "+ Add Images"')}</span>
+        <span style="font-size:11px">${(window.t||String)('PNG · JPEG · BMP · WebP supported')}</span>
       </div>`;
     return;
   }
@@ -4508,7 +4518,7 @@ function renderCreateGrid() {
     });
     const newOpt = document.createElement('option');
     newOpt.value = 'new';
-    newOpt.textContent = '+ New';
+    newOpt.textContent = (window.t||String)('+ New');
     sel.appendChild(newOpt);
 
     sel.addEventListener('change', () => {
@@ -4723,7 +4733,7 @@ async function cmpRenderSidebar(side) {
     preview.style.display = 'none';
     badge.classList.add('hidden');
     clearBtn.classList.add('hidden');
-    dropEl.textContent = 'Drop .dcm or click';
+    dropEl.textContent = (window.t||String)('Drop .dcm or click');
     return;
   }
 
@@ -4758,9 +4768,9 @@ function cmpRenderTable() {
   cmpExportCard.classList.toggle('hidden', !bothLoaded);
 
   // Status pill
-  if (!cmpA && !cmpB)      cmpStatusPill.textContent = 'Load two files to compare';
-  else if (!cmpA)           cmpStatusPill.textContent = 'File B loaded — load File A';
-  else if (!cmpB)           cmpStatusPill.textContent = 'File A loaded — load File B';
+  if (!cmpA && !cmpB)      cmpStatusPill.textContent = (window.t||String)('Load two files to compare');
+  else if (!cmpA)           cmpStatusPill.textContent = (window.t||String)('File B loaded — load File A');
+  else if (!cmpB)           cmpStatusPill.textContent = (window.t||String)('File A loaded — load File B');
   else                      cmpStatusPill.textContent = `${cmpA.name}  vs  ${cmpB.name}`;
 
   if (!bothLoaded) { cmpBody.innerHTML = ''; return; }
@@ -5018,7 +5028,7 @@ const loadOverlay = document.getElementById('loadOverlay');
 const loadText    = document.getElementById('loadText');
 function showLoading(visible, text = 'Loading…', progress, count) {
   loadOverlay.classList.toggle('visible', visible);
-  if (text) loadText.textContent = text;
+  if (text) loadText.textContent = (window.t||String)(text);
   const bw = document.getElementById('loadBarWrap'), b = document.getElementById('loadBar'), c = document.getElementById('loadCount');
   if (bw && b) {
     if (visible && typeof progress === 'number') {
@@ -5037,7 +5047,7 @@ function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel) {
   const ok = document.getElementById('confirmOk');
   const cancel = document.getElementById('confirmCancel');
   document.getElementById('confirmMsg').textContent = message;
-  ok.textContent = confirmLabel;
+  ok.textContent = (window.t||String)(confirmLabel);
   const close = () => {
     ov.classList.remove('visible');
     ok.onclick = null; cancel.onclick = null;
@@ -5097,7 +5107,7 @@ function performUndo() {
   renderTable();
   if (dict) drawPreview(dict, currentFrame);
   updateHistoryBtns();
-  toast('Undo');
+  toast((window.t||String)('Undo'));
 }
 function performRedo() {
   if (!editFuture.length) return;
@@ -5106,7 +5116,7 @@ function performRedo() {
   renderTable();
   if (dict) drawPreview(dict, currentFrame);
   updateHistoryBtns();
-  toast('Redo');
+  toast((window.t||String)('Redo'));
 }
 undoBtn.addEventListener('click', performUndo);
 redoBtn.addEventListener('click', performRedo);
@@ -5300,7 +5310,7 @@ wlResetBtn.addEventListener('click', () => {
   if (wcOriginal == null && wwOriginal == null) return;
   pushHistory();
   setWL(wcOriginal ?? 40, wwOriginal ?? 400);
-  toast('Window / Level reset to file values');
+  toast((window.t||String)('Window / Level reset to file values'));
 });
 
 // ── Add Tag ──────────────────────────────────────────────────────
@@ -5321,9 +5331,9 @@ addTagCode.addEventListener('keydown', e => { if (e.key === 'Enter') addTagConfi
 addTagVal.addEventListener('keydown',  e => { if (e.key === 'Enter') addTagConfirm.click(); });
 
 addTagConfirm.addEventListener('click', () => {
-  if (!dict) { toast('No file loaded'); return; }
+  if (!dict) { toast((window.t||String)('No file loaded')); return; }
   const raw = addTagCode.value.trim().replace(/[()]/g, '').replace(',', '').replace(/\s/g, '');
-  if (!/^[0-9a-fA-F]{8}$/.test(raw)) { toast('Invalid code — use format (GGGG,EEEE)'); return; }
+  if (!/^[0-9a-fA-F]{8}$/.test(raw)) { toast((window.t||String)('Invalid code — use format (GGGG,EEEE)')); return; }
   const key = 'x' + raw.toLowerCase();
   const vr  = addTagVR.value;
   const val = addTagVal.value.trim();
@@ -5358,7 +5368,7 @@ function getExportRows() {
 }
 
 exportJsonBtn.addEventListener('click', () => {
-  if (!dict) { toast('No file loaded'); return; }
+  if (!dict) { toast((window.t||String)('No file loaded')); return; }
   const rows = getExportRows();
   const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -5366,11 +5376,11 @@ exportJsonBtn.addEventListener('click', () => {
   a.download = (files[currentFileIdx]?.name || 'dicom').replace(/\.[^.]+$/, '') + '_tags.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
-  toast('Exported JSON');
+  toast((window.t||String)('Exported JSON'));
 });
 
 exportCsvBtn.addEventListener('click', () => {
-  if (!dict) { toast('No file loaded'); return; }
+  if (!dict) { toast((window.t||String)('No file loaded')); return; }
   const rows = getExportRows();
   const q = v => `"${String(v).replace(/"/g, '""')}"`;
   const csv = ['Tag,Description,VR,Value',
@@ -5382,7 +5392,7 @@ exportCsvBtn.addEventListener('click', () => {
   a.download = (files[currentFileIdx]?.name || 'dicom').replace(/\.[^.]+$/, '') + '_tags.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
-  toast('Exported CSV');
+  toast((window.t||String)('Exported CSV'));
 });
 
 // ── Keyboard shortcuts ───────────────────────────────────────────
@@ -5398,7 +5408,7 @@ document.addEventListener('keydown', e => {
 });
 
 createDicomBtn.addEventListener('click', async () => {
-  if (!createImages.length) { alert('No images loaded.'); return; }
+  if (!createImages.length) { alert((window.t||String)('No images loaded.')); return; }
 
   const studyDate = (document.getElementById('cdStudyDate').value || '').replace(/-/g, '') || nowDA();
   const commonMeta = {
@@ -5420,7 +5430,7 @@ createDicomBtn.addEventListener('click', async () => {
   }
 
   createDicomBtn.disabled = true;
-  createDicomBtn.textContent = 'Creating…';
+  createDicomBtn.textContent = (window.t||String)('Creating…');
 
   const instanceCount = {};
   for (const s of createSeries) instanceCount[s.id] = 0;
@@ -5445,7 +5455,7 @@ createDicomBtn.addEventListener('click', async () => {
   }
 
   createDicomBtn.disabled = false;
-  createDicomBtn.textContent = '⬇ Create DICOM';
+  createDicomBtn.textContent = (window.t||String)('⬇ Create DICOM');
 });
 
 // ================================================================
@@ -5947,7 +5957,7 @@ function renderSR(d) {
   if (!root.length) {
     const msg = document.createElement('p');
     msg.style.cssText='color:var(--text-muted);font-size:12px;margin-top:8px';
-    msg.textContent='No content items found in Content Sequence.';
+    msg.textContent=(window.t||String)('No content items found in Content Sequence.');
     srView.appendChild(msg);
     return;
   }
@@ -6026,7 +6036,7 @@ document.addEventListener('keydown', e => {
     const d = new Date(), p = n => String(n).padStart(2, '0');
     const local = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     const dc = $('diagClock'); if (dc) dc.textContent = local;
-    const g = $('greeting'); if (g) { const h = d.getHours(); g.textContent = h < 5 ? 'Late shift.' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.'; }
+    const g = $('greeting'); if (g) { const h = d.getHours(); g.textContent = (window.t||String)(h < 5 ? 'Late shift.' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.'); }
   }
   tick(); setInterval(tick, 1000);
 
@@ -6073,18 +6083,18 @@ document.addEventListener('keydown', e => {
       nameCell = `<span class="ov-kv-v empty">—</span>`;
     } else {
       const val = shown ? esc(name) : '••••••••';
-      nameCell = `<span class="ov-kv-v${shown ? '' : ' hidden-val'}">${val}<button class="ov-reveal" id="ovPnToggle">${shown ? 'Hide' : 'Show'}</button></span>`;
+      nameCell = `<span class="ov-kv-v${shown ? '' : ' hidden-val'}">${val}<button class="ov-reveal" id="ovPnToggle">${(window.t||String)(shown ? 'Hide' : 'Show')}</button></span>`;
     }
     core.innerHTML =
-      `<div class="ov-kv-row"><span class="ov-kv-k">Patient Name</span>${nameCell}</div>` +
-      kvRow('Patient ID', txt('00100020')) +
-      kvRow('Sex', txt('00100040')) +
-      kvRow('Age', txt('00101010')) +
-      kvRow('Modality', txt('00080060')) +
-      kvRow('Study Description', txt('00081030')) +
-      kvRow('Study Date', fmtDate(txt('00080020'))) +
-      kvRow('Series Description', txt('0008103E')) +
-      kvRow('Body Part', txt('00180015'));
+      `<div class="ov-kv-row"><span class="ov-kv-k">${(window.t||String)('Patient Name')}</span>${nameCell}</div>` +
+      kvRow((window.t||String)('Patient ID'), txt('00100020')) +
+      kvRow((window.t||String)('Sex'), txt('00100040')) +
+      kvRow((window.t||String)('Age'), txt('00101010')) +
+      kvRow((window.t||String)('Modality'), txt('00080060')) +
+      kvRow((window.t||String)('Study Description'), txt('00081030')) +
+      kvRow((window.t||String)('Study Date'), fmtDate(txt('00080020'))) +
+      kvRow((window.t||String)('Series Description'), txt('0008103E')) +
+      kvRow((window.t||String)('Body Part'), txt('00180015'));
     const tgl = $('ovPnToggle');
     if (tgl) tgl.addEventListener('click', () => { localStorage.setItem(PN_KEY, patientShown() ? '0' : '1'); renderCore(); });
   }
@@ -6136,7 +6146,7 @@ document.addEventListener('keydown', e => {
 
   function renderMfr() {
     const brand = txt('00080070'), model = txt('00081090'), img = $('ovMfrImg');
-    $('ovMfrBrand').textContent = brand || 'Unknown manufacturer';
+    $('ovMfrBrand').textContent = brand || (window.t||String)('Unknown manufacturer');
     $('ovMfrModel').textContent = model || '';
     if (img) {
       if (brand || model) {
@@ -6146,10 +6156,10 @@ document.addEventListener('keydown', e => {
       } else { img.onerror = null; img.src = PLACEHOLDER; }
     }
     $('ovMfrExtra').innerHTML =
-      kvRow('Station Name', txt('00081010')) +
-      kvRow('Institution', txt('00080080')) +
-      kvRow('Software Versions', txt('00181020')) +
-      kvRow('Device Serial', txt('00181000'));
+      kvRow((window.t||String)('Station Name'), txt('00081010')) +
+      kvRow((window.t||String)('Institution'), txt('00080080')) +
+      kvRow((window.t||String)('Software Versions'), txt('00181020')) +
+      kvRow((window.t||String)('Device Serial'), txt('00181000'));
   }
 
   // ---------- RIS / workflow ----------
@@ -6167,20 +6177,20 @@ document.addEventListener('keydown', e => {
   function renderRis() {
     const el = $('ovRis'); if (!el) return;
     el.innerHTML =
-      kvRow('Accession Number', risVal('00080050')) +
-      kvRow('Study ID', txt('00200010')) +
-      kvRow('Referring Physician', txt('00080090')) +
-      kvRow('Requesting Physician', txt('00321032')) +
-      kvRow('Requesting Service', txt('00321033')) +
-      kvRow('Requested Procedure ID', risVal('00401001')) +
-      kvRow('Requested Procedure Desc.', txt('00321060')) +
-      kvRow('Scheduled Step ID', risVal('00400009')) +
-      kvRow('Scheduled Step Desc.', risVal('00400007')) +
-      kvRow('Performed Step ID', txt('00400253')) +
-      kvRow('Reason for Request', txt('00401002') || txt('00321030')) +
-      kvRow('Admission ID', txt('00380010')) +
-      kvRow('Performing Physician', txt('00081050')) +
-      kvRow('Operators', txt('00081070'));
+      kvRow((window.t||String)('Accession Number'), risVal('00080050')) +
+      kvRow((window.t||String)('Study ID'), txt('00200010')) +
+      kvRow((window.t||String)('Referring Physician'), txt('00080090')) +
+      kvRow((window.t||String)('Requesting Physician'), txt('00321032')) +
+      kvRow((window.t||String)('Requesting Service'), txt('00321033')) +
+      kvRow((window.t||String)('Requested Procedure ID'), risVal('00401001')) +
+      kvRow((window.t||String)('Requested Procedure Desc.'), txt('00321060')) +
+      kvRow((window.t||String)('Scheduled Step ID'), risVal('00400009')) +
+      kvRow((window.t||String)('Scheduled Step Desc.'), risVal('00400007')) +
+      kvRow((window.t||String)('Performed Step ID'), txt('00400253')) +
+      kvRow((window.t||String)('Reason for Request'), txt('00401002') || txt('00321030')) +
+      kvRow((window.t||String)('Admission ID'), txt('00380010')) +
+      kvRow((window.t||String)('Performing Physician'), txt('00081050')) +
+      kvRow((window.t||String)('Operators'), txt('00081070'));
   }
 
   // ---------- validation / conformance (read-only report) ----------
@@ -6197,7 +6207,7 @@ document.addEventListener('keydown', e => {
 
     if (!issues.length) {
       summary.style.display = '';
-      summary.innerHTML = `<div class="val-badge" style="color:var(--ok,#2ecc71)">✓ No conformance issues found</div>`;
+      summary.innerHTML = `<div class="val-badge" style="color:var(--ok,#2ecc71)">${(window.t||String)('✓ No conformance issues found')}</div>`;
       list.innerHTML = '';
       return;
     }
@@ -6398,7 +6408,7 @@ document.addEventListener('keydown', e => {
   }
 
   function printOverview() {
-    if (!dict) { if (window.toast) toast('Open a DICOM file first'); return; }
+    if (!dict) { if (window.toast) toast((window.t||String)('Open a DICOM file first')); return; }
     const fileName = files[currentFileIdx]?.name || 'DICOM study';
     const now = new Date();
     const stamp = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') +
