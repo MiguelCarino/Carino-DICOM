@@ -77,6 +77,14 @@ a { color: var(--accent); }
 .dl-note { max-width: 560px; margin: 8px auto 0; font-size: .82rem; color: var(--muted);
   word-break: normal; overflow-wrap: break-word; }
 
+/* The page describes the gateway; the newest installer is still the
+   store-and-forward 1.0.0. This note is the only thing standing between a
+   visitor and downloading something that does not match what they just read,
+   so it is tinted rather than left as one more grey line. */
+.release-note { border-left: 2px solid var(--accent); padding-left: 12px; text-align: left; }
+.release-note b { color: var(--accent); }
+.release-note code { word-break: normal; overflow-wrap: anywhere; }
+
 .firstrun { max-width: 560px; margin: 16px auto 0; text-align: left; }
 .firstrun summary { cursor: pointer; text-align: center; font-size: .82rem; color: var(--muted); padding: 8px 0; }
 .firstrun summary:hover { color: var(--accent); }
@@ -102,6 +110,15 @@ a { color: var(--accent); }
 .sub { max-width: 640px; margin: -6px auto 22px; text-align: center; color: var(--muted);
   font-size: .9rem; word-break: normal; overflow-wrap: break-word; }
 .sub.left { margin-left: 0; margin-right: 0; text-align: left; }
+
+/* "Coming in v1.1.0" — a plain list, deliberately not a feature grid: these
+   are not shipped yet and should not be dressed up to look as though they are. */
+.lede-sm { max-width: 720px; margin: -6px auto 20px; text-align: center; color: var(--muted);
+  font-size: .88rem; line-height: 1.6; word-break: normal; overflow-wrap: break-word; }
+.next-list { max-width: 760px; margin: 0 auto; padding-left: 20px; }
+.next-list li { margin-bottom: 9px; font-size: .88rem; line-height: 1.55; color: #d4d4d4;
+  word-break: normal; overflow-wrap: break-word; }
+.next-list li::marker { color: var(--accent); }
 
 /* ---- server quick start (Docker / systemd side by side) ---- */
 .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 22px; }

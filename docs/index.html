@@ -36,6 +36,9 @@
       </div>
       <p class="version" id="version">Checking for the latest version…</p>
       <p class="dl-note" data-i18n>The desktop app is one way in, not the only one — on a server, run it in Docker or as a systemd service.</p>
+      <p class="dl-note release-note" id="dl-release">The installers above are <b>v1.0.0</b>, which stores and forwards and
+        nothing else. Everything else described on this page is on <code>main</code> today and ships in
+        <b>v1.1.0</b> — to run it now, use Docker or install from source.</p>
       <details class="firstrun">
         <summary data-i18n>First launch shows a security warning? Here's how to open it</summary>
         <ul>
@@ -128,8 +131,31 @@ sudo packaging/systemd/install.sh</code></pre>
     </div>
   </section>
 
-  <!-- ── What it is NOT — stated plainly, not in fine print ───────── -->
+  <!-- ── What lands in v1.1.0 ─────────────────────────────────────────
+       The page describes the gateway; the newest installer is still the
+       store-and-forward 1.0.0. Saying which is which here is cheaper than
+       fielding "I downloaded it and there is no Query/Retrieve tab". -->
   <section class="section alt">
+    <div class="wrap">
+      <h2 class="center" data-i18n>Coming in v1.1.0</h2>
+      <p class="center lede-sm" id="v11-intro">All of it is written, tested and on <code>main</code> — what is missing is
+        a tagged release with signed installers. Run it today with Docker or from source; the full list is in the
+        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a>.</p>
+      <ul class="next-list">
+        <li data-i18n>Query/Retrieve SCP — C-FIND, C-MOVE and C-GET, so equipment that only speaks DIMSE can search this archive.</li>
+        <li data-i18n>DICOMweb — QIDO-RS, WADO-RS and STOW-RS, so a browser viewer can read it without ever opening an association.</li>
+        <li data-i18n>Conditional routing — send a study to different destinations by modality, calling AE, station, patient ID or study description.</li>
+        <li data-i18n>De-identification on forward — strip identity as studies leave, while the copy you keep stays untouched.</li>
+        <li data-i18n>Token authentication — and a refusal to start at all if you expose the dashboard without one.</li>
+        <li data-i18n>Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.</li>
+        <li data-i18n>Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.</li>
+        <li data-i18n>Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── What it is NOT — stated plainly, not in fine print ───────── -->
+  <section class="section">
     <div class="wrap">
       <div class="notbox">
         <h2 data-i18n>What it is not</h2>
@@ -145,7 +171,7 @@ sudo packaging/systemd/install.sh</code></pre>
   </section>
 
   <!-- ── Steps + documentation ────────────────────────────────────── -->
-  <section class="section">
+  <section class="section alt">
     <div class="wrap grid2">
       <div>
         <h2 data-i18n>Up and running in 3 steps</h2>
@@ -168,7 +194,7 @@ sudo packaging/systemd/install.sh</code></pre>
   </section>
 
   <!-- ── For technical users (collapsed) ──────────────────────────── -->
-  <section class="section alt">
+  <section class="section">
     <div class="wrap">
       <details class="techbox">
         <summary><b data-i18n>For technical users</b> <span data-i18n>— DICOM details, CLI &amp; source</span></summary>
