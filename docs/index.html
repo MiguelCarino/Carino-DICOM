@@ -35,10 +35,12 @@
           <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.zip</span></a>
       </div>
       <p class="version" id="version">Checking for the latest version…</p>
-      <p class="dl-note" data-i18n>The desktop app is one way in, not the only one — on a server, run it in Docker or as a systemd service.</p>
-      <p class="dl-note release-note" id="dl-release">The installers above are <b>v1.0.0</b>, which stores and forwards and
-        nothing else. Everything else described on this page is on <code>main</code> today and ships in
-        <b>v1.1.0</b> — to run it now, use Docker or install from source.</p>
+      <!-- One note, not two. It used to be a line about Docker followed by a
+           line about versions, and they are the same sentence: what you can
+           download, versus what you can run. -->
+      <p class="dl-note release-note" id="dl-release">These installers are <b>v1.0.0</b> — store and forward only.
+        Everything else on this page ships in <b>v1.1.0</b>, which runs today from Docker, systemd or source.
+        <a href="#releases">What is in each release ↓</a></p>
       <details class="firstrun">
         <summary data-i18n>First launch shows a security warning? Here's how to open it</summary>
         <ul>
@@ -58,8 +60,119 @@
     </div>
   </header>
 
-  <!-- ── Docker / server quick start ──────────────────────────────── -->
+  <!-- ── What it is / what it is not, side by side ─────────────────────
+       Moved up here and paired. "What it is not" used to sit near the bottom
+       on its own, which meant the honest half was the half nobody scrolled to.
+       Reading them together is the point: each column is only meaningful
+       against the other. -->
   <section class="section alt">
+    <div class="wrap">
+      <div class="contrast">
+        <div class="isbox">
+          <h2 data-i18n>What it is</h2>
+          <ul>
+            <li><b data-i18n>A gateway between your equipment and your archive.</b> <span data-i18n>Studies arrive, get routed by rules you write, and are retried until every destination has taken them.</span></li>
+            <li><b data-i18n>A continuity appliance.</b> <span data-i18n>When the primary PACS stops answering, it serves the worklist itself, holds what arrives, and back-fills once the primary returns.</span></li>
+            <li><b data-i18n>A translator for equipment nothing else will talk to.</b> <span data-i18n>Print-only modalities, consoles with no RIS feed, readers that speak nothing but DIMSE.</span></li>
+            <li><b data-i18n>Yours, on your hardware.</b> <span data-i18n>One config file, one process, no cloud, no telemetry, no licence server. AGPL-3.0.</span></li>
+          </ul>
+        </div>
+        <div class="notbox">
+          <h2 data-i18n>What it is not</h2>
+          <ul>
+            <li><b data-i18n>Not a medical device.</b> <span data-i18n>It is not certified, cleared or registered anywhere, and nothing in it has been validated for clinical use by anyone. Whoever deploys it owns that validation.</span></li>
+            <li><b data-i18n>Not for primary diagnosis.</b> <span data-i18n>There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.</span></li>
+            <li><b data-i18n>Not an enterprise archive.</b> <span data-i18n>No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.</span></li>
+            <li><b data-i18n>Not a replacement for your PACS or your RIS.</b> <span data-i18n>It is the gateway between them, and the thing that keeps a department working through an outage until they come back.</span></li>
+          </ul>
+          <p class="notbox-foot" data-i18n>If a patient's care depends on it, the responsibility for that is yours, not this software's.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── What it does ─────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="wrap">
+      <h2 class="center" data-i18n>What it does</h2>
+      <p class="sub" data-i18n>Every service is off until you turn it on. The tag on each card is the release it ships in.</p>
+      <div class="svc">
+        <div class="svc-item">
+          <b data-i18n>📥 Receive and file</b><span class="svc-ver now">v1.0</span>
+          <p data-i18n>A Storage SCP that accepts C-STORE and C-ECHO and files each study to disk by patient, study and series. Compressed objects are stored exactly as they arrived — never transcoded.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>📤 Route and forward</b><span class="svc-ver now">v1.0 · rules v1.1</span>
+          <p data-i18n>Forwards to as many nodes as you like, with rules: CT from the ER to the archive, ultrasound to the reading room. Each destination is retried until it accepts. A file that matches no rule goes everywhere rather than nowhere.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🕶️ De-identify on the way out</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>A rule can de-identify the copy it sends (PS3.15 Basic profile) while the archived original stays untouched. It does not clean burned-in pixel text — a human still has to look at the images.</p>
+        </div>
+        <div class="svc-item">
+          <!-- Protocol identifiers are never translated (fleet convention). -->
+          <b>🔎 Query/Retrieve</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>C-FIND, C-MOVE and C-GET over an indexed view of what is actually on disk, so a twelve-year-old ultrasound or CR reader can ask what you hold and pull it back.</p>
+        </div>
+        <div class="svc-item">
+          <b>🌐 DICOMweb</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>QIDO-RS, WADO-RS and STOW-RS, so OHIF, Weasis and other modern viewers can read the archive over HTTP without negotiating a DICOM association.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>📋 Worklist and emergency RIS</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>Takes HL7 orders over MLLP or hand-keyed ones, and serves them to modalities as a Modality Worklist. If your primary PACS stops answering, it can take over, hold what arrives, and forward it once the primary is back.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🖨️ Virtual print</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>Captures print-only modalities as PDF, so a machine whose only output is film still produces something you can file.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🔑 Token authentication</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>The dashboard and the DICOMweb API take a single shared token. Bind them to anything other than localhost without one and the server refuses to start — the refusal is the feature.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>👥 People and permissions</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone's chart.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🔒 Audit trail</b><span class="svc-ver">v1.1</span>
+          <p data-i18n>Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Releases ─────────────────────────────────────────────────
+       Replaces a "Coming in v1.1.0" list that repeated the feature grid
+       above it item for item. Each card there now carries its release tag,
+       so this section only has to answer what a release IS, not re-list it. -->
+  <section class="section alt" id="releases">
+    <div class="wrap">
+      <h2 class="center" data-i18n>Releases</h2>
+      <div class="rel">
+        <div class="rel-item">
+          <span class="rel-tag">v1.0.0</span>
+          <b data-i18n>Available now</b>
+          <p data-i18n>What the installers at the top of this page give you: a Storage SCP that receives studies, and a folder watcher that forwards them. Nothing else.</p>
+        </div>
+        <div class="rel-item next">
+          <span class="rel-tag">v1.1.0</span>
+          <b data-i18n>Next — and running today</b>
+          <p id="rel-next">Everything else on this page. It is written, tested and merged on <code>main</code>; what is missing is a tagged release with signed installers. Run it now with Docker or from source.</p>
+          <a class="rel-link" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n>Full changelog</a>
+        </div>
+        <div class="rel-item later">
+          <span class="rel-tag">—</span>
+          <b data-i18n>Not scheduled</b>
+          <p data-i18n>Encryption at rest, and directory integration (LDAP, Active Directory, single sign-on). Both are deliberate gaps rather than things forgotten — the security policy sets out the reasoning, and an encrypted disk underneath covers the first one today.</p>
+          <a class="rel-link" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n>Security policy</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Docker / server quick start ──────────────────────────────── -->
+  <section class="section">
     <div class="wrap">
       <h2 class="center" data-i18n>Running it on a server</h2>
       <div class="quick">
@@ -88,119 +201,13 @@ sudo packaging/systemd/install.sh</code></pre>
     </div>
   </section>
 
-  <!-- ── What it does ─────────────────────────────────────────────── -->
-  <section class="section">
-    <div class="wrap">
-      <h2 class="center" data-i18n>What it does</h2>
-      <p class="sub" data-i18n>Every service is off until you turn it on. Turn on only what the site actually needs.</p>
-      <div class="svc">
-        <div class="svc-item">
-          <b data-i18n>📥 Receive and file</b>
-          <p data-i18n>A Storage SCP that accepts C-STORE and C-ECHO and files each study to disk by patient, study and series. Compressed objects are stored exactly as they arrived — never transcoded.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>📤 Route and forward</b>
-          <p data-i18n>Forwards to as many nodes as you like, with rules: CT from the ER to the archive, ultrasound to the reading room. Each destination is retried until it accepts. A file that matches no rule goes everywhere rather than nowhere.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>🕶️ De-identify on the way out</b>
-          <p data-i18n>A rule can de-identify the copy it sends (PS3.15 Basic profile) while the archived original stays untouched. It does not clean burned-in pixel text — a human still has to look at the images.</p>
-        </div>
-        <div class="svc-item">
-          <!-- Protocol identifiers are never translated (fleet convention). -->
-          <b>🔎 Query/Retrieve</b>
-          <p data-i18n>C-FIND, C-MOVE and C-GET over an indexed view of what is actually on disk, so a twelve-year-old ultrasound or CR reader can ask what you hold and pull it back.</p>
-        </div>
-        <div class="svc-item">
-          <b>🌐 DICOMweb</b>
-          <p data-i18n>QIDO-RS, WADO-RS and STOW-RS, so OHIF, Weasis and other modern viewers can read the archive over HTTP without negotiating a DICOM association.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>📋 Worklist and emergency RIS</b>
-          <p data-i18n>Takes HL7 orders over MLLP or hand-keyed ones, and serves them to modalities as a Modality Worklist. If your primary PACS stops answering, it can take over, hold what arrives, and forward it once the primary is back.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>🖨️ Virtual print</b>
-          <p data-i18n>Captures print-only modalities as PDF, so a machine whose only output is film still produces something you can file.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>🔑 Token authentication</b>
-          <p data-i18n>The dashboard and the DICOMweb API take a single shared token. Bind them to anything other than localhost without one and the server refuses to start — the refusal is the feature.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>👥 People and permissions</b>
-          <p data-i18n>Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone's chart.</p>
-        </div>
-        <div class="svc-item">
-          <b data-i18n>🔒 Audit trail</b>
-          <p data-i18n>Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── What lands in v1.1.0 ─────────────────────────────────────────
-       The page describes the gateway; the newest installer is still the
-       store-and-forward 1.0.0. Saying which is which here is cheaper than
-       fielding "I downloaded it and there is no Query/Retrieve tab". -->
+  <!-- ── Manuals — a strip, not a section. It was a heading and a
+       standfirst wrapped around three buttons. -->
   <section class="section alt">
-    <div class="wrap">
-      <h2 class="center" data-i18n>Coming in v1.1.0</h2>
-      <p class="center lede-sm" id="v11-intro">All of it is written, tested and on <code>main</code> — what is missing is
-        a tagged release with signed installers. Run it today with Docker or from source; the full list is in the
-        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a>.</p>
-      <ul class="next-list">
-        <li data-i18n>Query/Retrieve SCP — C-FIND, C-MOVE and C-GET, so equipment that only speaks DIMSE can search this archive.</li>
-        <li data-i18n>DICOMweb — QIDO-RS, WADO-RS and STOW-RS, so a browser viewer can read it without ever opening an association.</li>
-        <li data-i18n>Conditional routing — send a study to different destinations by modality, calling AE, station, patient ID or study description.</li>
-        <li data-i18n>De-identification on forward — strip identity as studies leave, while the copy you keep stays untouched.</li>
-        <li data-i18n>Token authentication — and a refusal to start at all if you expose the dashboard without one.</li>
-        <li data-i18n>Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.</li>
-        <li data-i18n>Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.</li>
-        <li data-i18n>Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.</li>
-        <li data-i18n>Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.</li>
-        <li data-i18n>An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.</li>
-        <li data-i18n>Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- ── What it is NOT — stated plainly, not in fine print ───────── -->
-  <section class="section">
-    <div class="wrap">
-      <div class="notbox">
-        <h2 data-i18n>What it is not</h2>
-        <ul>
-          <li><b data-i18n>Not a medical device.</b> <span data-i18n>It is not certified, cleared or registered anywhere, and nothing in it has been validated for clinical use by anyone. Whoever deploys it owns that validation.</span></li>
-          <li><b data-i18n>Not for primary diagnosis.</b> <span data-i18n>There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.</span></li>
-          <li><b data-i18n>Not an enterprise archive.</b> <span data-i18n>No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.</span></li>
-          <li><b data-i18n>Not a replacement for your PACS or your RIS.</b> <span data-i18n>It is the gateway between them, and the thing that keeps a department working through an outage until they come back.</span></li>
-        </ul>
-        <p class="notbox-foot" data-i18n>If a patient's care depends on it, the responsibility for that is yours, not this software's.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── Steps + documentation ────────────────────────────────────── -->
-  <section class="section alt">
-    <div class="wrap grid2">
-      <div>
-        <h2 data-i18n>Up and running in 3 steps</h2>
-        <ol class="steps">
-          <li><span class="n">1</span> <span data-i18n>Start it — desktop app in the tray, or a container/service on a server.</span></li>
-          <li><span class="n">2</span> <span data-i18n>Open the dashboard and pick which services this machine should run.</span></li>
-          <li><span class="n">3</span> <span data-i18n>Add your destinations, point the modalities at it, send a C-ECHO to confirm.</span></li>
-        </ol>
-      </div>
-      <div>
-        <h2 data-i18n>Documentation</h2>
-        <p class="sub left" data-i18n>Full manuals: getting started, the security model and why the token rule exists, what each service does and when to turn it on.</p>
-        <div class="doclinks">
-          <a class="btn ghost" href="manual/" data-i18n>Manual (English)</a>
-          <a class="btn ghost" href="manual/es/" lang="es">Manual (Español)</a>
-          <a class="btn ghost" href="manual/pt-BR/" lang="pt-BR">Manual (Português&nbsp;BR)</a>
-        </div>
-      </div>
+    <div class="wrap doclinks center-row">
+      <a class="btn ghost" href="manual/" data-i18n>Manual (English)</a>
+      <a class="btn ghost" href="manual/es/" lang="es">Manual (Español)</a>
+      <a class="btn ghost" href="manual/pt-BR/" lang="pt-BR">Manual (Português&nbsp;BR)</a>
     </div>
   </section>
 
@@ -244,12 +251,6 @@ cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
       </details>
     </div>
   </section>
-
-  <footer class="foot" style="text-align: center;">
-    <div>
-      <span class="disclaimer" style="color: rgb(185, 36, 36);" data-i18n>Not a medical device and not for primary diagnosis. Use TLS, set a token and restrict access before it touches real patient data.</span>
-    </div>
-  </footer>
 
   <script src="app.js"></script>
 </body>
