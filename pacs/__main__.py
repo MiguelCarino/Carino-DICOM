@@ -1,6 +1,6 @@
 """Carino PACS command line.
 
-    python -m pacs serve      # web dashboard (+ optional --receive/--watch)
+    python -m pacs serve      # web dashboard + whatever services the config enables
     python -m pacs receive    # Storage SCP only, headless
     python -m pacs send       # folder watcher / auto-forward only, headless
     python -m pacs print      # virtual DICOM print receiver only, headless
@@ -69,6 +69,10 @@ def cmd_init(args) -> int:
         print(f"  ensured {d}")
     os.makedirs(cfg.logs_dir, exist_ok=True)
     print(f"  ensured {cfg.logs_dir}")
+    # A scaffolded config enables no service on purpose: the dashboard's setup
+    # chooser is what enrolls them, so say so rather than let `serve` look dead.
+    if not str(cfg.data.get("setup_completed", "")).strip():
+        print("No services enabled yet — run `pacs serve` and pick them in the dashboard.")
     return 0
 
 
@@ -77,39 +81,32 @@ def cmd_serve(args) -> int:
 
     cfg = Config(args.config)
     server = PacsServer(cfg)
-    # Auto-start is best-effort: a failure (e.g. DICOM port in use, bad TLS
-    # cert) must NOT stop the dashboard from coming up — it is how the user
-    # sees the error and fixes the config.
-    if args.receive:
+    # What runs is what the config enables — the dashboard's setup chooser is
+    # what writes those flags, so a machine that has never been through it
+    # starts nothing but the dashboard. Auto-start is best-effort: a failure
+    # (e.g. DICOM port in use, bad TLS cert) must NOT stop the dashboard from
+    # coming up — it is how the user sees the error and fixes the config.
+    for row in server.sync_services():
+        if not row.get("ok"):
+            print(f"WARNING: {row.get('service')} did not {row.get('action')}: {row.get('error')}",
+                  file=sys.stderr)
+    # The flags are run-once overrides for headless launches: they start a
+    # service for THIS run without enrolling it in the config. start_* is a
+    # no-op when the service is already up, so an override never doubles a sync.
+    for flag, start, label, kind in (
+        (args.receive, server.start_receiver, "receiver", "scp"),
+        (args.watch, server.start_watcher, "watcher", "watch"),
+        (args.print, server.start_printer, "print receiver", "print"),
+        (args.ris, server.start_ris, "RIS listener", "ris"),
+        (args.mwl, server.start_mwl, "worklist SCP", "mwl"),
+    ):
+        if not flag:
+            continue
         try:
-            server.start_receiver()
+            start()
         except Exception as exc:
-            server.log.error(f"Could not start receiver: {exc}", kind="scp")
-            print(f"WARNING: receiver did not start: {exc}", file=sys.stderr)
-    if args.watch:
-        try:
-            server.start_watcher()
-        except Exception as exc:
-            server.log.error(f"Could not start watcher: {exc}", kind="watch")
-            print(f"WARNING: watcher did not start: {exc}", file=sys.stderr)
-    if args.print or cfg.printer.get("enabled"):
-        try:
-            server.start_printer()
-        except Exception as exc:
-            server.log.error(f"Could not start print receiver: {exc}", kind="print")
-            print(f"WARNING: print receiver did not start: {exc}", file=sys.stderr)
-    if args.ris or cfg.ris.get("enabled"):
-        try:
-            server.start_ris()
-        except Exception as exc:
-            server.log.error(f"Could not start RIS listener: {exc}", kind="ris")
-            print(f"WARNING: RIS listener did not start: {exc}", file=sys.stderr)
-    if args.mwl or server.worklist_wanted():
-        try:
-            server.start_mwl()
-        except Exception as exc:
-            server.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
-            print(f"WARNING: worklist SCP did not start: {exc}", file=sys.stderr)
+            server.log.error(f"Could not start {label}: {exc}", kind=kind)
+            print(f"WARNING: {label} did not start: {exc}", file=sys.stderr)
     # Emergency failover monitor auto-starts if armed in config.
     try:
         server.emergency.start()
@@ -230,14 +227,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="run the web dashboard")
     s.add_argument("--host", help="override web bind host")
     s.add_argument("--port", type=int, help="override web port")
-    s.add_argument("--receive", action="store_true", help="also start the receiver on launch")
-    s.add_argument("--watch", action="store_true", help="also start the folder watcher on launch")
+    # These start a service for this run only — they never write the config's
+    # enabled flags (that is the dashboard's setup chooser).
+    s.add_argument("--receive", action="store_true", help="start the receiver for this run even if config has it off")
+    s.add_argument("--watch", action="store_true", help="start the folder watcher for this run even if config has it off")
     s.add_argument("--print", action="store_true", dest="print",
-                   help="also start the virtual DICOM print receiver on launch")
+                   help="start the virtual DICOM print receiver for this run even if config has it off")
     s.add_argument("--ris", action="store_true", dest="ris",
-                   help="also start the emergency-RIS HL7/MLLP listener on launch")
+                   help="start the emergency-RIS HL7/MLLP listener for this run even if config has it off")
     s.add_argument("--mwl", action="store_true", dest="mwl",
-                   help="also start the Modality Worklist SCP on launch")
+                   help="start the Modality Worklist SCP for this run even if config has it off")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")

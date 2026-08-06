@@ -1,5 +1,6 @@
 {
   "scp": {
+    "enabled": false,
     "aet": "CARINOPACS",
     "bind": "0.0.0.0",
     "port": 11112,
@@ -13,6 +14,7 @@
     "tls_ca": ""
   },
   "scu": {
+    "enabled": false,
     "aet": "CARINOSCU",
     "watch_dir": "./outgoing",
     "poll_interval": 3,
@@ -80,5 +82,6 @@
     "port": 8042,
     "editor_url": "/editor/"
   },
-  "logs_dir": "./logs"
+  "logs_dir": "./logs",
+  "setup_completed": ""
 }

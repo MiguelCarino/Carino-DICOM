@@ -86,6 +86,32 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(error=f"could not apply config: {exc}"), 400
         return jsonify(ok=True, config=server.cfg.data)
 
+    @app.post("/api/setup")
+    def api_setup():
+        """The service chooser's Apply: enrol the picked services and stamp the
+        run, in one save. A service that then fails to bind is a 200 with a
+        failed row — enrolled-but-not-running is a state the dashboard shows,
+        not a bad request."""
+        d = request.get_json(silent=True) or {}
+        try:
+            res = server.apply_setup(d.get("services") or {})
+        except ValueError as exc:          # invalid candidate config
+            return jsonify(error=str(exc)), 400
+        except OSError as exc:             # e.g. config file unwritable
+            return jsonify(error=f"could not save setup: {exc}"), 400
+        return jsonify(res)
+
+    @app.post("/api/portcheck")
+    def api_portcheck():
+        """Are these DICOM ports bindable on this machine? POST, not GET, on
+        purpose: the write-header guard only covers non-GET, and a GET here
+        would hand any page the operator has open a port probe against their
+        own loopback."""
+        items = (request.get_json(silent=True) or {}).get("ports")
+        if not isinstance(items, list):
+            return jsonify(error="expected a 'ports' array"), 400
+        return jsonify(server.check_ports(items))
+
     @app.post("/api/receiver")
     def api_receiver():
         action = (request.get_json(silent=True) or {}).get("action")

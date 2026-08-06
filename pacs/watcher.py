@@ -78,6 +78,9 @@ class FolderWatcher:
         self.sent_count = 0
         self.failed_count = 0
         self.last_activity = ""
+        # Last forward ATTEMPT (not the last success) — "did the last thing that
+        # happened work?" is the question the dashboard actually needs answered.
+        self.last_sent: Optional[dict] = None
 
     @property
     def running(self) -> bool:
@@ -194,6 +197,10 @@ class FolderWatcher:
                     with self._lock:
                         self.sent_count += 1
                         self.last_activity = f"{os.path.basename(path)} -> {dest.name}"
+                        self.last_sent = {
+                            "epoch": int(time.time()), "file": os.path.basename(path),
+                            "dest": dest.name, "ok": True, "error": "",
+                        }
                     self.log.info(f"Sent {os.path.basename(path)} -> {dest.name}", kind="send")
                 else:
                     f = fails.setdefault(dest.name, {"attempts": 0})
@@ -202,6 +209,10 @@ class FolderWatcher:
                     f["next_try"] = time.time() + _backoff(f["attempts"], interval)
                     with self._lock:
                         self.failed_count += 1
+                        self.last_sent = {
+                            "epoch": int(time.time()), "file": os.path.basename(path),
+                            "dest": dest.name, "ok": False, "error": res.message,
+                        }
                     self.log.warn(
                         f"Send {os.path.basename(path)} -> {dest.name}: {res.message} "
                         f"(attempt {f['attempts']}, retry in {int(f['next_try'] - time.time())}s)",
@@ -353,4 +364,5 @@ class FolderWatcher:
                 "sent": self.sent_count,
                 "failed": self.failed_count,
                 "last_activity": self.last_activity,
+                "last_sent": self.last_sent,
             }

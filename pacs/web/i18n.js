@@ -403,6 +403,70 @@ const I18N = {
         'Capture failed': 'Fallo en la captura',
         'Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.': '¿Borrar TODAS las órdenes cerradas?\n\nEsto elimina permanentemente la traza de auditoría de órdenes cerradas.',
         'Purged': 'Purgadas',
+
+        // ── Setup chooser & Overview ──
+        // Budgets for this group, measured on the panels it renders in: 'Use this'
+        // rides in .card-head under white-space:nowrap, so <= 12 chars (ja <= 6
+        // full-width) or it pushes the card title aside; .card-warn and .card-port
+        // are one line each in the same 407px card as the descriptions above, <= 60
+        // chars (ja <= 28 full-width); Overview tiles are minmax(120px,1fr), so a
+        // .ov-tile-k label may wrap to two lines but not three — <= 18 chars (ja
+        // <= 9 full-width); 'not listening' rides behind the receiver's AE:port in
+        // an ellipsising .ov-atomic dd, so <= 16 chars (ja <= 8 full-width).
+        // Everything else here is prose in the 300px-min .ov-grid
+        // boxes and is not budgeted. The chooser reuses the long card descriptions
+        // above as its body copy, so no service is described twice in this file.
+        'Choose the services this PC should run': 'Elige los servicios que debe ejecutar este PC',
+        'Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.': 'Marca lo que debe hacer este PC. Puedes cambiarlo luego en Servicios o Ajustes; no se inicia nada hasta que lo actives.',
+        'Use this': 'Usar',
+        '⚙ Choose services': '⚙ Elegir servicios',
+        'Re-run service setup': 'Volver a elegir servicios',
+        'Turn these on': 'Activar los marcados',
+        // The three ways a service can end up doing nothing, kept apart on
+        // purpose: switched on and down with a port to check, switched on and
+        // down with no port (the watcher binds none), and never switched on at
+        // all. The operator acts differently on each, so no two of them may
+        // share a translation, and none may read like "nothing has happened yet".
+        'Enabled but not running — check the port and the log.': 'Activado pero parado: revisa el puerto y el registro.',
+        'Enabled but not running — check the log.': 'Activado pero parado: revisa el registro.',
+        'Switched off on this PC.': 'Desactivado en este PC.',
+        'Checking ports…': 'Comprobando el puerto…',
+        'Port {port} is free': 'El puerto {port} está libre',
+        // Ours is not free, and it is not a clash either — only the third
+        // sentence may say the port is taken by something else on this PC.
+        'Port {port} is in use by this app': 'El puerto {port} está en uso por esta app',
+        'Port {port} is already in use on this PC': 'El puerto {port} ya está en uso en este PC',
+        'Nothing selected — this PC will not receive or send anything.': 'No has marcado nada: este PC no recibirá ni enviará nada.',
+        '{svc} did not start: {err}': '{svc} no se pudo iniciar: {err}',
+        'Overview': 'Resumen',
+        'this machine at a glance': 'este PC de un vistazo',
+        'Services on': 'Servicios activos',
+        'Free space': 'Espacio libre',
+        // Names the two tiles it actually covers — the other five state what is
+        // true right now and have no window, so they may not be swept in here.
+        'Received and sent counted since {ts}': 'Recibidos y enviados contados desde {ts}',
+        'This machine': 'Este PC',
+        'Address': 'Dirección',
+        'not listening': 'no escucha',
+        'Version': 'Versión',
+        'Config file': 'Archivo de configuración',
+        'Log folder': 'Carpeta de registros',
+        'Not checked': 'Sin comprobar',
+        'Reachable': 'Accesible',
+        'Received counted since {rx} · sent since {wx}': 'Recibidos desde {rx} · enviados desde {wx}',
+        'Sends failing': 'Fallan los envíos',
+        'No orders yet — HL7 intake is stopped.': 'Aún no hay órdenes; la recepción HL7 está parada.',
+        'Unreachable': 'Inaccesible',
+        'checked {ts}': 'comprobado {ts}',
+        'No destinations configured yet.': 'Aún no hay destinos configurados.',
+        'Last received': 'Último estudio recibido',
+        'Nothing received yet.': 'Aún no se ha recibido nada.',
+        'Last transfer': 'Último envío',
+        'Nothing sent yet.': 'Aún no se ha enviado nada.',
+        'Last order': 'Última orden',
+        'No orders yet.': 'Aún no hay órdenes.',
+        'Nothing has happened yet.': 'Todavía no ha pasado nada.',
+        'Not set up yet — pick the services this PC should run.': 'Sin configurar todavía: elige los servicios que debe ejecutar este PC.',
     },
 
     'pt-BR': {
@@ -748,6 +812,69 @@ const I18N = {
         'Capture failed': 'Falha na captura',
         'Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.': 'Excluir TODOS os pedidos fechados?\n\nIsso limpa permanentemente a trilha de auditoria de pedidos fechados.',
         'Purged': 'Limpos',
+
+        // Budgets for this group, measured on the panels it renders in: 'Use this'
+        // rides in .card-head under white-space:nowrap, so <= 12 chars (ja <= 6
+        // full-width) or it pushes the card title aside; .card-warn and .card-port
+        // are one line each in the same 407px card as the descriptions above, <= 60
+        // chars (ja <= 28 full-width); Overview tiles are minmax(120px,1fr), so a
+        // .ov-tile-k label may wrap to two lines but not three — <= 18 chars (ja
+        // <= 9 full-width); 'not listening' rides behind the receiver's AE:port in
+        // an ellipsising .ov-atomic dd, so <= 16 chars (ja <= 8 full-width).
+        // Everything else here is prose in the 300px-min .ov-grid
+        // boxes and is not budgeted. The chooser reuses the long card descriptions
+        // above as its body copy, so no service is described twice in this file.
+        'Choose the services this PC should run': 'Escolha os serviços que este PC deve executar',
+        'Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.': 'Marque o que este PC deve fazer. Você pode mudar depois em Serviços ou Configurações; nada é iniciado até você ligar.',
+        'Use this': 'Usar',
+        '⚙ Choose services': '⚙ Escolher serviços',
+        'Re-run service setup': 'Escolher serviços de novo',
+        'Turn these on': 'Ligar os marcados',
+        // The three ways a service can end up doing nothing, kept apart on
+        // purpose: switched on and down with a port to check, switched on and
+        // down with no port (the watcher binds none), and never switched on at
+        // all. The operator acts differently on each, so no two of them may
+        // share a translation, and none may read like "nothing has happened yet".
+        'Enabled but not running — check the port and the log.': 'Ligado, mas parado: verifique a porta e o registro.',
+        'Enabled but not running — check the log.': 'Ligado, mas parado: verifique o registro.',
+        'Switched off on this PC.': 'Desligado neste PC.',
+        'Checking ports…': 'Verificando a porta…',
+        'Port {port} is free': 'A porta {port} está livre',
+        // Ours is not free, and it is not a clash either — only the third
+        // sentence may say the port is taken by something else on this PC.
+        'Port {port} is in use by this app': 'A porta {port} está em uso por este app',
+        'Port {port} is already in use on this PC': 'A porta {port} já está em uso neste PC',
+        'Nothing selected — this PC will not receive or send anything.': 'Nada marcado: este PC não vai receber nem enviar nada.',
+        '{svc} did not start: {err}': '{svc} não iniciou: {err}',
+        'Overview': 'Resumo',
+        'this machine at a glance': 'este PC num relance',
+        'Services on': 'Serviços ativos',
+        'Free space': 'Espaço livre',
+        // Names the two tiles it actually covers — the other five state what is
+        // true right now and have no window, so they may not be swept in here.
+        'Received and sent counted since {ts}': 'Recebidos e enviados contados desde {ts}',
+        'This machine': 'Este PC',
+        'Address': 'Endereço',
+        'not listening': 'não escuta',
+        'Version': 'Versão',
+        'Config file': 'Arquivo de configuração',
+        'Log folder': 'Pasta de registros',
+        'Not checked': 'Não verificado',
+        'Reachable': 'Acessível',
+        'Received counted since {rx} · sent since {wx}': 'Recebidos desde {rx} · enviados desde {wx}',
+        'Sends failing': 'Envios falhando',
+        'No orders yet — HL7 intake is stopped.': 'Ainda não há pedidos; a recepção HL7 está parada.',
+        'Unreachable': 'Inacessível',
+        'checked {ts}': 'verificado {ts}',
+        'No destinations configured yet.': 'Ainda não há destinos configurados.',
+        'Last received': 'Último estudo recebido',
+        'Nothing received yet.': 'Ainda não foi recebido nada.',
+        'Last transfer': 'Último envio',
+        'Nothing sent yet.': 'Ainda não foi enviado nada.',
+        'Last order': 'Último pedido',
+        'No orders yet.': 'Ainda não há pedidos.',
+        'Nothing has happened yet.': 'Ainda não aconteceu nada.',
+        'Not set up yet — pick the services this PC should run.': 'Ainda não configurado: escolha os serviços que este PC deve executar.',
     },
 
     ja: {
@@ -1093,6 +1220,69 @@ const I18N = {
         'Capture failed': '取り込みに失敗しました',
         'Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.': '完了したオーダを「すべて」削除しますか？\n\n完了オーダの監査証跡が完全に消去されます。',
         'Purged': '削除しました',
+
+        // Budgets for this group, measured on the panels it renders in: 'Use this'
+        // rides in .card-head under white-space:nowrap, so <= 12 chars (ja <= 6
+        // full-width) or it pushes the card title aside; .card-warn and .card-port
+        // are one line each in the same 407px card as the descriptions above, <= 60
+        // chars (ja <= 28 full-width); Overview tiles are minmax(120px,1fr), so a
+        // .ov-tile-k label may wrap to two lines but not three — <= 18 chars (ja
+        // <= 9 full-width); 'not listening' rides behind the receiver's AE:port in
+        // an ellipsising .ov-atomic dd, so <= 16 chars (ja <= 8 full-width).
+        // Everything else here is prose in the 300px-min .ov-grid
+        // boxes and is not budgeted. The chooser reuses the long card descriptions
+        // above as its body copy, so no service is described twice in this file.
+        'Choose the services this PC should run': 'このPCで動かすサービスを選んでください',
+        'Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.': 'このPCに何をさせるかをチェックしてください。あとから「サービス」や「設定」で変更できます。オンにするまで何も起動しません。',
+        'Use this': '使う',
+        '⚙ Choose services': '⚙ サービスを選ぶ',
+        'Re-run service setup': 'サービス選択をやり直す',
+        'Turn these on': 'オンにする',
+        // The three ways a service can end up doing nothing, kept apart on
+        // purpose: switched on and down with a port to check, switched on and
+        // down with no port (the watcher binds none), and never switched on at
+        // all. The operator acts differently on each, so no two of them may
+        // share a translation, and none may read like "nothing has happened yet".
+        'Enabled but not running — check the port and the log.': 'オンですが停止中です。ポートとログを確認してください。',
+        'Enabled but not running — check the log.': 'オンですが停止中です。ログを確認してください。',
+        'Switched off on this PC.': 'このPCではオフになっています。',
+        'Checking ports…': 'ポートを確認中…',
+        'Port {port} is free': 'ポート{port}は空いています',
+        // Ours is not free, and it is not a clash either — only the third
+        // sentence may say the port is taken by something else on this PC.
+        'Port {port} is in use by this app': 'ポート{port}はこのアプリが使用中です',
+        'Port {port} is already in use on this PC': 'ポート{port}はこのPCで既に使われています',
+        'Nothing selected — this PC will not receive or send anything.': '何も選ばれていません。このPCは受信も送信もしません。',
+        '{svc} did not start: {err}': '{svc}を開始できませんでした: {err}',
+        'Overview': '概要',
+        'this machine at a glance': 'このPCの状態をひと目で',
+        'Services on': '稼働中のサービス',
+        'Free space': '空き容量',
+        // Names the two tiles it actually covers — the other five state what is
+        // true right now and have no window, so they may not be swept in here.
+        'Received and sent counted since {ts}': '「受信数」と「送信数」は{ts}からの集計です',
+        'This machine': 'このPC',
+        'Address': 'アドレス',
+        'not listening': '待ち受けなし',
+        'Version': 'バージョン',
+        'Config file': '設定ファイル',
+        'Log folder': 'ログフォルダ',
+        'Not checked': '未確認',
+        'Reachable': '到達可能',
+        'Received counted since {rx} · sent since {wx}': '受信は{rx}から、送信は{wx}からの集計です',
+        'Sends failing': '送信が失敗中',
+        'No orders yet — HL7 intake is stopped.': 'オーダはまだありません。HL7の受信は停止中です。',
+        'Unreachable': '到達不可',
+        'checked {ts}': '確認 {ts}',
+        'No destinations configured yet.': 'まだ送信先が設定されていません。',
+        'Last received': '最後に受信した検査',
+        'Nothing received yet.': 'まだ何も受信していません。',
+        'Last transfer': '最後の送信',
+        'Nothing sent yet.': 'まだ何も送信していません。',
+        'Last order': '最後のオーダ',
+        'No orders yet.': 'まだオーダはありません。',
+        'Nothing has happened yet.': 'まだ何も起きていません。',
+        'Not set up yet — pick the services this PC should run.': 'まだ設定されていません。このPCで動かすサービスを選んでください。',
     },
 
     ru: {
@@ -1438,6 +1628,69 @@ const I18N = {
         'Capture failed': 'Не удалось захватить',
         'Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.': 'Удалить ВСЕ закрытые заявки?\n\nЭто безвозвратно очистит журнал аудита по закрытым заявкам.',
         'Purged': 'Очищено',
+
+        // Budgets for this group, measured on the panels it renders in: 'Use this'
+        // rides in .card-head under white-space:nowrap, so <= 12 chars (ja <= 6
+        // full-width) or it pushes the card title aside; .card-warn and .card-port
+        // are one line each in the same 407px card as the descriptions above, <= 60
+        // chars (ja <= 28 full-width); Overview tiles are minmax(120px,1fr), so a
+        // .ov-tile-k label may wrap to two lines but not three — <= 18 chars (ja
+        // <= 9 full-width); 'not listening' rides behind the receiver's AE:port in
+        // an ellipsising .ov-atomic dd, so <= 16 chars (ja <= 8 full-width).
+        // Everything else here is prose in the 300px-min .ov-grid
+        // boxes and is not budgeted. The chooser reuses the long card descriptions
+        // above as its body copy, so no service is described twice in this file.
+        'Choose the services this PC should run': 'Выберите службы, которые должен запускать этот ПК',
+        'Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.': 'Отметьте, что должен делать этот ПК. Изменить это можно потом в разделе «Службы» или «Настройки»; ничего не запустится, пока вы не включите выбранное.',
+        'Use this': 'Использовать',
+        '⚙ Choose services': '⚙ Выбрать службы',
+        'Re-run service setup': 'Заново выбрать службы',
+        'Turn these on': 'Включить выбранные',
+        // The three ways a service can end up doing nothing, kept apart on
+        // purpose: switched on and down with a port to check, switched on and
+        // down with no port (the watcher binds none), and never switched on at
+        // all. The operator acts differently on each, so no two of them may
+        // share a translation, and none may read like "nothing has happened yet".
+        'Enabled but not running — check the port and the log.': 'Включено, но не работает — проверьте порт и журнал.',
+        'Enabled but not running — check the log.': 'Включено, но не работает — проверьте журнал.',
+        'Switched off on this PC.': 'Выключено на этом ПК.',
+        'Checking ports…': 'Проверка порта…',
+        'Port {port} is free': 'Порт {port} свободен',
+        // Ours is not free, and it is not a clash either — only the third
+        // sentence may say the port is taken by something else on this PC.
+        'Port {port} is in use by this app': 'Порт {port} занят этим приложением',
+        'Port {port} is already in use on this PC': 'Порт {port} уже занят на этом ПК',
+        'Nothing selected — this PC will not receive or send anything.': 'Ничего не выбрано — этот ПК не будет ни принимать, ни отправлять.',
+        '{svc} did not start: {err}': '{svc}: не удалось запустить — {err}',
+        'Overview': 'Обзор',
+        'this machine at a glance': 'этот ПК с одного взгляда',
+        'Services on': 'Служб запущено',
+        'Free space': 'Свободно',
+        // Names the two tiles it actually covers — the other five state what is
+        // true right now and have no window, so they may not be swept in here.
+        'Received and sent counted since {ts}': '«Принято» и «Отправлено» считаются с {ts}',
+        'This machine': 'Этот ПК',
+        'Address': 'Адрес',
+        'not listening': 'не слушает',
+        'Version': 'Версия',
+        'Config file': 'Файл конфигурации',
+        'Log folder': 'Папка журналов',
+        'Not checked': 'Не проверялся',
+        'Reachable': 'Доступен',
+        'Received counted since {rx} · sent since {wx}': 'Принято с {rx} · отправлено с {wx}',
+        'Sends failing': 'Отправка не идёт',
+        'No orders yet — HL7 intake is stopped.': 'Заявок пока нет — приём HL7 остановлен.',
+        'Unreachable': 'Недоступен',
+        'checked {ts}': 'проверено {ts}',
+        'No destinations configured yet.': 'Назначения пока не настроены.',
+        'Last received': 'Последнее принятое исследование',
+        'Nothing received yet.': 'Пока ничего не принято.',
+        'Last transfer': 'Последняя отправка',
+        'Nothing sent yet.': 'Пока ничего не отправлено.',
+        'Last order': 'Последняя заявка',
+        'No orders yet.': 'Заявок пока нет.',
+        'Nothing has happened yet.': 'Пока ничего не происходило.',
+        'Not set up yet — pick the services this PC should run.': 'Ещё не настроено — выберите службы, которые должен запускать этот ПК.',
     },
 };
 
@@ -1453,30 +1706,42 @@ const PLURALS = {
         '{n} instances waiting': ['{n} instance waiting', '{n} instances waiting'],
         '{n} attempts': ['{n} attempt', '{n} attempts'],
         'Opened {n} files in the editor': ['Opened {n} file in the editor', 'Opened {n} files in the editor'],
+        // The chooser counts services, not images — it calls TN() like everything
+        // else that carries a number, so the forms belong here and not in I18N.
+        '{n} selected': ['{n} selected', '{n} selected'],
+        '{n} services enabled': ['{n} service enabled', '{n} services enabled'],
     },
     es: {
         '{n} images': ['{n} imagen', '{n} imágenes'],
         '{n} instances waiting': ['{n} instancia en espera', '{n} instancias en espera'],
         '{n} attempts': ['{n} intento', '{n} intentos'],
         'Opened {n} files in the editor': ['Se abrió {n} archivo en el editor', 'Se abrieron {n} archivos en el editor'],
+        '{n} selected': ['{n} marcado', '{n} marcados'],
+        '{n} services enabled': ['{n} servicio activado', '{n} servicios activados'],
     },
     'pt-BR': {
         '{n} images': ['{n} imagem', '{n} imagens'],
         '{n} instances waiting': ['{n} instância aguardando', '{n} instâncias aguardando'],
         '{n} attempts': ['{n} tentativa', '{n} tentativas'],
         'Opened {n} files in the editor': ['{n} arquivo aberto no editor', '{n} arquivos abertos no editor'],
+        '{n} selected': ['{n} marcado', '{n} marcados'],
+        '{n} services enabled': ['{n} serviço ligado', '{n} serviços ligados'],
     },
     ja: {
         '{n} images': ['{n}件の画像'],
         '{n} instances waiting': ['{n}件のインスタンスが待機中'],
         '{n} attempts': ['{n}回試行'],
         'Opened {n} files in the editor': ['{n}件のファイルをエディタで開きました'],
+        '{n} selected': ['{n}件を選択中'],
+        '{n} services enabled': ['{n}件のサービスをオンにしました'],
     },
     ru: {
         '{n} images': ['{n} изображение', '{n} изображения', '{n} изображений'],
         '{n} instances waiting': ['{n} объект ожидает', '{n} объекта ожидают', '{n} объектов ожидают'],
         '{n} attempts': ['{n} попытка', '{n} попытки', '{n} попыток'],
         'Opened {n} files in the editor': ['Открыт {n} файл в редакторе', 'Открыто {n} файла в редакторе', 'Открыто {n} файлов в редакторе'],
+        '{n} selected': ['Выбрана {n} служба', 'Выбрано {n} службы', 'Выбрано {n} служб'],
+        '{n} services enabled': ['Включена {n} служба', 'Включено {n} службы', 'Включено {n} служб'],
     },
 };
 

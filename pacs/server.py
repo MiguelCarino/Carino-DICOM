@@ -9,22 +9,51 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from typing import Optional
 
+from . import __version__
 from .config import Config
 from .emergency import EmergencyController
 from .logbuf import LogBuffer
 from .mwl import MwlSCP
 from .print_scp import PrintSCP
-from .ris import OrderStore, RisListener
+from .ris import OrderStore, RisListener, _utc_stamp
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
 from .watcher import FolderWatcher
+
+# The build that offers the service chooser. It is reported next to the marker
+# so the dashboard can say WHICH engine ran setup; it is deliberately never
+# compared against the marker — re-offering setup because the version moved
+# would be a migration, and there is nothing to migrate from yet.
+SETUP_VERSION = __version__
+
+# What the setup chooser may switch on, as (post key, config section).
+SETUP_SERVICES = (("receiver", "scp"), ("watcher", "scu"), ("printer", "print"),
+                  ("ris", "ris"), ("mwl", "mwl"))
+
+
+def _order_brief(order: Optional[dict], fields: tuple) -> Optional[dict]:
+    """Trim an order down to the handful of fields a dashboard line shows. A
+    whole order carries the patient's full identity plus 16 scheduling fields,
+    and /api/status is polled every two seconds — it gets what it draws."""
+    if not order:
+        return None
+    return {k: str(order.get(k, "") or "") for k in fields}
 
 
 class PacsServer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        # When this process started: the origin for uptime and for the counters
+        # of objects that outlive a save (the watcher is built once, here).
+        self.started_at = time.time()
+        # Counter origins for the three services this object REBUILDS on every
+        # save and every Start (print/RIS/worklist): their tallies zero with the
+        # new object, so each is stamped where it is constructed and reported
+        # next to its counters. StorageSCP carries its own started_at.
+        self._counter_since: dict[str, float] = {}
         self.log = LogBuffer(log_dir=cfg.logs_dir)
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
@@ -131,6 +160,7 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(p.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(p.get("tls_ca", "")),
             )
+            self._counter_since["printer"] = time.time()
             self.print_scp.start()
 
     def stop_printer(self) -> None:
@@ -153,6 +183,7 @@ class PacsServer:
                 log=self.log,
                 allowed_hosts=r.get("allowed_hosts", []),
             )
+            self._counter_since["ris"] = time.time()
             self.ris.start()
 
     def stop_ris(self) -> None:
@@ -178,6 +209,7 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(m.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(m.get("tls_ca", "")),
             )
+            self._counter_since["mwl"] = time.time()
             self.mwl_scp.start()
 
     def stop_mwl(self) -> None:
@@ -468,11 +500,21 @@ class PacsServer:
                         with self.watcher._lock:
                             self.watcher.sent_count += 1
                             self.watcher.last_activity = f"{os.path.basename(fp)} -> {d.name}"
+                            # A manual send is a forward like any other — it has
+                            # to move "last transfer" or the dashboard goes stale.
+                            self.watcher.last_sent = {
+                                "epoch": int(time.time()), "file": os.path.basename(fp),
+                                "dest": d.name, "ok": True, "error": "",
+                            }
                         self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}", kind="send")
                     else:
                         fail += 1
                         with self.watcher._lock:
                             self.watcher.failed_count += 1
+                            self.watcher.last_sent = {
+                                "epoch": int(time.time()), "file": os.path.basename(fp),
+                                "dest": d.name, "ok": False, "error": res.message,
+                            }
                         self.log.warn(f"Send {os.path.basename(fp)} -> {d.name}: {res.message}", kind="send")
             self.log.info(
                 f"Manual send of {label} finished: {ok} ok, {fail} failed "
@@ -602,11 +644,17 @@ class PacsServer:
             return None
 
     # ---- config ------------------------------------------------------------
-    def apply_config(self, new_data: dict) -> None:
+    def apply_config(self, new_data: dict, enforce: bool = False) -> None:
         """Persist a new config from the dashboard and hot-apply it.
 
         The receiver is bound to a port/AE at start time, so if it is running
         we bounce it; the watcher reads config live, so it just keeps going.
+
+        `enforce` marks a save that DEFINES the enrolled set — the setup
+        chooser's. Such a save touches nothing but the bounce of services that
+        were running and stay enrolled: every other transition is left to the
+        sync_services() the caller runs next, which is the single place
+        enrollment is enforced and the only one that reports per-service rows.
         """
         # Validate the candidate first so a bad post never disturbs a running
         # receiver (raises ValueError, surfaced to the caller as a 400).
@@ -624,19 +672,200 @@ class PacsServer:
         # store_dir / match_on may have changed — repoint the live order store.
         self.orders.store_dir = self.cfg.resolved("ris", "store_dir")
         self.orders.match_on = self.cfg.ris.get("match_on", "accession")
-        if was_receiving:
-            self.start_receiver()
-        if was_printing:
-            self.start_printer()
-        if was_ris:
-            self.start_ris()
-        if was_mwl:
-            self.start_mwl()
+        # A plain save restarts whatever was running and also starts anything it
+        # newly ENABLES — persisting "enabled: true" and leaving the service
+        # stopped would be a trap. It never STOPS a running service, though: the
+        # flag is enrollment, and Start on the card (like the CLI overrides) is
+        # a deliberate run-now on top of it.
+        # An enforcing save only bounces what was running AND stays enrolled. It
+        # starts nothing it is disabling — rebinding a port for ~50ms after the
+        # operator said "off" is exactly the bounce the chooser exists to avoid —
+        # and nothing it newly enables either, so sync_services() below performs
+        # each of those transitions once, and reports it.
+        first_exc: Optional[Exception] = None
+        for was, enabled, start, label, kind in (
+            (was_receiving, self.cfg.scp.get("enabled"), self.start_receiver, "receiver", "scp"),
+            (was_printing, self.cfg.printer.get("enabled"), self.start_printer, "print receiver", "print"),
+            (was_ris, self.cfg.ris.get("enabled"), self.start_ris, "RIS listener", "ris"),
+        ):
+            if not ((was and enabled) if enforce else (was or enabled)):
+                continue
+            try:
+                start()
+            except Exception as exc:
+                self.log.error(f"Could not start {label}: {exc}", kind=kind)
+                # Enabled but not bound is a state the dashboard shows (and the
+                # log explains), not a reason to abort a save that is already
+                # persisted — the remaining services, the worklist and the health
+                # monitor still have to be brought up. A run-now service that is
+                # NOT enrolled draws nothing on the dashboard, so for that one
+                # case the exception is the only signal the caller will ever get:
+                # it is kept and re-raised once everything else has been applied.
+                # An enforcing save never reaches here on a disabled service, and
+                # sync_services() retries the rest into a results row.
+                if was and not enabled and first_exc is None:
+                    first_exc = exc
+        # The worklist is not in the loop above: worklist_wanted(), not the flag,
+        # decides whether it runs, and sync_worklist() starts a wanted one. This
+        # is only the run-now case — a worklist nothing wants, kept alive across
+        # a plain save the same way the three services above are.
+        if was_mwl and not enforce and not self.worklist_wanted():
+            try:
+                self.start_mwl()
+            except Exception as exc:
+                self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
+                if first_exc is None:
+                    first_exc = exc
         self.sync_worklist()   # a no_ris destination may now want a permanent worklist
+        if self.cfg.scu.get("enabled") and not self.watcher.running and not enforce:
+            # The watcher is never bounced (it reads config live), so a newly
+            # enrolled one needs its own nudge — except under an enforcing save,
+            # where sync_services() starts it and says so.
+            try:
+                self.start_watcher()
+            except Exception as exc:
+                self.log.error(f"Could not start watcher: {exc}", kind="watch")
         # Re-sync the health monitor to the new config (armed flag / trigger set).
         self.emergency.stop()
         self.emergency.start()
         self.log.info("Configuration updated", kind="config")
+        if first_exc is not None:
+            raise first_exc
+
+    # ---- service enrollment (the dashboard's setup chooser) ---------------
+    def sync_services(self) -> list:
+        """Bring the running services in line with the enabled flags: start what
+        is enabled and stopped, stop what is disabled and running. Each
+        transition stands alone — a port already in use must not stop the rest
+        coming up — and every outcome is reported back as a row."""
+        rows: list = []
+        for name, want, running, start, stop, label, kind in (
+            ("receiver", bool(self.cfg.scp.get("enabled")), bool(self.scp and self.scp.running),
+             self.start_receiver, self.stop_receiver, "receiver", "scp"),
+            ("watcher", bool(self.cfg.scu.get("enabled")), self.watcher.running,
+             self.start_watcher, self.stop_watcher, "watcher", "watch"),
+            ("printer", bool(self.cfg.printer.get("enabled")), bool(self.print_scp and self.print_scp.running),
+             self.start_printer, self.stop_printer, "print receiver", "print"),
+            ("ris", bool(self.cfg.ris.get("enabled")), bool(self.ris and self.ris.running),
+             self.start_ris, self.stop_ris, "RIS listener", "ris"),
+            # worklist_wanted(), not mwl.enabled: a no_ris destination makes the
+            # worklist permanent, and sync_worklist() would otherwise start
+            # again what this just stopped.
+            ("mwl", self.worklist_wanted(), bool(self.mwl_scp and self.mwl_scp.running),
+             self.start_mwl, self.stop_mwl, "worklist SCP", "mwl"),
+        ):
+            if want == running:
+                continue
+            action = "start" if want else "stop"
+            try:
+                (start if want else stop)()
+                rows.append({"service": name, "action": action, "ok": True, "error": ""})
+            except Exception as exc:
+                self.log.error(f"Could not {action} {label}: {exc}", kind=kind)
+                rows.append({"service": name, "action": action, "ok": False, "error": str(exc)})
+        return rows
+
+    def apply_setup(self, picks: dict) -> dict:
+        """Finish the setup chooser: write the five enabled flags plus the
+        completion marker in ONE save, then sync the services to them.
+
+        One save is the point — apply_config stops and restarts every bound
+        service each time it runs, so posting the five service toggles
+        separately would mean five windows with the receiver down. A service
+        that then fails to bind is reported in `results`, not as an error: it
+        is enrolled, which is exactly what was asked for."""
+        import copy
+        new = copy.deepcopy(self.cfg.data)
+        # A `services` that is not an object (an array, say) passes the "key in
+        # picks" test and then blows up on the subscript — a 500 for a bad body
+        # shape, where every other write endpoint gives a 400. ValueError is the
+        # route's 400.
+        if not isinstance(picks, dict):
+            raise ValueError("services must be an object of service -> true/false")
+        for key, section in SETUP_SERVICES:
+            if key in picks:       # an absent key leaves that service's flag alone
+                new[section]["enabled"] = bool(picks[key])
+        new["setup_completed"] = _utc_stamp()
+        # enforce: this save defines the enrolled set, so it must not start what
+        # it is disabling and must not race sync_services() for what it enables.
+        self.apply_config(new, enforce=True)
+        results = self.sync_services()
+        on = [k for k, section in SETUP_SERVICES if new[section].get("enabled")]
+        self.log.info(
+            "Service setup saved: " + (", ".join(on) if on else "nothing enabled"),
+            kind="config",
+        )
+        return {"ok": True, "setup": self.setup_state(), "results": results,
+                "message": f"{len(on)} service(s) enabled"}
+
+    def check_ports(self, items) -> dict:
+        """Can these ports actually be bound on this machine? validate() only
+        checks that ports are in range and distinct, so "another PACS already
+        owns 11112" is otherwise only discoverable by enabling the receiver and
+        reading the log — and the chooser is where that answer is worth having.
+
+        A port one of OUR OWN running services holds is reported free (mine), or
+        the probe would call a healthy receiver broken. Known asymmetry: the RIS
+        listener sets SO_REUSEADDR when it really binds and this probe does not,
+        so its port can read busy while it is in truth rebindable."""
+        import socket
+        ours = set()
+        for obj, sect, default_port in (
+            (self.scp, self.cfg.scp, 11112),
+            (self.print_scp, self.cfg.printer, 11113),
+            (self.ris, self.cfg.ris, 2575),
+            (self.mwl_scp, self.cfg.mwl, 11114),
+        ):
+            if obj and obj.running:
+                ours.add((str(sect.get("bind") or "0.0.0.0"), int(sect.get("port", default_port))))
+        out = []
+        for it in (items or []):
+            it = it if isinstance(it, dict) else {}
+            bind = str(it.get("bind") or "0.0.0.0")
+            try:
+                port = int(it.get("port", 0))
+            except (TypeError, ValueError):
+                port = 0
+            row = {"service": str(it.get("service", "")), "port": port,
+                   "free": False, "mine": False, "error": ""}
+            if not 1 <= port <= 65535:
+                row["error"] = "port must be 1..65535"
+                out.append(row)
+                continue
+            if (bind, port) in ours:
+                row["free"] = row["mine"] = True
+                out.append(row)
+                continue
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # No SO_REUSEADDR on purpose: with it set, a port still in TIME_WAIT
+            # binds cleanly and we would report a port pynetdicom will fight
+            # over as free. A stricter probe can only produce a false "in use",
+            # never a false "free", and that is the direction to be wrong in.
+            try:
+                s.bind((bind, port))
+                row["free"] = True
+            except OSError as exc:
+                row["error"] = str(exc)
+            finally:
+                s.close()
+            out.append(row)
+        return {"ok": True, "results": out}
+
+    def setup_state(self) -> dict:
+        """Has this install been through the service chooser? The marker alone
+        decides it: "" means no run has ever finished the chooser, so it is
+        offered. Whether a config file exists is reported (one stat, no walk)
+        because "never set up" reads differently with and without one, but it is
+        NOT part of the decision — a hand-written config has still never been
+        chosen, and guessing otherwise would be a migration by another name."""
+        marker = str(self.cfg.data.get("setup_completed", "") or "").strip()
+        return {
+            "needed": not marker,
+            "completed": marker,
+            "version": SETUP_VERSION,
+            "config_path": self.cfg.path,
+            "config_exists": os.path.exists(self.cfg.path),
+        }
 
     # ---- status ------------------------------------------------------------
     @staticmethod
@@ -766,7 +995,8 @@ class PacsServer:
         mcfg = self.cfg.mwl
         return {
             "receiver": {
-                "running": bool(scp and scp.running),
+                "enabled": bool(self.cfg.scp.get("enabled", False)),   # enrolled
+                "running": bool(scp and scp.running),                  # bound right now
                 "aet": self.cfg.scp["aet"],
                 "bind": self.cfg.scp.get("bind", "0.0.0.0"),
                 "port": self.cfg.scp["port"],
@@ -775,8 +1005,17 @@ class PacsServer:
                 "received": scp.received_count if scp else 0,
                 "errors": scp.error_count if scp else 0,
                 "refused": scp.refused_count if scp else 0,
+                # Origin of the three counters above (and of `last`): the epoch
+                # THIS receiver object was built, not the process start — a save
+                # or a Start replaces it and zeroes them. No receiver has ever
+                # run in this process yet: the counters are 0 since boot.
+                "since": int(scp.started_at) if scp else int(self.started_at),
                 "tls": bool(self.cfg.scp.get("tls", False)),
                 "tls_mutual": bool(self.cfg.scp.get("tls", False) and self.cfg.scp.get("tls_ca", "")),
+                # Last instance THIS receiver object stored; null means either
+                # no receiver has ever run in this process or none has arrived
+                # since it started — running/enabled tell those apart.
+                "last": scp.last_stored if scp else None,
             },
             "printer": {
                 "enabled": bool(pr.get("enabled", False)),
@@ -789,14 +1028,19 @@ class PacsServer:
                 "printed": pscp.printed_count if pscp else 0,
                 "errors": pscp.error_count if pscp else 0,
                 "tls": bool(pr.get("tls", False)),
+                "since": int(self._counter_since.get("printer", self.started_at)),
             },
             "watcher": {
-                **self.watcher.stats(),
+                **self.watcher.stats(),                                # carries last_sent
+                "enabled": bool(self.cfg.scu.get("enabled", False)),
                 "watch_dir": self.cfg.resolved("scu", "watch_dir"),
                 "aet": self.cfg.scu.get("aet", "CARINOSCU"),
                 "on_success": self.cfg.scu.get("on_success", "keep"),
                 "poll_interval": self.cfg.scu.get("poll_interval", 3),
                 "tls_verify": bool(self.cfg.scu.get("tls_verify", True)),
+                # sent/failed count since the process started: the watcher object
+                # is built once and survives every save, unlike the receiver.
+                "since": int(self.started_at),
             },
             "ris": {
                 "enabled": bool(rcfg.get("enabled", False)),
@@ -808,7 +1052,23 @@ class PacsServer:
                 "received": ris.received_count if ris else 0,
                 "orders_in": ris.order_count if ris else 0,
                 "errors": ris.error_count if ris else 0,
+                # Anchors received/orders_in/errors ONLY. `counts` below comes
+                # from the persisted store and survives restarts entirely — it
+                # is a current state, not a window, and has no origin to give.
+                "since": int(self._counter_since.get("ris", self.started_at)),
                 "counts": self.orders.counts(),
+                # The store is always live (manual entry works with the listener
+                # stopped), so these are real whatever "running" says.
+                "last_order": _order_brief(
+                    self.orders.latest("open"),
+                    ("id", "accession", "patient", "patient_id", "modality",
+                     "study_desc", "created", "source", "status")),
+                # Orders in without orders matched cannot answer whether
+                # reconciliation — the whole point of the RIS — is working.
+                "last_closed": _order_brief(
+                    self.orders.latest("closed", by="closed"),
+                    ("id", "accession", "patient", "created", "closed",
+                     "close_reason", "matched_study")),
             },
             "mwl": {
                 "enabled": bool(mcfg.get("enabled", False)),
@@ -819,6 +1079,7 @@ class PacsServer:
                 "queries": mwl.query_count if mwl else 0,
                 "matches": mwl.match_count if mwl else 0,
                 "errors": mwl.error_count if mwl else 0,
+                "since": int(self._counter_since.get("mwl", self.started_at)),
                 "tls": bool(mcfg.get("tls", False)),
                 "wanted": self.worklist_wanted(),   # permanent (enabled or a no_ris destination)
             },
@@ -828,10 +1089,22 @@ class PacsServer:
             "logs_dir": self.cfg.logs_dir,
             "host_ip": self._local_ip(),
             "host_ips": self._local_ips(),
+            # Current-state figures, NOT counters: pending is a live count of the
+            # review folder, stuck a live count of failed outgoing items, disk a
+            # reading of the volume right now, and ris.counts comes from the
+            # persisted order store. None of them carries a `since`, because none
+            # of them describes a window — that absence is how the dashboard
+            # tells them apart from received/sent, which do.
             "pending": ingest.count_pending(self._pending_dir()),
             "stuck": self.stuck_count(),
             "disk": self._disk_status(),
             "editor_url": self.cfg.web.get("editor_url", ""),
+            # Same epoch base as a log entry. This is when the PROCESS started —
+            # it is uptime's origin, not the counters': each block above carries
+            # its own `since`, because a save rebuilds the object behind it.
+            "started_at": int(self.started_at),
+            "uptime_sec": int(time.time() - self.started_at),
+            "setup": self.setup_state(),
         }
 
     def shutdown(self) -> None:

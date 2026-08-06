@@ -146,6 +146,82 @@ html[lang="ru"] .card-tag, html[lang="ja"] .card-tag {
   .card-lede { padding-left: 0; }
 }
 
+/* ---- enrolled vs running: two orthogonal axes ----
+   The DOT means RUNNING (a socket is bound right now). The card HIGHLIGHT
+   means ENROLLED (the persisted enabled flag). Keeping them apart is the
+   point: it is the only way "enabled but failed to start" can be seen at all.
+   Deliberately NOT the .drop-active treatment (2px ring + 30px glow) — a
+   chosen card would look permanently mid-drag, and a folder dropped onto a
+   chosen card still has to read as a drop. Flat border, faint wash, and a 2px
+   top rule so the state does not rest on colour alone. */
+.card.chosen { border-color: var(--accent); background: linear-gradient(180deg, rgba(234, 179, 8, .05), #080808); }
+.card.chosen::before {
+  content: ""; position: absolute; top: -1px; left: -1px; right: -1px; height: 2px;
+  border-radius: 14px 14px 0 0; background: var(--accent); pointer-events: none;
+}
+/* Enrolled and NOT running: the operator asked for this service and it is not
+   there. An inset rule instead of a real border so the card does not shift by
+   3px the moment a port clash appears. */
+.card.stalled { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
+.card.stalled::before { background: var(--warn); }
+.card.stalled .card-warn { display: block; }
+/* Both at once: the drag feedback has to win, or dropping a folder on a
+   stalled card looks like nothing happened. */
+.card.stalled.drop-active { box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(234,179,8,.22), inset 3px 0 0 var(--warn); }
+
+/* ---- the service chooser: #dlgServices with class="setup" ----
+   Not a modal and not a second set of cards — the same five, one class. The
+   2s poll already writes into these ids, so the chooser is live for free.
+   These three elements ship in every card at all times and are revealed by
+   the state class alone, never by a `hidden` attribute: one switch, so the
+   control cannot be visible per one file and hidden per another. */
+.card-pick { display: none; }
+.card-warn { display: none; margin: 0 0 12px; padding-left: 20px; font-size: .72rem; line-height: 1.4; color: var(--warn); word-break: normal; overflow-wrap: break-word; }
+.card-port { display: none; margin: 0 0 12px; padding-left: 20px; font-family: var(--mono); font-size: .68rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
+.card-port.bad { color: var(--bad); }
+/* The long lede as visible copy. Same width treatment as .card-desc, but no
+   min-height: this one is meant to be as tall as the sentence needs. */
+.card-why { display: none; margin: 3px 0 0; font-size: .74rem; line-height: 1.5; color: #9a9a9a; word-break: normal; overflow-wrap: break-word; hyphens: auto; }
+#dlgServices.setup .card-pick {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; cursor: pointer;
+  font-family: var(--mono); font-size: .66rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+#dlgServices.setup .card-pick:hover { color: var(--accent); }
+html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setup .card-pick {
+  text-transform: none; letter-spacing: .02em;
+}
+/* A real checkbox, not a styled div: focusable, space-toggles, and it reports
+   its own state to assistive tech without app.js having to mirror anything. */
+.pick-box { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+.pick-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* While choosing, the checkbox REPLACES Start/Stop — two controls for one
+   decision is the thing to avoid, and the toggle handlers cannot fire
+   mid-chooser if the button is not there. */
+#dlgServices.setup .card-head .btn.toggle { display: none; }
+#dlgServices.setup #setupOpen { display: none; }
+#dlgServices.setup .card-port { display: block; }
+/* Swap the one-liner for the full two-sentence version, and drop the cursor
+   that advertised a tooltip nobody needs while the text is on screen. */
+#dlgServices.setup .card-why { display: block; }
+#dlgServices.setup .card-desc { display: none; }
+#dlgServices.setup .card-lede { cursor: default; }
+/* Belt and braces: enterSetup() clears the hidden attribute itself, so this
+   only covers the frame between entering setup and the next status poll. The
+   chooser must show the two services a new operator has never seen. */
+#dlgServices.setup #risCard[hidden], #dlgServices.setup #mwlCard[hidden] { display: block; }
+.setup-intro { margin: 0 0 16px; }
+.setup-intro[hidden] { display: none; }
+.setup-intro h3 { margin: 0 0 5px; font-size: 1rem; }
+.setup-intro p { margin: 0; max-width: 74ch; color: var(--muted); font-size: .8rem; line-height: 1.5; word-break: normal; overflow-wrap: break-word; }
+.setup-foot[hidden] { display: none; }
+/* The count owns the left end; the generic `.modal-foot .btn.ghost` auto
+   margin would otherwise fight it for the same free space. */
+.setup-foot .btn.ghost { margin-right: 0; }
+.setup-count { margin-right: auto; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .72rem; line-height: 1.4; word-break: normal; overflow-wrap: break-word; }
+/* Same reason, in the Settings footer: #killSvc already claims the left end. */
+#setupFromSettings { margin-right: 0; }
+
 /* ---- panels ---- */
 .panel { padding: 20px 22px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
@@ -540,6 +616,167 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .emg-modal-card h2 { margin: 0 0 10px; color: #f87171; }
 .emg-modal-card p { margin: 0 0 12px; }
 .emg-modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+
+/* ── Overview ────────────────────────────────────────────────────
+   Its own .ov-* namespace on purpose: .card / .kv / .card-head carry the
+   service-card policy (container queries, reserved hint height, a two-column
+   kv) and reusing them here would drag all of it in. The value policy is the
+   same one the kv block documents, restated in .ov-* terms:
+     .ov-atomic  identifiers — nowrap + ellipsis, app.js mirrors into title
+     .ov-path    paths on a full-width .ov-wide row — overflow-wrap: anywhere
+     everything else is prose — word-break: normal + overflow-wrap: break-word
+   Breaking a value at any character is banned here as it is everywhere else. */
+#dlgOverview .modal-body { display: block; overflow-y: auto; }
+
+/* Counters. Every tile that counts something is a button onto the panel that
+   owns it (app.js wires the click); Free space is a plain div because it
+   counts nothing and leads nowhere.
+   The sizing is set by that one tile, because it is the only value here that is
+   a measurement and not a count: #ovFree is round(free / 1024^3, 1) + " GB", so
+   9 characters ("3725.9 GB") is an ordinary 4 TB volume and 10 ("18626.4 GB") a
+   20 TB one — and it carries no title mirror, so whatever the box cannot hold
+   is lost with no way to recover it. The measure, at the 932px body:
+     tracks   7 tiles want 7 columns, and the widest floor that still fits 7 is
+              (932 - 6x10) / 7 = 124.5px → 124px. Derive against the FLOOR, not
+              against the 124.57px this layout happens to hand out: auto-fit's
+              worst case is a track sitting exactly on its floor, which is what
+              a narrower window produces.
+     content  124 - 22 padding - 2 border = 100px.
+     value    IBM Plex Mono advances exactly 0.6em (measured, all subsets), so
+              1rem = 9.6px per character and 10 characters = 96px. The old
+              1.3rem was 12.48px per character against 96.6px of content, i.e.
+              "999.9 GB" (99.8px) already overflowed — every volume from 100 GB
+              up was ellipsised, usually eating the unit that makes the number
+              mean anything.
+   min(…, 100%) for the reason .cards and .ov-grid carry it: a bare minmax(124px,
+   …) refuses to shrink and overflows a container narrower than one track. */
+.ov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(124px, 100%), 1fr)); gap: 10px; }
+.ov-tile {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; text-align: left;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px; font-family: var(--sans); color: var(--text);
+}
+button.ov-tile { cursor: pointer; transition: .15s; }
+button.ov-tile:hover { border-color: var(--accent); }
+button.ov-tile:hover .ov-tile-k { color: var(--accent); }
+button.ov-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-tile-v { min-width: 0; font-family: var(--mono); font-size: 1rem; font-weight: 700; line-height: 1.15;
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-tile-k { min-width: 0; color: var(--muted); font-size: .64rem; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: .06em; word-break: normal; overflow-wrap: break-word; }
+/* Counters belong to this run of the engine — a config save restarts the
+   receiver — so the "since" line is never optional. */
+.ov-since { margin: 10px 2px 0; color: var(--muted); font-family: var(--mono); font-size: .68rem;
+  word-break: normal; overflow-wrap: break-word; }
+.ov-note { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 0;
+  padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--accent-faint); color: var(--accent); font-size: .8rem; }
+.ov-note[hidden] { display: none; }
+.ov-note > span { min-width: 0; word-break: normal; overflow-wrap: break-word; }
+
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; margin-top: 16px; }
+.ov-box { min-width: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.ov-box-h { margin: 0 0 10px; color: var(--accent); font-family: var(--mono); font-size: .64rem;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+/* Label OVER value, never a fixed label column: a two-column grid confines
+   every value to whatever the longest label leaves it, and "Configuración" or
+   "Конфигурационный файл" leaves a path almost nothing. */
+.ov-list { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 9px 16px; }
+.ov-list > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov-list > div.ov-wide { grid-column: 1 / -1; }
+.ov-list dt { color: var(--muted); font-size: .6rem; line-height: 1.25; text-transform: uppercase; letter-spacing: .06em; }
+.ov-list dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: .82rem;
+  word-break: normal; overflow-wrap: break-word; hyphens: none; }
+/* Same localisation hazard as the kv labels: all-caps Cyrillic at wide
+   tracking is harder to scan, and Japanese gains nothing from either. The
+   destination state belongs in this list as much as any label does: "НЕ
+   ПРОВЕРЯЛСЯ" is both the hardest to read and, at 83.8px against 80.0px in
+   sentence case, the widest thing competing with the node name beside it. */
+html[lang="ru"] .ov-list dt, html[lang="ja"] .ov-list dt,
+html[lang="ru"] .ov-tile-k, html[lang="ja"] .ov-tile-k,
+html[lang="ru"] .ov-box-h, html[lang="ja"] .ov-box-h,
+html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
+  text-transform: none; letter-spacing: .02em;
+}
+.ov-atomic { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-path { font-size: .74rem; word-break: normal; overflow-wrap: anywhere; }
+
+/* Destinations. The state span carries a word as well as a colour, and it is
+   only ever green when a timestamped probe says so — an unprobed node reads
+   "Not checked", which is the truth.
+   A row is a small STACK, not one line of four columns, because the two parts
+   that cannot shrink already own the box. Measured at the shipped 267px
+   (.ov-grid → 3 tracks of 301.33px, minus 32px padding and 2px border):
+     state  70.9px "NOT CHECKED", 83.8 es, 90.3 pt-BR, 80.0 ru, 40.5 ja
+     note   171.1px "checked 2026-08-05 14:30:02" — CarinoClock.format() renders
+            date AND time, so the stamp is 27-30 characters, not the 8 a bare
+            clock would be: 190.1 es/pt-BR, 183.7 ru, 147.8 ja
+   Those two plus the gaps came to 242.0px of the 243.3px a single line had, so
+   the node name and the address were splitting 1.3px in en and OVERFLOWING in
+   es/pt-BR (-17.7px) and ru (-1.9px) — where the clipped tail was the timestamp
+   itself. The name is the identifier the operator recognises, so it cannot be
+   the thing that pays. Stacked, each part gets a measure of its own:
+     row 1  state + name — the name takes 267.33 - state - 8, i.e. 169px in
+            pt-BR (the worst locale) up to 219px in ja: 26+ characters
+     row 2  address, the whole 267.33px = 38 monospace characters, so the usual
+            "192.168.1.50:104 · REMOTE_AE" (28) lands whole. It stays .ov-atomic
+            for the pathological case, but giving it a full row is deliberate:
+            a mid-truncated dotted quad reads as a shorter VALID address, which
+            is the one truncation in this panel worse than an extra line.
+     row 3  the stamp, at most 190.1px of 267.33px, and empty on an unprobed
+            node — an empty grid item is zero high, so those rows stay at two
+            lines and the "Not checked" case costs nothing. */
+.ov-dests { display: flex; flex-direction: column; gap: 7px; }
+.ov-dest { display: grid; grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; overflow: hidden; font-size: .8rem; }
+/* Node names come from the config and can be in any script; isolate keeps an
+   RTL one from reordering the row around it. */
+.ov-dest > span { unicode-bidi: isolate; }
+.ov-dest-state { grid-area: 1 / 1; white-space: nowrap; font-family: var(--mono); font-size: .62rem;
+  text-transform: uppercase; letter-spacing: .05em; }
+.ov-dest-state.ok { color: var(--ok); }
+.ov-dest-state.bad { color: var(--bad); }
+.ov-dest-state.warn { color: var(--warn); }   /* answered our probe, but its sends are backed up */
+.ov-dest-state.unknown { color: var(--muted); }
+.ov-dest-name { grid-area: 1 / 2; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The two full-width rows keep min-width:0 for the reason the kv block gives,
+   and one more here: they span the `auto` track, so without it their content
+   would be free to widen the very column that track exists to size. */
+.ov-dest-addr { grid-area: 2 / 1 / 3 / -1; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .72rem; }
+/* Prose, not an identifier: on its own row it fits in every locale, and if a
+   narrow window ever forces it to fold it folds at a space, which no one can
+   misread — where nowrap would have clipped digits off a timestamp. */
+.ov-dest-note { grid-area: 3 / 1 / 4 / -1; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .66rem;
+  word-break: normal; overflow-wrap: break-word; }
+
+.ov-empty { margin: 0; color: var(--muted); font-family: var(--mono); font-size: .74rem;
+  word-break: normal; overflow-wrap: break-word; }
+.ov-empty[hidden] { display: none; }
+/* One fact per line. app.js blanks a line when its source is null, and an
+   empty line takes no room — so a half-known box has no gaps in it. */
+.ov-line { min-width: 0; font-size: .8rem; line-height: 1.5; unicode-bidi: isolate;
+  word-break: normal; overflow-wrap: break-word; }
+.ov-line:empty { display: none; }
+.ov-strong { font-weight: 700; font-size: .9rem; }
+.ov-dim { color: var(--muted); font-family: var(--mono); font-size: .7rem; }
+.ov-bad { color: var(--bad); font-family: var(--mono); font-size: .7rem; }
+
+/* The log ticker is the one element whose content this app does not author: an
+   engine line in the server's language, arbitrary length, often carrying a
+   patient name in a script we never see. One line, always, in every language —
+   the row clips and cannot grow or push the panel, and isolate stops an RTL
+   name from reordering the timestamp and the text around it. */
+.ov-ticker {
+  display: flex; align-items: baseline; gap: 10px; width: 100%; min-width: 0; overflow: hidden;
+  margin-top: 16px; padding: 10px 14px; text-align: left; cursor: pointer; transition: .15s;
+  background: #070707; border: 1px solid var(--border); border-radius: 10px;
+  font-family: var(--mono); font-size: .74rem; color: var(--text);
+}
+.ov-ticker:hover { border-color: var(--accent); }
+.ov-ticker:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-ticker > span { unicode-bidi: isolate; }
+.ov-ticker .t { flex: 0 0 auto; color: var(--muted); white-space: nowrap; }
+.ov-ticker-m { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Full-screen notice after the service is shut down */
 .stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;

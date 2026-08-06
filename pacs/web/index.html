@@ -30,6 +30,10 @@
     <div class="shell">
       <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
       <nav class="sidebar" id="sidebar">
+        <!-- Overview is first in the list but NOT the landing panel: Services
+             keeps `active` because it is what an unattended screen shows all
+             day, and Overview may put a patient name on the wall. -->
+        <button class="navbtn" data-panel="dlgOverview"><span class="nav-ico">📊</span> <span data-i18n>Overview</span></button>
         <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
         <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> <span data-i18n>History</span></button>
         <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> <span data-i18n>Orders</span><span class="badge" id="ordersBadge" hidden>0</span></button>
@@ -42,24 +46,129 @@
 
       <div id="workspace">
 
+        <!-- Overview — this machine at a glance. Everything here comes from the
+             /api/status poll that already runs every 2s and from the last log
+             line pollLog() drew, so the panel adds no request of its own. The
+             .ov-* namespace is deliberate: .card / .kv / .card-head carry the
+             service-card rendering policy and would drag it in here. -->
+        <section class="panel workpanel" id="dlgOverview" hidden>
+          <header class="modal-head">
+            <h2><span data-i18n>Overview</span> <small data-i18n>this machine at a glance</small></h2>
+            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+          </header>
+          <div class="modal-body">
+            <!-- Each counting tile is a button on the panel that owns the thing
+                 it counts (app.js wires the click); Free space counts nothing
+                 and leads nowhere, so it stays a plain div rather than a button
+                 that does not act. -->
+            <div class="ov-tiles">
+              <button type="button" class="ov-tile" data-panel="dlgServices"><span class="ov-tile-v" id="ovServices">—</span><span class="ov-tile-k" data-i18n>Services on</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgHistory"><span class="ov-tile-v" id="ovReceived">—</span><span class="ov-tile-k" data-i18n>Received</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgHistory"><span class="ov-tile-v" id="ovSent">—</span><span class="ov-tile-k" data-i18n>Sent</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgStuck"><span class="ov-tile-v" id="ovStuck">—</span><span class="ov-tile-k" data-i18n>Stuck</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgPending"><span class="ov-tile-v" id="ovPending">—</span><span class="ov-tile-k" data-i18n>Pending</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgOrders"><span class="ov-tile-v" id="ovOpenOrders">—</span><span class="ov-tile-k" data-i18n>Open orders</span></button>
+              <div class="ov-tile"><span class="ov-tile-v" id="ovFree">—</span><span class="ov-tile-k" data-i18n>Free space</span></div>
+            </div>
+            <!-- Scoped to Received and Sent: they are the only windowed
+                 counters in the row (Stuck, Pending, Open orders and Free space
+                 are current-state figures). Their two origins differ, because a
+                 config save rebuilds the receiver but not the watcher. -->
+            <p class="ov-since" id="ovSince"></p>
+            <p class="ov-note" id="ovSetupNote" hidden>
+              <span data-i18n>Not set up yet — pick the services this PC should run.</span>
+              <button class="btn ghost tiny" id="ovSetupOpen" data-i18n>⚙ Choose services</button>
+            </p>
+            <div class="ov-grid">
+              <section class="ov-box">
+                <h3 class="ov-box-h" data-i18n>This machine</h3>
+                <dl class="ov-list">
+                  <div><dt data-i18n>Address</dt><dd id="ovIp" class="ov-atomic">—</dd></div>
+                  <div><dt data-i18n>Receiver</dt><dd id="ovAetPort" class="ov-atomic">—</dd></div>
+                  <div><dt data-i18n>Version</dt><dd id="ovVersion">—</dd></div>
+                  <div class="ov-wide"><dt data-i18n>Config file</dt><dd id="ovConfigPath" class="ov-path">—</dd></div>
+                  <div class="ov-wide"><dt data-i18n>Storage folder</dt><dd id="ovStorageDir" class="ov-path">—</dd></div>
+                  <div class="ov-wide"><dt data-i18n>Log folder</dt><dd id="ovLogsDir" class="ov-path">—</dd></div>
+                </dl>
+              </section>
+              <section class="ov-box">
+                <h3 class="ov-box-h" data-i18n>Destinations</h3>
+                <div class="ov-dests" id="ovDestList"></div>
+                <p class="ov-empty" id="ovDestEmpty" hidden data-i18n>No destinations configured yet.</p>
+              </section>
+              <section class="ov-box">
+                <h3 class="ov-box-h" data-i18n>Last received</h3>
+                <div class="ov-line ov-strong" id="ovRxPatient"></div>
+                <div class="ov-line" id="ovRxMeta"></div>
+                <div class="ov-line ov-dim" id="ovRxWhen"></div>
+                <p class="ov-empty" id="ovRxEmpty" hidden data-i18n>Nothing received yet.</p>
+              </section>
+              <section class="ov-box">
+                <h3 class="ov-box-h" data-i18n>Last transfer</h3>
+                <div class="ov-line ov-strong" id="ovTxFile"></div>
+                <div class="ov-line" id="ovTxDest"></div>
+                <div class="ov-line ov-dim" id="ovTxWhen"></div>
+                <div class="ov-line ov-bad" id="ovTxError"></div>
+                <p class="ov-empty" id="ovTxEmpty" hidden data-i18n>Nothing sent yet.</p>
+              </section>
+              <section class="ov-box">
+                <h3 class="ov-box-h" data-i18n>Last order</h3>
+                <div class="ov-line ov-strong" id="ovOrderPatient"></div>
+                <div class="ov-line" id="ovOrderMeta"></div>
+                <div class="ov-line ov-dim" id="ovOrderWhen"></div>
+                <div class="ov-line ov-dim" id="ovOrderClosed"></div>
+                <p class="ov-empty" id="ovOrderEmpty" hidden data-i18n>No orders yet.</p>
+              </section>
+            </div>
+            <button type="button" class="ov-ticker" id="ovTicker" data-panel="dlgLogs">
+              <span class="t" id="ovTickerTs"></span>
+              <span class="ov-ticker-m" id="ovTickerMsg" data-i18n>Nothing has happened yet.</span>
+            </button>
+          </div>
+        </section>
+
         <!-- Services (default) — live status cards -->
         <section class="panel workpanel" id="dlgServices">
-          <header class="modal-head"><h2><span data-i18n>Services</span> <small data-i18n>receive · send · worklist</small></h2></header>
+          <header class="modal-head">
+            <h2><span data-i18n>Services</span> <small data-i18n>receive · send · worklist</small></h2>
+            <div class="head-right">
+              <button class="btn ghost tiny" id="setupOpen" data-i18n>⚙ Choose services</button>
+            </div>
+          </header>
           <div class="modal-body">
+            <!-- The chooser is this same panel with class="setup" on it: the
+                 same five cards, the same ids renderStatus() already writes to
+                 every 2s, so the cards stay live while the operator picks. -->
+            <div class="setup-intro" id="setupIntro" hidden>
+              <h3 data-i18n>Choose the services this PC should run</h3>
+              <p data-i18n>Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.</p>
+            </div>
             <section class="cards">
       <article class="card" id="receiverCard">
         <header class="card-head">
           <div class="card-title"><span class="dot" id="rxDot"></span> <span data-i18n>Receiver</span></div>
           <button class="btn toggle" id="rxToggle" data-on="false" data-i18n>Start</button>
+          <!-- Chooser control. It lives in the markup at all times and is
+               revealed by CSS in the setup state, never by a `hidden` attribute
+               — one switch (the state class), so the control cannot end up
+               visible in one file's opinion and hidden in another's. -->
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickRx" data-svc="receiver" /> <span data-i18n>Use this</span></label>
         </header>
         <!-- Lede: protocol tag + one plain sentence. The data-i18n-title value IS
              the i18n key (applyI18nIn keeps a pre-filled data-i18n-title and
              writes t(key) into title), so the same string serves the tooltip now
-             and the first-boot wizard later. -->
+             and the first-boot wizard later. .card-why repeats that same key as
+             visible copy — data-i18n takes its key from the text, so this costs
+             no new string and no JS: in the setup state the long version shows
+             and the one-liner hides, because a tooltip is invisible on touch and
+             to the keyboard, and this is the moment the text matters most. -->
         <div class="card-lede" data-i18n-title="Studies a modality or another PACS send here are saved straight to a folder on this PC. Leave it on: it is what makes this machine a destination other equipment can send to.">
           <p class="card-tag" data-i18n>Storage SCP</p>
           <p class="card-desc" data-i18n>Studies a modality sends here are saved on this PC.</p>
+          <p class="card-why" data-i18n>Studies a modality or another PACS send here are saved straight to a folder on this PC. Leave it on: it is what makes this machine a destination other equipment can send to.</p>
         </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <p class="card-port" id="portRx"></p>
         <dl class="kv">
           <div><dt data-i18n>AE title</dt><dd id="rxAet" class="atomic">—</dd></div>
           <div><dt data-i18n>Listening</dt><dd id="rxAddr" class="atomic">—</dd></div>
@@ -75,11 +184,16 @@
         <header class="card-head">
           <div class="card-title"><span class="dot" id="wxDot"></span> <span data-i18n>Auto-send</span></div>
           <button class="btn toggle" id="wxToggle" data-on="false" data-i18n>Start</button>
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickWx" data-svc="watcher" /> <span data-i18n>Use this</span></label>
         </header>
         <div class="card-lede" data-i18n-title="Files put in the watched folder are forwarded to every enabled destination and retried until each one accepts, so nothing is dropped. Turn it on when studies must move onward.">
           <p class="card-tag" data-i18n>folder watcher</p>
           <p class="card-desc" data-i18n>Studies put in the watched folder are sent onward.</p>
+          <p class="card-why" data-i18n>Files put in the watched folder are forwarded to every enabled destination and retried until each one accepts, so nothing is dropped. Turn it on when studies must move onward.</p>
         </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <!-- No .card-port here: the watcher binds nothing, so there is no port
+             to probe and an empty line would only invite a guess. -->
         <dl class="kv">
           <div class="wide"><dt data-i18n>Watching</dt><dd id="wxDir" class="path">—</dd></div>
           <div><dt data-i18n>Calling AE</dt><dd id="wxAet" class="atomic">—</dd></div>
@@ -95,11 +209,15 @@
         <header class="card-head">
           <div class="card-title"><span class="dot" id="pxDot"></span> <span data-i18n>Print receiver</span></div>
           <button class="btn toggle" id="pxToggle" data-on="false" data-i18n>Start</button>
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickPx" data-svc="printer" /> <span data-i18n>Use this</span></label>
         </header>
         <div class="card-lede" data-i18n-title="A modality that can only print sends its film here, and each sheet is captured into Pending review, not printed. Use it for older ultrasound, CR or dental units that cannot send.">
           <p class="card-tag" data-i18n>Print SCP</p>
           <p class="card-desc" data-i18n>Film from a print-only unit is captured here for review.</p>
+          <p class="card-why" data-i18n>A modality that can only print sends its film here, and each sheet is captured into Pending review, not printed. Use it for older ultrasound, CR or dental units that cannot send.</p>
         </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <p class="card-port" id="portPx"></p>
         <dl class="kv">
           <div><dt data-i18n>AE title</dt><dd id="pxAet" class="atomic">—</dd></div>
           <div><dt data-i18n>Listening</dt><dd id="pxAddr" class="atomic">—</dd></div>
@@ -115,11 +233,15 @@
         <header class="card-head">
           <div class="card-title"><span class="dot" id="rsDot"></span> <span data-i18n>Emergency RIS</span></div>
           <button class="btn toggle" id="rsToggle" data-on="false" data-i18n>Start</button>
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickRs" data-svc="ris" /> <span data-i18n>Use this</span></label>
         </header>
         <div class="card-lede" data-i18n-title="Orders arrive as HL7 messages or are typed in by hand, and close themselves when the matching study arrives. Turn it on when the RIS feed is down and orders must keep flowing.">
           <p class="card-tag" data-i18n>HL7 order intake</p>
           <p class="card-desc" data-i18n>Exam orders arrive here when the hospital RIS is down.</p>
+          <p class="card-why" data-i18n>Orders arrive as HL7 messages or are typed in by hand, and close themselves when the matching study arrives. Turn it on when the RIS feed is down and orders must keep flowing.</p>
         </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <p class="card-port" id="portRs"></p>
         <dl class="kv">
           <div><dt data-i18n>Listening</dt><dd id="rsAddr" class="atomic">—</dd></div>
           <div><dt data-i18n>Protocol</dt><dd class="atomic" title="HL7 / MLLP">HL7 / MLLP</dd></div>
@@ -135,11 +257,15 @@
         <header class="card-head">
           <div class="card-title"><span class="dot" id="mwDot"></span> <span data-i18n>Worklist</span></div>
           <button class="btn toggle" id="mwToggle" data-on="false" data-i18n>Start</button>
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickMw" data-svc="mwl" /> <span data-i18n>Use this</span></label>
         </header>
         <div class="card-lede" data-i18n-title="The tech picks the patient on the scanner instead of typing name and accession; only open orders are served. Turn it on when the RIS worklist is down, or for a room with no RIS.">
           <p class="card-tag" data-i18n>MWL SCP</p>
           <p class="card-desc" data-i18n>Modalities pull their patient list from this PC.</p>
+          <p class="card-why" data-i18n>The tech picks the patient on the scanner instead of typing name and accession; only open orders are served. Turn it on when the RIS worklist is down, or for a room with no RIS.</p>
         </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <p class="card-port" id="portMw"></p>
         <dl class="kv">
           <div><dt data-i18n>AE title</dt><dd id="mwAet" class="atomic">—</dd></div>
           <div><dt data-i18n>Listening</dt><dd id="mwAddr" class="atomic">—</dd></div>
@@ -152,6 +278,15 @@
       </article>
             </section>
           </div>
+          <!-- Chooser footer: hidden until the setup state. "Turn these on" is
+               allowed with nothing ticked — applying zero services is a real
+               answer (it stops everything and records the choice), not an
+               error to block. -->
+          <footer class="modal-foot setup-foot" id="setupFoot" hidden>
+            <span class="setup-count" id="setupCount"></span>
+            <button class="btn ghost" id="setupCancel" data-i18n>Not now</button>
+            <button class="btn" id="setupApply" data-i18n>Turn these on</button>
+          </footer>
         </section>
 
         <!-- History -->
@@ -386,6 +521,7 @@
         </div>
         <footer class="modal-foot">
           <button class="btn kill" id="killSvc" data-i18n-title title="Stop the receiver, watcher and the whole engine process" data-i18n>⏻ Shut down service</button>
+          <button class="btn ghost" id="setupFromSettings" data-i18n>Re-run service setup</button>
           <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
         </footer>
       </section>
@@ -499,6 +635,19 @@
           <button class="btn tiny danger pend-discard" data-i18n-title title="Delete without importing" data-i18n>Discard</button>
         </span>
       </div>
+    </div>
+  </template>
+
+  <!-- Row template for a destination line in Overview. The state span carries a
+       WORD as well as a colour (Reachable / Unreachable / Not checked): a node
+       is only ever green when a timestamped probe says so, and "Not checked" is
+       the honest answer for every node the failover is not watching. -->
+  <template id="ovDestRowTpl">
+    <div class="ov-dest">
+      <span class="ov-dest-state"></span>
+      <span class="ov-dest-name"></span>
+      <span class="ov-dest-addr ov-atomic"></span>
+      <span class="ov-dest-note"></span>
     </div>
   </template>
 

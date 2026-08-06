@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from typing import Callable, Optional
 
 from pynetdicom import AE, evt, AllStoragePresentationContexts, ALL_TRANSFER_SYNTAXES
@@ -36,6 +37,31 @@ def _peer_addr(event) -> str:
         return str(addr) if addr else "?"
     except Exception:
         return "?"
+
+
+def _store_snapshot(ds, path: str, event) -> dict:
+    """A small, immutable record of the instance just stored, for the dashboard's
+    "last received".  Every read is best-effort: telemetry must never be the
+    reason a C-STORE fails, so a tag we cannot decode becomes an empty string."""
+    from .history import _fmt_name          # lazy: this is the C-STORE path, not the poll path
+    snap = {
+        "epoch": int(time.time()),
+        "modality": "", "patient": "", "patient_id": "", "study_uid": "",
+        "file": os.path.basename(path),
+        "from_aet": "", "peer": _peer_addr(event),
+    }
+    try:
+        snap["modality"] = str(getattr(ds, "Modality", "") or "")
+        snap["patient"] = _fmt_name(getattr(ds, "PatientName", ""))
+        snap["patient_id"] = str(getattr(ds, "PatientID", "") or "")
+        snap["study_uid"] = str(getattr(ds, "StudyInstanceUID", "") or "")
+    except Exception:
+        pass
+    try:
+        snap["from_aet"] = str(event.assoc.requestor.ae_title or "")
+    except Exception:
+        pass
+    return snap
 
 
 def dest_path(base: str, ds, organize: bool) -> str:
@@ -80,9 +106,19 @@ class StorageSCP:
         self.tls_ca = tls_ca
         self._server = None
         self._lock = threading.Lock()
+        # When the counters below were zeroed. The server builds a NEW receiver
+        # on every config save and every Start, so they restart at a moment
+        # LATER than the process did; anchoring them to the server's start time
+        # would claim a window they never covered ("0 received since 09:00" on a
+        # receiver rebuilt at 09:05). The dashboard reads this as their origin.
+        self.started_at = time.time()
         self.received_count = 0
         self.error_count = 0
         self.refused_count = 0
+        # Last instance stored by THIS object — None until one arrives, and gone
+        # again when the receiver is rebuilt (a config save replaces it), which is
+        # why the dashboard shows it against started_at above.
+        self.last_stored: Optional[dict] = None
         self._warned_low = False
 
     # ---- disk guard --------------------------------------------------------
@@ -129,8 +165,13 @@ class StorageSCP:
             path = dest_path(self.storage_dir, ds, self.organize)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             ds.save_as(path, write_like_original=False)
+            # Read the tags OUTSIDE the lock and assign the finished dict inside
+            # it: the critical section stays two attribute writes, and a reader
+            # only ever sees a complete snapshot (we never mutate one in place).
+            snap = _store_snapshot(ds, path, event)
             with self._lock:
                 self.received_count += 1
+                self.last_stored = snap
             who = event.assoc.requestor.ae_title
             self.log.info(
                 f"Stored {getattr(ds, 'Modality', '?')} {os.path.basename(path)} "

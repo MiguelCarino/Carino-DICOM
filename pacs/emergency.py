@@ -43,7 +43,7 @@ RECOVERING = "recovering"  # primary back, held studies flushing, awaiting Resum
 class _Health:
     """Per-destination reachability tracker."""
     __slots__ = ("online", "consecutive_fails", "consecutive_ok",
-                 "offline_since", "last_error", "last_probe")
+                 "offline_since", "last_error", "last_probe", "probe_ok")
 
     def __init__(self):
         self.online = True
@@ -52,6 +52,11 @@ class _Health:
         self.offline_since: Optional[float] = None
         self.last_error = ""
         self.last_probe: Optional[float] = None
+        # Did the last C-ECHO itself answer? Kept apart from last_error, which
+        # also carries "forward failing" — a node that answers our probe while
+        # its send queue backs up is reachable, and saying otherwise sends the
+        # operator to check a network that is fine.
+        self.probe_ok: Optional[bool] = None
 
 
 class EmergencyController:
@@ -87,14 +92,27 @@ class EmergencyController:
 
     # ---- lifecycle ---------------------------------------------------------
     def start(self) -> None:
-        """Start the monitor thread if failover is armed (idempotent)."""
-        if not self.armed or (self._thread and self._thread.is_alive()):
-            if self.armed and self.state == OFF:
+        """Start the monitor thread if failover is armed (idempotent).
+
+        stop() joins its worker and clears the reference, so a live thread here
+        is a genuine double-start and nothing else. It must not be the "worker
+        the caller just asked to stop" case: early-returning onto a thread that
+        is about to observe its stop flag leaves no monitor at all, and the
+        monitor is the only source of destination reachability."""
+        if not self.armed:
+            return
+        if self._thread and self._thread.is_alive():
+            if self.state == OFF:
                 self.state = IDLE
             return
-        self._stop.clear()
+        # Each run owns its stop/wake pair. A worker whose join timed out (a
+        # C-ECHO can sit on the wire for seconds) therefore keeps the flag it was
+        # stopped with and exits on its own — clearing a shared event here would
+        # resurrect it alongside its replacement.
+        self._stop, self._wake = threading.Event(), threading.Event()
         self.state = IDLE
-        self._thread = threading.Thread(target=self._loop, name="pacs-emergency", daemon=True)
+        self._thread = threading.Thread(target=self._loop, args=(self._stop, self._wake),
+                                        name="pacs-emergency", daemon=True)
         self._thread.start()
         n = len(self._trigger_dests())
         self.log.info(
@@ -104,9 +122,19 @@ class EmergencyController:
         )
 
     def stop(self) -> None:
+        """Flag the monitor down and wait for it. apply_config() stops then
+        starts in immediate succession, so an unjoined worker would still be
+        alive when start() looks, start() would decline, and the machine would
+        end up with no monitor for the life of the process.
+
+        Never under ``_lock``: the worker takes it in _evaluate()."""
         self._stop.set()
         self._wake.set()
         self.state = OFF
+        t = self._thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2)
+        self._thread = None
 
     def arm(self) -> dict:
         self._cfg["armed"] = True
@@ -173,14 +201,16 @@ class EmergencyController:
         return self.status()
 
     # ---- monitor loop ------------------------------------------------------
-    def _loop(self) -> None:
-        while not self._stop.is_set():
+    def _loop(self, stop: threading.Event, wake: threading.Event) -> None:
+        # Reads its OWN events, never self._stop/self._wake: a later start() has
+        # already replaced those, and this worker must stay stopped.
+        while not stop.is_set():
             try:
                 self._tick()
             except Exception as exc:  # never let the monitor die
                 self.log.error(f"Emergency monitor error: {exc}", kind="emergency")
-            self._wake.clear()
-            self._wake.wait(max(5, int(self._cfg.get("probe_interval_sec", 30))))
+            wake.clear()
+            wake.wait(max(5, int(self._cfg.get("probe_interval_sec", 30))))
 
     def _tick(self) -> None:
         dests = self._trigger_dests()
@@ -200,6 +230,7 @@ class EmergencyController:
             ok, msg = self.server._probe(d)
             failing = (not ok) or (name in stuck)     # both signals
             h.last_probe = now
+            h.probe_ok = ok
             if failing:
                 h.consecutive_fails += 1
                 h.consecutive_ok = 0
@@ -291,6 +322,12 @@ class EmergencyController:
                     "online": bool(h.online) if h else True,
                     "offline_since": self._iso(h.offline_since) if (h and h.offline_since) else "",
                     "last_error": h.last_error if h else "",
+                    "probe_ok": (h.probe_ok if h else None),
+                    # "online" defaults to True before the first probe, so it is
+                    # only meaningful once "checked" says a probe actually ran —
+                    # an unprobed node must not be reported as reachable.
+                    "last_probe": self._iso(h.last_probe) if (h and h.last_probe) else "",
+                    "checked": bool(h and h.last_probe),
                 })
             prompt = (self.state == TRIGGERED and not self.prompt_dismissed)
             return {

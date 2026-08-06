@@ -278,6 +278,16 @@ class OrderStore:
         # Newest first.
         return sorted(out, key=lambda o: o.get("created", ""), reverse=True)
 
+    def latest(self, status: Optional[str] = None, by: str = "created") -> Optional[dict]:
+        """Newest order (optionally of one status) — one max() pass over the live
+        dict, because /api/status reads this every two seconds and list() copies
+        and sorts every order under the lock."""
+        with self._lock:
+            vals = [o for o in self._orders.values() if not status or o.get("status") == status]
+            if not vals:
+                return None
+            return dict(max(vals, key=lambda o: o.get(by, "") or ""))
+
     def get(self, oid: str) -> Optional[dict]:
         with self._lock:
             return self._orders.get(oid)
@@ -424,14 +434,25 @@ class RisListener:
     def start(self) -> None:
         if self.running:
             return
+        # The port is not free until the previous accept loop has let go of the
+        # socket. stop() normally joins it, so this only bites when that join
+        # timed out — wait rather than bind straight into EADDRINUSE.
+        t = self._thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2)
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((self.bind, self.port))
         srv.listen(8)
         srv.settimeout(0.5)
+        # Each run owns its stop event and its socket, so a straggler accept loop
+        # can never be un-stopped by this start() nor end up accepting on the new
+        # listener alongside its replacement.
+        stop = threading.Event()
+        self._stop = stop
         self._sock = srv
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._serve, name="pacs-ris", daemon=True)
+        self._thread = threading.Thread(target=self._serve, args=(srv, stop),
+                                        name="pacs-ris", daemon=True)
         self._thread.start()
         allow = ", ".join(self.allowed_hosts) if self.allowed_hosts else "any host"
         self.log.info(
@@ -440,32 +461,43 @@ class RisListener:
             kind="ris",
         )
 
-    def _serve(self) -> None:
-        while not self._stop.is_set():
-            try:
-                conn, addr = self._sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            peer = addr[0] if addr else "?"
-            if self.allowed_hosts and peer not in self.allowed_hosts:
-                self.log.warn(f"RIS: refused connection from {peer} (not allowed)", kind="ris")
+    def _serve(self, srv: socket.socket, stop: threading.Event) -> None:
+        # Serves the socket it was handed, not self._sock: a restart swaps that
+        # attribute out from under a straggler, which would otherwise start
+        # accepting on the new listener.
+        try:
+            while not stop.is_set():
                 try:
-                    conn.close()
+                    conn, addr = srv.accept()
+                except socket.timeout:
+                    continue
                 except OSError:
-                    pass
-                continue
-            threading.Thread(target=self._handle_conn, args=(conn, peer),
-                             name="pacs-ris-conn", daemon=True).start()
+                    break
+                peer = addr[0] if addr else "?"
+                if self.allowed_hosts and peer not in self.allowed_hosts:
+                    self.log.warn(f"RIS: refused connection from {peer} (not allowed)", kind="ris")
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+                    continue
+                threading.Thread(target=self._handle_conn, args=(conn, peer, stop),
+                                 name="pacs-ris-conn", daemon=True).start()
+        finally:
+            # Drop the last reference to the listening fd here — whoever joins us
+            # is about to re-bind this port.
+            try:
+                srv.close()
+            except OSError:
+                pass
 
-    def _handle_conn(self, conn: socket.socket, peer: str) -> None:
+    def _handle_conn(self, conn: socket.socket, peer: str, stop: threading.Event) -> None:
         """Read MLLP-framed messages off one connection, ACK each. A sender may
         pipeline several messages on the same stream, so we loop until close."""
         conn.settimeout(30)
         buf = bytearray()
         try:
-            while not self._stop.is_set():
+            while not stop.is_set():
                 try:
                     chunk = conn.recv(65536)
                 except socket.timeout:
@@ -535,4 +567,13 @@ class RisListener:
             self._sock.close()
         finally:
             self._sock = None
-            self.log.info("RIS listener stopped", kind="ris")
+        # Wait for the accept loop to release the port. apply_config() re-binds it
+        # immediately after this returns, and a loop still winding down loses that
+        # race with EADDRINUSE — which surfaces as HTTP 200 plus a silently dead
+        # HL7 order intake. Never under ``_lock``: the connection threads take it
+        # to bump the counters.
+        t = self._thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2)
+        self._thread = None
+        self.log.info("RIS listener stopped", kind="ris")

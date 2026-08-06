@@ -45,12 +45,19 @@
   // so an omitted key would otherwise silently reset.
   let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {}, loadedEmg = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
+  // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
+  // carrying it through a Save, apply_config's merge over DEFAULTS would reset it
+  // to "" and the chooser would be offered again after every Settings save.
+  let loadedSetup = "";
+  let loadedLogsDir = "";   // no form field; cfg.replace merges over DEFAULTS, so a Save would reset it
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
+  let lastStatus = null;                             // newest /api/status, for the panels that render on demand
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
     const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
+    lastStatus = s;
     mountServiceChips();      // self-heals if the navbar mounted after us
 
     // This machine's network identity (what remote nodes send to).
@@ -162,20 +169,55 @@
     setChip("mw", mw.running);
 
     renderEmergency(s.emergency || {}, rs, mw);
+
+    // Enrolled and running are two different facts. The border says "this PC is
+    // supposed to run it" (the persisted flag), the dot says "the socket is bound
+    // right now" — so a service that was enrolled but never came up is visible
+    // instead of looking like one that was simply never asked for.
+    setCardState("receiverCard", rx.enabled, rx.running);
+    setCardState("watcherCard", wx.enabled, wx.running);
+    setCardState("printerCard", px.enabled, px.running);
+    setCardState("risCard", rs.enabled, rs.running);
+    // The worklist has a second enrolment axis: a destination flagged no_ris
+    // makes it permanent whatever the flag says (sync_services drives it from
+    // worklist_wanted()). Painting the border from mwl.enabled alone left the
+    // operator who unticked it looking at a running service with no highlight
+    // and nothing anywhere saying why.
+    setCardState("mwlCard", mw.enabled || mw.wanted, mw.running);
+
+    if (setupActive) {
+      // Entered before the first status landed (boot #setup): seed now.
+      if (!setupSeeded) seedSetup(s);
+    } else if (!setupDismissed && s.setup && s.setup.needed) {
+      // Door 1 — nothing has ever been chosen on this machine.
+      showPanel("dlgServices");
+      enterSetup();
+    }
+
+    renderOverview(s);
   }
 
   /* ── Emergency failover: banner, activation pop-up, card visibility ──── */
   let emgPromptShown = false;
   function renderEmergency(emg, rs, mw) {
     // The Worklist + Emergency-RIS cards are advanced/emergency services — keep
-    // them off the normal dashboard unless they're running or failover is armed.
+    // them off the normal dashboard unless they're running, enrolled or failover
+    // is armed. Enrolled counts: a service that is meant to run but did not come
+    // up must be visible, or its warning has nowhere to appear.
     const rsCard = $("risCard"), mwCard = $("mwlCard");
-    if (rsCard) rsCard.hidden = !((rs && rs.running) || emg.armed);
-    // Worklist card shows when running, armed, or a no_ris destination makes it permanent.
-    if (mwCard) mwCard.hidden = !((mw && (mw.running || mw.wanted)) || emg.armed);
+    // The chooser needs all five cards regardless, so setupActive forces both
+    // visible below. It clears the ATTRIBUTE rather than leaning on the CSS
+    // un-hide: hidden is what a screen reader and every el.hidden test read, and
+    // RIS and Worklist are exactly the two services a first-time operator has
+    // never seen. The next poll after exitSetup() restores the normal rule.
+    const rsShow = !!((rs && (rs.running || rs.enabled)) || emg.armed || setupActive);
+    // Worklist card shows when running, enrolled, armed, or a no_ris destination makes it permanent.
+    const mwShow = !!((mw && (mw.running || mw.enabled || mw.wanted)) || emg.armed || setupActive);
+    if (rsCard) rsCard.hidden = !rsShow;
+    if (mwCard) mwCard.hidden = !mwShow;
     // Keep the navbar chips for these advanced services in step with their cards.
-    showChip("rs", !(rsCard && rsCard.hidden));
-    showChip("mw", !(mwCard && mwCard.hidden));
+    showChip("rs", rsShow);
+    showChip("mw", mwShow);
 
     const banner = $("emgBanner");
     const state = emg.state || "off";
@@ -239,6 +281,371 @@
   function setDot(el, on) {
     el.classList.toggle("on", on);
     el.classList.toggle("off", !on);
+  }
+
+  /* ── Service chooser: #dlgServices wearing its "setup" state ─────
+     Not a second screen — the same five cards, plus a checkbox each, switched by
+     one class. Which services this PC runs is a persisted decision (scp.enabled,
+     scu.enabled, print.enabled, ris.enabled, mwl.enabled); the chooser writes all
+     five in ONE post because apply_config() stops and restarts the receiver on
+     every save, so doing it a service at a time would take the receiver down five
+     times over. Selection stays local until Apply for the same reason. */
+  const SETUP_CARDS = [
+    { svc: "receiver", card: "receiverCard", pick: "pickRx", port: "portRx", label: "Receiver",       block: "receiver" },
+    { svc: "watcher",  card: "watcherCard",  pick: "pickWx", port: "",       label: "Auto-send",      block: "watcher" },
+    { svc: "printer",  card: "printerCard",  pick: "pickPx", port: "portPx", label: "Print receiver", block: "printer" },
+    { svc: "ris",      card: "risCard",      pick: "pickRs", port: "portRs", label: "Emergency RIS",  block: "ris" },
+    { svc: "mwl",      card: "mwlCard",      pick: "pickMw", port: "portMw", label: "Worklist",       block: "mwl" },
+  ];
+  // setupDismissed is deliberately in memory only: "Not now" must silence the 2s
+  // poll for this page-load, but a reload should offer the chooser again while
+  // the machine still has no services chosen.
+  let setupActive = false, setupSeeded = false, setupDismissed = false;
+  const labelFor = (svc) => (SETUP_CARDS.find((c) => c.svc === svc) || {}).label || svc;
+
+  function setCardState(id, enabled, running) {
+    const card = $(id);
+    if (!card) return;
+    // While the chooser is open the checkbox owns the highlight — otherwise the
+    // 2s poll would paint over a tick the operator made half a second ago.
+    if (!setupActive) card.classList.toggle("chosen", !!enabled);
+    card.classList.toggle("stalled", !!enabled && !running);
+  }
+
+  // The five cards share one .card-warn, and it tells the operator to check the
+  // port — but the watcher binds no port at all (that is why its card has no
+  // .card-port), so on that one card the only instruction it gives is impossible
+  // to follow and points away from the real causes, a missing watched folder or
+  // a thread that never started. Dropping the clause leaves exactly the sentence
+  // the Overview boxes already use, so it costs no extra string. It is retitled
+  // from JS rather than in the markup because the language pass keys on the
+  // element's own text and would put the shared sentence back on every switch.
+  function retitleWatcherWarn() {
+    const card = $("watcherCard");
+    const warn = card && card.querySelector(".card-warn");
+    if (warn) warn.textContent = T("Enabled but not running — check the log.");
+  }
+
+  function enterSetup() {
+    const panel = $("dlgServices");
+    if (!panel) return;
+    setupActive = true;
+    setupSeeded = false;
+    panel.classList.add("setup");
+    // Un-hide the two advanced cards for real, now rather than on the next poll —
+    // renderEmergency() keeps them shown while setupActive, and restores the
+    // normal rule after exitSetup().
+    const rsCard = $("risCard"), mwCard = $("mwlCard");
+    if (rsCard) rsCard.hidden = false;
+    if (mwCard) mwCard.hidden = false;
+    const intro = $("setupIntro"), foot = $("setupFoot");
+    if (intro) intro.hidden = false;
+    if (foot) foot.hidden = false;
+    if (lastStatus) seedSetup(lastStatus);
+    else updateSetupCount();  // no status yet (boot #setup) — the next poll seeds it
+  }
+
+  function exitSetup() {
+    const panel = $("dlgServices");
+    setupActive = false;
+    setupDismissed = true;
+    if (panel) panel.classList.remove("setup");
+    const intro = $("setupIntro"), foot = $("setupFoot");
+    if (intro) intro.hidden = true;
+    if (foot) foot.hidden = true;
+    pollStatus();             // the poll is the truth: it repaints highlights and card visibility
+  }
+
+  // Seed the boxes from the persisted flags ONCE per chooser session; after that
+  // the operator owns them until Apply or Cancel.
+  function seedSetup(s) {
+    setupSeeded = true;
+    SETUP_CARDS.forEach((c) => {
+      const on = !!((s[c.block] || {}).enabled);
+      const box = $(c.pick);
+      if (box) box.checked = on;
+      const card = $(c.card);
+      if (card) card.classList.toggle("chosen", on);
+    });
+    updateSetupCount();
+    probePorts(s);
+  }
+
+  function pickedServices() {
+    const out = {};
+    document.querySelectorAll(".pick-box").forEach((b) => { out[b.dataset.svc] = b.checked; });
+    return out;
+  }
+
+  function updateSetupCount() {
+    const el = $("setupCount");
+    if (!el) return;
+    const picks = pickedServices();
+    const n = Object.keys(picks).filter((k) => picks[k]).length;
+    // Zero is a legitimate choice (it stops everything and still records that the
+    // question was answered), so it gets a sentence rather than a blocked button.
+    el.textContent = n ? TN(n, "{n} selected") : T("Nothing selected — this PC will not receive or send anything.");
+  }
+
+  // validate() proves the ports are distinct and in range, never that they are
+  // free — so until now the only way to learn 11112 was taken was to start the
+  // receiver and read the log. Fired once on entering the chooser, not polled.
+  async function probePorts(s) {
+    const items = [];
+    SETUP_CARDS.forEach((c) => {
+      const el = c.port && $(c.port);
+      const blk = s[c.block] || {};
+      if (!el || blk.port == null) return;      // the watcher binds nothing at all
+      el.textContent = T("Checking ports…");
+      el.classList.remove("bad");
+      items.push({ service: c.svc, bind: blk.bind || "0.0.0.0", port: blk.port });
+    });
+    if (!items.length) return;
+    let res;
+    try {
+      res = await post("/api/portcheck", { ports: items });
+    } catch (e) {
+      // No answer is rendered as no answer — never as a guess about the port.
+      SETUP_CARDS.forEach((c) => { const el = c.port && $(c.port); if (el) { el.textContent = ""; el.classList.remove("bad"); } });
+      return;
+    }
+    const by = {};
+    (res.results || []).forEach((r) => { by[r.service] = r; });
+    SETUP_CARDS.forEach((c) => {
+      const el = c.port && $(c.port);
+      if (!el) return;
+      const r = by[c.svc];
+      if (!r) { el.textContent = ""; el.classList.remove("bad"); return; }
+      const free = !!(r.free || r.mine);        // a port we are already listening on is ours, not a clash
+      // Three different facts, three different sentences. "mine" is not "free" —
+      // check_ports skipped the bind because this process already holds the
+      // port — and only an address-in-use errno (98 Linux, 48 BSD/macOS, 10048
+      // Windows) is the clash the friendly sentence describes. "port must be
+      // 1..65535" is an answer about the configuration and EACCES on 104 is an
+      // answer about privileges; both are shown in the engine's own words, like
+      // every other engine message, rather than recast as a clash on this PC.
+      const clash = /\[(?:Errno|WinError) (?:98|48|10048)\]/.test(r.error || "");
+      el.textContent = r.mine ? TF("Port {port} is in use by this app", { port: r.port })
+                     : free   ? TF("Port {port} is free", { port: r.port })
+                     : (r.error && !clash) ? r.error
+                              : TF("Port {port} is already in use on this PC", { port: r.port });
+      el.classList.toggle("bad", !free);
+    });
+  }
+
+  async function applySetup(btn) {
+    const picks = pickedServices();
+    const n = Object.keys(picks).filter((k) => picks[k]).length;
+    btn.disabled = true;
+    try {
+      const res = await post("/api/setup", { services: picks });
+      // The server has just rewritten all five enabled flags and the onboarding
+      // stamp, but this file's snapshot of the config still predates the chooser
+      // — and EVERY later POST /api/config re-asserts that snapshot verbatim
+      // (collectConfig() spreads loadedScp/loadedScu, reads #prnEnabled /
+      // #risEnabled / #mwlEnabled, and carries loadedSetup). A Settings Save or
+      // any card's Start would therefore undo the whole enrolment and re-offer
+      // the chooser forever. Re-read the config instead of hand-assigning the
+      // six fields the chooser touched: hand-assignment is what created this
+      // class of bug, and a seventh field would silently reintroduce it. The
+      // cost is that unsaved Settings edits are replaced by what was persisted,
+      // which is the correct direction to be wrong in — the server's config is
+      // the thing the next Save has to be built on.
+      let resyncErr = null;
+      await loadConfig().catch((e) => { resyncErr = e; });
+      flashNote(TN(n, "{n} services enabled"), true);
+      // A service that failed to bind is not a failed request — it is the
+      // "enabled but not running" state the cards now show, so name each one
+      // instead of failing the whole apply.
+      (res.results || []).filter((r) => r.ok === false).forEach((r) => {
+        flashNote(TF("{svc} did not start: {err}", { svc: T(labelFor(r.service)), err: r.error || "" }), false);
+      });
+      // A snapshot that could not be re-read is the one state that must not pass
+      // quietly — the next Save would post the pre-chooser config — so it is
+      // flashed last, over the success toast.
+      if (resyncErr) flashNote(TF("Load failed: {err}", { err: resyncErr.message }), false);
+      exitSetup();
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally { btn.disabled = false; }
+  }
+
+  /* ── Overview ────────────────────────────────────────────────────
+     One screen of facts about this machine, drawn entirely from polls that are
+     already running: renderStatus() feeds the tiles and boxes, pollLog() feeds
+     the ticker. No fetch, no timer, and nothing is drawn while the panel is
+     closed. Nothing here is inferred — a peer is only "reachable" when its last
+     probe actually succeeded, and an empty box says whether the service behind
+     it is idle or stopped rather than leaving the operator to guess. */
+  function renderOverview(s) {
+    const panel = $("dlgOverview");
+    if (!panel || panel.hidden) return;         // badges keep updating; the DOM work is skipped
+    const txt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    const rx = s.receiver || {}, wx = s.watcher || {}, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
+    const setup = s.setup || {};
+
+    txt("ovServices", [rx, wx, px, rs, mw].filter((b) => b.running).length + "/5");
+    txt("ovReceived", rx.received || 0);
+    txt("ovSent", wx.sent || 0);
+    txt("ovStuck", s.stuck || 0);
+    txt("ovPending", s.pending || 0);
+    txt("ovOpenOrders", (rs.counts && rs.counts.open) || 0);
+    const disk = s.disk || {};
+    txt("ovFree", disk.free_gb != null ? disk.free_gb + " GB" : "—");
+    // Only Received and Sent are counters; Stuck, Pending, Open orders and Free
+    // space are current-state figures with no window at all (open orders outlive
+    // the process entirely), so the line names the two it actually covers.
+    // The origin is the NEWEST the payload offers: the receiver object is rebuilt
+    // — and its counters zeroed — on every config save, so borrowing the
+    // process's start instant would claim a window the tile never counted.
+    // Two origins, not one: the receiver object is rebuilt — and its counters
+    // zeroed — on every config save, while the watcher survives it. Averaging or
+    // max-ing them would caption one tile with the other tile's instant, which
+    // is the same lie in smaller print. They collapse to one line only when the
+    // two really are the same moment.
+    const rxSince = rx.since || s.started_at || 0;
+    const wxSince = wx.since || s.started_at || 0;
+    txt("ovSince", !rxSince && !wxSince ? ""
+      : rxSince === wxSince
+        ? TF("Received and sent counted since {ts}", { ts: fmtLogTs(rxSince * 1000) })
+        : TF("Received counted since {rx} · sent since {wx}",
+             { rx: fmtLogTs(rxSince * 1000), wx: fmtLogTs(wxSince * 1000) }));
+    const note = $("ovSetupNote");
+    if (note) note.hidden = !setup.needed;
+
+    const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
+    setAtomic("ovIp", ips.length ? ips[0] + (ips.length > 1 ? " +" + (ips.length - 1) : "") : "");
+    // The AE:port is what a tech points a modality at, so it may only be printed
+    // as an address when something is actually bound to it — a stopped receiver
+    // says so on the same line instead of sending them to a dead port.
+    setAtomic("ovAetPort", rx.aet
+      ? rx.aet + ":" + rx.port + (rx.running ? "" : " · " + T("not listening"))
+      : "");
+    txt("ovVersion", dash(s.version));
+    setPath("ovConfigPath", setup.config_path || s.config_path);
+    setPath("ovStorageDir", rx.storage_dir);
+    setPath("ovLogsDir", s.logs_dir);
+
+    renderOvDests(s);
+    renderOvLast(s);
+  }
+
+  function renderOvDests(s) {
+    const box = $("ovDestList"), empty = $("ovDestEmpty"), tpl = $("ovDestRowTpl");
+    if (!box || !tpl) return;
+    const list = (s.destinations || []).filter((d) => d.enabled !== false);
+    if (empty) empty.hidden = !!list.length;
+    box.innerHTML = "";
+    // Only 🚨-flagged destinations are probed, and only while failover is armed,
+    // so most installs have no evidence about most peers. Absence of evidence is
+    // rendered as "Not checked" — never as a green dot nothing stands behind.
+    const probes = {};
+    ((s.emergency || {}).destinations || []).forEach((e) => { probes[e.name] = e; });
+    list.forEach((d) => {
+      const row = I18N_IN(tpl.content.cloneNode(true)).querySelector(".ov-dest");
+      const nm = row.querySelector(".ov-dest-name");
+      nm.textContent = d.name || T("(destination)");
+      nm.title = nm.textContent;                // ellipsises; keep the full name reachable
+      const addr = row.querySelector(".ov-dest-addr");
+      addr.textContent = dash([d.host && d.port ? d.host + ":" + d.port : d.host, d.aet].filter(Boolean).join(" · "));
+      addr.title = addr.textContent;            // .ov-atomic ellipsises the tail
+      const state = row.querySelector(".ov-dest-state");
+      const note = row.querySelector(".ov-dest-note");
+      const p = probes[d.name];
+      if (p && p.checked) {
+        // `online` is NOT "the last probe succeeded": it stays true for
+        // offline_threshold_sec after probes start failing (that debounce is the
+        // failover state machine's, and it stays untouched), while last_probe is
+        // stamped on every tick whatever the outcome. Green here would therefore
+        // mean "failing for under two minutes" and carry a fresh timestamp
+        // behind it. last_error is the per-tick fact — the engine clears it on a
+        // successful probe — so it is what the green state is gated on.
+        // Three outcomes, because the engine reports three. probe_ok is the
+        // C-ECHO itself; last_error also carries "forward failing", which is set
+        // when the node ANSWERED but its send queue is backed up. Calling that
+        // unreachable sends the operator to check a network that is fine.
+        const answered = p.probe_ok !== false;
+        const up = answered && !p.last_error;
+        state.classList.add(up ? "ok" : (answered ? "warn" : "bad"));
+        state.textContent = up ? T("Reachable")
+          : answered ? T("Sends failing") : T("Unreachable");
+        // The engine's own words for the failure, untranslated, without spending
+        // row width: the badge carries them as its tooltip.
+        if (p.last_error) state.title = p.last_error;
+        note.textContent = p.last_probe
+          ? TF("checked {ts}", { ts: fmtLogTs(Date.parse(p.last_probe), p.last_probe) }) : "";
+      } else {
+        state.classList.add("unknown");
+        state.textContent = T("Not checked");
+        note.textContent = "";
+      }
+      box.appendChild(row);
+    });
+  }
+
+  // The three "last thing that happened" boxes. Each is null until this process
+  // has actually done that thing — but "nothing yet" and "this service is not
+  // running" are different instructions: the first says wait, the second says go
+  // and turn it on. Both flags ride in the same payload, so the empty line says
+  // which of the two it is instead of always reading as idle.
+  function ovEmptyText(blk, idle) {
+    if (blk.running) return T(idle);
+    return blk.enabled ? T("Enabled but not running — check the log.")
+                       : T("Switched off on this PC.");
+  }
+
+  function renderOvLast(s) {
+    const txt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    // Show the empty line and, while it is showing, own its wording.
+    const empty = (id, on, blk, idle) => {
+      const el = $(id);
+      if (!el) return;
+      el.hidden = !on;
+      if (on) el.textContent = ovEmptyText(blk, idle);
+    };
+
+    const rx = s.receiver || {};
+    const l = rx.last;
+    empty("ovRxEmpty", !l, rx, "Nothing received yet.");
+    txt("ovRxPatient", l ? (l.patient || T("(no name)")) + (l.patient_id ? "  ·  " + l.patient_id : "") : "");
+    txt("ovRxMeta", l ? [l.modality, l.file, l.from_aet ? TF("from {src}", { src: l.from_aet }) : ""]
+      .filter(Boolean).join("  ·  ") : "");
+    txt("ovRxWhen", l ? fmtLogTs(l.epoch * 1000) : "");
+
+    const wx = s.watcher || {};
+    const t = wx.last_sent;
+    empty("ovTxEmpty", !t, wx, "Nothing sent yet.");
+    txt("ovTxFile", t ? t.file || "" : "");
+    txt("ovTxDest", t ? "→ " + (t.dest || "") : "");
+    txt("ovTxWhen", t ? fmtLogTs(t.epoch * 1000) : "");
+    // The engine's own words, untranslated, like every other engine message.
+    txt("ovTxError", t && t.ok === false ? t.error || "" : "");
+
+    const ris = s.ris || {};
+    const o = ris.last_order, c = ris.last_closed;
+    // A closed order is still evidence that orders exist, so the empty line is
+    // for the box with nothing in it at all — and then it says whether the HL7
+    // feed is down, since orders can also be typed in by hand with it stopped.
+    // Orders can be typed in by hand with the HL7 listener stopped, so this box
+    // must not say the feature is off — only that the intake is.
+    const oe = $("ovOrderEmpty");
+    if (oe) {
+      oe.hidden = !(!o && !c);
+      if (!oe.hidden) oe.textContent = ris.running ? T("No orders yet.")
+                                                   : T("No orders yet — HL7 intake is stopped.");
+    }
+    txt("ovOrderPatient", o ? (o.patient || T("(no patient)")) +
+      (o.accession ? "  ·  " + TF("ACC {acc}", { acc: o.accession }) : "") : "");
+    txt("ovOrderMeta", o ? [
+      o.patient_id ? TF("ID {id}", { id: o.patient_id }) : "",
+      o.modality || "",
+      o.study_desc || T("(no study description)"),
+      o.source ? TF("from {src}", { src: o.source }) : "",
+    ].filter(Boolean).join("  ·  ") : "");
+    txt("ovOrderWhen", o && o.created ? TF("queued {ts}", { ts: fmtLogTs(Date.parse(o.created), o.created) }) : "");
+    txt("ovOrderClosed", !c ? "" : (c.close_reason === "matched"
+      ? TF("✓ matched {ts}", { ts: fmtLogTs(Date.parse(c.closed), c.closed) })
+      : TF("cancelled {ts}", { ts: fmtLogTs(Date.parse(c.closed), c.closed) })));
   }
 
   /* ── Service chips in the top navbar ─────────────────────────────
@@ -333,13 +740,28 @@
   }
   // Re-render already-drawn log lines when the clock mode changes.
   document.addEventListener("carino-clock-change", () => {
-    document.querySelectorAll("#log .t[data-ms]").forEach((t) => {
+    document.querySelectorAll("#log .t[data-ms], #ovTicker .t[data-ms]").forEach((t) => {
       t.textContent = fmtLogTs(Number(t.dataset.ms));
     });
   });
 
   /* ── Log polling ─────────────────────────────────────────────── */
   let logSeq = 0, firstLog = true;
+  // #ovTickerMsg ships with a data-i18n placeholder, so the language pass writes
+  // "Nothing has happened yet." back over the live engine line every time the
+  // language changes — a false statement on a machine that has been logging all
+  // day. The last line drawn is kept here so the langchange handler can restore
+  // it at once instead of leaving it wrong until the next log poll.
+  let lastTick = null;
+  function paintTicker() {
+    if (!lastTick) return;
+    const ts = $("ovTickerTs"), msg = $("ovTickerMsg");
+    if (ts) {
+      if (!isNaN(lastTick.ms)) ts.dataset.ms = lastTick.ms;
+      ts.textContent = fmtLogTs(lastTick.ms, lastTick.ts);
+    }
+    if (msg) msg.textContent = lastTick.message;
+  }
   async function pollLog() {
     try {
       const data = await api("/api/log?since=" + logSeq);
@@ -368,6 +790,18 @@
         line.append(t, m);
         box.appendChild(line);
       }
+      // Overview's ticker is the last line of whatever this poll drew — the first
+      // poll asks since=0 and gets the whole backlog, so it is right from the
+      // first tick after a reload without a second request.
+      if (data.entries.length) {
+        const last = data.entries[data.entries.length - 1];
+        lastTick = {
+          ms: last.epoch ? last.epoch * 1000 : Date.parse(last.ts || ""),
+          ts: last.ts,
+          message: last.message,
+        };
+        paintTicker();
+      }
       while (box.childElementCount > 400) box.removeChild(box.firstChild);
       if (atBottom) box.scrollTop = box.scrollHeight;
       if (!firstLog) {                 // don't blink for the backlog on first load
@@ -391,6 +825,8 @@
     loadedMwl = c.mwl || {};
     loadedEmg = c.emergency || {};
     loadedWeb = c.web || loadedWeb;
+    loadedSetup = c.setup_completed || "";
+    loadedLogsDir = c.logs_dir || "";
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
     $("scpBind").value = c.scp.bind;
@@ -567,6 +1003,10 @@
       },
       destinations: collectDests(),
       web: { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() },
+      // Top-level, no form input: carried through so a Save cannot wipe the
+      // onboarding stamp and re-offer the chooser forever.
+      setup_completed: loadedSetup,
+      logs_dir: loadedLogsDir,
     };
   }
 
@@ -1124,7 +1564,9 @@
   /* ── Sidebar workspace: each nav button expands its panel in the pane ──
      Every panel renders inline in the viewport-bound workspace and scrolls its
      own content; there is no popup/backdrop anymore. */
-  const PANELS = ["dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgSettings", "dlgLogs"];
+  // Overview leads the list (hash routing + sidebar order match) but Services
+  // stays the landing panel: the unattended screen must not show patient names.
+  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgSettings", "dlgLogs"];
   const loaders = { dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck };
   let activePanel = "dlgServices";
 
@@ -1134,6 +1576,9 @@
     PANELS.forEach((pid) => { const p = $(pid); if (p) p.hidden = pid !== id; });
     document.querySelectorAll(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
     if (loaders[id]) loaders[id]();
+    // Overview has no loader — it is drawn by the status poll — so redraw it from
+    // the last poll on open instead of showing a blank panel for up to 2s.
+    if (id === "dlgOverview" && lastStatus) renderOverview(lastStatus);
   }
   function reflowActive() { /* no-op: panels scroll internally now (kept for callers) */ }
 
@@ -1166,6 +1611,30 @@
     $("saveDests").addEventListener("click", () => saveConfig());
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
+
+    // Service chooser. Three of the four doors are buttons (the fourth is the
+    // first status that says nothing has ever been chosen); every one of them is
+    // optional markup as far as this file is concerned, so nothing is assumed.
+    const setupOpen = $("setupOpen");
+    if (setupOpen) setupOpen.addEventListener("click", enterSetup);
+    const setupFromSettings = $("setupFromSettings");
+    if (setupFromSettings) setupFromSettings.addEventListener("click", () => { showPanel("dlgServices"); enterSetup(); });
+    const ovSetupOpen = $("ovSetupOpen");
+    if (ovSetupOpen) ovSetupOpen.addEventListener("click", () => { showPanel("dlgServices"); enterSetup(); });
+    const setupCancel = $("setupCancel");
+    if (setupCancel) setupCancel.addEventListener("click", exitSetup);
+    const setupApply = $("setupApply");
+    if (setupApply) setupApply.addEventListener("click", () => applySetup(setupApply));
+    document.querySelectorAll(".pick-box").forEach((b) =>
+      b.addEventListener("change", () => {
+        const card = b.closest(".card");
+        if (card) card.classList.toggle("chosen", b.checked);
+        updateSetupCount();
+      }));
+    // Overview tiles and the ticker each carry data-panel: every figure on the
+    // panel leads to the screen that owns the thing it counts.
+    document.querySelectorAll("#dlgOverview [data-panel]").forEach((b) =>
+      b.addEventListener("click", () => showPanel(b.dataset.panel)));
 
     // Sidebar: each button expands its panel in the right-hand pane.
     document.querySelectorAll(".navbtn").forEach((b) =>
@@ -1200,16 +1669,42 @@
     // file rendered (status cards, list rows, navbar chips) is redrawn here.
     window.addEventListener("carino:langchange", () => {
       relabelServiceChips();
+      // i18n.js has just re-applied the static markup, which includes two live
+      // elements it seeded with placeholders — the Overview ticker and the three
+      // empty lines. Repaint them from what is already in hand, synchronously,
+      // so the placeholder never gets to stand as a statement about this machine
+      // while the next poll is in flight.
+      paintTicker();
+      if (lastStatus) renderOverview(lastStatus);
+      retitleWatcherWarn();
       pollStatus();
       if (loaders[activePanel]) loaders[activePanel]();
     });
 
     loadConfig().catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false));
     // Deep-link: #dlgSettings etc. opens that panel; default is the cards.
+    // #setup is not a panel but a state of the cards, so it is branched BEFORE
+    // the fallback — that line would otherwise swallow it as an unknown hash.
     const fromHash = (location.hash || "").replace("#", "");
-    showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
+    if (fromHash === "setup") {
+      showPanel("dlgServices");
+      enterSetup();
+    } else {
+      showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
+    }
+    // Persist the panel in the hash so a reload comes back where the operator
+    // was — except Overview. #dlgOverview stays deep-linkable (someone who asks
+    // for it by URL gets it), but it must never become the panel an UNATTENDED
+    // screen restores to: it prints a patient name and an accession, and a
+    // reload, an Electron restart that keeps the fragment or a kiosk recovery
+    // would all land on it after a single visit. Not persisting is the option
+    // that keeps both halves: the deliberate link works, the accident does not.
     document.querySelectorAll(".navbtn").forEach((b) =>
-      b.addEventListener("click", () => { try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {} }));
+      b.addEventListener("click", () => {
+        if (b.dataset.panel === "dlgOverview") return;
+        try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {}
+      }));
+    retitleWatcherWarn();
     pollStatus();
     pollLog();
     statusTimer = setInterval(pollStatus, 2000);

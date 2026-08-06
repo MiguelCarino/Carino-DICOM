@@ -82,7 +82,8 @@ your `.dcm` files land, and hit **Start** on Receiver and/or Auto-send.
 > **Full run / build / release walkthrough:** see **[BUILDING.md](BUILDING.md)**.
 
 `desktop/` is an optional Electron wrapper that runs Carino PACS as a **background
-tray agent**: it launches the Python engine (`pacs serve --receive --watch`),
+tray agent**: it launches the Python engine (`pacs serve`), which brings up
+whichever services the setup chooser enrolled,
 sits in the system tray / menu bar, and opens the dashboard in a native window
 when you click it. Closing the window hides it back to the tray — the engine
 keeps receiving and forwarding.

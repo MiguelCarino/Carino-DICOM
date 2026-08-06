@@ -21,6 +21,7 @@ DEFAULT_CONFIG = os.path.join(DEFAULT_DIR, "config.json")
 
 DEFAULTS: dict[str, Any] = {
     "scp": {
+        "enabled": False,       # opt-in — off by default; the setup chooser enrolls it
         "aet": "CARINOPACS",
         "bind": "0.0.0.0",
         "port": 11112,
@@ -34,6 +35,7 @@ DEFAULTS: dict[str, Any] = {
         "tls_ca": "",           # if set: require + verify client certs (mutual TLS)
     },
     "scu": {
+        "enabled": False,       # opt-in — off by default; the setup chooser enrolls it
         "aet": "CARINOSCU",
         "watch_dir": "./outgoing",
         "poll_interval": 3,
@@ -93,6 +95,7 @@ DEFAULTS: dict[str, Any] = {
         "editor_url": "/editor/",   # DICOM-editor for ✎ Edit; "/editor/" = the bundled same-origin copy, or a full URL, or "" to hide
     },
     "logs_dir": "./logs",       # dated log files (one per day) live here
+    "setup_completed": "",      # UTC stamp of the run that finished the service chooser; "" = never, so the chooser is offered
 }
 
 _PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"),
@@ -206,6 +209,10 @@ def validate(data: dict) -> None:
         if not isinstance(data.get(section), dict):
             raise ValueError(f"'{section}' must be an object")
 
+    # The scp checks below are deliberately unconditional — they do NOT look at
+    # scp.enabled. A config that only validates while the receiver is off would
+    # explode the moment the setup chooser enrolls it, and the scp port stays
+    # reserved (print/mwl/ris are checked against it) whether it is bound or not.
     p = data["scp"]["port"]
     if not (isinstance(p, int) and 1 <= p <= 65535):
         raise ValueError("scp.port must be 1..65535")

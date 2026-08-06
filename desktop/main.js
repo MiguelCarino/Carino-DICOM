@@ -1,8 +1,10 @@
 /* ============================================================
    Carino PACS desktop — Electron tray agent.
    ------------------------------------------------------------
-   Runs the Python DICOM engine (`pacs serve --receive --watch`) as a
-   background child process and shows a tray icon. The window shows a
+   Runs the Python DICOM engine (`pacs serve`) as a background child
+   process and shows a tray icon. Which DICOM services come up is the
+   config's business — the dashboard's setup chooser writes those enabled
+   flags, and the shell must not override them from here. The window shows a
    loading screen immediately, then the dashboard once the engine is up
    (or an error page pointing at the engine log). On first run it asks
    where to store data (default ~/CarinoPACS), creates the folders, and
@@ -106,7 +108,9 @@ function webConfig() {
 function engineCommand(host, port) {
   const isWin = process.platform === "win32";
   // NB: --config is a global flag, so it must precede the `serve` subcommand.
-  const common = ["--config", configPath(), "serve", "--host", host, "--port", String(port), "--receive", "--watch"];
+  // No --receive/--watch: those are headless overrides, and forcing them here
+  // would silently undo every "off" the user picks in the setup chooser.
+  const common = ["--config", configPath(), "serve", "--host", host, "--port", String(port)];
   if (app.isPackaged) {
     const bin = path.join(process.resourcesPath, "engine", "pacs-engine", isWin ? "pacs-engine.exe" : "pacs-engine");
     return { cmd: bin, args: common, cwd: dataDir };
