@@ -15,6 +15,7 @@ without the token.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import sys
 import threading
@@ -23,8 +24,9 @@ from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
 
-from . import APP_NAME, __version__, auth
-from .config import auth_token_of, deid_secret_of, is_loopback_host, web_host_of
+from . import APP_NAME, __version__, audit, auth, users
+from .config import (auth_token_of, deid_secret_of, is_loopback_host,
+                     notify_secrets_of, web_host_of)
 from .server import PacsServer
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -47,7 +49,11 @@ def create_app(server: PacsServer) -> Flask:
     # request must answer 401-with-a-prompt, not 403-missing-header, or the
     # dashboard shows the operator the wrong recovery path. The static UI is
     # left open so the token prompt can actually render — justified in auth.py.
-    guard = auth.install(app, server.cfg, log=server.log)
+    # The audit sink goes in here rather than being wired up afterwards: login,
+    # a failed login and logout are the three records that have to exist before
+    # anything else can be attributed to anybody, and they happen inside the
+    # endpoints auth.install() owns.
+    guard = auth.install(app, server.cfg, log=server.log, audit_log=server.audit)
     # The guard is otherwise trapped in this closure, and it is the only object
     # that knows whether a request arrived authenticated. Parking it on the app
     # is Flask's own idiom for exactly that and costs nothing.
@@ -85,6 +91,60 @@ def create_app(server: PacsServer) -> Flask:
     bp = dicomweb.create_blueprint(server)
     app.register_blueprint(bp)          # the blueprint already carries url_prefix="/dicom-web"
     server.dicomweb = bp.stats          # so status() can report the counters
+
+    @app.before_request
+    def _guard_dicomweb():
+        """Capability gate for /dicom-web, and a hard stop for restricted profiles.
+
+        Registered after auth.install()'s guard, so a request without a
+        credential is already a 401 by the time it gets here and this only ever
+        sees somebody identified.
+
+        The second half is the uncomfortable one and it is deliberate. QIDO
+        answers in DICOM tag keys (00100010, not patient_name) and WADO-RS
+        answers raw Part 10 bytes, so the identifier redactor that covers the
+        dashboard cannot reach either — de-identification in this appliance is
+        something that happens on FORWARD, driven by a routing rule, and there
+        is no scrub on the retrieval path at all. A profile that may not see a
+        patient's name would therefore be handed it in full by a single QIDO
+        query, and the dashboard would be the only place the restriction held.
+
+        Rather than let a per-field policy be true on one surface and false on
+        another, a restricted profile does not get DICOMweb. It is refused out
+        loud, naming what it would take, because the operator has to be able to
+        tell this apart from an outage. The alternative — quietly serving the
+        identifiers — is the failure this whole feature exists to prevent.
+        """
+        path = request.path
+        if not (path == "/dicom-web" or path.startswith("/dicom-web/")):
+            return None
+        if request.method == "OPTIONS":
+            return None
+        if not guard.profiles_enabled:
+            return None
+        who = guard.identify(headers=request.headers, cookies=request.cookies)
+        write = request.method in ("POST", "PUT", "PATCH", "DELETE")
+        denied = guard.deny("studies.send" if write else "studies.read")
+        if denied:
+            return denied
+        if who.phi_visible() < frozenset(users.PHI_FIELDS):
+            withheld = sorted(frozenset(users.PHI_FIELDS) - who.phi_visible())
+            return jsonify({
+                "ok": False,
+                "error": "not permitted",
+                "forbidden": {
+                    "capability": "phi.all",
+                    "profile": who.name,
+                    "withheld": withheld,
+                },
+                "detail": "DICOMweb returns DICOM datasets, which carry identifiers in "
+                          "the data itself — there is no redaction on the retrieval "
+                          "path, only on forwarding. A profile that may not see "
+                          f"{', '.join(withheld)} cannot be served here without "
+                          "handing them over anyway. Use the dashboard, or ask an "
+                          "administrator to widen this profile.",
+            }), 403
+        return None
 
     # ---- static UI --------------------------------------------------------
     @app.get("/")
@@ -126,10 +186,88 @@ def create_app(server: PacsServer) -> Flask:
         storage path, every destination's host/port/AE and the config file
         location — it is the single most disclosive endpoint in the app. The
         dashboard shell renders anonymously, but every tile stays empty until
-        the operator logs in; app.js must call GET /api/auth first and prompt."""
-        body = server.status()
+        the operator logs in; app.js must call GET /api/auth first and prompt.
+
+        Composed per profile rather than filtered in the browser. That is not a
+        preference: this one payload carries the last patient's name and ID, the
+        last order's accession, every storage path and every destination's
+        host, port and AE title, and it is what fills all ten panels. Hiding a
+        nav button in app.js would leave all of it sitting in the receptionist's
+        browser, one devtools tab away. So the parts a profile has no capability
+        for are never assembled into the response at all."""
+        body = _status_for(guard.identify(headers=request.headers,
+                                          cookies=request.cookies))
         body["auth"] = guard.status(headers=request.headers, cookies=request.cookies)
         return jsonify(app=APP_NAME, version=__version__, **body)
+
+    # Which capability each top-level section of the status payload answers to.
+    # A section named here is dropped entirely from the response when the caller
+    # lacks it — not blanked, dropped, so nothing downstream can render a stale
+    # shape. Anything NOT named is common ground: service up/down, counters,
+    # uptime, disk, the setup state. Those carry no identifier and no address,
+    # and a profile that cannot see whether the receiver is running cannot do
+    # any job this appliance has.
+    #
+    # New section, new entry. The test that walks a live payload against this
+    # table is what stops the next one from defaulting to visible — which is the
+    # failure mode that matters here, since nobody notices an extra field going
+    # out the way they notice a missing one.
+    _STATUS_GATES = {
+        "destinations":   "routing.read",   # host, port and AE of every node
+        "routing":        "routing.read",
+        "deid":           "routing.read",   # which nodes get scrubbed, and held
+        "config_path":    "config.read",
+        "config_problem": "config.read",
+        "logs_dir":       "config.read",
+        "host_ip":        "config.read",
+        "host_ips":       "config.read",
+        "disk":           "config.read",    # storage paths and free space
+        "pending":        "studies.read",
+        "stuck":          "studies.read",
+        "index":          "studies.read",
+        "ris":            "orders.read",    # carries the last order's identity
+        "editor_url":     "studies.read",
+        "audit":          "audit.read",
+        # Carries the SMTP host and whether a signing key is set. Not secrets,
+        # but infrastructure, and it belongs with the rest of the configuration
+        # rather than on a receptionist's screen.
+        "notify":         "config.read",
+    }
+
+    # Sections that survive the gate but still carry an identifier inside them:
+    # the receiver's last stored instance, the watcher's last send. Redacted
+    # per profile rather than dropped, because "a study arrived 4 seconds ago"
+    # is exactly what a receptionist needs to see and the patient's name is not.
+    def _status_for(profile) -> dict:
+        body = server.status()
+        # Recomposed for THIS person. server.status() cannot answer it: whether
+        # the failover modal opens depends on who is asking, whether they are
+        # someone emergency.notify names, and whether they have already
+        # acknowledged this particular outage.
+        if "emergency" in body:
+            body["emergency"] = server.emergency.status(_as_profile(profile))
+        out = {}
+        for key, value in body.items():
+            need = _STATUS_GATES.get(key)
+            if need is None or profile.can(need):
+                out[key] = value
+        return users.redact(out, profile)
+
+    def _as_profile(profile):
+        """A Profile for the policy layer, or None when profiles are not in use.
+
+        The emergency controller treats None as "one operator, everything
+        permitted", which is what an appliance without profiles is. Passing the
+        SERVICE_PROFILE stand-in instead would make it evaluate activate_by
+        against a synthetic identity that matches nothing, and a policy naming a
+        real radiologist would silently stop the token from activating anything.
+        """
+        if not guard.profiles_enabled:
+            return None
+        return profile
+
+    def _profile_or_none():
+        return _as_profile(guard.current())
 
     # ---- no secret is ever part of a config payload ------------------------
     # web.auth_token is the permanent shared secret for this whole API. It used
@@ -158,6 +296,41 @@ def create_app(server: PacsServer) -> Flask:
     # name/host/port/aet/flags, with no credential field anywhere in the sender;
     # qr.move_destinations is host/port/aet; ris.allowed_hosts and *.allowed_aets
     # are access lists, not keys.
+    @app.after_request
+    def _withhold_identifiers(resp):
+        """Strip identifiers this profile may not see from every JSON response.
+
+        A choke point, deliberately, and not a call added to each handler. There
+        are forty-odd endpoints and the ones that carry a patient name are not
+        the obvious ones — /api/stuck names the study that will not send,
+        /api/pending names the file waiting for review, /api/ris/orders is
+        nothing but demographics. Redacting at each of them means the next
+        endpoint someone adds leaks until a reviewer notices, and the whole
+        point of a per-field policy is that it cannot be forgotten in one place.
+
+        Costs nothing on the two paths that matter. An appliance with no
+        profiles never enters the body of this function, so an existing install
+        pays one boolean per request and behaves exactly as it did. A profile
+        that may see every identifier — every administrator, and the radiologist
+        and receptionist presets — skips it too, because there is nothing to
+        take out.
+        """
+        if not guard.profiles_enabled:
+            return resp
+        if not (resp.is_json and 200 <= resp.status_code < 300):
+            return resp
+        who = guard.identify(headers=request.headers, cookies=request.cookies)
+        if who.phi_visible() >= frozenset(users.PHI_FIELDS):
+            return resp
+        try:
+            body = resp.get_json(silent=True)
+        except Exception:
+            return resp
+        if body is None:
+            return resp
+        resp.set_data(json.dumps(users.redact(body, who)))
+        return resp
+
     def _redacted(data: dict) -> dict:
         out = copy.deepcopy(data)
         web = out.get("web")
@@ -170,7 +343,44 @@ def create_app(server: PacsServer) -> Flask:
         if isinstance(deid, dict):
             deid.pop("secret", None)
             deid["secret_set"] = bool(deid_secret_of(server.cfg.deid))
+        # Profiles carry stored password material, and this document goes to
+        # anyone holding config.read — which IT holds and which is deliberately
+        # NOT auth.manage. A PBKDF2 record handed to someone who may not manage
+        # accounts is an offline cracking target against their colleagues'
+        # passwords, so the rows are replaced by their describe() form: the
+        # administrator's editor gets everything it needs to render, and the
+        # salt and hash never leave the file.
+        # The list is also read-only through this endpoint (POST refuses to take
+        # one), so nothing here is a value a Save has to be able to send back.
+        # The notifier's webhook signing key and SMTP password. Same rule as the
+        # other two secrets: never in a payload, replaced by a "_set" mirror so
+        # the dashboard can render "configured / not configured" without ever
+        # holding the value.
+        notify = out.get("notify")
+        if isinstance(notify, dict):
+            live = notify_secrets_of(server.cfg.data.get("notify"))
+            for section, field in (("webhook", "secret"), ("smtp", "password")):
+                block = notify.get(section)
+                if isinstance(block, dict):
+                    block.pop(field, None)
+                    block[field + "_set"] = bool(live[f"notify.{section}.{field}"])
+        cfg_users = out.get("users")
+        if isinstance(cfg_users, dict):
+            cfg_users["profiles"] = _profiles_view()
         return out
+
+    def _profiles_view() -> list:
+        """The profile rows as GET /api/config publishes them.
+
+        One function, because POST has to compare what it was handed against
+        exactly this. A caller that GETs the document and posts it straight back
+        is doing the documented thing, and refusing that would break every
+        client that is not the dashboard — including the two suites in this repo
+        that round-trip a config. Refusing a caller who posts something ELSE is
+        the actual intent, and that is only expressible if both ends agree on
+        what "unchanged" looks like.
+        """
+        return [p.describe() for p in users.profiles_of(server.cfg.users)]
 
     def _holds_the_token() -> bool:
         """Is this request carrying the token ITSELF, not just a session?
@@ -250,6 +460,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.get("/api/config")
     def api_get_config():
+        denied = guard.deny("config.read")
+        if denied:
+            return denied
         # The body is untouched — every client that posts this document straight
         # back must keep working, and the version rides in the ETag instead.
         # Deliberately not made conditional: a 304 with no body here would leave
@@ -258,6 +471,17 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/config")
     def api_set_config():
+        # config.write is the floor, not the whole answer. This endpoint takes a
+        # WHOLE document, so it is the one place where a capability someone does
+        # hold reaches sections gated behind two they do not: the profile list
+        # (auth.manage) and the de-identification profile (deid.manage). Both
+        # are re-checked against what is actually being changed, down in
+        # _merge() where the stored document is in hand and a comparison is
+        # possible. Without that, config.write silently means "grant yourself
+        # admin" and "turn the scrub off", and IT holds config.write.
+        denied = guard.deny("config.write")
+        if denied:
+            return denied
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(error="expected a JSON config object"), 400
@@ -364,6 +588,91 @@ def create_app(server: PacsServer) -> Flask:
                 deid["secret"] = secret
             else:
                 deid.pop("secret", None)    # never write an empty key into the file
+
+            # The notifier's two secrets, by the same rule as the site key and
+            # with the same failure if it is skipped. Both ARE in DEFAULTS as
+            # "", so a Save that posts back a redacted GET does not merely drop
+            # them — it merges an empty string over them and silently
+            # unconfigures the webhook signature and the SMTP login. The next
+            # emergency then either fails to notify or posts unsigned, and the
+            # only symptom is that nobody was told.
+            stored_notify = stored.get("notify") if isinstance(stored.get("notify"), dict) else {}
+            live_secrets = notify_secrets_of(stored_notify)
+            incoming_notify = data.get("notify")
+            if isinstance(incoming_notify, dict):
+                for section, field in (("webhook", "secret"), ("smtp", "password")):
+                    block = incoming_notify.get(section)
+                    if not isinstance(block, dict):
+                        continue
+                    block.pop(field + "_set", None)   # a read-only mirror, not a field
+                    kept = live_secrets[f"notify.{section}.{field}"]
+                    offered = block.get(field)
+                    if offered is not None and offered != kept:
+                        raise _Refused(400, dict(
+                            error=f"notify.{section}.{field} cannot be set from here — it is "
+                                  f"redacted from GET /api/config so a Save has nothing to "
+                                  f"send back. Use POST /api/notify/secret."))
+                    if kept:
+                        block[field] = kept
+                    else:
+                        block.pop(field, None)
+
+            # ---- the two escalation paths out of config.write ----------------
+            # Both are checked HERE rather than at the top of the handler,
+            # because both are questions about a DIFFERENCE and the stored
+            # document only exists inside this lock. Asking earlier would have
+            # meant comparing against a copy read outside it — the precise shape
+            # that lost 15 of 40 token rotations before this function was moved
+            # in here.
+            #
+            # The profile list is re-asserted, never taken. Two separate reasons,
+            # either sufficient: a caller with config.write could otherwise post
+            # themselves an admin row and hold every capability a moment later;
+            # and cfg.replace() merges over DEFAULTS, where users.profiles is [],
+            # so a dashboard Save that simply does not carry the section — which
+            # is every Save built from a page-load snapshot of a redacted GET —
+            # would delete every profile on the appliance and turn access
+            # control off. Editing goes through /api/profiles, which asks for
+            # auth.manage.
+            stored_users = copy.deepcopy(stored.get("users", {}))
+            offered_users = data.get("users")
+            if offered_users is not None:
+                # Two shapes are accepted and mean the same thing: no `users` at
+                # all (the dashboard, which does not carry it), and the exact
+                # document GET published (any client that round-trips the
+                # config). Only `profiles` is compared loosely — list_profiles
+                # is an ordinary setting and stays editable here.
+                echoed = dict(offered_users)
+                echoed_profiles = echoed.pop("profiles", None)
+                if echoed_profiles is not None and echoed_profiles != _profiles_view():
+                    raise _Refused(400, dict(
+                        error="users.profiles cannot be set from here — profiles are "
+                              "published in a redacted form by GET /api/config, so a Save "
+                              "has nothing to send back, and taking them from this "
+                              "endpoint would let config.write grant itself anything. "
+                              "Use the profile endpoints under /api/profiles."))
+                for key, value in echoed.items():
+                    stored_users[key] = value
+            data["users"] = stored_users
+
+            # The de-identification PROFILE is not a secret, so it survives the
+            # GET and a Save legitimately carries it back unchanged. Only a
+            # change needs deid.manage: turning the profile off is how a study a
+            # rule promised to scrub reaches a research node identified, and
+            # that decision is not part of "edit the config".
+            stored_deid = stored.get("deid") if isinstance(stored.get("deid"), dict) else {}
+            changed = {k: v for k, v in deid.items()
+                       if k not in ("secret", "secret_set") and stored_deid.get(k) != v}
+            missing = [k for k in stored_deid
+                       if k not in ("secret",) and k not in deid]
+            if (changed or missing) and not guard.current().can("deid.manage"):
+                raise _Refused(403, dict(
+                    ok=False, error="not permitted",
+                    forbidden={"capability": "deid.manage",
+                               "fields": sorted(set(changed) | set(missing))},
+                    detail="this Save changes de-identification, which decides whether a "
+                           "study a routing rule promised to scrub is sent identified. "
+                           "It needs deid.manage, which this profile does not hold."))
             return data
 
         with _save_lock:
@@ -397,6 +706,9 @@ def create_app(server: PacsServer) -> Flask:
         the moment this returns — that is the point of a rotation, and the
         dashboard should say so before it fires.
         """
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
         if not _holds_the_token():
             return jsonify(ok=False, error="send the current token in an Authorization: Bearer "
                                            "or X-Carino-Token header — a session cookie is not "
@@ -482,6 +794,9 @@ def create_app(server: PacsServer) -> Flask:
         studies already exported stop lining up with the ones that follow. That
         has to be a value the operator chose and wrote down, not a button.
         """
+        denied = guard.deny("deid.manage")
+        if denied:
+            return denied
         if not _holds_the_token():
             return jsonify(ok=False, error="send the current dashboard token in an Authorization: "
                                            "Bearer or X-Carino-Token header — a session cookie is "
@@ -552,12 +867,63 @@ def create_app(server: PacsServer) -> Flask:
                                 "pseudonyms and date shifts than the ones exported before it "
                                 "changed; they will not line up."))
 
+    @app.post("/api/notify/secret")
+    def api_notify_secret():
+        """Set or clear the webhook signing key and the SMTP password.
+
+        Body: {"field": "webhook"|"smtp", "action": "set"|"clear", "value": "..."}
+
+        Its own endpoint for the same reason deid.secret has one: both are
+        redacted out of GET /api/config, so a Save has nothing to send back and
+        must be refused rather than allowed to blank them. Unlike the site key
+        this does NOT demand the raw token — neither secret can be used to read
+        patient data or to reach anything on this appliance, and requiring the
+        token would mean an administrator cannot configure e-mail from the
+        dashboard they are already logged into.
+        """
+        denied = guard.deny("config.write")
+        if denied:
+            return denied
+        d = request.get_json(silent=True) or {}
+        field = str(d.get("field") or "").strip().lower()
+        if field not in ("webhook", "smtp"):
+            return jsonify(ok=False, error="field must be webhook|smtp"), 400
+        key = "secret" if field == "webhook" else "password"
+        action = str(d.get("action") or "").strip().lower()
+        if action == "set":
+            value = d.get("value")
+            if not isinstance(value, str) or not value:
+                return jsonify(ok=False, error=f"'value' must be a non-empty string"), 400
+        elif action == "clear":
+            value = ""
+        else:
+            return jsonify(ok=False, error="action must be set|clear"), 400
+
+        with server.cfg.mutate():
+            block = server.cfg.data.setdefault("notify", {}).setdefault(field, {})
+            previous = block.get(key, "")
+            block[key] = value
+            try:
+                server.cfg.save()
+            except OSError as exc:
+                block[key] = previous
+                return jsonify(ok=False, error=f"could not save: {exc}"), 400
+        # The value never reaches the log or the audit trail — only that it moved.
+        server.log.info(
+            f"notify.{field}.{key} " + ("cleared" if not value else
+                                        ("changed" if previous else "set")),
+            kind="notify")
+        return jsonify(ok=True, configured=bool(value))
+
     @app.post("/api/setup")
     def api_setup():
         """The service chooser's Apply: enrol the picked services and stamp the
         run, in one save. A service that then fails to bind is a 200 with a
         failed row — enrolled-but-not-running is a state the dashboard shows,
         not a bad request."""
+        denied = guard.deny("config.write")
+        if denied:
+            return denied
         d = request.get_json(silent=True) or {}
         try:
             res = server.apply_setup(d.get("services") or {})
@@ -573,6 +939,9 @@ def create_app(server: PacsServer) -> Flask:
         purpose: the write-header guard only covers non-GET, and a GET here
         would hand any page the operator has open a port probe against their
         own loopback."""
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         items = (request.get_json(silent=True) or {}).get("ports")
         if not isinstance(items, list):
             return jsonify(error="expected a 'ports' array"), 400
@@ -580,6 +949,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/receiver")
     def api_receiver():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         try:
             if action == "start":
@@ -594,6 +966,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/printer")
     def api_printer():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         try:
             if action == "start":
@@ -608,6 +983,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/ris")
     def api_ris():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         try:
             if action == "start":
@@ -622,12 +1000,18 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/emergency")
     def api_emergency():
+        denied = guard.deny("emergency.activate")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
-        res = server.emergency_action(action)
+        res = server.emergency_action(action, _profile_or_none())
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/mwl")
     def api_mwl():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         try:
             if action == "start":
@@ -642,6 +1026,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/qr")
     def api_qr():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         try:
             if action == "start":
@@ -660,17 +1047,26 @@ def create_app(server: PacsServer) -> Flask:
     # ---- RIS orders (emergency RIS: intake + reconciliation) --------------
     @app.get("/api/ris/orders")
     def api_ris_orders():
+        denied = guard.deny("orders.read")
+        if denied:
+            return denied
         status = request.args.get("status") or None
         return jsonify(server.list_orders(status))
 
     @app.post("/api/ris/orders")
     def api_ris_add_order():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         d = request.get_json(silent=True) or {}
         res = server.add_order(d)
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/ris/orders/update")
     def api_ris_update_order():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         d = request.get_json(silent=True) or {}
         oid = d.get("id")
         if not oid:
@@ -680,6 +1076,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/ris/orders/cancel")
     def api_ris_cancel_order():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         oid = (request.get_json(silent=True) or {}).get("id")
         if not oid:
             return jsonify(ok=False, message="missing 'id'"), 400
@@ -688,6 +1087,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/ris/orders/delete")
     def api_ris_delete_order():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         oid = (request.get_json(silent=True) or {}).get("id")
         if not oid:
             return jsonify(ok=False, message="missing 'id'"), 400
@@ -696,12 +1098,18 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/ris/orders/purge")
     def api_ris_purge_orders():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         return jsonify(server.purge_closed_orders())
 
     @app.post("/api/ris/orders/capture")
     def api_ris_capture():
         """Multipart: an order 'id' and a 'file' (PDF/JPEG/PNG) exported from a
         legacy tool, wrapped as a DICOM study inheriting the order's identity."""
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
         oid = request.form.get("id")
         up = request.files.get("file")
         if not oid or up is None or not up.filename:
@@ -711,6 +1119,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/watcher")
     def api_watcher():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         action = (request.get_json(silent=True) or {}).get("action")
         if action == "start":
             server.start_watcher()
@@ -722,6 +1133,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/echo")
     def api_echo():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         dest = request.get_json(silent=True) or {}
         for k in ("host", "port", "aet"):
             if k not in dest:
@@ -731,6 +1145,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.get("/api/log")
     def api_log():
+        denied = guard.deny("logs.read")
+        if denied:
+            return denied
         try:
             since = int(request.args.get("since", 0))
         except ValueError:
@@ -740,6 +1157,9 @@ def create_app(server: PacsServer) -> Flask:
     # ---- study history (received / sent) ----------------------------------
     @app.get("/api/studies")
     def api_studies():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         group = request.args.get("group", "received")
         try:
             return jsonify(server.list_studies(group))
@@ -756,18 +1176,30 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/studies/send")
     def api_studies_send():
+        denied = guard.deny("studies.send")
+        if denied:
+            return denied
         return _study_action(server.send_study)
 
     @app.post("/api/studies/reveal")
     def api_studies_reveal():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         return _study_action(server.reveal_study)
 
     @app.post("/api/studies/delete")
     def api_studies_delete():
+        denied = guard.deny("studies.delete")
+        if denied:
+            return denied
         return _study_action(server.delete_study)
 
     @app.post("/api/studies/delete-all")
     def api_studies_delete_all():
+        denied = guard.deny("studies.delete")
+        if denied:
+            return denied
         group = (request.get_json(silent=True) or {}).get("group", "received")
         res = server.delete_all_studies(group)
         return jsonify(res), (200 if res.get("ok") else 400)
@@ -776,6 +1208,9 @@ def create_app(server: PacsServer) -> Flask:
     def api_studies_attach():
         """Multipart: 'group', 'path', and a 'file' (PDF/JPEG/PNG) to wrap as a
         DICOM instance attached to that study."""
+        denied = guard.deny("studies.send")
+        if denied:
+            return denied
         group = request.form.get("group", "received")
         path = request.form.get("path")
         up = request.files.get("file")
@@ -861,6 +1296,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.route("/api/studies/files", methods=["GET", "OPTIONS"])
     def api_studies_files():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         if request.method == "OPTIONS":
             return _preflight()
         group = request.args.get("group", "received")
@@ -872,6 +1310,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.route("/api/studies/file", methods=["GET", "OPTIONS"])
     def api_studies_file():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         if request.method == "OPTIONS":
             return _preflight()
         group = request.args.get("group", "received")
@@ -893,6 +1334,9 @@ def create_app(server: PacsServer) -> Flask:
         The field list is read off the router rather than restated here: a rule
         naming a field the matcher does not know is skipped entirely, so a UI
         working from a stale copy would build rules that silently never fire."""
+        denied = guard.deny("routing.read")
+        if denied:
+            return denied
         from . import routing
         r = server.cfg.routing
         return jsonify(ok=True,
@@ -910,6 +1354,9 @@ def create_app(server: PacsServer) -> Flask:
         top level) for a hypothetical study, or 'group' + 'path' to evaluate a
         study that is actually on disk. Read-only — nothing is sent, and
         explain() logs nothing, so this can be hammered from a form."""
+        denied = guard.deny("routing.read")
+        if denied:
+            return denied
         from . import routing
         d = request.get_json(silent=True) or {}
         attrs = d.get("attributes")
@@ -936,6 +1383,9 @@ def create_app(server: PacsServer) -> Flask:
         index_status() caches the COUNT(DISTINCT) figures itself — do not
         substitute a raw index.stats() call here, it is not free at a million
         instances and this route is pollable."""
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         return jsonify(ok=True, index=server.index_status())
 
     @app.post("/api/index/rescan")
@@ -943,16 +1393,25 @@ def create_app(server: PacsServer) -> Flask:
         """Reconcile the index with what is on disk. The walk can take minutes
         on a real archive, so the server runs it on its own thread and this
         returns as soon as it is accepted; the outcome lands in the log."""
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
         res = server.rescan_index()
         return jsonify(res), (200 if res.get("ok") else 400)
 
     # ---- stuck sends (failed / backing-off forwards) ----------------------
     @app.get("/api/stuck")
     def api_stuck():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         return jsonify(server.stuck_sends())
 
     @app.post("/api/stuck/retry")
     def api_stuck_retry():
+        denied = guard.deny("studies.send")
+        if denied:
+            return denied
         dest = (request.get_json(silent=True) or {}).get("dest") or None
         res = server.retry_stuck(dest)
         return jsonify(res), (200 if res.get("ok") else 400)
@@ -960,10 +1419,16 @@ def create_app(server: PacsServer) -> Flask:
     # ---- pending imports (non-DICOM awaiting review) ----------------------
     @app.get("/api/pending")
     def api_pending():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         return jsonify(server.list_pending())
 
     @app.post("/api/pending/approve")
     def api_pending_approve():
+        denied = guard.deny("studies.send")
+        if denied:
+            return denied
         d = request.get_json(silent=True) or {}
         pid = d.get("id")
         if not pid:
@@ -974,6 +1439,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/pending/discard")
     def api_pending_discard():
+        denied = guard.deny("studies.delete")
+        if denied:
+            return denied
         pid = (request.get_json(silent=True) or {}).get("id")
         if not pid:
             return jsonify(ok=False, message="missing 'id'"), 400
@@ -982,6 +1450,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.get("/api/pending/preview")
     def api_pending_preview():
+        denied = guard.deny("studies.read")
+        if denied:
+            return denied
         pid = request.args.get("id", "")
         loc = server.pending_preview(pid)
         if not loc:
@@ -992,6 +1463,9 @@ def create_app(server: PacsServer) -> Flask:
     @app.post("/api/shutdown")
     def api_shutdown():
         """Stop the workers and terminate the whole engine process."""
+        denied = guard.deny("system.shutdown")
+        if denied:
+            return denied
         server.log.info("Shutdown requested from dashboard", kind="config")
         server.shutdown()
 
@@ -1001,5 +1475,401 @@ def create_app(server: PacsServer) -> Flask:
 
         threading.Thread(target=_exit, daemon=True).start()
         return jsonify(ok=True, message="Carino PACS is shutting down")
+
+    # ---- profiles ----------------------------------------------------------
+    # Their own endpoints rather than a section of POST /api/config, for two
+    # reasons argued at that handler: config.write would otherwise be a way to
+    # grant yourself anything, and a Save built from a page-load snapshot would
+    # silently delete every profile on the appliance.
+    #
+    # Every write here runs inside one cfg.mutate() that reads, edits, validates
+    # and saves — the same critical section the token endpoint needed after a
+    # concurrent Save was measured reverting 15 of 40 rotations.
+
+    def _capabilities_catalogue() -> dict:
+        return {
+            "capabilities": [{"name": k, "description": v}
+                             for k, v in sorted(users.CAPABILITIES.items())],
+            "phi_fields": [{"name": k, "description": v}
+                           for k, v in sorted(users.PHI_FIELDS.items())],
+            "roles": users.roles_in_use(server.cfg.users),
+        }
+
+    @app.get("/api/profiles/manage")
+    def api_profiles_manage():
+        """The administrator's view: every row in full, plus what can be granted."""
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
+        return jsonify(ok=True,
+                       profiles=[p.describe() for p in users.profiles_of(server.cfg.users)],
+                       in_use=users.profiles_in_use(server.cfg.users),
+                       list_profiles=guard.lists_profiles(),
+                       **_capabilities_catalogue())
+
+    @app.post("/api/profiles/seed")
+    def api_profiles_seed():
+        """Turn profiles on, with the four presets.
+
+        Refuses when any already exist. This is the one-way door from "the token
+        is the only credential" into "people log in as themselves", and doing it
+        twice would mean an administrator who clicked it again got four fresh
+        presets alongside their real staff — including a brand new open
+        Administrator.
+        """
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
+        with server.cfg.mutate():
+            if users.profiles_of(server.cfg.users):
+                return jsonify(ok=False,
+                               error="profiles already exist on this appliance"), 400
+            resp = _write_profiles(users.preset_profiles(), audit.PROFILE_CREATED,
+                                   "seeded the four preset profiles")
+        # Seeding is the moment guard.required flips on, so the request that
+        # did it is the last one this caller can make without a session — the
+        # very next poll comes back 401 and the dashboard empties. On an
+        # appliance with no token set (loopback, which is the common case and
+        # the one this feature is aimed at) they would have no credential at
+        # all until they noticed the picker.
+        #
+        # So the act of turning profiles on logs you in as the administrator it
+        # just created. Safe by construction: reaching here needed auth.manage,
+        # which is strictly more authority than the session being handed back.
+        if isinstance(resp, tuple):
+            return resp
+        admin = next((p for p in users.enabled_profiles(server.cfg.users) if p.admin), None)
+        if admin is None:
+            return resp
+        return auth.set_session_cookie(resp, guard, admin)
+
+    @app.post("/api/profiles/save")
+    def api_profiles_save():
+        """Create or update one profile.
+
+        Body is a describe()-shaped row plus an optional "password":
+          {"action": "set", "value": "..."} | {"action": "clear"} | absent = keep
+        """
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify(ok=False, error="expected a profile object"), 400
+
+        with server.cfg.mutate():
+            rows = copy.deepcopy(users.profiles_of(server.cfg.users))
+            rows = [dict(p.data) for p in rows]
+            pid = str(body.get("id") or "")
+            existing = next((r for r in rows if r.get("id") == pid), None)
+            creating = existing is None
+            if creating:
+                row = {"id": users.new_id(), "password": None}
+                rows.append(row)
+            else:
+                row = existing
+
+            for field, default in (("name", ""), ("role", ""), ("email", ""),
+                                   ("locale", "")):
+                if field in body:
+                    row[field] = str(body.get(field) or default).strip()
+            for flag in ("enabled", "admin"):
+                if flag in body:
+                    row[flag] = body.get(flag) is True
+            if "capabilities" in body:
+                row["capabilities"] = [c for c in (body.get("capabilities") or [])
+                                       if isinstance(c, str)]
+            if "phi_visible" in body:
+                row["phi_visible"] = [f for f in (body.get("phi_visible") or [])
+                                      if isinstance(f, str)]
+
+            pw = body.get("password")
+            password_changed = False
+            if isinstance(pw, dict):
+                action = str(pw.get("action") or "").lower()
+                if action == "set":
+                    value = pw.get("value")
+                    if not isinstance(value, str) or len(value) < 4:
+                        return jsonify(ok=False,
+                                       error="a password must be at least 4 characters. "
+                                             "Leave it unset for an open profile instead — "
+                                             "a short password is not a weaker lock, it is "
+                                             "the same open door with a step in front of it."), 400
+                    row["password"] = users.hash_password(value)
+                    password_changed = True
+                elif action == "clear":
+                    row["password"] = None
+                    password_changed = True
+
+            action_name = audit.PROFILE_CREATED if creating else audit.PROFILE_CHANGED
+            what = ("created" if creating else "changed") + f" profile '{row.get('name', '')}'"
+            if password_changed:
+                what += " (password " + ("set)" if row.get("password") else "cleared)")
+            return _write_profiles(rows, action_name, what, target=row.get("id", ""))
+
+    @app.post("/api/profiles/delete")
+    def api_profiles_delete():
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
+        pid = str((request.get_json(silent=True) or {}).get("id") or "")
+        with server.cfg.mutate():
+            rows = [dict(p.data) for p in users.profiles_of(server.cfg.users)]
+            target = next((r for r in rows if r.get("id") == pid), None)
+            if target is None:
+                return jsonify(ok=False, error="no such profile"), 404
+            # Deleting the profile you are logged in as is allowed — an
+            # administrator tidying up two accounts of their own should not have
+            # to work out which one they are using. What is refused, below, is
+            # deleting the LAST one that can manage profiles, and that check
+            # covers this case whenever it actually matters.
+            rows = [r for r in rows if r.get("id") != pid]
+            return _write_profiles(rows, audit.PROFILE_DELETED,
+                                   f"deleted profile '{target.get('name', '')}'",
+                                   target=pid)
+
+    @app.post("/api/profiles/listing")
+    def api_profiles_listing():
+        """Show or hide the picker (users.list_profiles)."""
+        denied = guard.deny("auth.manage")
+        if denied:
+            return denied
+        want = (request.get_json(silent=True) or {}).get("list_profiles") is True
+        with server.cfg.mutate():
+            previous = server.cfg.users.get("list_profiles", True)
+            server.cfg.users["list_profiles"] = want
+            try:
+                server.cfg.save()
+            except OSError as exc:
+                server.cfg.users["list_profiles"] = previous
+                return jsonify(ok=False, error=f"could not save: {exc}"), 400
+        server.audit.record(audit.CONFIG_CHANGED, actor=guard.current(),
+                            target="users.list_profiles",
+                            source=request.remote_addr or "",
+                            detail=f"profile picker {'shown' if want else 'hidden'}")
+        return jsonify(ok=True, list_profiles=want)
+
+    def _write_profiles(rows: list, action: str, what: str, target: str = ""):
+        """Validate a proposed profile list, save it, and record the change.
+
+        Called with cfg.mutate() already held. Validation runs against a full
+        candidate document rather than the list alone, because two of the rules
+        are about the rest of the config — an open profile with write access is
+        legal on loopback and refused off-box, and that depends on web.host.
+        """
+        candidate = copy.deepcopy(server.cfg.data)
+        candidate.setdefault("users", {})["profiles"] = rows
+        try:
+            server.cfg.would_accept(candidate)
+        except ValueError as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+        previous = server.cfg.users.get("profiles", [])
+        server.cfg.users["profiles"] = rows
+        try:
+            server.cfg.save()
+        except OSError as exc:
+            # Rolled back for the reason every other secret-bearing save is: a
+            # profile list live in memory but not on disk means the appliance
+            # enforces one set of permissions now and a different one after the
+            # next restart, with nothing to say which is which.
+            server.cfg.users["profiles"] = previous
+            return jsonify(ok=False, error=f"could not save profiles: {exc}"), 400
+        server.log.info(f"Profiles: {what}", kind="auth")
+        server.audit.record(action, actor=guard.current(), target=target or what,
+                            source=request.remote_addr or "", detail=what)
+        return jsonify(ok=True,
+                       profiles=[p.describe() for p in users.profiles_of(server.cfg.users)],
+                       in_use=users.profiles_in_use(server.cfg.users),
+                       **_capabilities_catalogue())
+
+    # ---- the audit trail ---------------------------------------------------
+    @app.get("/api/audit")
+    def api_audit():
+        """Recent records, newest first. Filterable by action and by actor."""
+        denied = guard.deny("audit.read")
+        if denied:
+            return denied
+        try:
+            limit = min(2000, max(1, int(request.args.get("limit", 200))))
+        except ValueError:
+            limit = 200
+        rows = server.audit.tail(limit,
+                                 action=request.args.get("action", ""),
+                                 actor_id=request.args.get("actor", ""))
+        return jsonify(ok=True, records=_audit_rows_for(rows),
+                       audit=server.audit.stats())
+
+    @app.get("/api/audit/verify")
+    def api_audit_verify():
+        """Walk the whole chain and report the first place it breaks.
+
+        A real read of every file, not a cached answer: the question is whether
+        what is ON DISK still matches itself, and anything this process
+        remembers about what it wrote cannot answer that.
+        """
+        denied = guard.deny("audit.read")
+        if denied:
+            return denied
+        return jsonify(ok=True, verify=server.audit.verify(),
+                       audit=server.audit.stats())
+
+    @app.get("/api/audit/export")
+    def api_audit_export():
+        """The whole trail as JSON Lines, for an inspection or an archive.
+
+        Served with the chain intact and unredacted, which is the point of an
+        export — a copy with fields removed cannot be verified, because the
+        digests cover what was actually written. That is also why this needs
+        audit.read AND every identifier: see the check below.
+        """
+        denied = guard.deny("audit.read")
+        if denied:
+            return denied
+        who = guard.current()
+        if who.phi_visible() < frozenset(users.PHI_FIELDS):
+            return jsonify({
+                "ok": False, "error": "not permitted",
+                "forbidden": {"capability": "phi.all", "profile": who.name},
+                "detail": "an export has to carry the records exactly as they were "
+                          "written or the hash chain cannot be checked against it, so "
+                          "it cannot be redacted. Read the trail in the dashboard "
+                          "instead, or ask an administrator.",
+            }), 403
+        lines = []
+        for record in server.audit.read_all():
+            lines.append(json.dumps({k: v for k, v in record.items()
+                                     if not k.startswith("_")},
+                                    sort_keys=True, separators=(",", ":"),
+                                    default=str))
+        body = "\n".join(lines) + ("\n" if lines else "")
+        resp = app.response_class(body, mimetype="application/x-ndjson")
+        resp.headers["Content-Disposition"] = 'attachment; filename="carino-pacs-audit.jsonl"'
+        return resp
+
+    def _audit_rows_for(rows: list) -> list:
+        """Audit rows as this profile may see them.
+
+        One field needs care. `target` is often a stored study's path, and the
+        storage layout puts the PatientID in it (see dest_path in pacs/scp.py),
+        so a profile that may not see patient IDs would read them here — through
+        the one endpoint built to prove that access control works. The generic
+        redactor cannot catch it, because the key is called "target" and means
+        something different on every action.
+        """
+        who = guard.current()
+        if who.sees("patient_id"):
+            return rows
+        out = []
+        for row in rows:
+            row = dict(row)
+            if row.get("target"):
+                row["target"] = users.REDACTED
+            out.append(row)
+        return out
+
+    # Which audited action each mutating endpoint represents. Anything NOT
+    # listed still gets recorded, under an action derived from its path — the
+    # default is to record, so a new endpoint is auditable the day it is
+    # written rather than the day somebody remembers to add it here. This table
+    # only exists to give the common ones a stable, searchable name.
+    _AUDIT_ACTIONS = {
+        "/api/config":              audit.CONFIG_CHANGED,
+        "/api/setup":               audit.CONFIG_CHANGED,
+        "/api/auth/token":          audit.TOKEN_ROTATED,
+        "/api/deid/secret":         audit.DEID_CHANGED,
+        "/api/studies/send":        audit.STUDY_SENT,
+        "/api/studies/delete":      audit.STUDY_DELETED,
+        "/api/studies/delete-all":  audit.STUDY_DELETED,
+        "/api/stuck/retry":         audit.STUDY_SENT,
+        "/api/pending/approve":     audit.STUDY_SENT,
+        "/api/pending/discard":     audit.STUDY_DELETED,
+        "/api/ris/orders":          audit.ORDER_CHANGED,
+        "/api/ris/orders/update":   audit.ORDER_CHANGED,
+        "/api/ris/orders/cancel":   audit.ORDER_CHANGED,
+        "/api/ris/orders/delete":   audit.ORDER_CHANGED,
+        "/api/ris/orders/purge":    audit.ORDER_CHANGED,
+        "/api/receiver":            audit.SERVICE_CHANGED,
+        "/api/printer":             audit.SERVICE_CHANGED,
+        "/api/ris":                 audit.SERVICE_CHANGED,
+        "/api/mwl":                 audit.SERVICE_CHANGED,
+        "/api/qr":                  audit.SERVICE_CHANGED,
+        "/api/watcher":             audit.SERVICE_CHANGED,
+        "/api/emergency":           audit.EMERGENCY_CHANGED,
+        "/api/shutdown":            audit.SHUTDOWN,
+    }
+
+    # Endpoints whose body is genuinely uninteresting and high-volume enough
+    # that recording each one would bury the records that matter.
+    _AUDIT_SKIP = frozenset({"/api/portcheck", "/api/echo", "/api/login",
+                             "/api/logout", "/api/routing/test"})
+
+    # Body fields safe to record as the target of an action. Deliberately a
+    # whitelist: an order POST body is nothing but demographics and a login body
+    # carries a password, and an audit trail that copies request bodies
+    # wholesale becomes the largest unredacted pile of PHI on the appliance.
+    _TARGET_FIELDS = ("path", "id", "profile", "group", "action", "name")
+
+    def _audit_target() -> str:
+        try:
+            body = request.get_json(silent=True)
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            body = request.form if request.form else {}
+        parts = []
+        for field in _TARGET_FIELDS:
+            try:
+                value = body.get(field)
+            except Exception:
+                value = None
+            if isinstance(value, (str, int)) and str(value):
+                parts.append(f"{field}={value}")
+        return " ".join(parts)[:300]
+
+    @app.after_request
+    def _record_to_audit(resp):
+        """Record every mutating API call, with its outcome.
+
+        In after_request so the record carries what actually HAPPENED. A
+        decorator on the way in would have to guess, and an audit trail that
+        says a study was deleted when the delete returned 400 is worse than no
+        trail — it is a trail that lies in the direction of alarming people.
+
+        Refusals are recorded too, and that is not padding: "who kept trying to
+        reach the thing they are not allowed to reach" is one of the few
+        questions an audit trail is uniquely able to answer.
+        """
+        try:
+            path = request.path
+            if not path.startswith("/api/"):
+                return resp
+            method = request.method.upper()
+            if path in _AUDIT_SKIP or method in ("GET", "HEAD", "OPTIONS"):
+                # A 403 on a read is still worth a record — it is the only
+                # trace that somebody went looking.
+                if not (resp.status_code == 403 and method in ("GET", "POST")):
+                    return resp
+                server.audit.record(
+                    audit.DENIED, actor=guard.current(), target=path,
+                    outcome="denied", source=request.remote_addr or "",
+                    method=method)
+                return resp
+            action = _AUDIT_ACTIONS.get(path) or "api" + path[4:].replace("/", ".")
+            outcome = ("ok" if 200 <= resp.status_code < 300 else
+                       "denied" if resp.status_code in (401, 403) else "failed")
+            server.audit.record(
+                action if outcome != "denied" else audit.DENIED,
+                actor=guard.current(),
+                target=_audit_target() or path,
+                outcome=outcome,
+                source=request.remote_addr or "",
+                status=resp.status_code,
+                endpoint=path,
+            )
+        except Exception:
+            # Never let recording break the response it is recording. The
+            # failure is visible through audit.stats()["broken"] instead.
+            pass
+        return resp
 
     return app

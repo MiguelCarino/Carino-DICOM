@@ -34,11 +34,26 @@ from collections import deque
 from hashlib import sha256
 from typing import Any, Optional
 
+from . import users as _users
 from .config import auth_token_of
 
 SESSION_COOKIE = "carino_session"
 SESSION_TTL = 12 * 3600         # a working day; the operator retypes at most once per shift
+
+# Two cookie formats, deliberately not one.
+#
+#   "1"  ver.exp.nonce.sig                  — the shared token's session
+#   "2"  ver.exp.nonce.profile_id.sig       — one person's session
+#
+# A v1 value is what every install that predates profiles is already holding, and
+# it keeps working untouched. Version 2 carries WHO, because a capability check
+# has to name somebody and an audit entry has to attribute to them. Keeping the
+# formats apart rather than growing one is what makes "a v1 cookie can never be
+# read as naming a profile" true by parsing rather than by care: verify() rejects
+# anything that is not exactly four parts, so a v2 value cannot drift into the
+# token path and a forged "2" prefix cannot shorten its way into the v1 one.
 SESSION_VERSION = "1"
+SESSION_VERSION_PROFILE = "2"
 
 # Everything under these prefixes needs a credential when a token is set.
 # "/dicom-web" is listed even though this file predates that blueprint: the
@@ -64,6 +79,12 @@ PUBLIC_PATHS = frozenset({
     "/api/auth",        # "does this server want a token?" — the 401 already says so
     "/api/login",
     "/api/logout",
+    # The profile picker, for the same reason /api/login is public: a browser
+    # cannot draw a "who are you" screen out of a 401. It answers names, roles
+    # and whether each needs a password — never an email, a capability list or
+    # any password material — and it answers nothing at all when the operator
+    # sets users.list_profiles false. See Profile.public().
+    "/api/profiles",
 })
 
 # Failed-attempt budget per client IP. Small enough that guessing a
@@ -245,6 +266,61 @@ class SessionSigner:
             return "expired"
         return ""
 
+    # ---- profile sessions (format 2) ------------------------------------
+    def issue_profile(self, profile_id: str, credential_fp: str,
+                      now: Optional[float] = None) -> str:
+        """A session naming one person, bound to the credential they used.
+
+        *credential_fp* is users.password_fingerprint of their stored password,
+        or the constant for an open profile. Binding to it is what makes a
+        password change log that person out — and only that person, which is the
+        whole difference from the token, where a rotation logs out everybody.
+        """
+        now = time.time() if now is None else now
+        exp = int(now + self.ttl)
+        nonce = secrets.token_urlsafe(9)
+        pid = str(profile_id or "")
+        payload = f"{SESSION_VERSION_PROFILE}.{exp}.{nonce}.{pid}.{self.fingerprint(credential_fp)}"
+        return f"{SESSION_VERSION_PROFILE}.{exp}.{nonce}.{pid}.{self._sign(payload)}"
+
+    @staticmethod
+    def claimed_profile_id(value: str) -> str:
+        """The profile id a cookie CLAIMS, with nothing verified yet.
+
+        Used for exactly one thing: choosing which stored password to check the
+        signature against. That is safe because the signature check immediately
+        afterwards is what proves the claim — an attacker who edits this field
+        selects a different key and then fails to match. It must never be used
+        as an identity on its own, which is why it is a static method that
+        returns a bare string and not a Profile: there is nothing here to
+        mistake for a lookup that already succeeded.
+        """
+        parts = str(value or "").split(".")
+        if len(parts) != 5 or parts[0] != SESSION_VERSION_PROFILE:
+            return ""
+        return parts[3]
+
+    def verify_profile(self, value: str, credential_fp: str,
+                       now: Optional[float] = None) -> str:
+        """"" when the cookie is good, else invalid | expired."""
+        now = time.time() if now is None else now
+        parts = str(value or "").split(".")
+        if len(parts) != 5:
+            return "invalid"
+        ver, exp_s, nonce, pid, sig = parts
+        if ver != SESSION_VERSION_PROFILE:
+            return "invalid"
+        payload = f"{ver}.{exp_s}.{nonce}.{pid}.{self.fingerprint(credential_fp)}"
+        if not hmac.compare_digest(sig, self._sign(payload)):
+            return "invalid"
+        try:
+            exp = int(exp_s)
+        except ValueError:
+            return "invalid"
+        if exp <= now:
+            return "expired"
+        return ""
+
 
 class Verdict:
     """Outcome of one auth check: what to do, and what to tell the client."""
@@ -301,8 +377,33 @@ class AuthGuard:
         return auth_token_of(self.cfg.web)
 
     @property
+    def profiles_enabled(self) -> bool:
+        """Is this appliance running with profiles, or on the token alone?
+
+        Read live from config for the same reason the token is: an operator who
+        seeds profiles from the dashboard must not have to restart, and there
+        must be no window in which profiles exist but nothing enforces them.
+        """
+        try:
+            return _users.profiles_in_use(self.cfg.users)
+        except (AttributeError, KeyError, TypeError):
+            # A Config built before the users section existed, or a stub in a
+            # test. No profiles is the honest answer and the safe one: it means
+            # the guard falls back to exactly the token behaviour it had before.
+            return False
+
+    @property
     def required(self) -> bool:
-        return bool(self.token)
+        """Must a request carry a credential?
+
+        Turning profiles on has to be sufficient by itself. It used to be the
+        token alone that decided this, and leaving it that way would have meant
+        an operator who seeds profiles on a loopback box — the common case, and
+        the one the whole feature is for — gets a picker that anyone can walk
+        past, because with no token set the guard waves every request through
+        before it ever looks at who is asking.
+        """
+        return bool(self.token) or self.profiles_enabled
 
     def verify_token(self, presented: str) -> bool:
         token = self.token
@@ -341,14 +442,24 @@ class AuthGuard:
                 return Verdict(True)
             return self._fail(client_ip, "invalid", now)
 
-        raw = ""
-        try:
-            raw = str(cookies.get(SESSION_COOKIE) or "")
-        except Exception:
-            raw = ""
+        raw = self._cookie(cookies)
         if raw:
+            # A profile session is checked against that profile's password, a
+            # token session against the token. Which one this is comes from the
+            # cookie's own format, so the two can never be confused: a v1 value
+            # has no id to look up and a v2 value never reaches the token path.
+            if SessionSigner.claimed_profile_id(raw):
+                _profile, reason = self._profile_from_cookie(raw, now)
+                if not reason:
+                    return Verdict(True)
+                return Verdict(False, 401, reason)
             reason = self.sessions.verify(raw, self.token, now)
             if not reason:
+                # A token session is still a valid credential when profiles are
+                # on — it authenticates as the service identity, which is what
+                # every existing dashboard tab is holding the moment the
+                # operator seeds profiles. Logging all of them out mid-shift to
+                # celebrate the new feature is not an upgrade path.
                 return Verdict(True)
             # An expired or token-rotated session is a stale browser, not a
             # guess: it costs the attacker nothing to forge garbage cookies, so
@@ -357,6 +468,66 @@ class AuthGuard:
             return Verdict(False, 401, reason)
 
         return Verdict(False, 401, "missing")
+
+    @staticmethod
+    def _cookie(cookies: Any) -> str:
+        try:
+            return str(cookies.get(SESSION_COOKIE) or "")
+        except Exception:
+            return ""
+
+    def _profile_from_cookie(self, raw: str, now: Optional[float] = None):
+        """(Profile, "") for a good profile session, (None, reason) otherwise.
+
+        The lookup happens on every request rather than being cached in the
+        cookie, which is the point: an administrator who disables someone or
+        edits what they may do has it take effect on that person's very next
+        request, with no restart and no waiting for a session to expire. A
+        cached capability list would have meant a revoked profile keeps working
+        for up to twelve hours.
+        """
+        pid = SessionSigner.claimed_profile_id(raw)
+        if not pid:
+            return None, "invalid"
+        profile = _users.by_id(self.cfg.users, pid)
+        # Deleted or disabled reads as invalid, not as its own reason. The
+        # browser's move is identical (log in again), and naming the difference
+        # would tell an unauthenticated caller which ids exist.
+        if profile is None or not profile.enabled:
+            return None, "invalid"
+        reason = self.sessions.verify_profile(raw, profile.credential_fingerprint(), now)
+        if reason:
+            return None, reason
+        return profile, ""
+
+    def identify(self, *, headers: Any, cookies: Any) -> "_users.Profile":
+        """Who is making this request. Never raises, never returns None.
+
+        Returns users.ANONYMOUS rather than None so a caller that forgets to
+        check gets a denial from the capability test instead of an
+        AttributeError halfway through composing a payload — a crash there would
+        be served as a 500 from an endpoint whose whole job at that moment was
+        to refuse.
+        """
+        if not self.profiles_enabled:
+            # No capability model in force: this is the pre-profiles world, where
+            # holding the token (or being on loopback with no token set) means
+            # holding everything. Saying so explicitly here is what lets every
+            # endpoint downstream ask "can you" without also asking "are
+            # profiles on".
+            return _users.SERVICE_PROFILE
+        presented = token_from_headers(headers)
+        if presented and self.verify_token(presented):
+            return _users.SERVICE_PROFILE
+        raw = self._cookie(cookies)
+        if raw:
+            if SessionSigner.claimed_profile_id(raw):
+                profile, reason = self._profile_from_cookie(raw)
+                if not reason and profile is not None:
+                    return profile
+            elif self.token and not self.sessions.verify(raw, self.token):
+                return _users.SERVICE_PROFILE
+        return _users.ANONYMOUS
 
     def _fail(self, client_ip: str, reason: str, now: Optional[float] = None) -> Verdict:
         if self.log is not None and self.limiter.should_log(client_ip, now):
@@ -388,6 +559,37 @@ class AuthGuard:
             self.log.info(f"Dashboard authenticated from {client_ip}", kind="auth")
         return Verdict(True, refresh=True)
 
+    def login_profile(self, profile_id: str, password: str, client_ip: str,
+                      now: Optional[float] = None):
+        """POST /api/login with a profile. Returns (Verdict, Profile).
+
+        An OPEN profile — one with no password — logs in on the strength of
+        being picked, which is the point of the setting and is why validate()
+        refuses that combination on a network-reachable bind. It is still a
+        deliberate POST rather than something the page assumes, so the audit
+        trail has a login to record and the operator has a session to end.
+        """
+        profile = _users.by_id(self.cfg.users, str(profile_id or ""))
+        if profile is None or not profile.enabled:
+            # A wrong id and a wrong password answer identically, and both are
+            # counted. The picker already publishes which profiles exist when
+            # the operator wants it to; where they have turned that off, this
+            # must not put it back by being more specific about failures.
+            return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
+        if profile.locked:
+            if not profile.check_password(str(password or "")):
+                return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
+        elif password:
+            # They typed a password at a profile that has none. Refusing is the
+            # honest answer: silently accepting it teaches somebody that their
+            # password "works" and leaves them believing the account is
+            # protected when anyone can click straight in.
+            return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
+        self.limiter.clear(client_ip)
+        if self.log is not None:
+            self.log.info(f"{profile.name} signed in from {client_ip}", kind="auth")
+        return Verdict(True, refresh=True), profile
+
     def authenticated(self, *, headers: Any, cookies: Any) -> bool:
         """Is this request already carrying a good credential? (for /api/auth)"""
         if not self.required:
@@ -395,25 +597,150 @@ class AuthGuard:
         presented = token_from_headers(headers)
         if presented and self.verify_token(presented):
             return True
-        try:
-            raw = str(cookies.get(SESSION_COOKIE) or "")
-        except Exception:
+        raw = self._cookie(cookies)
+        if not raw:
             return False
-        return bool(raw) and not self.sessions.verify(raw, self.token)
+        if SessionSigner.claimed_profile_id(raw):
+            _profile, reason = self._profile_from_cookie(raw)
+            return not reason
+        return not self.sessions.verify(raw, self.token)
 
     def status(self, *, headers: Any = None, cookies: Any = None) -> dict:
+        """What the login screen needs to decide what to draw.
+
+        ``profiles`` says whether to show a picker at all; ``who`` is the
+        identity of the current session, and is what the dashboard derives its
+        panels from. Both are absent-shaped rather than wrong when there is no
+        request to inspect, because /api/login answers this before a cookie has
+        been set on the response.
+        """
+        base = {
+            "required": self.required,
+            "profiles": self.profiles_enabled,
+            # An operator who turned the picker off gets a name-and-password
+            # form instead, and the browser has to be told which.
+            "list_profiles": self.lists_profiles(),
+        }
         if headers is None or cookies is None:
-            return {"required": self.required, "authenticated": not self.required}
-        return {"required": self.required,
-                "authenticated": self.authenticated(headers=headers, cookies=cookies)}
+            base["authenticated"] = not self.required
+            base["who"] = None
+            return base
+        base["authenticated"] = self.authenticated(headers=headers, cookies=cookies)
+        who = self.identify(headers=headers, cookies=cookies)
+        base["who"] = self.whoami(who) if base["authenticated"] else None
+        return base
+
+    def lists_profiles(self) -> bool:
+        try:
+            return self.cfg.users.get("list_profiles", True) is not False
+        except (AttributeError, KeyError, TypeError):
+            return True
+
+    # ---- the capability gate, as endpoints use it ------------------------
+    # Flask is imported inside these rather than at module scope so the guard
+    # stays testable without an app, and so a CLI that only wants verify_token
+    # does not drag the web stack into a frozen binary's import graph.
+
+    def current(self) -> "_users.Profile":
+        """Who is making the request Flask is currently handling."""
+        from flask import request
+        return self.identify(headers=request.headers, cookies=request.cookies)
+
+    def deny(self, capability: str):
+        """None when the caller may do this, else the response to return.
+
+        The shape every protected endpoint uses::
+
+            denied = guard.deny("studies.delete")
+            if denied:
+                return denied
+
+        Deliberately not a decorator. Several endpoints need the capability to
+        depend on what was posted — /api/config asks for config.write, but the
+        same handler is where a de-identification change needs deid.manage —
+        and a decorator would have pushed that decision to the top of the
+        function where the body is not parsed yet. A two-line guard at the point
+        of the decision reads worse and is right more often.
+        """
+        from flask import jsonify, request
+        # Preflights carry no credentials by definition, so there is nobody to
+        # check a capability against and a 403 here would break the editor's
+        # cross-origin deep-link before the real request was ever sent. check()
+        # already waves OPTIONS through for the same reason; this has to agree
+        # with it, or the two gates disagree about the same request and the
+        # failure looks like a network fault.
+        if str(request.method).upper() == "OPTIONS":
+            return None
+        who = self.current()
+        if who.can(capability):
+            return None
+        resp = jsonify({
+            "ok": False,
+            "error": "not permitted",
+            # Named so the dashboard can say WHICH permission is missing and
+            # who to ask for it, instead of a bare "forbidden" that sends the
+            # operator to the logs. The capability name is not a secret — the
+            # caller is authenticated, and knowing what they lack is the whole
+            # content of the refusal.
+            "forbidden": {"capability": capability,
+                          "profile": who.name,
+                          "role": who.role},
+        })
+        resp.status_code = 403
+        return resp
+
+    @staticmethod
+    def whoami(profile: "_users.Profile") -> dict:
+        """The identity the dashboard renders and derives its panels from.
+
+        Capabilities are published to their own holder deliberately: the page
+        has to know which panels to draw, and it is going to find out anyway
+        the moment it calls an endpoint. What it must never do is DECIDE
+        anything with them — every one of these is enforced server-side, and
+        this list is a rendering hint, not a permission.
+        """
+        return {
+            "id": profile.id,
+            "name": profile.name,
+            "role": profile.role,
+            "admin": profile.admin,
+            "service": profile.id == _users.SERVICE_PROFILE.id,
+            "capabilities": sorted(profile.capabilities()),
+            "phi_visible": sorted(profile.phi_visible()),
+        }
 
 
 # ---- Flask wiring -------------------------------------------------------
 # Kept here rather than in web.py so the enforcement and the endpoints that
 # grant it live in one file; web.py's diff is the install() call.
 
+def set_session_cookie(resp, guard: "AuthGuard", profile) -> Any:
+    """Attach a session for *profile* to an already-built response.
+
+    Exists for exactly one caller: the endpoint that turns profiles on. That
+    request is the last one its client can make anonymously — enabling profiles
+    is what makes a credential mandatory — so it has to hand back the session
+    that keeps them logged in, or the operator's reward for switching on access
+    control is being locked out of their own dashboard.
+
+    Kept here beside the other cookie code so there is one place that knows the
+    flags a session cookie is set with.
+    """
+    from flask import request
+    resp.set_cookie(
+        SESSION_COOKIE,
+        guard.sessions.issue_profile(profile.id, profile.credential_fingerprint()),
+        max_age=guard.sessions.ttl,
+        httponly=True,
+        samesite="Strict",
+        secure=bool(request.is_secure),
+        path="/",
+    )
+    return resp
+
+
 def install(app, cfg, log=None, ttl: int = SESSION_TTL,
-            extra_prefixes: tuple[str, ...] = ()) -> AuthGuard:
+            extra_prefixes: tuple[str, ...] = (), audit_log=None) -> AuthGuard:
     """Register the guard plus /api/auth, /api/login, /api/logout on *app*.
 
     Returns the AuthGuard so the caller can reach it (tests, a CLI status
@@ -424,6 +751,17 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
     from flask import jsonify, request
 
     guard = AuthGuard(cfg, log=log, ttl=ttl, extra_prefixes=extra_prefixes)
+
+    def _audit(action: str, **fields) -> None:
+        """Record to the trail if there is one. Optional on purpose: the tests
+        build this app without a server, and auth has to work without an audit
+        sink for the same reason it works without a LogBuffer."""
+        if audit_log is None:
+            return
+        try:
+            audit_log.record(action, source=_client_ip(), **fields)
+        except Exception:
+            pass
 
     def _client_ip() -> str:
         # remote_addr only. X-Forwarded-For is attacker-controlled when there
@@ -440,13 +778,13 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
             resp.headers["Retry-After"] = str(verdict.retry_after)
         return resp
 
-    def _set_cookie(resp):
+    def _set_cookie(resp, value: Optional[str] = None):
         # Secure only over HTTPS: the dashboard is plain HTTP on loopback and
         # on most LAN deployments, and a Secure cookie there is silently never
         # sent — a login that appears to succeed and then 401s every request.
         resp.set_cookie(
             SESSION_COOKIE,
-            guard.sessions.issue(guard.token),
+            guard.sessions.issue(guard.token) if value is None else value,
             max_age=guard.sessions.ttl,
             httponly=True,          # keeps the session out of reach of any injected script
             samesite="Strict",      # the API is same-origin; nothing legitimate posts here cross-site
@@ -472,17 +810,61 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
         return jsonify(ok=True, auth=guard.status(headers=request.headers,
                                                   cookies=request.cookies))
 
+    @app.get("/api/profiles")
+    def api_profiles():
+        """The picker's list. Public, and deliberately thin.
+
+        Publishing staff names to anyone who can reach the port is a real
+        disclosure, not a hypothetical one, so it is the operator's call:
+        users.list_profiles false answers an empty list and the dashboard falls
+        back to typing a name. Disabled profiles are never listed either way —
+        a button that cannot log in is a support call.
+        """
+        if not guard.profiles_enabled or not guard.lists_profiles():
+            return jsonify(ok=True, profiles=[], listed=False,
+                           enabled=guard.profiles_enabled)
+        rows = [p.public() for p in _users.enabled_profiles(guard.cfg.users)]
+        return jsonify(ok=True, profiles=rows, listed=True, enabled=True)
+
     @app.post("/api/login")
     def api_login():
-        presented = (request.get_json(silent=True) or {}).get("token")
-        verdict = guard.login(str(presented or ""), _client_ip())
+        body = request.get_json(silent=True) or {}
+        # A profile login and a token login are told apart by which field is
+        # present, not by what is configured: an appliance can have both, and a
+        # machine client holding the token must keep working while a person at
+        # the same box logs in as themselves.
+        if body.get("profile"):
+            verdict, profile = guard.login_profile(
+                str(body.get("profile") or ""), str(body.get("password") or ""),
+                _client_ip())
+            if not verdict.ok:
+                # The id that was tried, never the password, and never a
+                # judgement about whether that id exists — the record says what
+                # arrived, which is all it can honestly say.
+                _audit("login.failed", target=str(body.get("profile") or ""),
+                       outcome="denied", reason=verdict.reason)
+                return _reject(verdict)
+            _audit("login", actor=profile, target=profile.name)
+            resp = jsonify(ok=True, auth={**guard.status(),
+                                          "authenticated": True,
+                                          "who": guard.whoami(profile)})
+            return _set_cookie(resp, guard.sessions.issue_profile(
+                profile.id, profile.credential_fingerprint()))
+        verdict = guard.login(str(body.get("token") or ""), _client_ip())
         if not verdict.ok:
+            _audit("login.failed", target="api token", outcome="denied",
+                   reason=verdict.reason)
             return _reject(verdict)
+        _audit("login", target="api token")
         resp = jsonify(ok=True, auth=guard.status())
         return _set_cookie(resp) if verdict.refresh else resp
 
     @app.post("/api/logout")
     def api_logout():
+        # Recorded BEFORE the cookie is cleared, while there is still a session
+        # to say whose it was.
+        _audit("logout", actor=guard.identify(headers=request.headers,
+                                              cookies=request.cookies))
         resp = jsonify(ok=True)
         resp.delete_cookie(SESSION_COOKIE, path="/", samesite="Strict")
         return resp

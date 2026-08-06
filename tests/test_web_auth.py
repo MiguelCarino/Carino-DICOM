@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pacs import auth                                    # noqa: E402
+from pacs.audit import AuditLog                          # noqa: E402
 from pacs.config import Config                           # noqa: E402
 from pacs.index import InstanceIndex                     # noqa: E402
 from pacs.web import create_app                          # noqa: E402
@@ -56,6 +57,10 @@ class FakeServer:
         self.cfg = Config(os.path.join(tmpdir, "config.json")).load()
         self.log = FakeLog()
         self.index = InstanceIndex(os.path.join(tmpdir, "index.db"), log=self.log)
+        # A real AuditLog, not a stub. web.py records to it on every mutating
+        # request and reads it back through /api/audit, so a mock would only
+        # prove the mock works — and the chain is the part worth exercising.
+        self.audit = AuditLog(os.path.join(tmpdir, "audit"), log=self.log).open()
         self.calls = []
         self.qr_running = False
         self.qr_error = None
@@ -148,7 +153,8 @@ def test_no_token_leaves_the_api_open():
     _, _, c = make(_tmp())
     r = c.get("/api/status")
     assert r.status_code == 200, r.data
-    assert r.get_json()["auth"] == {"required": False, "authenticated": True}
+    body = r.get_json()["auth"]
+    assert body["required"] is False and body["authenticated"] is True
 
 
 def test_no_token_dicomweb_open():
@@ -203,7 +209,8 @@ def test_wrong_token_is_401_invalid():
 def test_status_reports_authenticated_once_logged_in():
     _, _, c = make(_tmp(), token=TOKEN)
     r = c.get("/api/status", headers={"X-Carino-Token": TOKEN})
-    assert r.get_json()["auth"] == {"required": True, "authenticated": True}
+    body = r.get_json()["auth"]
+    assert body["required"] is True and body["authenticated"] is True
 
 
 # ---------------------------------------------------------------- login/cookie
@@ -312,7 +319,8 @@ def test_api_auth_is_public():
     _, _, c = make(_tmp(), token=TOKEN)
     r = c.get("/api/auth")
     assert r.status_code == 200
-    assert r.get_json()["auth"] == {"required": True, "authenticated": False}
+    body = r.get_json()["auth"]
+    assert body["required"] is True and body["authenticated"] is False
 
 
 def test_options_preflight_is_never_gated():
@@ -1747,10 +1755,13 @@ def test_arm_disarm_is_never_lost_to_a_concurrent_dashboard_save():
 
     real_action = srv.emergency_action
 
-    def marked(action):
+    def marked(action, profile=None):
+        # Mirrors emergency_action's signature, profile included: the endpoint
+        # passes whoever is asking, and a stand-in that drops the argument turns
+        # a concurrency test into a TypeError inside the handler.
         marker.on = True
         try:
-            return real_action(action)
+            return real_action(action, profile)
         finally:
             marker.on = False
 

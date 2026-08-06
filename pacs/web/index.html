@@ -34,15 +34,23 @@
              keeps `active` because it is what an unattended screen shows all
              day, and Overview may put a patient name on the wall. -->
         <button class="navbtn" data-panel="dlgOverview"><span class="nav-ico">📊</span> <span data-i18n>Overview</span></button>
-        <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
-        <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> <span data-i18n>History</span></button>
-        <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> <span data-i18n>Orders</span><span class="badge" id="ordersBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> <span data-i18n>Pending</span><span class="badge" id="pendingBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> <span data-i18n>Stuck</span><span class="badge warn" id="stuckBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> <span data-i18n>Destinations</span></button>
-        <button class="navbtn" data-panel="dlgRouting"><span class="nav-ico">🔀</span> <span data-i18n>Routing</span></button>
-        <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> <span data-i18n>Settings</span></button>
-        <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> <span data-i18n>Logs</span></button>
+        <button class="navbtn active" data-panel="dlgServices" data-cap="services.control"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
+        <button class="navbtn" data-panel="dlgHistory" data-cap="studies.read"><span class="nav-ico">🗂</span> <span data-i18n>History</span></button>
+        <button class="navbtn" data-panel="dlgOrders" data-cap="orders.read"><span class="nav-ico">📋</span> <span data-i18n>Orders</span><span class="badge" id="ordersBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgPending" data-cap="studies.read"><span class="nav-ico">📎</span> <span data-i18n>Pending</span><span class="badge" id="pendingBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgStuck" data-cap="studies.read"><span class="nav-ico">⚠</span> <span data-i18n>Stuck</span><span class="badge warn" id="stuckBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgDests" data-cap="routing.read"><span class="nav-ico">🌐</span> <span data-i18n>Destinations</span></button>
+        <button class="navbtn" data-panel="dlgRouting" data-cap="routing.read"><span class="nav-ico">🔀</span> <span data-i18n>Routing</span></button>
+        <button class="navbtn" data-panel="dlgSettings" data-cap="config.read"><span class="nav-ico">⚙</span> <span data-i18n>Settings</span></button>
+        <button class="navbtn" data-panel="dlgLogs" data-cap="logs.read"><span class="nav-ico">📄</span> <span data-i18n>Logs</span></button>
+        <button class="navbtn" data-panel="dlgPeople" data-cap="auth.manage"><span class="nav-ico">👥</span> <span data-i18n>People</span></button>
+        <button class="navbtn" data-panel="dlgAudit" data-cap="audit.read"><span class="nav-ico">🔒</span> <span data-i18n>Audit</span></button>
+        <!-- Who this browser is signed in as. On a shared front-desk machine
+             the most expensive mistake is acting under somebody else's name
+             without noticing, so it sits in the nav where it is always on
+             screen, not behind a menu. -->
+        <div class="whoami" id="whoami" hidden></div>
+        <button class="navbtn signout" id="signOut" hidden><span class="nav-ico">⎋</span> <span data-i18n>Sign out</span></button>
       </nav>
 
       <div id="workspace">
@@ -720,6 +728,54 @@
         </div>
       </section>
 
+      <!-- People. The administrator's editor for who may use this appliance.
+           Every control here is a rendering of what the server enforces; none
+           of it is the access control itself. -->
+      <section class="panel workpanel" id="dlgPeople" hidden>
+        <header class="modal-head">
+          <h2 data-i18n>People</h2>
+          <div class="head-right">
+            <button class="btn ghost tiny" id="peopleAdd" data-i18n>Add someone</button>
+            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+          </div>
+        </header>
+        <div class="modal-body">
+          <!-- Shown while the appliance is still token-only. -->
+          <div class="people-intro" id="peopleOff" hidden>
+            <p data-i18n>Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.</p>
+            <p data-i18n>Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.</p>
+            <p class="hint" data-i18n>You will start with four editable presets: Administrator, IT, Radiologist and Reception. They are ordinary entries — rename them, re-permission them or delete them.</p>
+            <button class="btn" id="peopleSeed" data-i18n>Turn on profiles</button>
+          </div>
+          <div id="peopleOn" hidden>
+            <p class="sub-note" id="peopleCount"></p>
+            <div class="people-list" id="peopleList"></div>
+            <label class="chk people-listing"><input type="checkbox" id="peopleListing" />
+              <span data-i18n>Show the list of names on the sign-in screen</span></label>
+            <p class="hint" data-i18n>With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Audit trail. Deliberately its own panel and not part of Activity:
+           the log answers "what is this box doing", this answers "who did
+           that", and conflating them is how the second question stops being
+           answerable. -->
+      <section class="panel workpanel" id="dlgAudit" hidden>
+        <header class="modal-head">
+          <h2 data-i18n>Audit trail</h2>
+          <div class="head-right">
+            <button class="btn ghost tiny" id="auditVerify" data-i18n>Check integrity</button>
+            <button class="btn ghost tiny" id="auditExport" data-i18n>Export</button>
+            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+          </div>
+        </header>
+        <div class="modal-body">
+          <p class="audit-state" id="auditState"></p>
+          <div class="audit-list" id="auditList"></div>
+        </div>
+      </section>
+
       </div>
     </div>
   </main>
@@ -735,16 +791,55 @@
        "sign in again", not as a fault. -->
   <div class="auth-gate" id="authGate" hidden>
     <div class="auth-card">
-      <h2 data-i18n>This PACS needs its access token</h2>
+      <h2 id="authTitle" data-i18n>This PACS needs its access token</h2>
       <p class="auth-lede" id="authLede" data-i18n>Nothing is shown until you sign in. The dashboard reads and writes patient studies, storage paths and the shutdown control, so it is not served to an unauthenticated browser.</p>
-      <label class="auth-field"><span data-i18n>Access token</span>
+
+      <!-- Profile picker. Present only when the appliance runs with profiles
+           AND the operator left users.list_profiles on — publishing the staff
+           list to anyone who can reach the port is a real disclosure, and it is
+           their call, so this whole block is absent rather than empty when they
+           turn it off. -->
+      <div id="authPickWrap" hidden>
+        <div class="auth-people" id="authPeople"></div>
+        <!-- Shown after picking somebody who has a password. The name is
+             repeated above the field because on a shared front-desk machine the
+             most common mistake is typing your own password at a colleague's
+             button. -->
+        <div id="authPwWrap" hidden>
+          <p class="auth-who"><span data-i18n>Signing in as</span> <b id="authPwName"></b>
+            <button class="linkish" id="authPwBack" data-i18n>change</button></p>
+          <label class="auth-field"><span data-i18n>Password</span>
+            <input id="authPassword" type="password" autocomplete="current-password" spellcheck="false" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Name-and-password form, for a site that hid the picker. -->
+      <div id="authNameWrap" hidden>
+        <label class="auth-field"><span data-i18n>Your name</span>
+          <input id="authName" type="text" autocomplete="username" spellcheck="false" />
+        </label>
+        <label class="auth-field"><span data-i18n>Password</span>
+          <input id="authName2" type="password" autocomplete="current-password" spellcheck="false" />
+        </label>
+      </div>
+
+      <label class="auth-field" id="authTokenWrap"><span data-i18n>Access token</span>
         <input id="authToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste the token" />
       </label>
       <p class="auth-msg" id="authMsg" hidden></p>
       <div class="auth-actions">
         <button class="btn" id="authLogin" data-i18n>Sign in</button>
       </div>
-      <p class="auth-help" data-i18n>The token is web.auth_token in this server's config file. A container generates one on first boot and prints it once in its startup output. The dashboard never shows a stored token.</p>
+      <!-- The token still works, and still authenticates as an administrator,
+           so an appliance that has switched to profiles keeps a way in for the
+           person holding it. Folded away rather than removed: it is the
+           recovery path when somebody has locked themselves out of a profile,
+           and it should not be the first thing anyone reaches for. -->
+      <p class="auth-alt" id="authAltWrap" hidden>
+        <button class="linkish" id="authUseToken" data-i18n>Sign in with the access token instead</button>
+      </p>
+      <p class="auth-help" id="authHelp" data-i18n>The token is web.auth_token in this server's config file. A container generates one on first boot and prints it once in its startup output. The dashboard never shows a stored token.</p>
     </div>
   </div>
 
@@ -753,7 +848,14 @@
     <div class="emg-modal-card">
       <h2 data-i18n>⚠ Primary PACS unreachable</h2>
       <p id="emgPromptMsg"></p>
+      <!-- What THIS person should do about it. Filled from their role, because
+           reception, radiology and IT are being asked three different
+           questions about one outage. -->
+      <p class="emg-role" id="emgRoleHint" hidden></p>
       <p class="hint" data-i18n-html>Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
+      <!-- Shown instead of the Activate button to somebody the administrator
+           did not designate: who to go to, rather than a button that fails. -->
+      <p class="emg-who" id="emgWhoCan" hidden></p>
       <div class="emg-modal-actions">
         <button class="btn" id="emgActivate" data-i18n>Activate emergency RIS</button>
         <button class="btn ghost" id="emgDismiss" data-i18n>Not now</button>

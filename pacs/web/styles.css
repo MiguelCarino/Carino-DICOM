@@ -911,6 +911,121 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .auth-help { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
   color: var(--muted); font-size: .72rem; line-height: 1.55;
   word-break: normal; overflow-wrap: break-word; }
+/* ---- profile picker at the gate ----
+   Buttons rather than a <select>: this is a touch screen at a front desk as
+   often as it is a keyboard, and a name you tap is faster and harder to get
+   wrong than a name you scroll to. */
+.auth-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.person {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; position: relative;
+  background: #070707; border: 1px solid var(--border); border-radius: 9px;
+  padding: 12px 30px 12px 13px; cursor: pointer; text-align: left; color: var(--text);
+  font-family: var(--sans); font-size: .88rem; transition: .14s; min-width: 0;
+}
+.person:hover { border-color: var(--accent); }
+.person.chosen { border-color: var(--accent); background: var(--accent-faint); }
+/* A person's name is PROSE and wraps at spaces; it is never broken mid-word,
+   because a name cut in half is a name read wrong. */
+.person b { font-weight: 600; word-break: normal; overflow-wrap: break-word; }
+.person-role { font-size: .7rem; color: var(--muted); text-transform: lowercase;
+  word-break: normal; overflow-wrap: break-word; }
+.person-lock { position: absolute; top: 10px; right: 10px; font-size: .72rem; }
+.auth-who { margin: 16px 0 8px; font-size: .78rem; color: var(--muted);
+  word-break: normal; overflow-wrap: break-word; }
+.auth-who b { color: var(--text); }
+.auth-alt { margin: 14px 0 0; text-align: center; }
+.auth-alt[hidden], .auth-help[hidden], #authPickWrap[hidden],
+#authNameWrap[hidden], #authTokenWrap[hidden], #authPwWrap[hidden] { display: none; }
+.linkish {
+  background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent);
+  font-family: var(--sans); font-size: .76rem; text-decoration: underline;
+}
+#authPickWrap #authPwWrap { margin-top: 4px; }
+
+/* ---- who is signed in, in the nav ---- */
+.whoami {
+  margin-top: auto; padding: 10px 11px 4px; font-size: .74rem; color: var(--accent);
+  border-top: 1px solid var(--border); word-break: normal; overflow-wrap: break-word;
+}
+.whoami[hidden] { display: none; }
+.navbtn.signout { color: var(--muted); }
+.navbtn[hidden] { display: none; }
+
+/* ---- People panel ---- */
+.people-intro p { font-size: .84rem; line-height: 1.6; color: #cfcfcf; max-width: 66ch;
+  word-break: normal; overflow-wrap: break-word; }
+.people-list { display: flex; flex-direction: column; gap: 14px; margin: 14px 0; }
+.person-card {
+  border: 1px solid var(--border); border-radius: 11px; padding: 14px; background: var(--panel);
+  min-width: 0;
+}
+.person-card.off { opacity: .58; }
+.person-head { display: flex; gap: 10px; flex-wrap: wrap; }
+.person-head input, .person-meta input, .person-pw input {
+  background: #070707; border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 7px 10px; font-size: .84rem; min-width: 0;
+}
+.person-name { flex: 2 1 180px; font-weight: 600; }
+.person-rolein { flex: 1 1 110px; }
+.person-meta { margin-top: 8px; display: flex; }
+.person-meta input { flex: 1 1 auto; }
+.person-flags { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0; }
+.person-section { margin: 10px 0; }
+.person-section[hidden] { display: none; }
+.person-section h4 { margin: 0 0 6px; font-size: .76rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; }
+.person-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 14px; }
+.chk { display: flex; align-items: flex-start; gap: 7px; font-size: .8rem; color: #cfcfcf;
+  cursor: pointer; word-break: normal; overflow-wrap: break-word; }
+.chk input { margin-top: 2px; flex-shrink: 0; }
+.person-pw { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.person-pw input { flex: 1 1 160px; }
+.pw-state { font-size: .78rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
+.pw-state.warn { color: var(--warn); }
+.person-actions { display: flex; gap: 8px; margin-top: 10px; }
+.btn.danger:hover { border-color: var(--bad); color: var(--bad); }
+.people-listing { margin-top: 16px; }
+.sub-note { font-size: .8rem; color: var(--muted); margin: 0 0 6px;
+  word-break: normal; overflow-wrap: break-word; }
+.sub-note.warn { color: var(--warn); }
+
+/* ---- Audit panel ----
+   A grid, because the columns have to line up to be scannable — the whole use
+   of this screen is running an eye down the actor column. */
+.audit-state { font-size: .8rem; color: var(--muted); margin: 0 0 10px;
+  word-break: normal; overflow-wrap: break-word; }
+.audit-state.bad { color: var(--bad); }
+.audit-list { display: flex; flex-direction: column; gap: 2px; }
+.audit-row {
+  display: grid; grid-template-columns: 145px 130px 150px 1fr 74px; gap: 10px;
+  padding: 6px 8px; border-radius: 5px; font-size: .76rem; align-items: baseline;
+  border-left: 2px solid transparent; background: #070707;
+}
+.audit-row.denied { border-left-color: var(--warn); }
+.audit-row.failed { border-left-color: var(--bad); }
+.audit-ts, .audit-out { font-family: var(--mono); color: var(--muted); font-size: .72rem; }
+.audit-who { color: var(--text); word-break: normal; overflow-wrap: break-word; }
+.audit-act { font-family: var(--mono); color: var(--accent); font-size: .72rem;
+  overflow-wrap: anywhere; }
+/* PATHS: a target is a study path or an id, which carries no spaces to break
+   at and would otherwise push this grid sideways. The one class allowed to
+   break mid-token. */
+.audit-target { color: #b0b0b0; overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 780px) {
+  .audit-row { grid-template-columns: 1fr 1fr; gap: 2px 10px; }
+  .audit-target { grid-column: 1 / -1; }
+}
+
+/* ---- emergency modal, role-aware ---- */
+.emg-role {
+  margin: 10px 0; padding: 10px 12px; border-left: 2px solid var(--accent);
+  background: var(--accent-faint); font-size: .84rem; line-height: 1.55; color: var(--text);
+  word-break: normal; overflow-wrap: break-word;
+}
+.emg-role[hidden], .emg-who[hidden] { display: none; }
+.emg-who { margin: 8px 0 0; font-size: .8rem; color: var(--warn);
+  word-break: normal; overflow-wrap: break-word; }
+
 /* Rotation lives in Settings and is never a pre-filled field — see index.html. */
 .auth-rotate { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .auth-rotate[hidden] { display: none; }

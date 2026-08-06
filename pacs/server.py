@@ -13,11 +13,14 @@ import time
 from typing import Optional
 
 from . import __version__
+from .audit import AuditLog
 from .config import Config
+from . import users
 from .emergency import EmergencyController
 from .index import InstanceIndex
 from .logbuf import LogBuffer
 from .mwl import MwlSCP
+from .notify import Notifier
 from .print_scp import PrintSCP
 from .qr import QrSCP
 from .ris import OrderStore, RisListener, _utc_stamp
@@ -292,6 +295,29 @@ class PacsServer:
                 f"(the next Save will not go through until you do) or in the file.",
                 kind="config",
             )
+        # The audit trail. Opened here rather than lazily on first record so a
+        # directory that cannot be created is reported at startup, next to the
+        # config problem above, instead of at the moment somebody deletes a
+        # study and the one record that mattered is the one that failed.
+        acfg = cfg.audit
+        self.audit = AuditLog(
+            cfg.resolved("audit", "dir"),
+            enabled=bool(acfg.get("enabled", True)),
+            max_bytes=int(acfg.get("max_bytes", 8388608) or 0),
+            log_reads=bool(acfg.get("log_reads", False)),
+            fsync=bool(acfg.get("fsync", True)),
+            log=self.log,
+        ).open()
+        if self.audit.broken:
+            self.log.warn(
+                f"The audit trail is not being written: {self.audit.broken}. "
+                f"The PACS is running normally, but nothing is recording who does what.",
+                kind="audit")
+        # Reads its config live, so an operator turning webhooks or e-mail on in
+        # Settings gets them without a restart. Started lazily on the first
+        # event rather than here: an appliance with notification off should not
+        # be carrying a worker thread for it.
+        self.notifier = Notifier(cfg, log=self.log, audit=self.audit)
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
         self.print_scp: Optional[PrintSCP] = None
@@ -736,8 +762,15 @@ class PacsServer:
             )
 
     # ---- emergency failover (health monitor + state machine) --------------
-    def emergency_action(self, action: str) -> dict:
-        """Drive the failover state machine from the dashboard."""
+    def emergency_action(self, action: str, profile=None) -> dict:
+        """Drive the failover state machine from the dashboard.
+
+        *profile* is whoever asked. It decides three things: whether they are
+        allowed to activate at all, whose acknowledgement a dismiss records, and
+        whose name goes in the log and the audit trail next to the decision.
+        None means an appliance running without profiles, where there is one
+        operator and every answer is yes.
+        """
         fn = {
             "arm": self.emergency.arm,
             "disarm": self.emergency.disarm,
@@ -747,7 +780,23 @@ class PacsServer:
         }.get(action)
         if not fn:
             return {"ok": False, "message": "action must be arm|disarm|activate|dismiss|resume"}
-        return {"ok": True, "emergency": fn()}
+        # emergency.activate as a capability says "this person makes failover
+        # decisions"; emergency.activate_by says the administrator designated
+        # them on THIS appliance. The endpoint checked the first. This checks
+        # the second, and it has to be here rather than in the route, because
+        # the state machine is what knows the policy.
+        #
+        # Dismiss is deliberately NOT gated: acknowledging a prompt is saying "I
+        # have seen this", which anybody being shown it is entitled to say. Only
+        # the three that change what the appliance is doing are restricted.
+        if action in ("activate", "arm", "disarm", "resume") and not self.emergency.may_activate(profile):
+            named = ", ".join(
+                users.describe_principal(self.cfg.users, s)
+                for s in (self.cfg.emergency.get("activate_by") or [])) or "an administrator"
+            return {"ok": False,
+                    "message": f"failover decisions on this appliance are for {named}. "
+                               f"Your profile can see the alert but not answer it."}
+        return {"ok": True, "emergency": fn(profile)}
 
     # ---- RIS orders (CRUD over the store) ---------------------------------
     def list_orders(self, status: Optional[str] = None) -> dict:
@@ -2304,6 +2353,16 @@ class PacsServer:
             "started_at": int(self.started_at),
             "uptime_sec": int(time.time() - self.started_at),
             "setup": self.setup_state(),
+            # Published, not merely logged. A trail that stopped recording looks
+            # exactly like a quiet week, and the dashboard has to be able to say
+            # which it is. Carries `head` too, which is the digest an external
+            # monitor anchors — see the note at the top of pacs/audit.py about
+            # what a chain kept on the same box can and cannot prove.
+            "audit": self.audit.stats(),
+            # Whether anybody is actually being reached. "enabled but
+            # nothing sent and three failed" is the state an operator has
+            # to be able to see BEFORE the outage that depends on it.
+            "notify": self.notifier.stats(),
         }
 
     def shutdown(self) -> None:

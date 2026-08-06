@@ -47,8 +47,9 @@ one of them, not this, if you want:
 
 - a **long-term archive** — tiering, storage commitment, retention policies,
   clustering, replication;
-- **user accounts, roles or a per-user audit trail** — Carino has none of the
-  three (see [Regulatory and safety](#regulatory-and-safety));
+- **a directory integration** — Carino has its own profiles, capabilities and
+  audit trail now, but no LDAP, no Active Directory, no SSO and no SAML, so
+  accounts are managed on the appliance rather than by your identity provider;
 - a **plugin ecosystem**, a REST API other products already integrate with, or
   a viewer in the box;
 - **certification, a support contract, or someone to call**;
@@ -408,6 +409,98 @@ node answers; a de-identification hold is waiting on a *configuration* and
 clears only when someone edits it. The stuck panel lists them separately for
 that reason.
 
+#### Who answers it, and who is told
+
+An outage is three different questions to three different people, so the prompt
+is not one prompt shown to whoever happens to be at the screen.
+
+**Who may activate** is a policy you write: a role (`role:radiologist`), one
+named person, or nobody at all because `auto_activate` is on and the appliance
+decides for itself. Somebody the policy does not name still sees the alert —
+and is told who can answer it, instead of being handed a button that fails.
+
+**Who is told** is a separate list, because reception needs to know the RIS is
+down so they can start keying orders by hand, and must not be the one deciding
+to fail over.
+
+**Acknowledgement is per person.** Clicking *Not now* stops the modal reopening
+for you and for nobody else. It used to be a single flag, which meant a
+receptionist clearing a pop-up they could do nothing about took it off the
+radiologist's screen at the same time.
+
+If the outage should reach somebody who is not looking at a dashboard, see
+*Emergency notification* below.
+
+### Emergency notification
+
+Off by default. A banner only reaches someone who already has the page open,
+which is the wrong assumption at 03:00, so the same events can go out two ways:
+
+- **A webhook** — an HTTP POST carrying the event, the destination and the
+  state, to a URL you choose. Set a secret and it is signed with
+  `X-Carino-Signature: sha256=…` over the exact bytes sent, so the receiver can
+  tell a genuine POST from anyone who learned the URL. Retried on 5xx, 408 and
+  429; not retried on other 4xx, because an unchanged body will not get better.
+- **E-mail**, to the address on each profile the notify policy names. The
+  message is written for the reader: reception is told to key orders in by hand
+  and hand over the accession number, a radiologist is told studies are being
+  held and how to forward one to an alternate node, IT gets the address and the
+  probe result. A recipient who could not see a destination's address in the
+  dashboard is not sent one in an e-mail either.
+
+Nothing is sent anywhere you have not written down, no patient identifiers
+appear in either channel, and neither can delay or crash a failover — every send
+is queued to a worker thread and a failure becomes a counter and a log line.
+
+### People and permissions
+
+Optional, and off until you turn it on. Until then the shared access token is
+the only credential and can do everything, exactly as before.
+
+Turning profiles on gives each person their own sign-in, their own set of
+permissions, their own view of patient identifiers, and their own name in the
+audit trail. You start with four editable presets — **Administrator**, **IT**,
+**Radiologist**, **Reception** — which are ordinary entries you can rename,
+re-permission or delete.
+
+Two things are worth knowing before you enable it:
+
+**Permissions are per capability, and enforced at the endpoint.** The dashboard
+hides panels you cannot use, but that is a courtesy: `GET /api/status` is
+composed per profile, so a receptionist's browser never receives the destination
+table or the storage paths at all.
+
+**Identifier visibility is per field.** You choose, per profile, which of
+patient name, patient ID, date of birth, sex, accession number, study
+description and referring physician they may see. Withheld fields come back as
+`***` rather than blank, because an empty accession means "this study has none"
+and the two must not be confused. The IT preset ships able to see the accession
+number and patient ID and nothing else — enough to trace a study through the
+routing engine, not enough to read a chart.
+
+Passwords are optional per profile: a shared front-desk machine can have an open
+Reception profile, and a waiting-room display can be open and read-only. Config
+validation refuses an open profile that can *change* anything when the dashboard
+is bound to the network.
+
+### Audit trail
+
+On by default, and a different artifact from the log. The log answers "what is
+this box doing"; the audit trail answers "who did that".
+
+Records are append-only and hash-chained — each covers the previous one's
+digest, so an edit, a deletion from the middle or a reorder breaks every digest
+after it, and *Check integrity* reports the first break with its record number
+and cause. Each record names the profile that acted, what they did, to what,
+from where, and whether it worked. Refusals are recorded too.
+
+The honest limit, because an audit trail trusted further than it earns is worse
+than none: a chain authenticates the order and content of what is *present*. It
+cannot detect the last few records being deleted, and cannot stop somebody with
+write access to the audit directory rewriting it consistently. If you need
+non-repudiation, anchor the chain head — it is published on the Audit panel and
+in `/api/status` — somewhere this appliance cannot write.
+
 ### Non-DICOM ingest
 
 PDFs and JPEG/PNG images become **real** DICOM objects — Encapsulated PDF
@@ -486,23 +579,35 @@ Read this before it matters.
 - **It is not for primary diagnosis.** The bundled editor is a tag editor, not a
   reading workstation. Nothing here is calibrated, and no image it displays or
   produces should be read from.
-- **There is no encryption at rest.** Studies are ordinary DICOM files on disk,
-  the index holds patient names and identifiers in the clear, orders are JSON,
-  captured print jobs are PDFs, and `config.json` holds both the dashboard token
-  and `deid.secret` — the HMAC key behind every pseudonym this box has ever
-  issued — in plaintext. Anyone with filesystem access to the data directory has
-  everything, including the ability to re-link studies already exported as
-  "anonymised".
+- **There is no encryption at rest, and that is a decision rather than an
+  oversight.** Studies are ordinary DICOM files on disk, the index holds patient
+  names and identifiers in the clear and indexes them, orders are JSON, captured
+  print jobs are PDFs, and `config.json` holds the dashboard token, `deid.secret`
+  — the HMAC key behind every pseudonym this box has ever issued — the webhook
+  signing key, the SMTP password and every profile's password hash. Anyone with
+  filesystem access to the data directory has everything, including the ability
+  to re-link studies already exported as "anonymised", and **no profile or
+  capability changes that**: the permission model is enforced by the process,
+  not by the filesystem.
   Put it on full-disk or filesystem-level encryption — LUKS, BitLocker,
   FileVault — and restrict the directory to the account that runs the service.
-- **There is no user management.** No accounts, no usernames, no roles, no
-  permissions. The token is a single shared secret, and everyone holding it can
-  read every study, change every setting, and shut the server down.
-- **There is no per-user audit trail.** The log records what happened —
-  associations, stores, forwards, order matches, rejected tokens — with
-  timestamps and peer addresses. It cannot record *who* did it, because the
-  software has no concept of a who. Logs are plain text with no tamper
-  protection: an operational record, not evidence.
+  [SECURITY.md](SECURITY.md#why-encryption-at-rest-is-deferred) sets out why
+  that is the right answer here rather than an application-level scheme whose
+  key would sit on the same disk as the data.
+- **Profiles are off until you turn them on.** A fresh install runs on the
+  shared token alone — one secret, and everyone holding it can read every study,
+  change every setting and shut the server down. That is still the default,
+  because switching it silently during an upgrade would break every machine
+  client on the site. Everything this bullet used to say is still true of your
+  appliance until an administrator enables profiles.
+- **The audit trail can be truncated.** It detects a record edited, removed from
+  the middle, or reordered. It cannot detect the last few records being deleted
+  — the remaining prefix is a genuinely valid chain — nor a wholesale rewrite by
+  somebody with write access to the audit directory. Anchor the chain head
+  elsewhere if you need non-repudiation.
+- **There is no directory integration.** Accounts live on the appliance. There
+  is no LDAP, no Active Directory, no SSO, and no way to disable somebody
+  centrally when they leave.
 - **De-identification does not remove burned-in patient data.** See above.
 - **The HL7 MLLP listener is unauthenticated and unencrypted.** Anyone who can
   open a TCP connection to it can inject orders that appear on the worklist.
@@ -564,7 +669,11 @@ Around that: credentials are accepted as `Authorization: Bearer`, an
 `X-Carino-Token` header, or a session cookie that carries an HMAC rather than
 the token itself and dies with the process; failed attempts are rate-limited per
 IP while a *correct* token is always honoured (locking the only operator out of
-a running PACS is the worse failure); state-changing calls to `/api` require an
+a running PACS is the worse failure); optional **profiles** put a per-person
+sign-in, per-capability permissions and per-field identifier visibility on top
+of that token, enforced at every endpoint rather than in the browser, with an
+append-only hash-chained **audit trail** naming who did what; state-changing
+calls to `/api` require an
 `X-Carino` header, and `/dicom-web` is exempt from it because no conforming
 DICOMweb client can send one — STOW-RS's `multipart/related` body forces the
 preflight there instead; the config file is written `0600` and log files `0640`,

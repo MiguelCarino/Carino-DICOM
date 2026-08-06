@@ -335,10 +335,28 @@ async function main() {
   // body's top-level keys against the engine's own is the whole check.
   const posted = Object.keys(await cdp.eval("JSON.stringify(window.__lastConfigPost)").then(JSON.parse)).sort();
   const known = Object.keys(after).sort();
-  const dropped = known.filter((k) => posted.indexOf(k) < 0);
+  // `users` is the one section this Save must NOT carry, and the exemption is
+  // load-bearing rather than an oversight. POST /api/config re-asserts the
+  // stored profile list and refuses a body that tries to change it, because a
+  // caller holding config.write would otherwise be able to post themselves an
+  // admin row — and config.write is a capability IT holds. Being exempt from
+  // "post it back" therefore means it must be protected some other way, which
+  // is what the check below actually proves.
+  const CARRIED_BY_THE_SERVER = ["users"];
+  const dropped = known.filter((k) => posted.indexOf(k) < 0
+                                      && CARRIED_BY_THE_SERVER.indexOf(k) < 0);
   check(dropped.length === 0, "the Save posts back every config section the engine knows about"
         + (dropped.length ? " — missing: " + dropped.join(", ") : ""));
-  for (const section of ["qr", "dicomweb", "routing", "index", "deid"]) {
+  // The other half: not being posted must not mean being reset. If this ever
+  // fails, every profile on the appliance is deleted by a Settings Save and
+  // access control silently switches itself off.
+  const usersBefore = JSON.stringify(cfgBefore.users);
+  const usersAfter = JSON.stringify(after.users);
+  check(usersBefore === usersAfter,
+        "a Save that does not carry `users` leaves the profile list untouched"
+        + (usersBefore === usersAfter ? "" : "\n          before " + usersBefore
+                                             + "\n          after  " + usersAfter));
+  for (const section of ["qr", "dicomweb", "routing", "index", "deid", "audit", "notify"]) {
     const a = JSON.stringify(cfgBefore[section]);
     const b = JSON.stringify(after[section]);
     check(a === b, "a Settings Save left cfg." + section + " intact" + (a === b ? "" : "\n          before " + a + "\n          after  " + b));

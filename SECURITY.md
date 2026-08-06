@@ -156,6 +156,77 @@ The Flask app serves the dashboard, `/api/*`, and DICOMweb under `/dicom-web`.
   roots by a realpath-based containment check, which defeats both `..` traversal
   and symlink escapes.
 
+### Profiles, capabilities and identifier visibility
+
+Optional, off by default, and additive: an appliance that never turns them on
+behaves exactly as it did before they existed.
+
+- **A profile is a row, not a type.** Name, role, an optional password, a set of
+  capabilities, and a set of identifier fields it may be shown. The four presets
+  — Administrator, IT, Radiologist, Reception — are seed data written on first
+  use and ordinary rows afterwards. Nothing in the software looks a profile up
+  by name or branches on its role, so renaming or deleting any of them is safe.
+- **Capabilities are enforced at the endpoint, never in the browser.** The
+  dashboard derives which panels to draw from the capabilities the server tells
+  it about, but that is a rendering hint: every one of the ~44 API routes checks
+  for itself, and `GET /api/status` is *composed* per profile rather than
+  filtered afterwards — the sections a profile has no capability for are never
+  assembled into the response, so a receptionist's browser never receives the
+  destination table, the storage paths or the config file location.
+- **Identifier visibility is per field, not a single flag.** An administrator
+  chooses which of patient name, patient ID, date of birth, sex, accession
+  number, study description and referring physician each profile may see.
+  Anything withheld is replaced with `***` — never blanked, because an empty
+  accession means "this study has no accession" and the two must not be
+  confused. The IT preset ships seeing the accession number and patient ID and
+  nothing else: enough to trace a study through the routing engine at 3am,
+  not enough to read somebody's chart.
+- **A restricted profile is refused DICOMweb rather than served identifiers.**
+  QIDO answers in DICOM tag keys and WADO-RS in raw Part 10 bytes, so the
+  redactor cannot reach either — de-identification in this appliance happens on
+  *forward*, driven by a routing rule, and there is no scrub on the retrieval
+  path at all. Rather than let the policy be true on one surface and false on
+  another, a profile that may not see every identifier gets a 403 that says so.
+  The same rule applies to the audit export, which has to carry records exactly
+  as written or the chain cannot be checked against it.
+- **Two capabilities are separated because either can grant the rest.**
+  `auth.manage` edits profiles; `deid.manage` changes what gets scrubbed.
+  Neither is in any preset except Administrator, and `POST /api/config` — which
+  IT can reach — refuses to touch the profile list at all and re-checks
+  `deid.manage` against what a save actually changes.
+- **Passwords are optional per profile, and that is bounded.** An open profile
+  is a reasonable thing on a loopback appliance or for a read-only waiting-room
+  display. Config validation refuses an open profile that can change anything
+  when `web.host` is reachable from the network.
+- **Sessions bind to the credential that opened them.** Changing one profile's
+  password ends that profile's sessions and nobody else's; disabling or deleting
+  a profile takes effect on its next request, because the lookup happens per
+  request rather than being cached in the cookie.
+- **The shared token still works, as an administrator.** It is what every
+  machine client holds, and the audit trail records its actions as a service
+  rather than attributing them to a person who was not there.
+
+### The audit trail
+
+Separate from the operational log, which is a 500-entry ring buffer answering
+"what is this box doing". This answers "who did that".
+
+- **Append-only and hash-chained.** Each record covers the previous one's
+  digest, so an edit, a deletion from the middle or a reorder breaks every
+  digest after it, and `GET /api/audit/verify` reports the first break with its
+  record number and cause.
+- **Attributed.** Every record names the profile that caused it, with the
+  action, the target, the source address and whether it succeeded. Refusals are
+  recorded too — "who kept trying to reach what they are not allowed to reach"
+  is a question only an audit trail can answer.
+- **Written on deliberate actions, fsynced by default.** A record still in the
+  page cache when the machine loses power is a record that did not happen.
+- **Recording reads is opt-in** (`audit.log_reads`). "Who viewed this patient"
+  is required in some jurisdictions and multiplies the size of the file by how
+  often somebody refreshes a dashboard, so it is the operator's decision.
+- Read the limits in *What is not protected* below before relying on it as
+  evidence.
+
 ### DICOM transport
 
 - **DICOM TLS is supported on both sides.** Every DIMSE listener (Storage SCP,
@@ -233,28 +304,41 @@ something has to decide what that means.
 Read this section before deploying anywhere that is not a closed clinical
 network you control.
 
-- **There is no user management.** No accounts, no usernames, no roles, no
-  permissions. The token is a single shared secret for the whole appliance, and
-  everyone who holds it can do everything: read every stored study, change every
-  setting, start and stop services, delete studies, and shut the server down.
-- **There is no per-user audit trail.** The log records *what happened* —
-  associations, stores, forwards, order matches, rejected tokens — with
-  timestamps and peer addresses, both in a memory ring buffer and in dated files
-  under the logs directory. It cannot record *who* did it, because the software
-  has no concept of a who. The logs are plain text with no tamper protection, so
-  they are an operational record, not evidence.
-- **There is no encryption at rest.** Received studies are written to disk as
-  ordinary DICOM files, the sqlite index holds patient names and identifiers in
-  the clear, orders are stored as JSON, captured film waits in the pending
-  queue as a PDF or an image with the demographics printed into the pixels, and
-  `config.json` holds both `web.auth_token` and `deid.secret` in plaintext.
+- **Profiles are off until you turn them on.** A fresh install, and every
+  install that predates them, runs on the shared token alone — one secret, and
+  everyone holding it can do everything. That is still the default, deliberately,
+  because switching it silently during an upgrade would break every machine
+  client on the site. Until an administrator seeds profiles, everything the old
+  version of this bullet said is still true of your appliance. See
+  *Profiles, capabilities and identifier visibility* above.
+- **The audit trail can be truncated.** It detects a record edited in place, one
+  removed from the middle, records reordered, and a file cut mid-line — each
+  breaks a digest and `GET /api/audit/verify` says which record and why. It
+  cannot detect the last *n* records being deleted, because the remaining prefix
+  is a genuinely valid chain, and it cannot detect a wholesale rewrite by
+  somebody with write access to the audit directory and a copy of the source.
+  Nothing kept beside the data can. **If you need non-repudiation, anchor it**:
+  the chain head is published in `GET /api/status` and on the Audit panel, so
+  record it somewhere this appliance cannot write and any later truncation
+  produces a head that does not match and a record count that went backwards.
+- **There is no encryption at rest.** This is the one gap of the four that is
+  still open, and it is open by decision rather than by oversight — see
+  *Why encryption at rest is deferred* below. Received studies are written to
+  disk as ordinary DICOM files, the sqlite index holds patient names and
+  identifiers in the clear **and indexes them**, orders are stored as JSON,
+  captured film waits in the pending queue as a PDF or an image with the
+  demographics printed into the pixels, the audit trail records what was done to
+  which study, and `config.json` holds `web.auth_token`, `deid.secret`, the
+  webhook signing key, the SMTP password and every profile's password hash.
   Treat the de-identification key as at least as sensitive as the token: the
   token gets you this box, while the key turns every "ANON-…" set this box ever
   exported back into a lookup table — confirm a PatientID, re-link a patient
   across exports, recover the shifted dates. Anyone with filesystem access to
-  the data directory has everything. If you need encryption at rest,
-  use full-disk or filesystem-level encryption underneath — LUKS, BitLocker,
-  FileVault — and set restrictive permissions on the data directory.
+  the data directory has everything, and **no profile or capability changes
+  that** — the whole model above is enforced by the process, not by the
+  filesystem. If you need encryption at rest, use full-disk or filesystem-level
+  encryption underneath — LUKS, BitLocker, FileVault — and set restrictive
+  permissions on the data directory.
 - **The HL7 MLLP listener has no transport security and no authentication.** It
   is a plain TCP socket speaking MLLP framing; there is no TLS option for it, no
   credential of any kind, and the HL7 parser is deliberately lenient because
@@ -291,13 +375,49 @@ network you control.
 
 ---
 
+## Why encryption at rest is deferred
+
+Because doing it badly is worse than not doing it, and most of the ways to do it
+on a self-hosted appliance are doing it badly.
+
+An appliance that reboots unattended and comes back receiving studies needs its
+key available without a human present. That means the key lives on the same disk
+as the data. A page that claims "encrypted at rest" in that posture invites
+exactly one question — *where is the key?* — and the honest answer fails an
+audit harder than not having made the claim.
+
+So the answer here is the one real deployments use, stated plainly rather than
+dressed up: **use full-disk or filesystem-level encryption underneath**. LUKS on
+Linux, BitLocker on Windows, FileVault on macOS. That protects the case this
+actually defends against — a disk that leaves the building, in a decommissioned
+machine, a stolen laptop or an RMA'd drive — which is the same case
+application-level encryption with a co-located key would protect, at a fraction
+of the complexity and with none of the cost to Q/R and WADO performance.
+
+What it does not protect against is a live box that somebody has compromised.
+Neither would the alternative.
+
+If a deployment has a requirement that genuinely needs application-level
+encryption — a defined threat model, a key custody arrangement, somebody to type
+a passphrase at boot — open an issue describing it. It is a real piece of work
+and it should be built against a real requirement rather than against the phrase
+"encryption at rest" on a checklist.
+
+---
+
 ## No telemetry
 
 Carino PACS collects nothing and sends nothing. No analytics, no crash
 reporting, no update checks, no usage counters, no remote logging, no bundled
 third-party scripts fetched at runtime. The only outbound network connections it
 ever makes are the DICOM associations and HL7 acknowledgements the operator
-configured, to the peers the operator named. The navbar does carry ordinary
+configured, to the peers the operator named — and, since emergency notification
+was added, the webhook URL and SMTP server the operator configured, to the
+addresses on the profiles the operator named. Notification is **off by default**
+and every part of it is empty until somebody fills it in; nothing is sent
+anywhere the operator has not written down. What is sent is the fact of the
+outage, its destination name and its state — no patient identifiers, and no
+study data. The navbar does carry ordinary
 hyperlinks to the project's pages (carino.systems, GitHub, LinkedIn); they are
 `target="_blank"` anchors that do nothing until somebody clicks them, and no
 script, font or stylesheet is loaded from any of them — everything the dashboard

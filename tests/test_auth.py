@@ -243,7 +243,12 @@ def test_no_token_means_everything_passes():
     assert not g.required
     assert check(g).ok
     assert check(g, "/api/shutdown", "POST").ok
-    assert g.status() == {"required": False, "authenticated": True}
+    st = g.status()
+    # Subset rather than equality: status() gained profile fields when
+    # profiles landed, and an exact match here fails every time the payload
+    # grows without anything being wrong. What this test is about is the two
+    # flags.
+    assert st["required"] is False and st["authenticated"] is True
 
 
 def test_whitespace_only_token_is_treated_as_unset():
@@ -525,7 +530,7 @@ def test_authenticated_and_status_helpers():
     cookie = g.sessions.issue(TOKEN)
     assert g.authenticated(headers={}, cookies={SESSION_COOKIE: cookie})
     st = g.status(headers={}, cookies={})
-    assert st == {"required": True, "authenticated": False}
+    assert st["required"] is True and st["authenticated"] is False
 
 
 # ---- Flask integration --------------------------------------------------
@@ -598,7 +603,8 @@ def test_flask_auth_endpoint_is_public():
     c = app.test_client()
     r = c.get("/api/auth")
     assert r.status_code == 200
-    assert r.get_json()["auth"] == {"required": True, "authenticated": False}
+    body = r.get_json()["auth"]
+    assert body["required"] is True and body["authenticated"] is False
     c.post("/api/login", json={"token": TOKEN})
     assert c.get("/api/auth").get_json()["auth"]["authenticated"] is True
 

@@ -64,6 +64,14 @@
   // deleted, and for dicomweb/qr means the service switches itself off.
   let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {}, loadedEmg = {};
   let loadedQr = {}, loadedDicomweb = {}, loadedRouting = {}, loadedIndex = {}, loadedDeid = {};
+  // audit and notify have no form fields in this file yet, and that is exactly
+  // why they need carrying: without them a Settings Save resets the audit trail
+  // to its defaults (moving where it writes, and re-enabling read logging) and
+  // switches every notification channel back off. `users` is NOT here — the
+  // server refuses to take a profile list from this endpoint at all and
+  // re-asserts the stored one, because config.write must not be a way to grant
+  // yourself admin.
+  let loadedAudit = {}, loadedNotify = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
   // carrying it through a Save, apply_config's merge over DEFAULTS would reset it
@@ -92,11 +100,73 @@
          a plain 401 — handled by re-raising this prompt where the operator was;
        * while the prompt is up the pollers are STOPPED, so a closed door is
          knocked on once, not thirty times a minute.  */
-  let authRequired = false;      // the engine wants a token at all
+  let authRequired = false;      // the engine wants a credential at all
   let authed = false;            // this browser is holding a good credential
   let gateOpen = false;
   let booted = false;            // has the dashboard ever been started in this page-load?
   let retryTimer = null;         // rate-limit countdown
+
+  /* Profiles.
+     `me` is who this browser is signed in as, straight from the server on every
+     /api/status. Its `capabilities` list is a RENDERING HINT and nothing more —
+     every one of them is enforced at the endpoint, and this file must never be
+     the only thing standing between somebody and an action. Hiding a button the
+     server would refuse anyway is courtesy; hiding a button INSTEAD of the
+     server refusing would be the whole feature undone. */
+  let me = null;                 // {id,name,role,admin,capabilities,phi_visible}
+  let profilesOn = false;        // the appliance runs with profiles at all
+  let pickList = [];             // the picker's rows, from GET /api/profiles
+  let picked = null;             // the profile chosen at the gate, awaiting a password
+  let gateMode = "token";        // token | pick | name
+
+  function can(cap) {
+    // No profiles means no capability model, which is the pre-profiles world
+    // where holding the credential means holding everything. Answering true is
+    // what keeps every existing dashboard rendering exactly as it did.
+    if (!profilesOn) return true;
+    if (!me) return false;
+    return me.admin === true || (me.capabilities || []).indexOf(cap) >= 0;
+  }
+
+  function seesPhi(field) {
+    if (!profilesOn || !me) return true;
+    return (me.phi_visible || []).indexOf(field) >= 0;
+  }
+
+  /* Nav follows capability. Derived from data-cap on each button rather than a
+     table in here, so the markup and the rule cannot drift; a button with no
+     data-cap is common ground and always shown. */
+  function applyCapabilities() {
+    let activeHidden = false;
+    document.querySelectorAll(".navbtn").forEach((b) => {
+      const cap = b.dataset.cap;
+      const allowed = !cap || can(cap);
+      b.hidden = !allowed;
+      if (!allowed && b.classList.contains("active")) activeHidden = true;
+    });
+    // Somebody whose permissions just narrowed — an administrator edited them
+    // mid-session — could be left staring at a panel they can no longer load.
+    // Move them somewhere they can actually be.
+    if (activeHidden) {
+      const first = document.querySelector(".navbtn:not([hidden])");
+      if (first) showPanel(first.dataset.panel);
+    }
+    const whoEl = $("whoami");
+    if (whoEl) {
+      whoEl.hidden = !profilesOn || !me;
+      if (me) {
+        whoEl.textContent = me.name + (me.role ? " · " + me.role : "");
+        whoEl.title = me.service
+          ? T("Signed in with the access token, which acts as an administrator.")
+          : TF("Signed in as {name}", { name: me.name });
+      }
+    }
+    // Sign out appears only when there is a session to end. On an appliance
+    // with no credential at all it would put up a button that signs you out of
+    // nothing and then shows a gate you cannot satisfy.
+    const out = $("signOut");
+    if (out) out.hidden = !authRequired;
+  }
 
   function setAuthMsg(msg, isNote) {
     const el = $("authMsg");
@@ -106,13 +176,114 @@
     el.classList.toggle("note", !!isNote);
   }
 
+  /* The gate has three shapes and picks one from what the server said:
+
+       pick   profiles are on and the operator publishes the list — buttons
+       name   profiles are on and they do not — type a name and a password
+       token  no profiles: the shared access token, exactly as before
+
+     The token field survives in all three, folded away in the first two. It is
+     the recovery path when somebody has locked themselves out of a profile, and
+     removing it would mean the only way back into a misconfigured appliance is
+     editing config.json by hand. */
+  function setGateMode(mode) {
+    gateMode = mode;
+    const pick = mode === "pick";
+    const name = mode === "name";
+    const token = mode === "token";
+    show($("authPickWrap"), pick);
+    show($("authNameWrap"), name);
+    show($("authTokenWrap"), token);
+    show($("authAltWrap"), !token);
+    show($("authHelp"), token);
+    const title = $("authTitle");
+    if (title) {
+      title.textContent = token ? T("This PACS needs its access token")
+                                : T("Who is using this station?");
+    }
+    const lede = $("authLede");
+    if (lede && !token) {
+      lede.textContent = T("Pick your profile to sign in. What you can see and do here follows the profile you choose, and everything you do is recorded against it.");
+    }
+    if (pick) renderPicker();
+    setTimeout(() => {
+      const focusOn = token ? $("authToken") : (name ? $("authName") : null);
+      if (focusOn) focusOn.focus();
+    }, 0);
+  }
+
+  function show(el, on) { if (el) el.hidden = !on; }
+
+  function renderPicker() {
+    const wrap = $("authPeople");
+    if (!wrap) return;
+    wrap.textContent = "";
+    pickList.forEach((p) => {
+      const b = document.createElement("button");
+      b.className = "person" + (picked && picked.id === p.id ? " chosen" : "");
+      b.type = "button";
+      const nm = document.createElement("b");
+      nm.textContent = p.name;
+      b.appendChild(nm);
+      if (p.role) {
+        const r = document.createElement("span");
+        r.className = "person-role";
+        r.textContent = p.role;
+        b.appendChild(r);
+      }
+      // A padlock, so somebody reaching a shared machine knows before they
+      // click whether they are about to be asked for anything.
+      const lock = document.createElement("span");
+      lock.className = "person-lock";
+      lock.textContent = p.locked ? "🔒" : "";
+      lock.title = p.locked ? T("Needs a password") : T("No password");
+      b.appendChild(lock);
+      b.addEventListener("click", () => choosePerson(p));
+      wrap.appendChild(b);
+    });
+  }
+
+  function choosePerson(p) {
+    picked = p;
+    renderPicker();
+    show($("authPwWrap"), !!p.locked);
+    const nameEl = $("authPwName");
+    if (nameEl) nameEl.textContent = p.name;
+    setAuthMsg("", false);
+    if (p.locked) {
+      const pw = $("authPassword");
+      if (pw) { pw.value = ""; pw.focus(); }
+    } else {
+      // An open profile signs in on the click itself. Making them press a
+      // second button to confirm a choice that needs no credential is friction
+      // at the one place this design is trying not to have any.
+      doLogin($("authLogin"));
+    }
+  }
+
+  async function loadPicker() {
+    try {
+      const r = await api("/api/profiles");
+      profilesOn = !!r.enabled;
+      pickList = r.profiles || [];
+      if (!r.enabled) return "token";
+      return r.listed ? "pick" : "name";
+    } catch (e) {
+      // The picker is public, so a failure here is the engine being
+      // unreachable rather than an access problem. Falling back to the token
+      // field gives the operator something that can still work.
+      return "token";
+    }
+  }
+
   function showAuthGate() {
     const gate = $("authGate");
     if (!gate) return;
     gateOpen = true;
     gate.hidden = false;
-    const input = $("authToken");
-    if (input) input.focus();
+    picked = null;
+    show($("authPwWrap"), false);
+    loadPicker().then(setGateMode);
   }
 
   function hideAuthGate() {
@@ -169,28 +340,78 @@
     retryTimer = setInterval(tick, 1000);
   }
 
-  async function doLogin(btn) {
+  /* Builds the body for POST /api/login out of whichever shape the gate is in,
+     or returns null with the operator already told what is missing. */
+  function loginBody() {
+    if (gateMode === "pick") {
+      if (!picked) { setAuthMsg(T("Choose your profile to continue."), true); return null; }
+      const pw = $("authPassword");
+      const value = (pw && pw.value) || "";
+      if (picked.locked && !value) {
+        setAuthMsg(T("Enter your password to continue."), true);
+        if (pw) pw.focus();
+        return null;
+      }
+      // An open profile is sent with no password field at all rather than with
+      // an empty one: the server refuses a password offered to a profile that
+      // has none, and sending "" would trip that on every click.
+      return picked.locked ? { profile: picked.id, password: value }
+                           : { profile: picked.id };
+    }
+    if (gateMode === "name") {
+      const nameEl = $("authName");
+      const pwEl = $("authName2");
+      const name = ((nameEl && nameEl.value) || "").trim();
+      if (!name) { setAuthMsg(T("Enter your name to continue."), true); if (nameEl) nameEl.focus(); return null; }
+      // The name is resolved to an id here, from the list the server gave us.
+      // When the picker is hidden that list is empty, so the id cannot be
+      // found — and the server is the one that must decide, so an unmatched
+      // name is sent as typed and comes back as an ordinary failed sign-in.
+      const match = pickList.filter((p) => p.name.toLowerCase() === name.toLowerCase())[0];
+      return { profile: match ? match.id : name, password: (pwEl && pwEl.value) || "" };
+    }
     const input = $("authToken");
     const token = ((input && input.value) || "").trim();
-    if (!token) { setAuthMsg(T("Enter the token to continue."), true); if (input) input.focus(); return; }
-    btn.disabled = true;
+    if (!token) { setAuthMsg(T("Enter the token to continue."), true); if (input) input.focus(); return null; }
+    return { token };
+  }
+
+  function clearGateInputs() {
+    // Nothing typed at the gate is kept once the cookie exists — not in a
+    // variable, not in a field, not in storage.
+    ["authToken", "authPassword", "authName2"].forEach((id) => {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+  }
+
+  async function doLogin(btn) {
+    const body = loginBody();
+    if (!body) return;
+    if (btn) btn.disabled = true;
     setAuthMsg(T("Checking…"), true);
     try {
-      await post("/api/login", { token });
-      // The token is dropped the instant the cookie exists: it is not kept in a
-      // variable, a field or storage anywhere in this file.
-      if (input) input.value = "";
+      const r = await post("/api/login", body);
+      clearGateInputs();
       authed = true;
+      const a = (r && r.auth) || {};
+      profilesOn = !!a.profiles;
+      me = a.who || null;
+      applyCapabilities();
       hideAuthGate();
       await startApp();
     } catch (e) {
       const a = e.auth || {};
       if (a.reason === "rate_limited") startRetryCountdown(a.retry_after);
       else if (e.status === 403) setAuthMsg(T("The sign-in request was rejected as cross-site — reload the page and try again."), false);
-      else if (e.status === 401) setAuthMsg(T("That token is not correct."), false);
-      else setAuthMsg(e.message, false);
+      else if (e.status === 401) {
+        setAuthMsg(gateMode === "token" ? T("That token is not correct.")
+                                        : T("That name or password is not correct."), false);
+        const pw = $(gateMode === "pick" ? "authPassword" : "authName2");
+        if (pw) { pw.value = ""; pw.focus(); }
+      } else setAuthMsg(e.message, false);
     } finally {
-      if (!retryTimer) btn.disabled = false;
+      if (!retryTimer && btn) btn.disabled = false;
     }
   }
 
@@ -200,6 +421,7 @@
     // either way rather than leaving a half-signed-out dashboard polling.
     try { await post("/api/logout", {}); } catch (e) { /* prompt anyway */ }
     authed = false;
+    me = null;
     stopPollers();
     showAuthGate();
     setAuthMsg(T("Signed out."), true);
@@ -247,6 +469,9 @@
     const a = st.auth || {};
     authRequired = !!a.required;
     authed = !!a.authenticated;
+    profilesOn = !!a.profiles;
+    me = a.who || null;
+    applyCapabilities();
     if (authRequired && !authed) { showAuthGate(); return; }
     hideAuthGate();
     await startApp();
@@ -259,7 +484,21 @@
     lastStatus = s;
     // The engine reports whether it wants a token on every status payload, so a
     // token set from another browser (or removed) is picked up without a reload.
-    if (s.auth) authRequired = !!s.auth.required;
+    if (s.auth) {
+      authRequired = !!s.auth.required;
+      profilesOn = !!s.auth.profiles;
+      // Re-read on every poll, not just at sign-in. An administrator who
+      // changes what somebody may do — or disables them — has it take effect on
+      // that person's next request server-side, and the nav has to follow
+      // within the same two seconds or they are left looking at buttons that
+      // now 403. Only redrawn when it actually changed, because this runs
+      // every poll.
+      const nextWho = s.auth.who || null;
+      if (JSON.stringify(nextWho) !== JSON.stringify(me)) {
+        me = nextWho;
+        applyCapabilities();
+      }
+    }
     mountServiceChips();      // self-heals if the navbar mounted after us
 
     // This machine's network identity (what remote nodes send to).
@@ -501,6 +740,7 @@
       if (!emgPromptShown) {
         $("emgPromptMsg").textContent =
           TF("The primary PACS '{who}' has been unreachable past the failover threshold.", { who });
+        renderEmergencyGuidance(emg);
         prompt.hidden = false;
         emgPromptShown = true;
       }
@@ -508,6 +748,52 @@
       prompt.hidden = true;
       emgPromptShown = false;
     }
+  }
+
+  /* What the person reading this modal should actually DO about it, and what
+     they are able to do.
+
+     The three people this appliance wakes up have three different jobs — key
+     orders in by hand, push a study to an alternate node, correct an address —
+     and a single generic paragraph serves none of them. The text follows the
+     ROLE, which is a label an administrator typed, so an unrecognised one gets
+     the neutral wording rather than nothing.
+
+     The Activate button follows emergency.activate_by, which the server also
+     enforces: someone who may not answer sees why and who can, instead of a
+     button that fails when pressed. */
+  const EMG_GUIDANCE = {
+    receptionist: "Orders are not reaching the modalities. Key new orders in here (Orders → New order) and give the technologist the accession number to type into the modality.",
+    radiologist: "Studies arriving now are held on this appliance. If a read cannot wait, forward that study to an alternate destination from History. Nothing is lost — held studies back-fill when the primary returns.",
+    it: "The primary is failing its health probe. If the address changed rather than the node going down, correct the destination and the monitor clears on the next probe.",
+    admin: "Activating starts the local worklist and holds incoming studies for the primary. Dismissing leaves this appliance receiving and queueing, but serving no worklist.",
+  };
+
+  function renderEmergencyGuidance(emg) {
+    const hint = $("emgRoleHint");
+    if (hint) {
+      const key = (me && me.role || "").toLowerCase();
+      hint.textContent = EMG_GUIDANCE[key] ? T(EMG_GUIDANCE[key]) : "";
+      hint.hidden = !hint.textContent;
+    }
+    const act = $("emgActivate");
+    const why = $("emgWhoCan");
+    // may_activate is absent on an appliance without profiles, where everyone
+    // at the dashboard decides — so undefined has to read as allowed.
+    const allowed = emg.may_activate !== false;
+    if (act) act.hidden = !allowed;
+    if (why) {
+      const named = (emg.activate_by || []).join(", ");
+      why.textContent = allowed ? ""
+        : (named ? TF("Failover on this appliance is answered by {who}.", { who: named })
+                 : T("Your profile can see this alert but not answer it."));
+      why.hidden = !why.textContent;
+    }
+    const dismiss = $("emgDismiss");
+    // "Not now" means "I have seen this", and it only ever silences the modal
+    // for the person who pressed it. Saying so matters on a shared machine,
+    // where the old single flag meant one person's click silenced everyone.
+    if (dismiss) dismiss.textContent = allowed ? T("Not now") : T("I have seen this");
   }
 
   async function emergencyAction(action) {
@@ -1292,6 +1578,8 @@
     loadedRouting = c.routing || {};
     loadedIndex = c.index || {};
     loadedDeid = c.deid || {};
+    loadedAudit = c.audit || {};
+    loadedNotify = c.notify || {};
     loadedSetup = c.setup_completed || "";
     loadedLogsDir = c.logs_dir || "";
     readWebSection(c.web || {});
@@ -1579,6 +1867,12 @@
       },
       destinations: collectDests(),
       web: webSection(),
+      audit: { ...loadedAudit },
+      // Posted back with the redacted secrets still redacted — the server
+      // re-asserts the stored webhook key and SMTP password and refuses any
+      // attempt to set them from here, so the "_set" mirrors it stripped on the
+      // way out are simply not sent back.
+      notify: { ...loadedNotify },
       // Top-level, no form input: carried through so a Save cannot wipe the
       // onboarding stamp and re-offer the chooser forever.
       setup_completed: loadedSetup,
@@ -2758,7 +3052,297 @@
      own content; there is no popup/backdrop anymore. */
   // Overview leads the list (hash routing + sidebar order match) but Services
   // stays the landing panel: the unattended screen must not show patient names.
-  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgRouting", "dlgSettings", "dlgLogs"];
+  /* ── People ──────────────────────────────────────────────────────
+     The administrator's editor. Every control draws what the server already
+     enforces — the capability list comes from the engine rather than being
+     duplicated here, so a capability added in a later version appears in this
+     screen without this file being touched. */
+  let peopleState = { profiles: [], capabilities: [], phi_fields: [], in_use: false };
+
+  async function loadPeople() {
+    if (!can("auth.manage")) return;
+    try {
+      const r = await api("/api/profiles/manage");
+      peopleState = r;
+      renderPeople();
+    } catch (e) {
+      flashNote(TF("Load failed: {err}", { err: e.message }), false);
+    }
+  }
+
+  function renderPeople() {
+    const on = !!peopleState.in_use;
+    show($("peopleOff"), !on);
+    show($("peopleOn"), on);
+    const add = $("peopleAdd");
+    if (add) add.hidden = !on;
+    if (!on) return;
+
+    const listing = $("peopleListing");
+    if (listing) listing.checked = peopleState.list_profiles !== false;
+    const count = $("peopleCount");
+    if (count) {
+      const rows = peopleState.profiles || [];
+      const open = rows.filter((p) => !p.locked && p.enabled).length;
+      count.textContent = open
+        ? TF("{n} profiles. {open} of them have no password.", { n: rows.length, open })
+        : TF("{n} profiles.", { n: rows.length });
+      count.classList.toggle("warn", open > 0);
+    }
+
+    const list = $("peopleList");
+    if (!list) return;
+    list.textContent = "";
+    (peopleState.profiles || []).forEach((p) => list.appendChild(personCard(p)));
+  }
+
+  function personCard(p) {
+    const card = document.createElement("div");
+    card.className = "person-card" + (p.enabled ? "" : " off");
+
+    const head = document.createElement("div");
+    head.className = "person-head";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = p.name;
+    name.className = "person-name";
+    head.appendChild(name);
+    const role = document.createElement("input");
+    role.type = "text";
+    role.value = p.role || "";
+    role.className = "person-rolein";
+    role.placeholder = T("role");
+    head.appendChild(role);
+    card.appendChild(head);
+
+    const meta = document.createElement("div");
+    meta.className = "person-meta";
+    const email = document.createElement("input");
+    email.type = "email";
+    email.value = p.email || "";
+    email.placeholder = T("email for emergency alerts");
+    meta.appendChild(email);
+    card.appendChild(meta);
+
+    const flags = document.createElement("div");
+    flags.className = "person-flags";
+    const enabled = chk(T("Enabled"), p.enabled);
+    const admin = chk(T("Administrator (everything, including future permissions)"), p.admin);
+    flags.appendChild(enabled.label);
+    flags.appendChild(admin.label);
+    card.appendChild(flags);
+
+    // Capabilities. Hidden behind the admin flag, because an administrator
+    // holds everything by definition and showing seventeen ticked, disabled
+    // boxes reads as a list somebody could edit.
+    const caps = document.createElement("div");
+    caps.className = "person-caps";
+    const capBoxes = {};
+    (peopleState.capabilities || []).forEach((c) => {
+      const box = chk(c.description, (p.capabilities || []).indexOf(c.name) >= 0);
+      box.label.title = c.name;
+      capBoxes[c.name] = box.input;
+      caps.appendChild(box.label);
+    });
+    const capsWrap = section(T("Can do"), caps);
+    card.appendChild(capsWrap);
+
+    const phi = document.createElement("div");
+    phi.className = "person-caps";
+    const phiBoxes = {};
+    (peopleState.phi_fields || []).forEach((f) => {
+      const box = chk(f.description, (p.phi_visible || []).indexOf(f.name) >= 0);
+      box.label.title = f.name;
+      phiBoxes[f.name] = box.input;
+      phi.appendChild(box.label);
+    });
+    const phiWrap = section(T("Can see"), phi);
+    const phiHint = document.createElement("p");
+    phiHint.className = "hint";
+    phiHint.textContent = T("Anything unticked is shown as *** wherever it would appear. Someone tracing a study through the routing engine usually needs the accession number and not the name.");
+    phiWrap.appendChild(phiHint);
+    card.appendChild(phiWrap);
+
+    const syncAdmin = () => {
+      const isAdmin = admin.input.checked;
+      capsWrap.hidden = isAdmin;
+      phiWrap.hidden = isAdmin;
+    };
+    admin.input.addEventListener("change", syncAdmin);
+    syncAdmin();
+
+    // Password. Three states, and the button says which one it is in rather
+    // than making the administrator remember: no password / set one / change
+    // or remove the one there is.
+    const pwRow = document.createElement("div");
+    pwRow.className = "person-pw";
+    const pwState = document.createElement("span");
+    pwState.className = "pw-state";
+    pwState.textContent = p.locked ? T("Password set") : T("No password — anyone can pick this profile");
+    pwState.classList.toggle("warn", !p.locked);
+    pwRow.appendChild(pwState);
+    const pwInput = document.createElement("input");
+    pwInput.type = "password";
+    pwInput.autocomplete = "new-password";
+    pwInput.placeholder = p.locked ? T("new password") : T("set a password");
+    pwRow.appendChild(pwInput);
+    let clearPw = false;
+    if (p.locked) {
+      const rm = document.createElement("button");
+      rm.className = "btn ghost tiny";
+      rm.textContent = T("Remove password");
+      rm.addEventListener("click", () => {
+        clearPw = true;
+        pwState.textContent = T("Password will be removed when you save");
+        pwState.classList.add("warn");
+      });
+      pwRow.appendChild(rm);
+    }
+    card.appendChild(pwRow);
+
+    const actions = document.createElement("div");
+    actions.className = "person-actions";
+    const save = document.createElement("button");
+    save.className = "btn tiny";
+    save.textContent = T("Save");
+    save.addEventListener("click", async () => {
+      const body = {
+        id: p.id,
+        name: name.value.trim(),
+        role: role.value.trim(),
+        email: email.value.trim(),
+        enabled: enabled.input.checked,
+        admin: admin.input.checked,
+        capabilities: Object.keys(capBoxes).filter((k) => capBoxes[k].checked),
+        phi_visible: Object.keys(phiBoxes).filter((k) => phiBoxes[k].checked),
+      };
+      if (pwInput.value) body.password = { action: "set", value: pwInput.value };
+      else if (clearPw) body.password = { action: "clear" };
+      await savePerson(save, body);
+    });
+    actions.appendChild(save);
+
+    const del = document.createElement("button");
+    del.className = "btn ghost tiny danger";
+    del.textContent = T("Delete");
+    del.addEventListener("click", async () => {
+      if (!window.confirm(TF("Delete {name}? Their entries in the audit trail stay — the trail is append-only and names them by id, so past actions keep resolving to this person.", { name: p.name }))) return;
+      try {
+        const r = await post("/api/profiles/delete", { id: p.id });
+        peopleState = Object.assign({}, peopleState, r);
+        renderPeople();
+        flashNote(TF("{name} removed.", { name: p.name }), true);
+      } catch (e) { flashNote(e.message, false); }
+    });
+    actions.appendChild(del);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function section(title, body) {
+    const wrap = document.createElement("div");
+    wrap.className = "person-section";
+    const h = document.createElement("h4");
+    h.textContent = title;
+    wrap.appendChild(h);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  function chk(text, checked) {
+    const label = document.createElement("label");
+    label.className = "chk";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!checked;
+    label.appendChild(input);
+    const span = document.createElement("span");
+    span.textContent = text;
+    label.appendChild(span);
+    return { label, input };
+  }
+
+  async function savePerson(btn, body) {
+    btn.disabled = true;
+    try {
+      const r = await post("/api/profiles/save", body);
+      peopleState = Object.assign({}, peopleState, r);
+      renderPeople();
+      flashNote(T("Saved."), true);
+    } catch (e) {
+      // The server's refusals here are the interesting ones — the last
+      // administrator, an open profile with write access on a network bind —
+      // and each names what to do about it. Shown as-is rather than replaced
+      // with a generic failure.
+      flashNote(e.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /* ── Audit trail ─────────────────────────────────────────────── */
+  async function loadAudit() {
+    if (!can("audit.read")) return;
+    try {
+      const r = await api("/api/audit?limit=300");
+      renderAudit(r.records || [], r.audit || {});
+    } catch (e) {
+      flashNote(TF("Load failed: {err}", { err: e.message }), false);
+    }
+  }
+
+  function renderAudit(rows, stats) {
+    const state = $("auditState");
+    if (state) {
+      state.textContent = "";
+      state.classList.remove("bad");
+      if (stats.broken) {
+        // The one message on this screen that must never be quiet: a trail that
+        // stopped recording looks exactly like a week in which nothing
+        // happened.
+        state.textContent = TF("The audit trail is NOT being written: {err}", { err: stats.broken });
+        state.classList.add("bad");
+      } else if (!stats.enabled) {
+        state.textContent = T("The audit trail is switched off — nothing is being recorded about who does what.");
+        state.classList.add("bad");
+      } else {
+        state.textContent = TF("{files} file(s), {kb} KB. Chain head {head}.",
+          { files: stats.files || 0, kb: Math.round((stats.bytes || 0) / 1024), head: (stats.head || "").slice(0, 12) });
+      }
+    }
+    const list = $("auditList");
+    if (!list) return;
+    list.textContent = "";
+    if (!rows.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = T("Nothing recorded yet.");
+      list.appendChild(p);
+      return;
+    }
+    rows.forEach((r) => {
+      const row = document.createElement("div");
+      row.className = "audit-row " + (r.outcome === "ok" ? "ok" : (r.outcome === "denied" ? "denied" : "failed"));
+      row.appendChild(cell("audit-ts", (r.ts || "").replace("T", " ").replace("+00:00", "")));
+      const actor = (r.actor || {});
+      const who = cell("audit-who", actor.name || "—");
+      if (actor.service) who.title = T("The shared access token, not a person.");
+      row.appendChild(who);
+      row.appendChild(cell("audit-act", r.action || ""));
+      row.appendChild(cell("audit-target", r.target || ""));
+      row.appendChild(cell("audit-out", r.outcome || ""));
+      list.appendChild(row);
+    });
+  }
+
+  function cell(cls, text) {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    return d;
+  }
+
+  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgRouting", "dlgSettings", "dlgLogs", "dlgPeople", "dlgAudit"];
   // Routing needs no fetch — its rules arrive with the config — but the
   // destination table may have gained or lost a node since they were drawn, so
   // opening the panel re-offers the current list without losing a tick.
@@ -2773,6 +3357,8 @@
       renderDicomweb(lastStatus.dicomweb || {});
       renderDeidState(lastStatus.deid || {});
     },
+    dlgPeople: loadPeople,
+    dlgAudit: loadAudit,
   };
   let activePanel = "dlgServices";
 
@@ -2827,8 +3413,83 @@
     wireDropZones();
 
     // Token prompt.
+    // Every listener below goes through this: the dashboard is packaged in a
+    // few shapes and a build that ships without one of these elements must not
+    // take the whole wiring block down with a TypeError on the first missing id.
+    const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
     $("authLogin").addEventListener("click", () => doLogin($("authLogin")));
-    $("authToken").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin($("authLogin")); });
+    ["authToken", "authPassword", "authName", "authName2"].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin($("authLogin")); });
+    });
+    bind("authUseToken", "click", () => setGateMode("token"));
+    bind("authPwBack", "click", () => {
+      picked = null;
+      show($("authPwWrap"), false);
+      setAuthMsg("", false);
+      renderPicker();
+    });
+    bind("signOut", "click", doLogout);
+
+    // People
+    bind("peopleSeed", "click", async (e) => {
+      if (!window.confirm(T("Turn on profiles? Everyone will sign in as themselves from now on, and this browser will be signed in as the Administrator. The access token keeps working."))) return;
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await post("/api/profiles/seed", {});
+        peopleState = Object.assign({}, peopleState, r);
+        profilesOn = true;
+        renderPeople();
+        // The seed response carries the administrator session it just issued,
+        // so the next status poll is what tells this page who it now is.
+        await pollStatus();
+        flashNote(T("Profiles are on. You are signed in as Administrator."), true);
+      } catch (err) {
+        flashNote(err.message, false);
+      } finally { btn.disabled = false; }
+    });
+    bind("peopleAdd", "click", () => {
+      // A new entry starts disabled, with nothing granted and nothing visible.
+      // Every other default would mean a half-filled form is briefly a real
+      // account, and the moment where it is real is the moment it has no
+      // password.
+      peopleState.profiles = (peopleState.profiles || []).concat([{
+        id: "", name: T("New profile"), role: "", enabled: false, admin: false,
+        locked: false, email: "", capabilities: [], phi_visible: [],
+      }]);
+      renderPeople();
+    });
+    bind("peopleListing", "change", async (e) => {
+      try {
+        await post("/api/profiles/listing", { list_profiles: e.currentTarget.checked });
+      } catch (err) {
+        flashNote(err.message, false);
+        e.currentTarget.checked = !e.currentTarget.checked;
+      }
+    });
+
+    // Audit
+    bind("auditVerify", "click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await api("/api/audit/verify");
+        const v = r.verify || {};
+        flashNote(v.ok
+          ? TF("Intact — {n} records, every one matching its digest.", { n: v.records || 0 })
+          : TF("BROKEN at record {n}: {why}", { n: v.broken_at || "?", why: v.reason || "" }),
+          !!v.ok);
+        renderAudit([], r.audit || {});
+        loadAudit();
+      } catch (err) { flashNote(err.message, false); }
+      finally { btn.disabled = false; }
+    });
+    bind("auditExport", "click", () => {
+      // A plain navigation, not a fetch: the response is a file download and
+      // the session cookie rides along with it.
+      window.location.href = "/api/audit/export";
+    });
     $("authLogout").addEventListener("click", doLogout);
     $("authRotateBtn").addEventListener("click", openRotate);
     $("authRotateCancel").addEventListener("click", cancelRotate);

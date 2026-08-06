@@ -30,7 +30,19 @@ import threading
 import time
 from typing import Optional
 
+from . import users
 from .logbuf import LogBuffer
+
+
+def _actor_key(profile) -> str:
+    """The acknowledgement key for whoever is looking at the prompt.
+
+    A profile's id, or "" for an appliance running without profiles — where
+    there is one operator, one key, and therefore exactly the single-dismiss
+    behaviour this file had before acknowledgement became per person.
+    """
+    return getattr(profile, "id", "") or ""
+
 
 # State constants.
 OFF = "off"                # not armed
@@ -71,7 +83,20 @@ class EmergencyController:
         self.state = OFF
         self.trigger_dest = ""
         self.since = 0.0
-        self.prompt_dismissed = False
+        # WHO has dealt with this outage, by profile id. It used to be a single
+        # boolean, and the boolean was the bug: dismiss() silenced the prompt for
+        # everybody, so a receptionist clearing a pop-up they could do nothing
+        # about took it off the radiologist's screen and off IT's at the same
+        # time. The three of them are being asked three different questions —
+        # start keying orders by hand, push to an alternate node, change an
+        # address — and each has to answer for themselves.
+        #
+        # Keyed by profile id, not by role: two radiologists on shift are two
+        # people, and one of them acknowledging is not the other one knowing.
+        # The empty-string key is the appliance running without profiles, where
+        # there is exactly one operator and the old behaviour is the right one.
+        self.acknowledged: set = set()
+        self.activated_by = ""
         self._now = time.time
 
     # ---- config views ------------------------------------------------------
@@ -185,30 +210,101 @@ class EmergencyController:
             self._cfg["armed"] = value
             self.server.cfg.save()
 
-    def arm(self) -> dict:
+    def arm(self, profile=None) -> dict:
         self._set_armed(True)
         self.start()
-        return self.status()
+        return self.status(profile)
 
-    def disarm(self) -> dict:
+    def disarm(self, profile=None) -> dict:
         self._set_armed(False)
         self.stop()
         with self._lock:
             self._health.clear()
             self.trigger_dest = ""
-            self.prompt_dismissed = False
+            self.acknowledged.clear()
         self.log.info("Emergency failover disarmed", kind="emergency")
-        return self.status()
+        return self.status(profile)
+
+    def _notify(self, event: str, actor=None) -> None:
+        """Tell the people the policy names, through whatever channels are on.
+
+        Best effort and never in the caller's way: a webhook that times out or
+        an SMTP server that is down must not delay a failover or take the
+        controller's thread with it. The notifier does its own retrying and
+        reports its own failures — this only decides WHO and hands over.
+
+        The audience is Profiles, not addresses, because each message is
+        rendered for its recipient: the same outage is "start keying orders by
+        hand" to reception, "your primary is unreachable, push to the alternate
+        node" to a radiologist, and an address and a port to IT.
+        """
+        notifier = getattr(self.server, "notifier", None)
+        if notifier is None:
+            return
+        try:
+            notifier.emergency(event, self.status(), self.audience(), actor=actor)
+        except Exception as exc:
+            self.log.error(f"Emergency notification failed: {exc}", kind="emergency")
+
+    # ---- who may do what about this outage ---------------------------------
+    @property
+    def _users_cfg(self) -> dict:
+        try:
+            return self.server.cfg.users
+        except (AttributeError, KeyError, TypeError):
+            return {}
+
+    def may_activate(self, profile=None) -> bool:
+        """May this profile press Activate?
+
+        Two gates, and both have to hold. The capability says they are the kind
+        of person who makes this call at all; ``emergency.activate_by`` says the
+        administrator designated them for THIS appliance. Either alone is the
+        wrong answer: capability alone ignores the designation the operator was
+        asked to make, and designation alone would let an administrator hand the
+        button to a profile that cannot reach the endpoint anyway.
+
+        With no profiles configured, or no policy set, this is True — the
+        pre-profiles behaviour, where whoever is at the dashboard decides.
+        """
+        if profile is None:
+            return True
+        if not profile.can("emergency.activate"):
+            return False
+        return users.matches_any(profile, self._cfg.get("activate_by") or [])
+
+    def notifies(self, profile=None) -> bool:
+        """Is this profile someone ``emergency.notify`` says to tell?"""
+        if profile is None:
+            return True
+        return users.matches_any(profile, self._cfg.get("notify") or [])
+
+    def audience(self):
+        """Every enabled profile the policy says to tell, for the notifier.
+
+        Returned as Profiles rather than addresses because the notifier has to
+        respect what each of them may see: a message naming the patient whose
+        study is stuck is a message that must not go to somebody whose profile
+        withholds patient names.
+        """
+        return [p for p in users.enabled_profiles(self._users_cfg)
+                if self.notifies(p)]
 
     # ---- operator actions --------------------------------------------------
-    def activate(self) -> dict:
+    def activate(self, profile=None) -> dict:
         """Operator confirmed the pop-up: bring up the local emergency services.
         Starts the Modality Worklist SCP and turns on hold-and-forward so studies
         received during the outage queue for the primary and back-fill on return."""
         with self._lock:
             self.state = ACTIVE
             self.since = self._now()
-            self.prompt_dismissed = False
+            self.acknowledged.clear()
+            # Recorded so the banner, the log and the audit trail can all say
+            # who made the call. "the system" is the honest answer for
+            # auto_activate — attributing an automatic failover to whoever
+            # happened to be logged in would put a decision in someone's name
+            # that they did not make.
+            self.activated_by = getattr(profile, "name", "") or "the system"
         try:
             self.server.start_mwl()
         except Exception as exc:
@@ -220,21 +316,31 @@ class EmergencyController:
         except Exception as exc:
             self.log.error(f"Emergency: auto-send failed to start: {exc}", kind="emergency")
         self.log.warn(
-            f"EMERGENCY ACTIVATED — primary '{self.trigger_dest}' unreachable. "
-            f"Worklist serving; received studies held for forward.",
+            f"EMERGENCY ACTIVATED by {self.activated_by} — primary "
+            f"'{self.trigger_dest}' unreachable. Worklist serving; received "
+            f"studies held for forward.",
             kind="emergency",
         )
-        return self.status()
+        self._notify("activated", profile)
+        return self.status(profile)
 
-    def dismiss(self) -> dict:
-        """Operator dismissed the pop-up: keep monitoring + banner, but don't
-        start emergency services or re-prompt for this outage."""
+    def dismiss(self, profile=None) -> dict:
+        """One person acknowledged the pop-up: stop asking THEM about this outage.
+
+        Everyone else still gets asked. The banner stays up for all of them,
+        including the person who dismissed — this only stops the modal
+        re-opening in their face, it never means the outage was handled. An
+        appliance running without profiles has one operator and gets exactly the
+        behaviour it had before.
+        """
         with self._lock:
-            self.prompt_dismissed = True
-        self.log.info("Emergency prompt dismissed — failover not activated", kind="emergency")
-        return self.status()
+            self.acknowledged.add(_actor_key(profile))
+        who = getattr(profile, "name", "") or "the operator"
+        self.log.info(f"Emergency prompt acknowledged by {who} — failover not activated",
+                      kind="emergency")
+        return self.status(profile)
 
-    def resume(self) -> dict:
+    def resume(self, profile=None) -> dict:
         """Operator stood down: stop the worklist SCP and return to armed/idle."""
         try:
             self.server.stop_mwl()
@@ -243,9 +349,13 @@ class EmergencyController:
         with self._lock:
             self.state = IDLE if self.armed else OFF
             self.trigger_dest = ""
-            self.prompt_dismissed = False
-        self.log.info("Emergency resolved — resumed normal operation", kind="emergency")
-        return self.status()
+            self.acknowledged.clear()
+        self.activated_by = ""
+        self.log.info(
+            f"Emergency resolved by {getattr(profile, 'name', '') or 'the operator'} "
+            f"— resumed normal operation", kind="emergency")
+        self._notify("resolved", profile)
+        return self.status(profile)
 
     # ---- monitor loop ------------------------------------------------------
     def _loop(self, stop: threading.Event, wake: threading.Event) -> None:
@@ -318,11 +428,17 @@ class EmergencyController:
             if self.state == IDLE and any_offline:
                 self.trigger_dest = offline_names[0]
                 self.since = self._now()
-                self.prompt_dismissed = False
+                self.acknowledged.clear()
                 if self._cfg.get("auto_activate"):
                     self._unlocked_activate = True   # handled below outside the lock
                 else:
                     self.state = TRIGGERED
+                    # Deferred exactly like the activate above, and for the same
+                    # reason: _lock is not re-entrant, _notify calls status()
+                    # which takes it, and notifying from in here would deadlock
+                    # the monitor thread — leaving the appliance with no health
+                    # probe at the moment its primary went down.
+                    self._unlocked_notify = "triggered"
                     self.log.warn(
                         f"Emergency TRIGGERED — '{self.trigger_dest}' unreachable; "
                         f"awaiting operator decision", kind="emergency")
@@ -330,7 +446,7 @@ class EmergencyController:
             elif self.state == TRIGGERED and not any_offline:
                 self.state = IDLE
                 self.trigger_dest = ""
-                self.prompt_dismissed = False
+                self.acknowledged.clear()
                 self.log.info("Emergency stand-down — primary recovered before activation",
                               kind="emergency")
 
@@ -341,6 +457,11 @@ class EmergencyController:
         if getattr(self, "_unlocked_activate", False):
             self._unlocked_activate = False
             self.activate()
+
+        pending = getattr(self, "_unlocked_notify", "")
+        if pending:
+            self._unlocked_notify = ""
+            self._notify(pending)
 
         if self.state == RECOVERING:
             self._flush_once()
@@ -364,7 +485,7 @@ class EmergencyController:
         import datetime
         return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def status(self) -> dict:
+    def status(self, profile=None) -> dict:
         with self._lock:
             dests = []
             for d in self._trigger_dests():
@@ -386,7 +507,14 @@ class EmergencyController:
                     "last_probe": self._iso(h.last_probe) if (h and h.last_probe) else "",
                     "checked": bool(h and h.last_probe),
                 })
-            prompt = (self.state == TRIGGERED and not self.prompt_dismissed)
+            # Whether the modal opens is now a question about a PERSON, so it
+            # is answered per request rather than stored. Three things have to
+            # be true: the appliance is waiting for a decision, this profile is
+            # someone the policy says to tell, and they have not already
+            # answered for this outage.
+            prompt = (self.state == TRIGGERED
+                      and self.notifies(profile)
+                      and _actor_key(profile) not in self.acknowledged)
             return {
                 "armed": self.armed,
                 "state": self.state,
@@ -394,6 +522,17 @@ class EmergencyController:
                 "trigger_dest": self.trigger_dest,
                 "since": self._iso(self.since),
                 "prompt": prompt,
+                # What this particular caller may do about it. The dashboard
+                # draws Activate from this rather than from the capability
+                # alone, because holding emergency.activate and being the person
+                # the administrator designated are two different things.
+                "may_activate": self.may_activate(profile),
+                # Rendered on the banner so somebody who cannot act knows who
+                # can, instead of staring at a disabled button.
+                "activate_by": [users.describe_principal(self._users_cfg, s)
+                                for s in (self._cfg.get("activate_by") or [])],
+                "activated_by": self.activated_by,
+                "acknowledged": len(self.acknowledged),
                 "auto_activate": bool(self._cfg.get("auto_activate")),
                 "monitored": len(dests),
                 "destinations": dests,

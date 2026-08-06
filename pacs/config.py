@@ -21,6 +21,12 @@ import threading
 import time
 from typing import Any
 
+# Imported as a module, not as names: users.py holds the profile rules and this
+# file holds the document they live in, and the arrow only ever points this way.
+# users.py must never import config — the fingerprint helper below and
+# validate() both call into it, and a cycle here would break `import pacs`.
+from . import users as _users
+
 # Default home for config + data + logs: ~/CarinoPACS
 DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "CarinoPACS")
 DEFAULT_CONFIG = os.path.join(DEFAULT_DIR, "config.json")
@@ -130,8 +136,69 @@ DEFAULTS: dict[str, Any] = {
         "recovery_successes": 2,    # consecutive good probes to declare a primary back
         "auto_activate": False,     # False = pop up + ask; True = start emergency services automatically
         "hold_and_forward": True,   # while active, auto-queue received studies for the primary
+        # WHO may press the button, declared by the administrator. Entries are
+        # "role:radiologist" or a profile id. EMPTY means anyone holding the
+        # emergency.activate capability, which is the behaviour every existing
+        # install already has — so an upgrade narrows nothing until somebody
+        # decides to. Setting auto_activate is the third option: nobody presses
+        # it, the appliance does.
+        "activate_by": [],
+        # WHO is told. Same spelling, same empty-means-everyone rule. This is
+        # separate from activate_by on purpose: the receptionist needs to know
+        # the RIS is down so they can start keying orders, and must not be the
+        # one deciding to fail over.
+        "notify": [],
+    },
+    "notify": {                 # reach people who do not have the dashboard open
+        "enabled": False,       # opt-in — nothing leaves this box until asked
+        "webhook": {
+            "enabled": False,
+            "url": "",
+            # Shared with the receiver so it can tell a genuine POST from anyone
+            # who learned the URL. Sent as an HMAC over the exact body, in
+            # X-Carino-Signature. Treated as a secret: redacted from
+            # GET /api/config and covered by version(), like the other two.
+            "secret": "",
+            "timeout_sec": 10,
+            "retries": 2,
+        },
+        "smtp": {
+            "enabled": False,
+            "host": "",
+            "port": 587,
+            "tls": "starttls",  # starttls | ssl | none
+            "username": "",
+            "password": "",     # a secret, treated as one — see above
+            "from": "",
+        },
+    },
+    "audit": {                  # who did what — append-only and hash-chained
+        "enabled": True,        # on by default: "there is no audit trail" is the gap this closes
+        "dir": "./audit",
+        "max_bytes": 8388608,   # rotate at 8 MB (~40k records)
+        # Recording every study anyone opens answers "who viewed this patient",
+        # which some jurisdictions require and which multiplies the size of the
+        # trail by how often people refresh a dashboard. The operator decides.
+        "log_reads": False,
+        # fsync each record. Slow by design and correct for this file: a record
+        # still in the page cache when the machine loses power is a record that
+        # did not happen. It fires on deliberate actions, not per instance.
+        "fsync": True,
     },
     "destinations": [],
+    "users": {                  # who may use the dashboard, and what they may do
+        # EMPTY = profiles are not in use and web.auth_token alone governs
+        # access, which is exactly how every install that predates this feature
+        # behaves. Seeded with four editable presets when the operator turns
+        # profiles on; see pacs/users.py.
+        "profiles": [],
+        # Show the profile buttons before anyone has logged in. True is the
+        # kiosk case this was built for — a shared front-desk machine where you
+        # tap your name and type a password. It does publish the staff list to
+        # anyone who can reach the port, so a site that binds off-box and cares
+        # about that sets this false and gets a name-and-password form instead.
+        "list_profiles": True,
+    },
     "web": {
         "host": "127.0.0.1",
         "port": 8042,
@@ -143,7 +210,8 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"),
-                ("scu", "pending_dir"), ("ris", "store_dir"), ("index", "path")]
+                ("scu", "pending_dir"), ("ris", "store_dir"), ("index", "path"),
+                ("audit", "dir")]
 
 _LOOPBACK_NAMES = ("localhost", "localhost.localdomain", "ip6-localhost")
 
@@ -230,6 +298,37 @@ def auth_token_of(web: Any) -> str:
     if not isinstance(token, str):
         return ""
     return token.strip()
+
+
+# The two secrets under notify, as (section, field). Named once so version(),
+# the redactor in web.py and notify_secrets_of() cannot drift apart — a secret
+# one of them knows about and another does not is a secret that leaks through
+# whichever one forgot.
+_NOTIFY_SECRETS = (("webhook", "secret"), ("smtp", "password"))
+
+
+def notify_secrets_of(notify: Any) -> dict:
+    """The two secrets under ``notify``, as {path: value}, "" when unset.
+
+    Same one-coercion rule as auth_token_of and deid_secret_of, and the same
+    reason: three readers have to agree about whether a secret is configured —
+    the redactor that keeps it out of GET /api/config, version() which has to
+    detect it changing, and the notifier that uses it. A non-string is not a
+    secret, so it is no secret to all three.
+    """
+    out = {"notify.webhook.secret": "", "notify.smtp.password": ""}
+    if not isinstance(notify, dict):
+        return out
+    wh = notify.get("webhook")
+    if isinstance(wh, dict) and isinstance(wh.get("secret"), str):
+        out["notify.webhook.secret"] = wh["secret"].strip()
+    sm = notify.get("smtp")
+    if isinstance(sm, dict) and isinstance(sm.get("password"), str):
+        # NOT stripped. A password whose leading or trailing space is
+        # significant is a password somebody chose, and silently trimming it
+        # here would make the login fail with no explanation anywhere.
+        out["notify.smtp.password"] = sm["password"]
+    return out
 
 
 def deid_secret_of(deid: Any) -> str:
@@ -438,6 +537,34 @@ class Config:
         deid = doc.get("deid")
         if isinstance(deid, dict):
             deid["secret"] = _secret_fingerprint("deid.secret", deid_secret_of(deid))
+        # The notifier's two secrets, for the same reason and by the same rule:
+        # a webhook signing key or an SMTP password that changes has to move
+        # this fingerprint, or a Save assembled before the change puts the old
+        # one back and If-Match cannot refuse it.
+        notify = doc.get("notify")
+        if isinstance(notify, dict):
+            secrets_now = notify_secrets_of(notify)
+            for section, field in _NOTIFY_SECRETS:
+                block = notify.get(section)
+                if isinstance(block, dict) and field in block:
+                    path = f"notify.{section}.{field}"
+                    block[field] = _secret_fingerprint(path, secrets_now[path])
+        # Password records, for both halves of the same reason the two secrets
+        # above are here. They have to be COVERED, or a Save assembled before
+        # somebody changed their password silently puts the old one back and
+        # If-Match cannot tell. And they cannot be covered RAW, because this
+        # string is published as an ETag to every holder of a session cookie
+        # and the stored hash is a PBKDF2 output — handing that to a caller who
+        # is not allowed to read it is an offline cracking target, which is the
+        # exact mistake the token made. Keyed fingerprint, labelled per profile
+        # so two people who chose the same password do not match here.
+        users = doc.get("users")
+        if isinstance(users, dict) and isinstance(users.get("profiles"), list):
+            for row in users["profiles"]:
+                if isinstance(row, dict) and isinstance(row.get("password"), dict):
+                    row["password"] = _secret_fingerprint(
+                        f"users.password.{row.get('id', '')}",
+                        _users.password_fingerprint(row["password"]))
         # sort_keys so key order in the file cannot change the fingerprint;
         # default=str so a value nothing else validates can never make asking
         # for the version raise.
@@ -653,6 +780,14 @@ class Config:
     @property
     def emergency(self) -> dict:
         return self.data["emergency"]
+
+    @property
+    def users(self) -> dict:
+        return self.data["users"]
+
+    @property
+    def audit(self) -> dict:
+        return self.data["audit"]
 
     @property
     def destinations(self) -> list[dict]:
@@ -958,6 +1093,25 @@ def validate(data: dict) -> None:
         ot = em.get("offline_threshold_sec")
         if ot is not None and not (isinstance(ot, (int, float)) and ot >= 0):
             raise ValueError("emergency.offline_threshold_sec must be a number >= 0")
+        _users.validate_principals(em.get("activate_by"), "emergency.activate_by")
+        _users.validate_principals(em.get("notify"), "emergency.notify")
+        # A policy naming only people who cannot act is a failover that will not
+        # fire, and it fails at 3am rather than at the moment it was configured.
+        # Only checked when profiles are actually in use — with none configured
+        # the capability question has no one to ask.
+        activate_by = em.get("activate_by") or []
+        if activate_by and _users.profiles_in_use(data.get("users", {})):
+            able = [p for p in _users.enabled_profiles(data.get("users", {}))
+                    if _users.matches_any(p, activate_by) and p.can("emergency.activate")]
+            if not able:
+                named = ", ".join(_users.describe_principal(data.get("users", {}), s)
+                                  for s in activate_by)
+                raise ValueError(
+                    f"emergency.activate_by names {named}, but nobody matching that can "
+                    f"activate failover — they would all need the emergency.activate "
+                    f"capability. As it stands the prompt would appear and no one could "
+                    f"answer it. Grant the capability, name someone else, or set "
+                    f"emergency.auto_activate true.")
 
     # Security gate. The dashboard API has no login of its own; it is safe
     # unauthenticated only because it answers on loopback, where the OS is the
@@ -975,12 +1129,77 @@ def validate(data: dict) -> None:
             "python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
         )
     web_host = web_host_of(data["web"])
-    if not is_loopback_host(web_host) and not auth_token_of(data["web"]):
+    reachable = not is_loopback_host(web_host)
+    if reachable and not auth_token_of(data["web"]):
         raise ValueError(
             f"web.host is '{web_host}', which is reachable from the network, but web.auth_token is empty. "
             "Set a token — generate one with: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\" — "
             "or set web.host back to 127.0.0.1 to keep the dashboard on this machine only."
         )
+
+    nt = data.get("notify")
+    if nt is not None:
+        if not isinstance(nt, dict):
+            raise ValueError("'notify' must be an object")
+        wh = nt.get("webhook")
+        if wh is not None:
+            if not isinstance(wh, dict):
+                raise ValueError("notify.webhook must be an object")
+            url = str(wh.get("url", "") or "").strip()
+            if wh.get("enabled") and not url:
+                raise ValueError(
+                    "notify.webhook.enabled is true but notify.webhook.url is empty — "
+                    "nothing would be sent, and the appliance would report notification "
+                    "as configured.")
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                raise ValueError(
+                    f"notify.webhook.url is '{url}' — it must start with http:// or https://.")
+            r = wh.get("retries")
+            if r is not None and not (isinstance(r, int) and not isinstance(r, bool) and r >= 0):
+                raise ValueError("notify.webhook.retries must be a whole number >= 0")
+        sm = nt.get("smtp")
+        if sm is not None:
+            if not isinstance(sm, dict):
+                raise ValueError("notify.smtp must be an object")
+            if sm.get("enabled") and not str(sm.get("host", "") or "").strip():
+                raise ValueError(
+                    "notify.smtp.enabled is true but notify.smtp.host is empty — no mail "
+                    "would be sent, and the appliance would report e-mail as configured.")
+            port = sm.get("port")
+            if port is not None and not (isinstance(port, int) and not isinstance(port, bool)
+                                         and 1 <= port <= 65535):
+                raise ValueError("notify.smtp.port must be a port number between 1 and 65535")
+            mode = str(sm.get("tls", "starttls") or "").lower()
+            if mode not in ("starttls", "ssl", "none"):
+                raise ValueError(
+                    f"notify.smtp.tls is '{mode}' — it must be starttls, ssl or none. "
+                    f"An unrecognised value used to mean no encryption, which is not a "
+                    f"thing to arrive at by typo when a password is being sent.")
+
+    au = data.get("audit")
+    if au is not None:
+        if not isinstance(au, dict):
+            raise ValueError("'audit' must be an object")
+        mb = au.get("max_bytes")
+        if mb is not None and not (isinstance(mb, int) and not isinstance(mb, bool) and mb >= 0):
+            raise ValueError(
+                "audit.max_bytes must be a whole number of bytes (0 = never rotate).")
+        if au.get("enabled", True) and not str(au.get("dir", "") or "").strip():
+            # An audit trail configured on with nowhere to write is the one
+            # failure mode this feature cannot tolerate quietly: it looks
+            # enabled in Settings and records nothing.
+            raise ValueError(
+                "audit.enabled is true but audit.dir is empty — the trail would have "
+                "nowhere to be written. Set a folder, or set audit.enabled false and "
+                "accept that this appliance keeps no record of who did what.")
+
+    # Profiles answer the same question one layer down: the token says whether a
+    # stranger can reach the API at all, and these say what each person who gets
+    # past it may do. The bind is passed in because an OPEN profile — one with
+    # no password — is a defensible thing on loopback and an unauthenticated
+    # stranger with write access off-box, and only the host knows which of those
+    # this appliance is. An empty profile list is legal and means token-only.
+    _users.validate_profiles(data.get("users", {}), network_reachable=reachable)
 
     dests = data.get("destinations", [])
     if not isinstance(dests, list):

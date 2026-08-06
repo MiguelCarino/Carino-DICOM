@@ -14,6 +14,33 @@ destination. What is no longer true is the "store only" description: this
 release also queries, retrieves, routes and de-identifies.
 
 ### Added
+- **Profiles, capabilities and per-field identifier visibility** — optional and
+  **off by default**, so an existing install behaves exactly as it did. Turning
+  them on gives each person a sign-in, a set of capabilities and their own name
+  in the audit trail, seeded with four editable presets (Administrator, IT,
+  Radiologist, Reception). Capabilities are enforced at every endpoint, never in
+  the browser: `GET /api/status` is *composed* per profile rather than filtered,
+  so a receptionist's browser never receives the destination table or the storage
+  paths. Identifier visibility is per field — an administrator decides which of
+  patient name, ID, date of birth, sex, accession, study description and
+  referring physician each profile may see, and withheld values arrive as `***`
+  rather than blank. The shared `web.auth_token` keeps working as an
+  administrator, so no machine client breaks. (`pacs/users.py`)
+- **Audit trail** — append-only, hash-chained records of who did what, to what,
+  from where, and whether it worked, with `GET /api/audit/verify` reporting the
+  first break in the chain and `GET /api/audit/export` producing a verifiable
+  copy. Separate from the operational log by design. Recording reads is opt-in
+  (`audit.log_reads`). On by default. (`pacs/audit.py`)
+- **Emergency notification** — optional outbound webhook (HMAC-signed over the
+  exact bytes sent) and SMTP to per-profile addresses, so an outage reaches
+  somebody who does not have the dashboard open. The message is written for its
+  reader's role, and detail is gated on what that reader could have seen in the
+  dashboard anyway. Off by default; no patient identifiers are ever sent.
+  (`pacs/notify.py`)
+- **Emergency activation authority** — `emergency.activate_by` names who may
+  answer a failover (a role, one person, or nobody because `auto_activate` is
+  on), and `emergency.notify` separately names who is told. Config validation
+  refuses a policy nobody matching can act on.
 - **Emergency RIS** — HL7 `ORM^O01` order intake over MLLP (default port
   `2575`), plus hand-keyed orders in the dashboard. Arriving studies are matched
   to open orders by Accession Number (Patient ID fallback) and archived for
@@ -158,6 +185,29 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Changed
+- **The emergency prompt is acknowledged per person, not globally.** It was one
+  flag, so a receptionist clearing a pop-up they could do nothing about took it
+  off the radiologist's screen and off IT's at the same time — and the
+  radiologist was the one who was going to forward the study somewhere it could
+  be read. Each person is now asked, and answers, for themselves; the prompt
+  text follows their role.
+- **A restricted profile is refused DICOMweb and the audit export** rather than
+  served identifiers it may not see. QIDO answers in DICOM tag keys and WADO-RS
+  in raw Part 10 bytes, so the redactor cannot reach either; an audit export has
+  to carry records exactly as written or the chain cannot be checked against it.
+  Both refusals name what they would take. Unrestricted profiles and the access
+  token are unaffected.
+- **`POST /api/config` no longer accepts the profile list**, and re-checks
+  `deid.manage` against what a save actually changes. Both are escalation paths
+  out of `config.write`, which the IT preset holds: without the first, posting a
+  document with an extra admin row would be a two-line path to full control.
+- **Documentation corrected where it had become false.** README and SECURITY.md
+  claimed no user management and no per-user audit trail; both now describe what
+  exists and, more importantly, what it still does not do — the audit chain
+  cannot detect truncation of its own tail, and there is still no encryption at
+  rest. SECURITY.md gained *Why encryption at rest is deferred*, which argues
+  for full-disk encryption underneath rather than an application-level scheme
+  whose key would sit on the same disk as the data.
 - **Carino Bridge** — the ✎ *Edit tags* hand-off to DICOM-editor now goes
   through the shared `carino-bridge.js` used across the fleet, instead of a
   hand-rolled exchange on each side. The bundled same-origin editor behaves as

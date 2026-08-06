@@ -64,7 +64,11 @@
     "port": 11115,
     "allowed_aets": [],
     "move_destinations": {
-      "WORKSTATION1": { "host": "127.0.0.1", "port": 104, "aet": "WORKSTATION1" }
+      "WORKSTATION1": {
+        "host": "127.0.0.1",
+        "port": 104,
+        "aet": "WORKSTATION1"
+      }
     },
     "tls": false,
     "tls_cert": "",
@@ -94,15 +98,17 @@
           "patient_id": "",
           "study_desc": ""
         },
-        "destinations": ["Example PACS"],
+        "destinations": [
+          "Example PACS"
+        ],
         "deidentify": true,
         "stop": true
       }
     ]
   },
   "deid": {
-    "_comment": "profile: basic | strict | off. A rule's \"deidentify\" above chooses WHICH destinations get a scrubbed copy; this chooses whether scrubbing happens at all. A destination a rule asks to de-identify for is HELD — not sent to at all, rather than forwarded identified — whenever the scrub cannot be performed. Nothing is lost either way: the study stays in the outgoing folder (never archived, never deleted), every other destination on the same study still receives it, and the log raises an error naming what is withheld and why.",
-    "_comment_hold_causes": "TWO causes, reported apart as hold_cause because they need different fixes. (1) \"profile-off\": this profile is \"off\" while a rule still asks for a scrub — turn the profile on (basic or strict) and the next Auto-send pass releases them. (2) \"no-deidentifier\": the profile is ON but no de-identifier could be built from these settings — the failure is in the log on the send channel; fix it there. Turning the profile off does NOT release a no-deidentifier hold, it only changes which half is stopping the scrub. Taking \"deidentify\" off the rule releases either hold, but it releases the studies as IDENTIFIED copies, which is the one outcome the hold exists to prevent.",
+    "_comment": "profile: basic | strict | off. A rule's \"deidentify\" above chooses WHICH destinations get a scrubbed copy; this chooses whether scrubbing happens at all. A destination a rule asks to de-identify for is HELD \u2014 not sent to at all, rather than forwarded identified \u2014 whenever the scrub cannot be performed. Nothing is lost either way: the study stays in the outgoing folder (never archived, never deleted), every other destination on the same study still receives it, and the log raises an error naming what is withheld and why.",
+    "_comment_hold_causes": "TWO causes, reported apart as hold_cause because they need different fixes. (1) \"profile-off\": this profile is \"off\" while a rule still asks for a scrub \u2014 turn the profile on (basic or strict) and the next Auto-send pass releases them. (2) \"no-deidentifier\": the profile is ON but no de-identifier could be built from these settings \u2014 the failure is in the log on the send channel; fix it there. Turning the profile off does NOT release a no-deidentifier hold, it only changes which half is stopping the scrub. Taking \"deidentify\" off the rule releases either hold, but it releases the studies as IDENTIFIED copies, which is the one outcome the hold exists to prevent.",
     "profile": "basic",
     "keep_private": false,
     "keep_dates": false,
@@ -114,7 +120,39 @@
     "offline_threshold_sec": 120,
     "recovery_successes": 2,
     "auto_activate": false,
-    "hold_and_forward": true
+    "hold_and_forward": true,
+    "activate_by": [],
+    "notify": []
+  },
+  "notify": {
+    "enabled": false,
+    "webhook": {
+      "enabled": false,
+      "url": "",
+      "secret": "",
+      "timeout_sec": 10,
+      "retries": 2
+    },
+    "smtp": {
+      "enabled": false,
+      "host": "",
+      "port": 587,
+      "tls": "starttls",
+      "username": "",
+      "password": "",
+      "from": ""
+    }
+  },
+  "audit": {
+    "enabled": true,
+    "dir": "./audit",
+    "max_bytes": 8388608,
+    "log_reads": false,
+    "fsync": true
+  },
+  "users": {
+    "profiles": [],
+    "list_profiles": true
   },
   "destinations": [
     {
