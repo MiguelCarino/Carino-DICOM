@@ -218,8 +218,12 @@ journalctl -u carino-pacs -f</code></pre>
 
     <p>Empecemos por lo importante: <strong>el panel es la llave del archivo</strong>. Quien lo abre puede
       leer todos los estudios guardados, descargar los ficheros DICOM, cambiar cualquier ajuste, arrancar
-      y parar servicios, borrar estudios y apagar el servidor. No hay usuarios ni roles: hay un único
-      secreto compartido, y quien lo tiene lo puede todo.</p>
+      y parar servicios, borrar estudios y apagar el servidor. De fábrica hay un único secreto compartido
+      y quien lo tiene lo puede todo: <strong>los perfiles son opcionales y están apagados hasta que
+      usted los active</strong>. Al activarlos, cada persona entra como sí misma, con sus propios
+      permisos, su propia vista de los identificadores del paciente y su propio nombre en la auditoría;
+      el token compartido sigue funcionando como administrador, así que nada de lo que ya lo usa se
+      rompe.</p>
 
     <h3>La regla</h3>
     <div class="danger">
@@ -283,12 +287,19 @@ openssl rand -base64 32</code></pre>
 
     <h3>Lo que el modelo no protege</h3>
     <ul>
-      <li><strong>No hay gestión de usuarios.</strong> Ni cuentas, ni roles, ni permisos. Un solo secreto
-        compartido para todo el equipo.</li>
-      <li><strong>No hay auditoría por usuario.</strong> El log registra qué pasó —asociaciones, envíos,
-        reenvíos, órdenes conciliadas, tokens rechazados— con hora y dirección del par, pero no puede
-        registrar <em>quién</em>, porque el software no tiene concepto de «quién». Y es texto plano sin
-        protección contra manipulación: es un registro operativo, no una prueba.</li>
+      <li><strong>Los perfiles están apagados hasta que usted los active.</strong> Hasta entonces hay
+        un solo secreto compartido para todo el equipo, sin cuentas, sin roles y sin permisos. Ese sigue
+        siendo el valor por defecto, porque activarlos en silencio durante una actualización rompería
+        todos los clientes automáticos del sitio.</li>
+      <li><strong>No hay integración con su directorio.</strong> Las cuentas viven en el equipo. No hay
+        LDAP, ni Active Directory, ni inicio de sesión único, ni forma de desactivar a alguien de forma
+        centralizada cuando se va.</li>
+      <li><strong>La auditoría se puede truncar.</strong> Detecta un registro editado, uno eliminado del
+        medio, registros reordenados y un fichero cortado a mitad de línea: cada caso rompe un resumen y
+        <em>Comprobar integridad</em> dice en qué registro y por qué. No detecta que se borren los
+        últimos registros, porque lo que queda es una cadena válida de verdad, ni impide que alguien con
+        permiso de escritura sobre la carpeta la reescriba entera. Si necesita no repudio, copie la
+        cabecera de la cadena a un sitio donde esta máquina no pueda escribir y compárela después.</li>
       <li><strong>No hay cifrado en reposo.</strong> Los estudios son ficheros DICOM normales, el índice
         sqlite guarda nombres e identificadores en claro, las órdenes son JSON y
         <code>config.json</code> contiene el token en texto plano. Cifra el volumen por debajo (LUKS,

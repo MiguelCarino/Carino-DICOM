@@ -220,8 +220,11 @@ journalctl -u carino-pacs -f</code></pre>
 
     <p>Comecemos pelo que importa: <strong>o painel é a chave do acervo</strong>. Quem abre o painel pode
       ler todos os estudos armazenados, baixar os arquivos DICOM, mudar qualquer configuração, iniciar e
-      parar serviços, apagar estudos e desligar o servidor. Não há usuários nem perfis de acesso: há um
-      único segredo compartilhado, e quem o tem pode tudo.</p>
+      parar serviços, apagar estudos e desligar o servidor. De fábrica há um único segredo compartilhado
+      e quem o tem pode tudo: <strong>os perfis são opcionais e ficam desligados até você ativá-los</strong>.
+      Ao ativar, cada pessoa entra como ela mesma, com as próprias permissões, a própria visão dos
+      identificadores do paciente e o próprio nome na auditoria; o token compartilhado continua
+      funcionando como administrador, então nada que já o utilize deixa de funcionar.</p>
 
     <h3>A regra</h3>
     <div class="danger">
@@ -284,12 +287,20 @@ openssl rand -base64 32</code></pre>
 
     <h3>O que o modelo não protege</h3>
     <ul>
-      <li><strong>Não há gestão de usuários.</strong> Sem contas, sem perfis, sem permissões. Um único
-        segredo compartilhado para o equipamento inteiro.</li>
-      <li><strong>Não há trilha de auditoria por usuário.</strong> O log registra o que aconteceu —
-        associações, armazenamentos, encaminhamentos, pedidos conciliados, tokens rejeitados — com hora e
-        endereço do par, mas não consegue registrar <em>quem</em>, porque o software não tem o conceito
-        de «quem». E é texto puro sem proteção contra adulteração: é registro operacional, não prova.</li>
+      <li><strong>Os perfis ficam desligados até você ativá-los.</strong> Até lá há um único segredo
+        compartilhado para o equipamento inteiro, sem contas, sem perfis de acesso e sem permissões.
+        Esse continua sendo o padrão, porque ativá-los em silêncio durante uma atualização quebraria
+        todos os clientes automáticos do site.</li>
+      <li><strong>Não há integração com o seu diretório.</strong> As contas vivem no equipamento. Não há
+        LDAP, nem Active Directory, nem logon único, nem como desativar alguém de forma centralizada
+        quando essa pessoa sai.</li>
+      <li><strong>A trilha de auditoria pode ser truncada.</strong> Ela detecta um registro editado, um
+        removido do meio, registros reordenados e um arquivo cortado no meio da linha — cada caso quebra
+        um resumo, e <em>Verificar integridade</em> diz em qual registro e por quê. Não detecta a
+        exclusão dos últimos registros, porque o que sobra é uma cadeia genuinamente válida, nem impede
+        que alguém com permissão de escrita na pasta a reescreva inteira. Se você precisa de não
+        repúdio, copie o topo da cadeia para um lugar onde esta máquina não possa escrever e compare
+        depois.</li>
       <li><strong>Não há criptografia em repouso.</strong> Os estudos são arquivos DICOM comuns, o índice
         sqlite guarda nomes e identificadores em claro, os pedidos são JSON e o <code>config.json</code>
         guarda o token em texto puro. Criptografe o volume por baixo (LUKS, BitLocker, FileVault) e

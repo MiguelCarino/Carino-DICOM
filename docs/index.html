@@ -127,6 +127,14 @@ sudo packaging/systemd/install.sh</code></pre>
           <b data-i18n>🔑 Token authentication</b>
           <p data-i18n>The dashboard and the DICOMweb API take a single shared token. Bind them to anything other than localhost without one and the server refuses to start — the refusal is the feature.</p>
         </div>
+        <div class="svc-item">
+          <b data-i18n>👥 People and permissions</b>
+          <p data-i18n>Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone's chart.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🔒 Audit trail</b>
+          <p data-i18n>Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -150,6 +158,9 @@ sudo packaging/systemd/install.sh</code></pre>
         <li data-i18n>Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.</li>
         <li data-i18n>Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.</li>
         <li data-i18n>Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.</li>
+        <li data-i18n>Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.</li>
+        <li data-i18n>An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.</li>
+        <li data-i18n>Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.</li>
       </ul>
     </div>
   </section>
@@ -162,7 +173,7 @@ sudo packaging/systemd/install.sh</code></pre>
         <ul>
           <li><b data-i18n>Not a medical device.</b> <span data-i18n>It is not certified, cleared or registered anywhere, and nothing in it has been validated for clinical use by anyone. Whoever deploys it owns that validation.</span></li>
           <li><b data-i18n>Not for primary diagnosis.</b> <span data-i18n>There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.</span></li>
-          <li><b data-i18n>Not an enterprise archive.</b> <span data-i18n>No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.</span></li>
+          <li><b data-i18n>Not an enterprise archive.</b> <span data-i18n>No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.</span></li>
           <li><b data-i18n>Not a replacement for your PACS or your RIS.</b> <span data-i18n>It is the gateway between them, and the thing that keeps a department working through an outage until they come back.</span></li>
         </ul>
         <p class="notbox-foot" data-i18n>If a patient's care depends on it, the responsibility for that is yours, not this software's.</p>

@@ -208,8 +208,11 @@ journalctl -u carino-pacs -f</code></pre>
 
     <p>Start with the part that matters: <strong>the dashboard is the key to the archive</strong>. Anyone
       who opens it can read every stored study, download the DICOM files, change every setting, start and
-      stop services, delete studies and shut the server down. There are no users and no roles: there is
-      one shared secret, and whoever holds it can do everything.</p>
+      stop services, delete studies and shut the server down. Out of the box there is one shared secret
+      and whoever holds it can do everything — <strong>profiles are optional and off until you turn
+      them on</strong>. Once you do, each person signs in as themselves with their own permissions,
+      their own view of patient identifiers, and their own name in the audit trail; the shared token
+      keeps working as an administrator so nothing that already uses it breaks.</p>
 
     <h3>The rule</h3>
     <div class="danger">
@@ -271,12 +274,19 @@ openssl rand -base64 32</code></pre>
 
     <h3>What the model does not protect</h3>
     <ul>
-      <li><strong>No user management.</strong> No accounts, no roles, no permissions. One shared secret
-        for the whole appliance.</li>
-      <li><strong>No per-user audit trail.</strong> The log records what happened — associations, stores,
-        forwards, matched orders, rejected tokens — with timestamps and peer addresses, but it cannot
-        record <em>who</em>, because the software has no concept of a who. It is plain text with no
-        tamper protection: an operational record, not evidence.</li>
+      <li><strong>Profiles are off until you turn them on.</strong> Until then there is one shared
+        secret for the whole appliance and no accounts, no roles and no permissions. That is still the
+        default, because switching it on silently during an upgrade would break every machine client
+        on the site.</li>
+      <li><strong>No directory integration.</strong> Accounts live on the appliance. There is no LDAP,
+        no Active Directory, no single sign-on, and no way to disable somebody centrally when they
+        leave.</li>
+      <li><strong>The audit trail can be truncated.</strong> It catches a record edited in place, one
+        removed from the middle, records reordered, and a file cut mid-line — each breaks a digest and
+        <em>Check integrity</em> names the record and the reason. It cannot catch the last few records
+        being deleted, because what remains is a genuinely valid chain, and it cannot stop a wholesale
+        rewrite by somebody with write access to the audit folder. If you need non-repudiation, copy
+        the chain head somewhere this machine cannot write and compare it later.</li>
       <li><strong>No encryption at rest.</strong> Studies are ordinary DICOM files, the sqlite index
         holds names and identifiers in the clear, orders are JSON, and <code>config.json</code> holds the
         token in plaintext. Encrypt the volume underneath (LUKS, BitLocker, FileVault) and restrict the

@@ -53,7 +53,7 @@ const I18N = {
         'Not for primary diagnosis.': 'No sirve para diagnóstico primario.',
         'There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.': 'Aquí no hay visor diagnóstico: sin ventaneo, sin mediciones, sin renderizado. Interpreta los estudios en la estación de trabajo validada que ya tienes.',
         'Not an enterprise archive.': 'No es un archivo empresarial.',
-        'No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.': 'Sin alta disponibilidad, sin cifrado en reposo, sin cuentas de usuario, sin roles y sin auditoría por usuario: el log registra qué pasó, nunca quién lo hizo.',
+        'No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.': 'Sin alta disponibilidad, sin clustering, sin políticas de retención y sin cifrado en reposo: póngalo sobre un disco cifrado. Tiene sus propios perfiles y su propia auditoría, pero no habla LDAP, ni Active Directory, ni inicio de sesión único, así que las cuentas viven en el equipo y no en su proveedor de identidad.',
         'Not a replacement for your PACS or your RIS.': 'No sustituye a tu PACS ni a tu RIS.',
         'It is the gateway between them, and the thing that keeps a department working through an outage until they come back.': 'Es la pasarela entre ellos y lo que mantiene funcionando al servicio durante una caída, hasta que vuelvan.',
         "If a patient's care depends on it, the responsibility for that is yours, not this software's.": 'Si la atención de un paciente depende de esto, la responsabilidad es tuya, no del software.',
@@ -89,6 +89,15 @@ const I18N = {
         'Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.': 'Imagen Docker, fichero compose y una unidad systemd endurecida, para ejecutarlo en un servidor y no en un escritorio.',
         'Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.': 'RIS de emergencia, Modality Worklist y conmutación automática, para las horas en que tu PACS principal está inaccesible.',
         'Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.': 'Receptor de impresión virtual, para modalidades que sólo saben imprimir a placa y nunca aprendieron a hacer C-STORE.',
+
+        // ── Profiles, audit trail and emergency notification ──
+        '👥 People and permissions': '👥 Personas y permisos',
+        'Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone\'s chart.': 'Inicio de sesión por persona, opcional, con cuatro perfiles predefinidos y editables. Los permisos se comprueban en cada endpoint, no se esconden en el navegador, y usted elige por perfil qué identificadores del paciente ve cada persona: así TI puede seguir un estudio por su número de acceso sin leer la historia de nadie.',
+        '🔒 Audit trail': '🔒 Registro de auditoría',
+        'Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.': 'Registros de solo anexado, encadenados por hash: quién hizo qué, sobre qué estudio, desde dónde y si funcionó, incluidos los intentos denegados. Cualquier edición o borrado dentro del archivo rompe la cadena, y el panel dice en qué registro y por qué.',
+        'Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.': 'Perfiles y permisos: inicio de sesión por persona, acceso por capacidad y control campo a campo de qué identificadores del paciente se muestran a cada quien.',
+        'An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.': 'Un registro de auditoría de solo anexado y encadenado por hash que nombra quién hizo qué, con comprobación de integridad y exportación.',
+        'Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.': 'Aviso de emergencia por webhook firmado y por correo, para que una caída a las 03:00 llegue a alguien que no está mirando un panel.',
     },
     'pt-BR': {
         'Late shift.': 'Turno da noite.',
@@ -127,7 +136,7 @@ const I18N = {
         'Not for primary diagnosis.': 'Não serve para diagnóstico primário.',
         'There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.': 'Aqui não há visualizador diagnóstico: sem janelamento, sem medições, sem pipeline de renderização. Faça o laudo na estação de trabalho validada que você já tem.',
         'Not an enterprise archive.': 'Não é um arquivo corporativo.',
-        'No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.': 'Sem alta disponibilidade, sem criptografia em repouso, sem contas de usuário, sem perfis de acesso e sem trilha de auditoria por usuário — o log registra o que aconteceu, nunca quem fez.',
+        'No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.': 'Sem alta disponibilidade, sem clustering, sem políticas de retenção e sem criptografia em repouso — coloque-o sobre um disco criptografado. Ele tem os próprios perfis e a própria trilha de auditoria, mas não fala LDAP, nem Active Directory, nem logon único, então as contas ficam no equipamento e não no seu provedor de identidade.',
         'Not a replacement for your PACS or your RIS.': 'Não substitui seu PACS nem seu RIS.',
         'It is the gateway between them, and the thing that keeps a department working through an outage until they come back.': 'Ele é o gateway entre os dois, e o que mantém o setor funcionando durante uma queda até que voltem.',
         "If a patient's care depends on it, the responsibility for that is yours, not this software's.": 'Se o cuidado de um paciente depender disso, a responsabilidade é sua, não do software.',
@@ -158,6 +167,15 @@ const I18N = {
         'Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.': 'Imagem Docker, arquivo compose e uma unidade systemd reforçada, para rodar em um servidor em vez de um desktop.',
         'Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.': 'RIS de emergência, Modality Worklist e failover automático, para as horas em que o seu PACS principal está inacessível.',
         'Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.': 'Receptor de impressão virtual, para modalidades que só sabem imprimir em filme e nunca aprenderam a fazer C-STORE.',
+
+        // ── Profiles, audit trail and emergency notification ──
+        '👥 People and permissions': '👥 Pessoas e permissões',
+        'Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone\'s chart.': 'Login por pessoa, opcional, com quatro perfis predefinidos e editáveis. As permissões são verificadas em cada endpoint, não escondidas no navegador, e você escolhe por perfil quais identificadores do paciente cada pessoa vê — assim a TI rastreia um estudo pelo número de acesso sem ler o prontuário de ninguém.',
+        '🔒 Audit trail': '🔒 Trilha de auditoria',
+        'Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.': 'Registros somente-acréscimo, encadeados por hash: quem fez o quê, em qual estudo, de onde e se deu certo — recusas incluídas. Qualquer edição ou exclusão dentro do arquivo quebra a cadeia, e o painel diz em qual registro e por quê.',
+        'Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.': 'Perfis e permissões — login por pessoa, acesso por capacidade e controle campo a campo de quais identificadores do paciente cada um vê.',
+        'An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.': 'Uma trilha de auditoria somente-acréscimo e encadeada por hash que nomeia quem fez o quê, com verificação de integridade e exportação.',
+        'Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.': 'Aviso de emergência por webhook assinado e por e-mail, para que uma queda às 03:00 chegue a alguém que não está olhando para um painel.',
     },
     ja: {
         'Late shift.': '夜勤お疲れさま。',
@@ -196,7 +214,7 @@ const I18N = {
         'Not for primary diagnosis.': '一次読影には使えません。',
         'There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.': '診断用ビューアはありません。ウィンドウ調整も計測もレンダリングもありません。読影は既存の検証済みワークステーションで行ってください。',
         'Not an enterprise archive.': 'エンタープライズアーカイブではありません。',
-        'No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.': '冗長構成なし、保存時暗号化なし、ユーザーアカウントも権限もなし、ユーザー単位の監査証跡もありません。ログは「何が起きたか」を記録しますが、「誰がやったか」は記録できません。',
+        'No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.': '冗長構成なし、クラスタリングなし、保存期間ポリシーなし、保存時暗号化なし — 暗号化したディスク上で運用してください。独自のプロファイルと監査証跡は備えていますが、LDAP・Active Directory・シングルサインオンには対応していないため、アカウントはID基盤側ではなくこの装置側で管理します。',
         'Not a replacement for your PACS or your RIS.': 'PACSやRISの置き換えではありません。',
         'It is the gateway between them, and the thing that keeps a department working through an outage until they come back.': 'それらをつなぐゲートウェイであり、障害中も部門を動かし続け、復旧を待つための仕組みです。',
         "If a patient's care depends on it, the responsibility for that is yours, not this software's.": '患者の診療がこれに依存するなら、その責任はソフトウェアではなく導入した側にあります。',
@@ -227,6 +245,15 @@ const I18N = {
         'Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.': 'Dockerイメージ、composeファイル、堅牢化したsystemdユニット。デスクトップではなくサーバーで動かすためのものです。',
         'Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.': '緊急用RIS、Modality Worklist、自動フェイルオーバー。主PACSに到達できない時間帯のためのものです。',
         'Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.': '仮想プリント受信。フィルムへの印刷しかできず、C-STOREを覚えなかったモダリティのために。',
+
+        // ── Profiles, audit trail and emergency notification ──
+        '👥 People and permissions': '👥 スタッフと権限',
+        'Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone\'s chart.': '任意で有効にできる個人単位のサインイン。編集可能な 4 つの初期プロファイルが付属します。権限はブラウザ側で隠すのではなく各エンドポイントで検証され、患者識別情報のどれを見せるかはプロファイルごとに選べます。IT 担当者はアクセッション番号で検査を追跡でき、誰のカルテを読む必要もありません。',
+        '🔒 Audit trail': '🔒 監査証跡',
+        'Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.': '追記のみ・ハッシュ連鎖の記録です。誰が・何を・どの検査に対して・どこから行い、成功したかどうかを、拒否された操作も含めて残します。ファイル内で編集や削除を行うと連鎖が壊れ、ダッシュボードがどの記録でなぜ壊れたかを示します。',
+        'Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.': 'プロファイルと権限 — 個人単位のサインイン、機能単位のアクセス、そして患者識別情報を項目ごとに誰へ見せるかの制御。',
+        'An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.': '誰が何をしたかを名前で残す、追記のみ・ハッシュ連鎖の監査証跡。整合性チェックとエクスポート付き。',
+        'Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.': '署名付き Webhook とメールによる緊急通知。午前 3 時の障害を、ダッシュボードを見ていない人にも届けます。',
     },
     ru: {
         'Late shift.': 'Ночная смена.',
@@ -265,7 +292,7 @@ const I18N = {
         'Not for primary diagnosis.': 'Не для первичной диагностики.',
         'There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.': 'Здесь нет диагностического просмотрщика: ни оконного преобразования, ни измерений, ни конвейера отрисовки. Описывайте исследования на уже имеющейся валидированной рабочей станции.',
         'Not an enterprise archive.': 'Это не корпоративный архив.',
-        'No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.': 'Нет отказоустойчивости, нет шифрования на диске, нет учётных записей, ролей и пользовательского аудита — журнал пишет, что произошло, но никогда — кто это сделал.',
+        'No high availability, no clustering, no retention policies, and no encryption at rest — put it on an encrypted disk. It has its own profiles and audit trail, but no LDAP, no Active Directory and no single sign-on, so accounts live on the appliance rather than with your identity provider.': 'Нет отказоустойчивости, кластеризации, политик хранения и шифрования на диске — разместите его на зашифрованном диске. У него есть собственные профили и собственный журнал аудита, но нет ни LDAP, ни Active Directory, ни единого входа, поэтому учётные записи живут на самом устройстве, а не у вашего поставщика удостоверений.',
         'Not a replacement for your PACS or your RIS.': 'Он не заменяет ни PACS, ни RIS.',
         'It is the gateway between them, and the thing that keeps a department working through an outage until they come back.': 'Это шлюз между ними и то, что позволяет отделению работать во время аварии, пока они не вернутся.',
         "If a patient's care depends on it, the responsibility for that is yours, not this software's.": 'Если от этого зависит помощь пациенту, ответственность за это на вас, а не на программе.',
@@ -296,6 +323,15 @@ const I18N = {
         'Docker image, compose file and a hardened systemd unit, for running it on a server instead of a desktop.': 'Образ Docker, файл compose и усиленный systemd-юнит — чтобы запускать на сервере, а не на настольной машине.',
         'Emergency RIS, Modality Worklist and automatic failover, for the hours your primary PACS is unreachable.': 'Аварийная РИС, Modality Worklist и автоматическое переключение — на те часы, когда основной PACS недоступен.',
         'Virtual print receiver, for modalities that can only print to film and never learned to C-STORE.': 'Виртуальный приёмник печати — для модальностей, которые умеют только печатать на плёнку и так и не научились C-STORE.',
+
+        // ── Profiles, audit trail and emergency notification ──
+        '👥 People and permissions': '👥 Люди и права',
+        'Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone\'s chart.': 'Необязательный вход для каждого человека с четырьмя редактируемыми заготовками. Права проверяются на каждом эндпоинте, а не прячутся в браузере, и вы для каждого профиля выбираете, какие идентификаторы пациента ему показывать, — так ИТ отследит исследование по номеру регистрации, не читая ничью карту.',
+        '🔒 Audit trail': '🔒 Журнал аудита',
+        'Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.': 'Записи только на дополнение, связанные хешами: кто, что, с каким исследованием, откуда и получилось ли, включая отказы. Любая правка или удаление внутри файла рвёт цепочку, а панель говорит, на какой записи и почему.',
+        'Profiles and permissions — per-person sign-in, per-capability access, and per-field control over which patient identifiers each person is shown.': 'Профили и права — вход для каждого человека, доступ по возможностям и пофайловый контроль того, какие идентификаторы пациента кому показывать.',
+        'An append-only, hash-chained audit trail that names who did what, with an integrity check and an export.': 'Журнал аудита только на дополнение, связанный хешами, который называет, кто что сделал, с проверкой целостности и экспортом.',
+        'Emergency notification by signed webhook and e-mail, so an outage at 03:00 reaches someone who is not watching a dashboard.': 'Аварийное уведомление подписанным webhook и по почте, чтобы сбой в 03:00 дошёл до того, кто не смотрит в панель.',
     },
 };
 
