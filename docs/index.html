@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Carino PACS</title>
-  <meta name="description" content="A deliberately simple, free tool that sits in your tray and receives DICOM medical images or auto-forwards a folder to other systems. Windows, macOS and Linux. Not an enterprise PACS." />
+  <meta name="description" content="A self-hosted DICOM gateway and continuity appliance: receives, routes, forwards and de-identifies studies, answers Query/Retrieve and DICOMweb, and serves an emergency worklist when the PACS is down. Not a medical device, not for primary diagnosis." />
   <link rel="icon" href="favicon.webp" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -18,11 +18,12 @@
   <header class="hero">
     <div class="wrap">
       <div class="badge" data-i18n>Your PACS systems are down? Urgent patients cannot wait.</div>
-      <h1><span data-i18n>Send &amp; receive medical images,</span><br><span class="gold" data-i18n>without the headache.</span></h1>
+      <h1><span data-i18n>Keep the images moving,</span><br><span class="gold" data-i18n>even when a system is down.</span></h1>
       <p class="lede">
-        <strong>Carino PACS</strong> quietly receives <abbr title="the standard format for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
-        images and auto-forwards them where you need them. It does two things well —
-        it's <em>not</em> an enterprise PACS, and that's the point. Download and go.
+        <strong>Carino PACS</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
+        gateway and continuity appliance. It receives studies, routes and forwards them,
+        answers <em>Query/Retrieve</em> and <em>DICOMweb</em>, and can serve the worklist
+        itself while your PACS is unreachable. One config file, one process, no cloud.
       </p>
 
       <div class="downloads" id="downloads">
@@ -34,6 +35,7 @@
           <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.zip</span></a>
       </div>
       <p class="version" id="version">Checking for the latest version…</p>
+      <p class="dl-note" data-i18n>The desktop app is one way in, not the only one — on a server, run it in Docker or as a systemd service.</p>
       <details class="firstrun">
         <summary data-i18n>First launch shows a security warning? Here's how to open it</summary>
         <ul>
@@ -53,23 +55,114 @@
     </div>
   </header>
 
-  <!-- ── What + how, compact ──────────────────────────────────────── -->
+  <!-- ── Docker / server quick start ──────────────────────────────── -->
+  <section class="section alt">
+    <div class="wrap">
+      <h2 class="center" data-i18n>Running it on a server</h2>
+      <div class="quick">
+        <div class="quick-col">
+          <h3>🐳 Docker</h3>
+          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
+docker compose up -d
+docker compose logs -f pacs</code></pre>
+          <p id="q-docker">The first boot prints an access token. Open
+            <code>http://127.0.0.1:8042/</code> and paste it when the dashboard asks.
+            Everything — config, studies, logs, index — lives in <code>./data</code>.</p>
+        </div>
+        <div class="quick-col">
+          <h3 data-i18n>🐧 Linux service (systemd)</h3>
+          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+sudo packaging/systemd/install.sh</code></pre>
+          <p id="q-systemd">The installer sets everything up and then <em>stops</em>: starting a PACS
+            opens listeners that accept patient data, so that stays your decision. Edit
+            <code>/var/lib/carino-pacs/config.json</code>, then
+            <code>systemctl start carino-pacs</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── What it does ─────────────────────────────────────────────── -->
+  <section class="section">
+    <div class="wrap">
+      <h2 class="center" data-i18n>What it does</h2>
+      <p class="sub" data-i18n>Every service is off until you turn it on. Turn on only what the site actually needs.</p>
+      <div class="svc">
+        <div class="svc-item">
+          <b data-i18n>📥 Receive and file</b>
+          <p data-i18n>A Storage SCP that accepts C-STORE and C-ECHO and files each study to disk by patient, study and series. Compressed objects are stored exactly as they arrived — never transcoded.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>📤 Route and forward</b>
+          <p data-i18n>Forwards to as many nodes as you like, with rules: CT from the ER to the archive, ultrasound to the reading room. Each destination is retried until it accepts. A file that matches no rule goes everywhere rather than nowhere.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🕶️ De-identify on the way out</b>
+          <p data-i18n>A rule can de-identify the copy it sends (PS3.15 Basic profile) while the archived original stays untouched. It does not clean burned-in pixel text — a human still has to look at the images.</p>
+        </div>
+        <div class="svc-item">
+          <!-- Protocol identifiers are never translated (fleet convention). -->
+          <b>🔎 Query/Retrieve</b>
+          <p data-i18n>C-FIND, C-MOVE and C-GET over an indexed view of what is actually on disk, so a twelve-year-old ultrasound or CR reader can ask what you hold and pull it back.</p>
+        </div>
+        <div class="svc-item">
+          <b>🌐 DICOMweb</b>
+          <p data-i18n>QIDO-RS, WADO-RS and STOW-RS, so OHIF, Weasis and other modern viewers can read the archive over HTTP without negotiating a DICOM association.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>📋 Worklist and emergency RIS</b>
+          <p data-i18n>Takes HL7 orders over MLLP or hand-keyed ones, and serves them to modalities as a Modality Worklist. If your primary PACS stops answering, it can take over, hold what arrives, and forward it once the primary is back.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🖨️ Virtual print</b>
+          <p data-i18n>Captures print-only modalities as PDF, so a machine whose only output is film still produces something you can file.</p>
+        </div>
+        <div class="svc-item">
+          <b data-i18n>🔑 Token authentication</b>
+          <p data-i18n>The dashboard and the DICOMweb API take a single shared token. Bind them to anything other than localhost without one and the server refuses to start — the refusal is the feature.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── What it is NOT — stated plainly, not in fine print ───────── -->
+  <section class="section alt">
+    <div class="wrap">
+      <div class="notbox">
+        <h2 data-i18n>What it is not</h2>
+        <ul>
+          <li><b data-i18n>Not a medical device.</b> <span data-i18n>It is not certified, cleared or registered anywhere, and nothing in it has been validated for clinical use by anyone. Whoever deploys it owns that validation.</span></li>
+          <li><b data-i18n>Not for primary diagnosis.</b> <span data-i18n>There is no diagnostic viewer here: no windowing, no measurements, no rendering pipeline. Read studies on the validated workstation you already have.</span></li>
+          <li><b data-i18n>Not an enterprise archive.</b> <span data-i18n>No high availability, no encryption at rest, no user accounts, no roles, and no per-user audit trail — the log records what happened, never who did it.</span></li>
+          <li><b data-i18n>Not a replacement for your PACS or your RIS.</b> <span data-i18n>It is the gateway between them, and the thing that keeps a department working through an outage until they come back.</span></li>
+        </ul>
+        <p class="notbox-foot" data-i18n>If a patient's care depends on it, the responsibility for that is yours, not this software's.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Steps + documentation ────────────────────────────────────── -->
   <section class="section">
     <div class="wrap grid2">
       <div>
-        <h2 data-i18n>Two jobs. That's it.</h2>
-        <ul class="plain">
-          <li><b data-i18n>📥 Receives</b> <span data-i18n>— machines and scanners send images to your computer; it files them into tidy folders by patient and study.</span></li>
-          <li><b data-i18n>📤 Forwards</b> <span data-i18n>— watches a folder and automatically sends new images on to the systems you pick, retrying until each one has it.</span></li>
-        </ul>
-      </div>
-      <div>
         <h2 data-i18n>Up and running in 3 steps</h2>
         <ol class="steps">
-          <li><span class="n">1</span> <span data-i18n>Open it — it tucks into your system tray and keeps running.</span></li>
-          <li><span class="n">2</span> <span data-i18n>Click the tray icon — a simple dashboard opens.</span></li>
-          <li><span class="n">3</span> <span data-i18n>Pick a folder, add where to send. Done.</span></li>
+          <li><span class="n">1</span> <span data-i18n>Start it — desktop app in the tray, or a container/service on a server.</span></li>
+          <li><span class="n">2</span> <span data-i18n>Open the dashboard and pick which services this machine should run.</span></li>
+          <li><span class="n">3</span> <span data-i18n>Add your destinations, point the modalities at it, send a C-ECHO to confirm.</span></li>
         </ol>
+      </div>
+      <div>
+        <h2 data-i18n>Documentation</h2>
+        <p class="sub left" data-i18n>Full manuals: getting started, the security model and why the token rule exists, what each service does and when to turn it on.</p>
+        <div class="doclinks">
+          <a class="btn ghost" href="manual/" data-i18n>Manual (English)</a>
+          <a class="btn ghost" href="manual/es/" lang="es">Manual (Español)</a>
+          <a class="btn ghost" href="manual/pt-BR/" lang="pt-BR">Manual (Português&nbsp;BR)</a>
+        </div>
       </div>
     </div>
   </section>
@@ -80,23 +173,34 @@
       <details class="techbox">
         <summary><b data-i18n>For technical users</b> <span data-i18n>— DICOM details, CLI &amp; source</span></summary>
         <div class="tech-body">
-          <p id="tech-intro">A store-only PACS built on <code>pynetdicom</code>/<code>pydicom</code>; the
-            desktop app is an Electron tray shell around the same engine.</p>
+          <p id="tech-intro">Built on <code>pynetdicom</code>/<code>pydicom</code> with a Flask
+            dashboard; the desktop app is an Electron tray shell around the same engine.</p>
           <ul class="tech-list">
             <li id="tl-scp"><b>Storage SCP</b> — C-STORE + C-ECHO, files by Patient/Study/Series, all
-              transfer syntaxes (compressed stored as-is).</li>
-            <li id="tl-scu"><b>Storage SCU</b> — folder-watch auto-forward to N nodes, per-destination
-              retry, keep/move/delete on success.</li>
-            <li id="tl-tls"><b>DICOM-TLS</b> both sides (optional), incl. mutual TLS.</li>
-            <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|echo</code>), or tray app.
-              DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
+              transfer syntaxes (compressed stored as-is), <code>allowed_aets</code> filtering.</li>
+            <li id="tl-scu"><b>Storage SCU</b> — folder-watch auto-forward to N nodes, conditional
+              routing rules, per-destination retry, keep/move/delete on success.</li>
+            <li id="tl-qr"><b>Query/Retrieve SCP</b> — C-FIND / C-MOVE / C-GET, Patient and Study Root,
+              answered from a sqlite index of what is on disk; failed sub-operations are named, never dropped.</li>
+            <li id="tl-web"><b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS under <code>/dicom-web</code>,
+              exact-match CORS allow-list, no wildcard. Rendered/thumbnail/transcoding answer 406 rather than fake it.</li>
+            <li id="tl-mwl"><b>MWL + HL7</b> — Modality Worklist C-FIND SCP, HL7 <code>ORM^O01</code> over MLLP,
+              accession-number reconciliation. Image delivery is never gated on an order match.</li>
+            <li id="tl-deid"><b>De-identification</b> — PS3.15 Annex E Basic profile on forward, with the
+              retain options declared in (0012,0064). Pixels are not touched.</li>
+            <li id="tl-tls"><b>DICOM-TLS</b> both sides (optional), incl. mutual TLS. Bearer-token auth on
+              the HTTP API; non-loopback <code>web.host</code> with an empty token is a startup error.</li>
+            <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>),
+              tray app, Docker image, or systemd unit. DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
           </ul>
           <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
 cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
+./run.sh init                    # scaffold config.json + folders
 ./run.sh serve                   # dashboard → http://127.0.0.1:8042</code></pre>
           <div class="tech-links">
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">GitHub</a>
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/README.md" target="_blank" rel="noopener">README</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n>Security policy</a>
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/BUILDING.md" target="_blank" rel="noopener" data-i18n>Build &amp; release</a>
           </div>
         </div>
@@ -106,7 +210,7 @@ cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
 
   <footer class="foot" style="text-align: center;">
     <div>
-      <span class="disclaimer" style="color: rgb(185, 36, 36);" data-i18n>Deliberately simple, not an enterprise PACS. Not a medical device — use TLS and restrict access before touching real patient data.</span>
+      <span class="disclaimer" style="color: rgb(185, 36, 36);" data-i18n>Not a medical device and not for primary diagnosis. Use TLS, set a token and restrict access before it touches real patient data.</span>
     </div>
   </footer>
 

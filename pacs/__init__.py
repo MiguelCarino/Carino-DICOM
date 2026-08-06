@@ -14,7 +14,7 @@ Added since v1.0.0:
                          when it goes unreachable, holding/forwarding studies.
   * virtual print receiver — captures print-only modalities as PDF.
   * embedded DICOM editor — bundled dcmjs tag editor / de-identifier.
-  * disk-space guard, PDF/ODF accession attachment.
+  * disk-space guard, PDF/JPEG/PNG accession attachment.
 
 Everything is driven from a single JSON config and can be run head-less from
 the CLI or through the bundled local web dashboard.

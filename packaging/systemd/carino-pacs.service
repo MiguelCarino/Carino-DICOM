@@ -1,0 +1,241 @@
+[Unit]
+Description=Carino PACS — DICOM gateway and continuity appliance
+Documentation=https://github.com/MiguelCarino/Carino-PACS
+Documentation=file:/opt/carino-pacs/packaging/README.md
+
+# The DICOM listeners bind a concrete address from config.json (often a LAN IP,
+# not 0.0.0.0), and a bind to an address the kernel does not have yet fails.
+# network-online.target waits for an interface to actually be configured;
+# network.target only means the network stack has been brought up.
+Wants=network-online.target
+After=network-online.target
+
+StartLimitIntervalSec=0
+# Pairs with Restart=always in [Service]; see the reasoning there. It lives up
+# here because the start rate limiter is a property of the unit, not of the
+# service — systemd ignores this key in [Service] with a warning, which is easy
+# to miss and turns "never gives up" back into "gives up after 5 tries in 10s".
+
+[Service]
+Type=exec
+# Type=exec (not simple) so systemctl start fails loudly when the interpreter or
+# the unit's User= is wrong, instead of reporting success for a process that
+# never got off the ground.
+
+User=carino-pacs
+Group=carino-pacs
+# A dedicated system user. This service accepts unauthenticated DICOM
+# associations from the network by default (scp.allowed_aets empty = accept
+# anyone), so the blast radius of a parsing bug has to be one uid that owns
+# nothing but its own data directory.
+
+# /var/lib/carino-pacs, created and chowned to User=/Group= on every start.
+StateDirectory=carino-pacs
+StateDirectoryMode=0750
+
+WorkingDirectory=/opt/carino-pacs
+Environment=PYTHONPATH=/opt/carino-pacs
+# Carino PACS ships no pyproject.toml and is not pip-installable, so the package
+# is found by path. WorkingDirectory alone would do it, but PYTHONPATH survives
+# anyone adding a drop-in that changes the working directory.
+
+Environment=PYTHONUNBUFFERED=1
+# Without this, Python block-buffers stdout when it is a pipe (which is what the
+# journal is), and startup banners plus the WARNING lines for listeners that
+# failed to bind sit in a buffer instead of showing up in journalctl.
+
+Environment=PYTHONDONTWRITEBYTECODE=1
+# /opt/carino-pacs is read-only under ProtectSystem=strict below. Without this,
+# every start retries and fails to write __pycache__ next to each module.
+
+Environment=HOME=%S/carino-pacs
+# pacs.config falls back to os.path.expanduser("~") for its default base
+# directory. --config below means that fallback is never taken, but a system
+# user whose HOME does not exist makes expanduser return unusable paths, so it
+# is pointed somewhere real rather than left to chance.
+
+# The config file lives WITH the data, not in /etc, and that is deliberate:
+# pacs.config resolves every relative path in config.json ("./received",
+# "./logs", "./index.db") against the directory the config file itself is in.
+# A config in /etc would scatter patient data into /etc, and /etc has to stay
+# read-only for the sandboxing below to be worth anything.
+ExecStartPre=/opt/carino-pacs/venv/bin/python /opt/carino-pacs/packaging/systemd/preflight.py %S/carino-pacs/config.json
+ExecStart=/opt/carino-pacs/venv/bin/python -m pacs --config %S/carino-pacs/config.json serve
+
+# --config is a GLOBAL flag and must precede the subcommand; `serve --config …`
+# is an argparse error. No --host/--port here on purpose: those flags override
+# config.json without validation, and the preflight check above only guards what
+# is in the file. Bind address and port belong in config.json so that one file
+# is the single answer to "what is this box exposing".
+# Which listeners come up is likewise decided by the enabled flags in the config.
+
+# --- Stopping ------------------------------------------------------------
+# No KillSignal= here, and that is now the correct answer rather than an
+# oversight. This unit used to carry KillSignal=SIGINT because `pacs serve`
+# installed no SIGTERM handler: the default disposition killed the process where
+# it stood, PacsServer.shutdown() never ran, and the listeners were never closed.
+# pacs.__main__._install_sigterm() fixed that at the source — SIGTERM is turned
+# into the same KeyboardInterrupt that Ctrl+C raises, which unwinds through
+# app.run() into cmd_serve's `finally: server.shutdown()`.
+#
+# Re-measured against a real engine (receiver enabled, six runs each signal,
+# timing from the kill to process exit and reading the app's own log):
+#
+#     SIGTERM   0.51–0.78 s   exit 0   log ends "scp Receiver stopped"
+#     SIGINT    0.49–0.71 s   exit 0   log ends "scp Receiver stopped"
+#
+# Identical. So the default is used deliberately: `systemctl stop`, `docker
+# stop` and every other supervisor then take the ONE shutdown path, instead of
+# systemd being the only caller exercising a second one. Do not reintroduce
+# KillSignal= without re-running that measurement — if the handler ever
+# regresses, the fix belongs in _install_sigterm(), not in this file, because
+# nothing outside systemd would be covered by a fix made here.
+#
+# SuccessExitStatus= is likewise gone: the process exits 0, and systemd already
+# counts a stop by the signal it sent as clean.
+TimeoutStopSec=30
+# shutdown() joins the watcher (5s), RIS and emergency monitor (2s each) plus
+# the SCP servers. 30s leaves room for a slow store to finish rather than
+# SIGKILLing a half-written DICOM file into the storage directory.
+
+# --- Restart policy ------------------------------------------------------
+Restart=always
+RestartSec=15
+# StartLimitIntervalSec=0 is set in [Unit] above — it is rejected here.
+# A store-and-forward gateway that is down is not obviously down: modalities get
+# connection refused and staff assume the network. So it always comes back, and
+# the start rate limiter is disabled so it never gives up permanently and parks
+# itself in "failed" where only someone looking would notice.
+#
+# The cost is honest: a genuinely broken config.json retries every 15 seconds
+# forever, one preflight line per attempt in the journal. That is the trade we
+# want for an appliance — fix config.json and it recovers on its own, no
+# `systemctl start` needed. RestartPreventExitStatus= is deliberately NOT used
+# to break that loop: it was measured to have no effect on ExecStartPre
+# failures, which is exactly where a config error surfaces.
+
+# --- Logging -------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carino-pacs
+# No duplication: the app's own dated files under /var/lib/carino-pacs/logs are
+# the operational record (what was stored, from which AE, what was forwarded),
+# written by pacs.logbuf and never echoed to stdout by `serve`. What reaches the
+# journal is the other half — process lifecycle, the startup banner, WARNING
+# lines for listeners that failed to bind, tracebacks, and Werkzeug's HTTP
+# access log. Keep both; neither contains the other.
+
+# --- Sandboxing ----------------------------------------------------------
+# Every line below was checked against this application's actual dependency
+# stack (pydicom, pynetdicom, flask, pillow, psutil, sqlite3) under
+# systemd-run, not copied from a hardening checklist.
+
+NoNewPrivileges=yes
+# Nothing here ever needs to gain privileges. This also makes the seccomp
+# filters below unbypassable, since they can only be installed unprivileged when
+# no-new-privs is set.
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Empty: this service needs no capabilities at all. Confirmed rather than
+# assumed — every port it binds is above 1024 (dashboard 8042, storage 11112,
+# print 11113, worklist 11114, query/retrieve 11115, HL7 MLLP 2575), so
+# CAP_NET_BIND_SERVICE is NOT required. Verified with an empty bounding set:
+# binding 19112 and 19113 succeeded, binding 104 failed with EACCES.
+# If you want the well-known DICOM port 104, forward it on the host
+# (nftables/firewalld redirect 104 -> 11112). Do not add the capability, and do
+# not run this as root to get it.
+
+PrivateTmp=yes
+# pacs.server makes a tempfile.mkdtemp(prefix="carinoprint-") for every captured
+# print job. A private /tmp keeps rendered films — which are patient images —
+# out of the world-readable system /tmp, and takes them with it on stop.
+
+ProtectSystem=strict
+# The whole filesystem read-only, including /etc and /usr. The application only
+# ever writes inside its data directory; anything else is a bug or an intrusion.
+ProtectHome=yes
+# /home, /root and /run/user are empty to this service. It has no business
+# there, and it makes an accidental expanduser("~") fall over loudly rather than
+# quietly filling somebody's home directory with studies.
+
+ReadWritePaths=/var/lib/carino-pacs
+# StateDirectory= already implies this; it is spelled out because it is the one
+# writable hole in ProtectSystem=strict and should be visible when reading the
+# file. It has to cover the directory holding config.json, not just the data
+# subfolders: every Config.save() creates a new config.json.tmp.<pid>.<random>
+# beside it and renames it over the config, and the folder watcher keeps
+# .carinopacs_state.json there, so a read-only config directory breaks the
+# dashboard's Save with a 400.
+
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# AF_INET/AF_INET6 for DICOM, HL7 and HTTP; AF_UNIX because the standard library
+# uses it internally. AF_NETLINK is not decoration: the dashboard lists this
+# machine's IP addresses via psutil.net_if_addrs(), which goes through
+# getifaddrs(3), which opens a netlink socket. Measured — without AF_NETLINK it
+# fails with EAFNOSUPPORT (errno 97). The application catches that and carries
+# on, so the only symptom is the dashboard silently no longer telling you which
+# address to point the modalities at, which on a headless box is the one thing
+# you needed it for.
+
+MemoryDenyWriteExecute=yes
+# Safe here, and checked rather than assumed: CPython has no JIT, and importing
+# pydicom, pynetdicom, flask, pillow, psutil and sqlite3, loading pillow's
+# built-in font and writing a sqlite database all succeeded with this on. Remove
+# it if you ever add a dependency that generates code at runtime (cffi's ABI
+# mode, numba, a bundled V8); it is a hard failure, not a slow path.
+
+SystemCallArchitectures=native
+# Blocks the x86 32-bit syscall entry point, a classic way around a 64-bit
+# seccomp filter. Nothing here is a 32-bit binary.
+SystemCallFilter=@system-service
+# The standard service syscall set. Verified sufficient for the whole dependency
+# stack above. Violations kill the process rather than returning EPERM, which is
+# what you want in software that handles patient data: stop, restart, and leave
+# a SIGSYS in the journal, rather than continue in a state nobody designed.
+#
+# Do NOT add `SystemCallFilter=~@privileged @resources` on top, which is the
+# usual next step and what `systemd-analyze security` will nag about. Measured:
+# it kills the process on startup with SIGSYS (code=dumped, status=31/SYS)
+# before it gets past importing pydicom, pynetdicom, flask, pillow and psutil.
+# The two points of exposure score are not worth a service that cannot boot.
+
+PrivateDevices=yes
+# Only /dev/null, /dev/zero, /dev/random, /dev/urandom and friends. No block
+# devices, so no path from a DICOM parsing bug to a raw disk.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# A userspace network service has no reason to write /proc/sys, load a module,
+# read the kernel ring buffer, edit cgroups, set the system clock or rename the
+# host. Note the clock one matters for more than tidiness: DICOM study
+# timestamps and the dated log filenames come from this machine's clock, and a
+# service that cannot change it cannot forge them.
+
+ProtectProc=invisible
+ProcSubset=pid
+# Other users' processes are not visible in /proc, and the non-process parts of
+# /proc are hidden. Checked against psutil's interface enumeration, which does
+# not read /proc for that call, so nothing here depends on it.
+
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+# No namespace creation (no container escape primitives), no realtime scheduling
+# (a busy DICOM transfer must not be able to starve the rest of the box), no
+# creating setuid files in the data directory, no changing the execution domain,
+# and SysV/POSIX IPC objects are cleaned up when the service stops.
+
+UMask=0077
+# Received studies, print captures, HL7 orders and the log files are patient
+# data. Default-deny: files 0600, directories 0700, owned by carino-pacs. Widen
+# it only with a reason, and prefer adding a reader to the group over loosening
+# the mode.
+
+[Install]
+WantedBy=multi-user.target

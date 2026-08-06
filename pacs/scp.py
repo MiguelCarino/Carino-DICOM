@@ -18,6 +18,7 @@ from typing import Callable, Optional
 from pynetdicom import AE, evt, AllStoragePresentationContexts, ALL_TRANSFER_SYNTAXES
 from pynetdicom.sop_class import Verification
 
+from .dicomfs import save_dicom
 from .logbuf import LogBuffer
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
@@ -85,6 +86,7 @@ class StorageSCP:
         log: LogBuffer,
         allowed_aets: Optional[list[str]] = None,
         on_received: Optional[Callable[[object, str], None]] = None,
+        index=None,
         tls: bool = False,
         tls_cert: str = "",
         tls_key: str = "",
@@ -100,6 +102,10 @@ class StorageSCP:
         self.log = log
         self.allowed_aets = [a for a in (allowed_aets or []) if str(a).strip()]
         self.on_received = on_received
+        # Optional InstanceIndex. It is a cache in front of the files, never the
+        # record itself, so it is handed the instance AFTER the write and can
+        # never be a reason a C-STORE fails.
+        self.index = index
         self.tls = tls
         self.tls_cert = tls_cert
         self.tls_key = tls_key
@@ -164,7 +170,7 @@ class StorageSCP:
             ds.file_meta = event.file_meta
             path = dest_path(self.storage_dir, ds, self.organize)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            ds.save_as(path, write_like_original=False)
+            save_dicom(ds, path)
             # Read the tags OUTSIDE the lock and assign the finished dict inside
             # it: the critical section stays two attribute writes, and a reader
             # only ever sees a complete snapshot (we never mutate one in place).
@@ -179,6 +185,16 @@ class StorageSCP:
                 kind="store",
                 path=path,
             )
+            if self.index is not None:
+                # Hand the already-parsed dataset over rather than the path: the
+                # index flattens the header on this thread (microseconds) and
+                # queues the row for its own writer, so the association is never
+                # waiting on sqlite. A failure here costs a query result, not an
+                # image — the file is on disk and a rescan will find it.
+                try:
+                    self.index.enqueue_dataset(ds, path, "received")
+                except Exception as exc:
+                    self.log.warn(f"Could not index {os.path.basename(path)}: {exc}", kind="index")
             if self.on_received:
                 try:
                     self.on_received(ds, path)

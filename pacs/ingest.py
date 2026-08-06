@@ -26,6 +26,8 @@ import os
 import shutil
 import uuid
 
+from .dicomfs import save_dicom
+
 CONVERTIBLE_EXTS = {
     ".pdf": "pdf",
     ".jpg": "image",
@@ -204,7 +206,7 @@ def save_instance(ds, out_dir: str) -> str:
     """Write *ds* into *out_dir* as ``<SOPInstanceUID>.dcm`` and return the path."""
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"{ds.SOPInstanceUID}.dcm")
-    ds.save_as(out, write_like_original=False)
+    save_dicom(ds, out)
     return out
 
 

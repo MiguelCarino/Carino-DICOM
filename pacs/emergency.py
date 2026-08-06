@@ -67,7 +67,7 @@ class EmergencyController:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._wake = threading.Event()
-        self._health: dict[str, _Health] = {}
+        self._health: dict[tuple, _Health] = {}      # _key(dest) -> health
         self.state = OFF
         self.trigger_dest = ""
         self.since = 0.0
@@ -89,6 +89,34 @@ class EmergencyController:
 
     def _trigger_dests(self) -> list:
         return [d for d in self.server.cfg.enabled_destinations() if d.get("emergency_trigger")]
+
+    @staticmethod
+    def _key(d: dict) -> tuple:
+        """Health is tracked per NODE, not per destination name.
+
+        Keyed by name alone, two rows sharing a name shared one _Health record
+        and the last probe of the pass won: the healthy twin's success reset
+        consecutive_fails and wiped offline_since every single tick, so the dead
+        twin's outage never accumulated past offline_threshold_sec, `online`
+        never flipped, and the failover NEVER TRIGGERED. The primary is down,
+        the monitor says everything is fine, and the studies pile up unsent.
+
+        validate() refuses duplicate names, so this only happens in a
+        hand-edited config.json — which is exactly the case the send path was
+        already hardened for (one routed name fans out to every node carrying
+        it, and is marked sent only when all of them took it). The monitor now
+        matches that: every physical node gets its own record, its own failure
+        count and its own place in the status list. Everything is str()'d
+        because a hand-edited file is also where a port arrives as a dict, and
+        an unhashable key here would raise on every tick of the monitor loop.
+        """
+        return (str(d.get("name", "")), str(d.get("host", "")),
+                str(d.get("port", "")), str(d.get("aet", "")))
+
+    @staticmethod
+    def _addr(d: dict) -> str:
+        """host:port, for the operator who now has two rows called 'Primary'."""
+        return f"{d.get('host', '')}:{d.get('port', '')}"
 
     # ---- lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -136,15 +164,34 @@ class EmergencyController:
             t.join(timeout=2)
         self._thread = None
 
+    def _set_armed(self, value: bool) -> None:
+        """Persist emergency.armed, under the config lock.
+
+        The read of ``emergency`` and the save that follows it are one
+        read-modify-write and have to be one critical section, exactly as the
+        token endpoint's is. Without the lock a POST /api/config landing in the
+        gap assigns a freshly merged cfg.data, our write lands on the section
+        dict nobody holds any more, and the save writes the OTHER document —
+        so the operator is told failover is armed, config.json says it is not,
+        and start() (which re-reads ``armed``) declines to start the monitor.
+        Measured over real HTTP: alternating arm/disarm against concurrent
+        dashboard Saves lost calls in both directions.
+
+        Deliberately only the read-modify-write: start()/stop() stay outside,
+        because stop() joins the monitor thread and holding a config lock across
+        a join is how this would deadlock against a worker that reads config.
+        The lock is re-entrant, so save() re-taking it here is free."""
+        with self.server.cfg.mutate():
+            self._cfg["armed"] = value
+            self.server.cfg.save()
+
     def arm(self) -> dict:
-        self._cfg["armed"] = True
-        self.server.cfg.save()
+        self._set_armed(True)
         self.start()
         return self.status()
 
     def disarm(self) -> dict:
-        self._cfg["armed"] = False
-        self.server.cfg.save()
+        self._set_armed(False)
         self.stop()
         with self._lock:
             self._health.clear()
@@ -226,9 +273,13 @@ class EmergencyController:
         offline_names = []
         for d in dests:
             name = d.get("name", "")
-            h = self._health.setdefault(name, _Health())
+            h = self._health.setdefault(self._key(d), _Health())
             ok, msg = self.server._probe(d)
-            failing = (not ok) or (name in stuck)     # both signals
+            # Both signals. The passive one is per-NAME by construction — the
+            # sender only records a name as sent once every node carrying it
+            # accepted — so a name that is stuck marks each of its nodes failing,
+            # which is the honest reading: one of them is not taking images.
+            failing = (not ok) or (name in stuck)
             h.last_probe = now
             h.probe_ok = ok
             if failing:
@@ -239,7 +290,8 @@ class EmergencyController:
                     h.offline_since = now
                 if h.online and (now - h.offline_since) >= threshold:
                     h.online = False
-                    self.log.warn(f"Emergency: '{name}' is OFFLINE ({h.last_error})", kind="emergency")
+                    self.log.warn(f"Emergency: '{name}' ({self._addr(d)}) is OFFLINE "
+                                  f"({h.last_error})", kind="emergency")
             else:
                 h.consecutive_ok += 1
                 h.consecutive_fails = 0
@@ -247,7 +299,8 @@ class EmergencyController:
                 if not h.online and h.consecutive_ok >= need_ok:
                     h.online = True
                     h.offline_since = None
-                    self.log.info(f"Emergency: '{name}' is back ONLINE", kind="emergency")
+                    self.log.info(f"Emergency: '{name}' ({self._addr(d)}) is back ONLINE",
+                                  kind="emergency")
                 elif h.online:
                     h.offline_since = None
             if not h.online:
@@ -316,9 +369,13 @@ class EmergencyController:
             dests = []
             for d in self._trigger_dests():
                 name = d.get("name", "")
-                h = self._health.get(name)
+                h = self._health.get(self._key(d))
                 dests.append({
                     "name": name,
+                    # Two rows may legitimately carry the same name here (a
+                    # hand-edited config), so the address is what tells the
+                    # operator which of them is the one that is down.
+                    "address": self._addr(d),
                     "online": bool(h.online) if h else True,
                     "offline_since": self._iso(h.offline_since) if (h and h.offline_since) else "",
                     "last_error": h.last_error if h else "",

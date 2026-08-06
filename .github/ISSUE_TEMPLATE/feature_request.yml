@@ -1,0 +1,116 @@
+name: Feature request
+description: Suggest something the project should do that it does not do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Good feature requests here usually start from a situation in a
+        department rather than from a technical design. Tell the story first —
+        what you were trying to get done, and what got in the way — and the
+        right implementation is often not the one either of us guessed.
+
+        Please read the scope section of
+        [CONTRIBUTING.md](https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md)
+        first. This is a
+        gateway and continuity appliance, not an enterprise PACS, and requests
+        that move it toward being one are the ones most likely to be declined.
+        That is a decision about the project, not about you.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve
+      description: >
+        The clinical or operational situation, not the feature. Who is standing
+        in front of the machine, what are they trying to do, and what stops
+        them?
+      placeholder: |
+        Our ultrasound room prints reports rather than storing them, and the
+        techs have to walk the film to the reading room because the captured PDF
+        has no patient identity attached until someone approves it by hand.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today instead
+      description: >
+        The workaround, however ugly — a manual step, a script, another tool, or
+        just living with it. This is often the most informative answer in the
+        form, because it shows what the feature actually has to beat.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: >
+        Describe the behaviour. If you have an idea of where it belongs — a
+        dashboard control, a config key, a CLI subcommand, a new listener — say
+        so, but do not feel obliged to design it.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Which part of the project
+      options:
+        - label: Receive — Storage SCP
+        - label: Auto-send — folder watcher, destinations, routing rules
+        - label: Print SCP — virtual film printer
+        - label: Modality Worklist
+        - label: Query/Retrieve
+        - label: DICOMweb — QIDO-RS / WADO-RS / STOW-RS
+        - label: Emergency RIS — HL7 orders and reconciliation
+        - label: Emergency failover
+        - label: Web dashboard
+        - label: Desktop app / tray
+        - label: CLI or configuration
+        - label: Packaging and installers
+        - label: Translations (es, pt-BR, ja, ru)
+        - label: Documentation
+        - label: Not sure
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      description: >
+        The rule that outranks everything in this codebase is that an image
+        which is silently not delivered is worse than a crash. Features that add
+        a path where a study can be dropped, held back, or quietly skipped need
+        a very good reason.
+      options:
+        - label: >
+            As far as I can tell, this does not introduce a way for a study to be
+            silently not delivered — or if it does, I have said so below and
+            explained why it is worth it.
+          required: true
+
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you be able to work on it
+      description: >
+        No wrong answer, and "no" does not make the request less welcome. It
+        only changes how the maintainer plans it.
+      options:
+        - "No — reporting it so it is on record"
+        - "Maybe, with guidance on where it goes"
+        - "Yes, I would like to send a pull request"
+        - "I can test it against real equipment, but not write it"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Equipment or software this has to interoperate with, the part of the
+        DICOM or HL7 standard involved, how other tools solve it, or a mock-up.
+        No patient data, please — including in screenshots.

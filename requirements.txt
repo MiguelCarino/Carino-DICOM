@@ -1,5 +1,9 @@
-pynetdicom>=2.0,<3.0
-pydicom>=2.3,<3
+# pydicom 3 is required, not merely tolerated: the write path passes
+# enforce_file_format=, which 2.x does not accept. A clean install from the
+# previous `pydicom>=2.3,<3` pin resolved to 2.4.5 and failed 71 of the tests,
+# so that ceiling was never a compatibility guarantee — it was a broken install.
+pydicom>=3.0
+pynetdicom>=3.0
 flask>=2.2
 pillow>=9
 psutil>=5.9

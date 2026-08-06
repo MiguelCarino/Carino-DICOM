@@ -1,12 +1,20 @@
 """Local web dashboard: a thin REST layer over PacsServer plus the static UI.
 
-Intentionally bound to localhost by default — it exposes start/stop and config
-editing with no auth, so it is meant for the machine running the PACS, not the
-open network.
+Bound to localhost by default, where it runs unauthenticated: only a process on
+this machine can reach it, and the X-Carino header stops a page the operator has
+open from firing cross-site writes. Binding it anywhere else requires
+web.auth_token (enforced by config validation, applied by pacs.auth), because an
+open API here hands out patient studies, storage paths and /api/shutdown.
+
+Auth and the X-Carino header are two different controls and both stay on: the
+token says *who* may call, the header says *from where*. A stolen token still
+cannot be used by a foreign page, and a same-origin XSS still cannot write
+without the token.
 """
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 import threading
@@ -15,7 +23,8 @@ from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
 
-from . import APP_NAME, __version__
+from . import APP_NAME, __version__, auth
+from .config import auth_token_of, deid_secret_of, is_loopback_host, web_host_of
 from .server import PacsServer
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -26,22 +35,56 @@ if not os.path.isdir(WEB_DIR) and hasattr(sys, "_MEIPASS"):
 
 
 def create_app(server: PacsServer) -> Flask:
+    from . import dicomweb          # pulls pydicom in; keep it off the CLI's import path
+
     app = Flask(__name__, static_folder=None)
 
+    # ---- authentication ---------------------------------------------------
+    # No-op while web.auth_token is empty — which config validation only permits
+    # while web.host is loopback. The moment the dashboard is bound anywhere
+    # reachable, a token is mandatory and every /api and /dicom-web route needs
+    # it. Registered BEFORE the write guard on purpose: an unauthenticated
+    # request must answer 401-with-a-prompt, not 403-missing-header, or the
+    # dashboard shows the operator the wrong recovery path. The static UI is
+    # left open so the token prompt can actually render — justified in auth.py.
+    guard = auth.install(app, server.cfg, log=server.log)
+    # The guard is otherwise trapped in this closure, and it is the only object
+    # that knows whether a request arrived authenticated. Parking it on the app
+    # is Flask's own idiom for exactly that and costs nothing.
+    app.extensions["carino_auth"] = guard
+
     # ---- cross-site write protection --------------------------------------
-    # The API is localhost-only and unauthenticated, so the one realistic
-    # attack is a cross-site request fired from a web page the operator has
-    # open: multipart forms and no-cors POSTs never trigger a CORS preflight,
-    # which is how /api/shutdown or /api/studies/attach could be hit remotely.
-    # Requiring a custom header on every write forces a preflight that no
-    # foreign origin passes, with zero auth ceremony for the dashboard itself.
+    # The API is localhost-only and (by default) unauthenticated, so the one
+    # realistic attack is a cross-site request fired from a web page the
+    # operator has open: multipart forms and no-cors POSTs never trigger a CORS
+    # preflight, which is how /api/shutdown or /api/studies/attach could be hit
+    # remotely. Requiring a custom header on every write forces a preflight that
+    # no foreign origin passes, with zero auth ceremony for the dashboard.
+    #
+    # /dicom-web is exempt because a conforming DICOMweb client cannot send the
+    # header and STOW-RS would be dead on arrival. That does not reopen the hole:
+    # STOW only accepts multipart/related, which is not a CORS-safelisted
+    # content type, so a cross-site POST there already has to survive a preflight
+    # the blueprint answers only for the origins in dicomweb.cors_origins.
     @app.before_request
     def _require_write_header():
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
+        if request.path == "/dicom-web" or request.path.startswith("/dicom-web/"):
+            return None
         if request.headers.get("X-Carino") != "1":
             return jsonify(ok=False, message="missing X-Carino header"), 403
         return None
+
+    # ---- DICOMweb (QIDO-RS / WADO-RS / STOW-RS) ---------------------------
+    # Registered unconditionally and gated per-request on dicomweb.enabled
+    # inside the blueprint (it answers 503 while off). Gating the *registration*
+    # would mean an operator ticking the box in Settings has to restart the
+    # engine before a viewer can connect, and every other service in this app
+    # applies from config with no restart.
+    bp = dicomweb.create_blueprint(server)
+    app.register_blueprint(bp)          # the blueprint already carries url_prefix="/dicom-web"
+    server.dicomweb = bp.stats          # so status() can report the counters
 
     # ---- static UI --------------------------------------------------------
     @app.get("/")
@@ -60,31 +103,454 @@ def create_app(server: PacsServer) -> Flask:
     def editor_index():
         return send_from_directory(os.path.join(WEB_DIR, "editor"), "index.html")
 
+    # The catch-all matches slashes, so it is the one rule that can shadow an
+    # entire API tree. Werkzeug ranks a blueprint's static rules above a
+    # converter rule and routes /dicom-web/studies correctly today, but that is
+    # an implementation detail of the router — an unmatched or later-removed
+    # endpoint under a reserved prefix would silently fall through to
+    # send_from_directory and answer a modality with the dashboard's 404 page.
+    # Naming the prefixes here makes the separation the code's, not the router's.
+    _RESERVED = ("api", "dicom-web")
+
     @app.get("/<path:filename>")
     def static_files(filename):
+        if filename.split("/", 1)[0] in _RESERVED:
+            return jsonify(ok=False, message="no such endpoint"), 404
         return send_from_directory(WEB_DIR, filename)
 
     # ---- API --------------------------------------------------------------
     @app.get("/api/status")
     def api_status():
-        return jsonify(app=APP_NAME, version=__version__, **server.status())
+        """Deliberately NOT in auth.PUBLIC_PATHS. This payload carries the last
+        received patient's name and ID, the last order's accession, every
+        storage path, every destination's host/port/AE and the config file
+        location — it is the single most disclosive endpoint in the app. The
+        dashboard shell renders anonymously, but every tile stays empty until
+        the operator logs in; app.js must call GET /api/auth first and prompt."""
+        body = server.status()
+        body["auth"] = guard.status(headers=request.headers, cookies=request.cookies)
+        return jsonify(app=APP_NAME, version=__version__, **body)
+
+    # ---- no secret is ever part of a config payload ------------------------
+    # web.auth_token is the permanent shared secret for this whole API. It used
+    # to be readable from GET /api/config, which meant a 12-hour session cookie
+    # could upgrade itself into the secret — inverting the entire reason the
+    # cookie exists (the token stays out of the browser, so an XSS or a rogue
+    # extension steals at most a session that dies with the process).
+    #
+    # So the token leaves the server exactly once, in the response to the call
+    # that MINTS it, to a caller that proved it already holds the current one.
+    # Everywhere else it is a boolean.
+    #
+    # deid.secret is the other one, and it went out verbatim to the same cookie
+    # holder for the same reason nobody looked. It is the HMAC site key behind
+    # every pseudonymous UID and every date shift: holding it turns the exported
+    # "ANON-..." set back into a lookup table — confirm a PatientID, re-link a
+    # study across exports, recover the true dates. That makes it at least as
+    # sensitive as the dashboard token (the token gets you this box; the key
+    # gets you the archives that already left it), so it is redacted the same
+    # way and set through the same proof-of-secret ceremony.
+    #
+    # Nothing else in the config is secret-shaped. Audited, and left verbatim on
+    # purpose: scp/scu/print/mwl/qr tls_cert/tls_key/tls_ca are filesystem PATHS
+    # (never contents — the dashboard has to show them so a typo is fixable, and
+    # /api/status already reports every storage path); destinations carry only
+    # name/host/port/aet/flags, with no credential field anywhere in the sender;
+    # qr.move_destinations is host/port/aet; ris.allowed_hosts and *.allowed_aets
+    # are access lists, not keys.
+    def _redacted(data: dict) -> dict:
+        out = copy.deepcopy(data)
+        web = out.get("web")
+        if isinstance(web, dict):
+            web.pop("auth_token", None)
+            # The dashboard still has to render "a token is set" / "none yet",
+            # and this is the whole of what it needs for that.
+            web["auth_token_set"] = bool(auth_token_of(server.cfg.web))
+        deid = out.get("deid")
+        if isinstance(deid, dict):
+            deid.pop("secret", None)
+            deid["secret_set"] = bool(deid_secret_of(server.cfg.deid))
+        return out
+
+    def _holds_the_token() -> bool:
+        """Is this request carrying the token ITSELF, not just a session?
+
+        A session cookie authenticates a browser; it must not be enough to read
+        or replace the secret that issued it. When no token is configured at all
+        there is nothing to prove — that is how the first one gets set.
+        """
+        if not guard.required:
+            return True
+        presented = auth.token_from_headers(request.headers)
+        return bool(presented) and guard.verify_token(presented)
+
+    # ---- optimistic concurrency -------------------------------------------
+    # A Save posts a WHOLE document assembled from a page-load snapshot, so two
+    # dashboards open on different sections do not merge: both get ok:true and
+    # the later one reverts the earlier, silently. On this API that can mean a
+    # destination, a routing rule or scp.enabled quietly going back — a study
+    # stops being forwarded and nothing anywhere says why.
+    #
+    # cfg.version() fingerprints the stored document. GET publishes it as an
+    # ETag; a POST carrying it back as If-Match is told (409) when it no longer
+    # matches. It is OPTIONAL on purpose: the shipped dashboard does not send it
+    # yet, and a Save that started failing on something the client does not send
+    # would be a worse bug than the one being fixed. No If-Match = exactly the
+    # old behaviour.
+    #
+    # A HEADER rather than a field in the document, for two reasons that pull
+    # the same way. More than one client here posts back the body GET handed it
+    # verbatim (pacs/web/tests' stuck-panel and dashboard-auth suites both do),
+    # so a version living in that body would have turned those round-trips into
+    # conflicts the day it shipped. And the alternative — accepting the field
+    # and not checking it, to keep them working — is worse than the bug: a
+    # client that believes its Save is guarded while nothing is guarding it.
+    # A header is opt-in, explicit, and cannot be sent by accident.
+    #
+    # For app.js to opt in: keep `res.headers.get("ETag")` from the GET in
+    # loadConfig(), send it as `If-Match` on the POST in saveConfig(), and treat
+    # 409 as "reload and reapply" — never as a retry, which would re-apply the
+    # stale document the check just refused. An ETag does not survive an engine
+    # restart (cfg.version() keys the two secrets per process, so covering them
+    # cannot leak them — see _VERSION_KEY in config.py), so that 409 has to be a
+    # reload path a tab can take at any moment, not an error dialog.
+    _VERSION_FIELD = "config_version"
+    # Keeps two whole applies from interleaving. It is NOT what makes the
+    # check-and-apply atomic any more — the config lock is, because the version
+    # check now happens inside the same critical section as the merge and the
+    # write (see _merge below), which is the only place it can be safe from a
+    # token rotation rather than merely safe from another Save. What this still
+    # buys is the bounce: apply_config stops and restarts services outside the
+    # config lock, and two of those running through each other is a receiver
+    # started from one config and stopped by the other. Nothing else takes this
+    # lock, and nothing takes it while holding the config lock, so the two
+    # cannot deadlock against each other.
+    _save_lock = threading.Lock()
+
+    class _Refused(Exception):
+        """A refusal decided INSIDE the config lock, carried out to the client.
+
+        The token check, the site-key check and the If-Match check all need the
+        stored document, and the whole point of this round is that they must
+        read it under the lock that the apply itself holds. They therefore run
+        inside _merge, where returning a Flask response is not possible — so
+        they raise this and api_set_config turns it into the response. Raised
+        before apply_config has touched anything, so nothing is left half-applied.
+        """
+
+        def __init__(self, status: int, body: dict):
+            super().__init__(body.get("error", ""))
+            self.status = status
+            self.body = body
+
+    def _tagged(resp):
+        """Stamp a config response with the fingerprint of what is now stored."""
+        resp.headers["ETag"] = f'"{server.cfg.version()}"'
+        return resp
 
     @app.get("/api/config")
     def api_get_config():
-        return jsonify(server.cfg.data)
+        # The body is untouched — every client that posts this document straight
+        # back must keep working, and the version rides in the ETag instead.
+        # Deliberately not made conditional: a 304 with no body here would leave
+        # the dashboard rendering an empty config.
+        return _tagged(jsonify(_redacted(server.cfg.data)))
 
     @app.post("/api/config")
     def api_set_config():
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(error="expected a JSON config object"), 400
-        try:
-            server.apply_config(data)
-        except ValueError as exc:          # invalid config
-            return jsonify(error=str(exc)), 400
-        except OSError as exc:             # e.g. TLS cert/key unreadable, port in use
-            return jsonify(error=f"could not apply config: {exc}"), 400
-        return jsonify(ok=True, config=server.cfg.data)
+        expected = request.headers.get("If-Match") or None
+        # Said out loud rather than ignored, exactly as a token posted here is:
+        # a caller that put the version in the document believes its Save is
+        # being checked, and silently not checking it is the false assurance
+        # this whole endpoint is meant to remove. GET never emits this key, so
+        # no existing client can trip it.
+        if _VERSION_FIELD in data:
+            return jsonify(error=f"'{_VERSION_FIELD}' is not a config field — send the version "
+                                 f"from the GET's ETag in an If-Match header instead, so a Save "
+                                 f"built on a stale copy is refused rather than applied."), 400
+        web = data.get("web")
+        if web is None:
+            web = {}
+            data["web"] = web
+        if not isinstance(web, dict):
+            return jsonify(error="'web' must be an object"), 400
+        web.pop("auth_token_set", None)          # a read-only mirror, not a config field
+        deid = data.get("deid")
+        if deid is None:
+            deid = {}
+            data["deid"] = deid
+        if not isinstance(deid, dict):
+            return jsonify(error="'deid' must be an object"), 400
+        deid.pop("secret_set", None)        # a read-only mirror, not a config field
+
+        # Everything that has to see the STORED document — the two secrets and
+        # the If-Match check — happens in here, and apply_config runs it inside
+        # the same cfg.mutate() that swaps and writes.
+        #
+        # It used to happen above, out in the open, and that was the bug. The
+        # stored token and site key were read outside any lock and re-asserted
+        # into a document applied some time later, so a rotation that landed in
+        # between was written straight back out of existence — while POST
+        # /api/auth/token had already answered 200 and told the operator the old
+        # token was dead. Measured by restoring that shape and running the
+        # rotation hammer in tests/test_web_auth.py against it: 15 and 16 of 40
+        # rotations reverted, over two runs. An operator who rotates because
+        # they believe the token is compromised, is told it worked, and is still
+        # running the old one is worse off than one who got an error.
+        #
+        # The If-Match check moved in for the same reason and is not merely
+        # tidiness: with the check outside, a rotation could land between the
+        # comparison and the write, and the version compared against would be
+        # one the config no longer had.
+        def _merge(stored: dict) -> dict:
+            if expected is not None:
+                # An If-Match carries the tag quoted, and may weak-mark it.
+                # Nobody is refused over punctuation. "*" is the RFC's "as long
+                # as something is there", which a config always is.
+                tag = expected.strip()
+                if tag.startswith("W/"):
+                    tag = tag[2:]
+                tag = tag.strip('"')
+                if tag != "*" and tag != server.cfg.version():
+                    # 409, not the 412 an If-Match usually earns: 412 reads as
+                    # "your header was wrong" and invites a blind retry, which
+                    # here would apply the very document just refused. This is a
+                    # conflict — the edits have to be rebuilt on top of someone
+                    # else's change, by someone who has seen it.
+                    raise _Refused(409, dict(
+                        ok=False, code="stale_config",
+                        error="this config changed since you loaded it — reload and reapply. "
+                              "Someone else saved in the meantime (another dashboard, the setup "
+                              "chooser, the token or site-key endpoint, or an edit to "
+                              "config.json), and applying this document would silently revert "
+                              "their change."))
+            # The stored token wins, always. An absent key is the normal case
+            # (the dashboard is posting back what GET gave it, which has no
+            # token in it) and it must mean "keep", never "clear" — a Save that
+            # silently blanked the token would drop the dashboard's only
+            # credential on a LAN-bound install and lock the operator out of
+            # their own PACS. Anything else is refused out loud rather than
+            # ignored: a caller trying to set a value here has the wrong
+            # endpoint, and should be told so.
+            token = auth_token_of(stored.get("web"))
+            incoming = web.get("auth_token")
+            if incoming is not None and not (isinstance(incoming, str)
+                                             and incoming.strip() == token):
+                raise _Refused(400, dict(
+                    error="web.auth_token cannot be set from here — it is redacted from "
+                          "GET /api/config so a Save has nothing to send back. "
+                          "Use POST /api/auth/token to rotate it."))
+            web["auth_token"] = token
+            # Same treatment for the de-identification site key, and the "keep"
+            # case is the one that bites: deid.secret is not in DEFAULTS, so a
+            # dashboard Save posting back a redacted GET would merge over a
+            # config with no secret in it and silently drop the key. Everything
+            # exported after that gets different pseudonyms and different date
+            # shifts — the old exports stop lining up with the new ones and
+            # nothing says why.
+            secret = deid_secret_of(stored.get("deid"))
+            offered = deid.get("secret")
+            if offered is not None and not (isinstance(offered, str)
+                                            and offered.strip() == secret):
+                raise _Refused(400, dict(
+                    error="deid.secret cannot be set from here — it is redacted from "
+                          "GET /api/config so a Save has nothing to send back, and "
+                          "changing it re-pseudonymises every future export. "
+                          "Use POST /api/deid/secret."))
+            if secret:
+                deid["secret"] = secret
+            else:
+                deid.pop("secret", None)    # never write an empty key into the file
+            return data
+
+        with _save_lock:
+            try:
+                server.apply_config(edit=_merge)
+            except _Refused as refusal:
+                # 409 carries the CURRENT fingerprint so the client's reload has
+                # something to compare against; the 400s are plain refusals.
+                resp = jsonify(**refusal.body)
+                return (_tagged(resp) if refusal.status == 409 else resp), refusal.status
+            except ValueError as exc:          # invalid config
+                return jsonify(error=str(exc)), 400
+            except OSError as exc:             # e.g. TLS cert/key unreadable, port in use
+                return jsonify(error=f"could not apply config: {exc}"), 400
+            # The new fingerprint rides out on the response, so a client that
+            # sent one can keep saving without a re-GET between every Save.
+            return _tagged(jsonify(ok=True, config=_redacted(server.cfg.data)))
+
+    @app.post("/api/auth/token")
+    def api_auth_token():
+        """Rotate, set or clear web.auth_token — the only path that touches it.
+
+        Body: {"action": "rotate"}                 mint a fresh 256-bit token
+              {"action": "set", "token": "..."}    adopt one the operator chose
+              {"action": "clear"}                  remove it (loopback host only)
+
+        Requires the CURRENT token in an Authorization: Bearer / X-Carino-Token
+        header, not the session cookie: replacing a secret has to be proof of
+        holding it. Rotating changes the fingerprint every session was signed
+        with, so every logged-in browser (including the caller's) is signed out
+        the moment this returns — that is the point of a rotation, and the
+        dashboard should say so before it fires.
+        """
+        if not _holds_the_token():
+            return jsonify(ok=False, error="send the current token in an Authorization: Bearer "
+                                           "or X-Carino-Token header — a session cookie is not "
+                                           "enough to change the token it was issued from."), 403
+        d = request.get_json(silent=True) or {}
+        action = str(d.get("action") or "").strip().lower()
+        minted = ""
+        if action == "rotate":
+            value = minted = auth.generate_token()
+        elif action == "set":
+            value = d.get("token")
+            if not isinstance(value, str) or not value.strip():
+                return jsonify(ok=False, error="'token' must be a non-empty string"), 400
+            value = value.strip()
+            # A token an operator invents is the weak link; 12 characters is the
+            # floor at which a network guess stops being trivial. Generated ones
+            # are 43.
+            if len(value) < 12:
+                return jsonify(ok=False, error="that token is too short to protect a network-"
+                                               "reachable API — use at least 12 characters, or "
+                                               "{\"action\":\"rotate\"} to get a generated one."), 400
+        elif action == "clear":
+            host = web_host_of(server.cfg.web)
+            if not is_loopback_host(host):
+                return jsonify(ok=False, error=f"web.host is '{host}', which is reachable from the "
+                                               "network — clearing the token would serve patient "
+                                               "data and /api/shutdown to anyone who can route "
+                                               "here. Set web.host back to 127.0.0.1 first."), 400
+            value = ""
+        else:
+            return jsonify(ok=False, error="action must be rotate|set|clear"), 400
+
+        # Everything from the read of the current document to the save runs under
+        # mutate(). Without it a POST /api/config landing in the gap swaps
+        # cfg.data out, our write lands on the document nobody holds any more,
+        # and the save that follows writes the OLD token back while this returns
+        # ok:true — the operator is told the previous token is dead and it is
+        # not. The lock is re-entrant, so save() re-taking it here is free.
+        with server.cfg.mutate():
+            candidate = copy.deepcopy(server.cfg.data)
+            candidate.setdefault("web", {})["auth_token"] = value
+            try:
+                server.cfg.would_accept(candidate)
+            except ValueError as exc:
+                return jsonify(ok=False, error=str(exc)), 400
+            previous = server.cfg.web.get("auth_token", "")
+            server.cfg.web["auth_token"] = value
+            try:
+                server.cfg.save()
+            except OSError as exc:
+                # Rolled back on purpose: a token enforced in memory but not on
+                # disk survives until the next restart and then reverts, which is
+                # the worst of both — the operator holds a token that stops
+                # working.
+                server.cfg.web["auth_token"] = previous
+                return jsonify(ok=False, error=f"could not save the token: {exc}"), 400
+        server.log.info("Dashboard token " + ("cleared" if not value else
+                                              ("rotated" if minted else "changed")),
+                        kind="auth")
+        body = {"ok": True, "auth_token_set": bool(value),
+                "message": ("Token cleared — the dashboard API is open to this machine again."
+                            if not value else
+                            "Token saved. Every logged-in browser is signed out; log in again "
+                            "with the new token.")}
+        if minted:
+            # Shown once, to the caller that asked for it. It is not in any other
+            # response, not in the log, and not in a URL.
+            body["token"] = minted
+        return jsonify(body)
+
+    @app.post("/api/deid/secret")
+    def api_deid_secret():
+        """Set or clear deid.secret — the only path that touches the site key.
+
+        Body: {"action": "set", "secret": "..."}   adopt a site key
+              {"action": "clear"}                  remove it
+
+        Requires the token itself, not the session cookie, exactly as the token
+        endpoint does: this key is the difference between a pseudonym and a
+        lookup table, and a cookie must not be enough to read it, replace it or
+        throw it away. There is deliberately no "rotate": a fresh key is not a
+        harmless refresh, it re-pseudonymises everything from here on and the
+        studies already exported stop lining up with the ones that follow. That
+        has to be a value the operator chose and wrote down, not a button.
+        """
+        if not _holds_the_token():
+            return jsonify(ok=False, error="send the current dashboard token in an Authorization: "
+                                           "Bearer or X-Carino-Token header — a session cookie is "
+                                           "not enough to change the de-identification site "
+                                           "key."), 403
+        d = request.get_json(silent=True) or {}
+        action = str(d.get("action") or "").strip().lower()
+        if action == "set":
+            value = d.get("secret")
+            if not isinstance(value, str) or not value.strip():
+                return jsonify(ok=False, error="'secret' must be a non-empty string"), 400
+            value = value.strip()
+            # Nobody guesses this over the network — it is attacked offline, by
+            # someone holding an export and a guess at a PatientID, who only has
+            # to re-derive the HMAC to confirm the patient is in the set. A short
+            # key makes that search trivial, so it gets the same floor as the
+            # token.
+            if len(value) < 12:
+                return jsonify(ok=False, error="that site key is too short — it is attacked offline "
+                                               "against a known Patient ID, so use at least 12 "
+                                               "characters. Generate one with: python3 -c "
+                                               "\"import secrets; print(secrets.token_urlsafe(32))\""), 400
+        elif action == "clear":
+            value = ""
+        else:
+            return jsonify(ok=False, error="action must be set|clear"), 400
+
+        # Under mutate() for the same reason the token endpoint is, and the cost
+        # of losing this one is higher: a Save landing in the gap discards the
+        # key while this answers ok:true, so the operator writes the new site key
+        # down, restarts, and every export from then on carries pseudonyms
+        # derived from the old one — two sets of exports that will not line up
+        # and nothing recording which key made which.
+        with server.cfg.mutate():
+            candidate = copy.deepcopy(server.cfg.data)
+            candidate.setdefault("deid", {})["secret"] = value
+            try:
+                server.cfg.would_accept(candidate)
+            except ValueError as exc:
+                return jsonify(ok=False, error=str(exc)), 400
+            previous = server.cfg.deid.get("secret", "")
+            if value:
+                server.cfg.deid["secret"] = value
+            else:
+                server.cfg.deid.pop("secret", None)
+            try:
+                server.cfg.save()
+            except OSError as exc:
+                # Rolled back for the same reason the token is: a key that is
+                # live in memory but not on disk pseudonymises today's exports
+                # one way and tomorrow's (after a restart) another, with nothing
+                # to point at.
+                if previous:
+                    server.cfg.deid["secret"] = previous
+                else:
+                    server.cfg.deid.pop("secret", None)
+                return jsonify(ok=False, error=f"could not save the site key: {exc}"), 400
+        # The key itself never reaches the log — only the fact that it moved.
+        server.log.info("De-identification site key " + ("cleared" if not value else
+                                                         ("changed" if previous else "set")),
+                        kind="deid")
+        return jsonify(ok=True, secret_set=bool(value),
+                       message=("Site key cleared — pseudonyms are now a pure function of the "
+                                "input, so anyone who can guess a Patient ID can confirm it is "
+                                "in your exported set."
+                                if not value else
+                                "Site key saved. Studies exported from now on carry different "
+                                "pseudonyms and date shifts than the ones exported before it "
+                                "changed; they will not line up."))
 
     @app.post("/api/setup")
     def api_setup():
@@ -173,6 +639,23 @@ def create_app(server: PacsServer) -> Flask:
         except OSError as exc:
             return jsonify(error=f"could not start worklist SCP: {exc}"), 400
         return jsonify(ok=True, mwl=server.status()["mwl"])
+
+    @app.post("/api/qr")
+    def api_qr():
+        action = (request.get_json(silent=True) or {}).get("action")
+        try:
+            if action == "start":
+                server.start_qr()
+            elif action == "stop":
+                server.stop_qr()
+            else:
+                return jsonify(error="action must be start|stop"), 400
+        # ValueError as well as OSError: Q/R answers exclusively out of the
+        # instance index and start_qr refuses to run without it. That is a
+        # message the operator has to see, not a 500.
+        except (OSError, ValueError) as exc:
+            return jsonify(error=f"could not {action} Query/Retrieve SCP: {exc}"), 400
+        return jsonify(ok=True, qr=server.status()["qr"])
 
     # ---- RIS orders (emergency RIS: intake + reconciliation) --------------
     @app.get("/api/ris/orders")
@@ -313,6 +796,30 @@ def create_app(server: PacsServer) -> Flask:
     # Access sends a CORS preflight expecting
     # `Access-Control-Allow-Private-Network: true`, so we answer OPTIONS and
     # echo that header.
+    #
+    # What is deliberately NOT here is Access-Control-Allow-Credentials. Two
+    # reasons, and they matter more once web.auth_token is set:
+    #   * the session cookie is SameSite=Strict, so a browser will not attach it
+    #     to a cross-site subresource request no matter what we allow. Sending
+    #     Allow-Credentials would be a promise we cannot keep;
+    #   * without it, a cross-origin editor can only read studies if it is
+    #     holding the token deliberately. With it, ANY page on the configured
+    #     editor origin — including one that has been XSS'd — reads the whole
+    #     archive on the operator's ambient session. Requiring an explicit
+    #     Authorization header is the weaker capability, so it is the right one.
+    # This is also why Allow-Headers may stay "*": the wildcard is honoured for
+    # non-credentialed requests only. Adding Allow-Credentials later would
+    # silently stop Authorization from being allowed and break the editor in a
+    # way that looks like a network fault. Note that ACAO is an exact origin and
+    # never "*" — a wildcard would let any page the operator visits enumerate
+    # and download their archive off localhost, token or no token, because a
+    # bearer header is not a credential the browser withholds.
+    #
+    # Consequence to hand the operator: with a token set, a CROSS-ORIGIN editor
+    # needs the token, and there is no safe way to give it one (a deep-link
+    # query string is exactly the URL-logging leak the design forbids). The
+    # answer is web.editor_url = "/editor/" — the bundled same-origin copy,
+    # where _editor_origin() returns None and no CORS is emitted at all.
     def _editor_origin():
         url = (server.cfg.web.get("editor_url") or "").strip()
         p = urlsplit(url)
@@ -340,6 +847,18 @@ def create_app(server: PacsServer) -> Flask:
             resp.headers["Vary"] = "Origin"
         return resp
 
+    _EDITOR_ROUTES = ("/api/studies/files", "/api/studies/file")
+
+    @app.after_request
+    def _cors_on_auth_failure(resp):
+        # The auth guard short-circuits in before_request, so its 401/429 never
+        # passes through _cors() on the way out. Without this a cross-origin
+        # editor sees an opaque network failure and cannot tell "log in" from
+        # "the PACS is down" — the two recoveries are nothing alike.
+        if resp.status_code in (401, 429) and request.path in _EDITOR_ROUTES:
+            _cors(resp)
+        return resp
+
     @app.route("/api/studies/files", methods=["GET", "OPTIONS"])
     def api_studies_files():
         if request.method == "OPTIONS":
@@ -363,6 +882,69 @@ def create_app(server: PacsServer) -> Flask:
             return _cors(jsonify(error="not found")), 404
         return _cors(send_file(fp, mimetype="application/dicom",
                                as_attachment=False, download_name=os.path.basename(fp)))
+
+    # ---- conditional routing ----------------------------------------------
+    @app.get("/api/routing")
+    def api_routing():
+        """The rule list plus the names a rule may name. Destination names are
+        the join key for routing, send state and the archive gate, so the editor
+        has to pick from the live enabled set rather than free-text them.
+
+        The field list is read off the router rather than restated here: a rule
+        naming a field the matcher does not know is skipped entirely, so a UI
+        working from a stale copy would build rules that silently never fire."""
+        from . import routing
+        r = server.cfg.routing
+        return jsonify(ok=True,
+                       enabled=bool(r.get("enabled")),
+                       rules=r.get("rules") or [],
+                       destinations=[d.get("name", "") for d in server.cfg.enabled_destinations()],
+                       fields=list(routing._MATCH_FIELDS))
+
+    @app.post("/api/routing/test")
+    def api_routing_test():
+        """Dry-run the rules and return the per-rule trace, so an operator can
+        see WHY a study went where it did before a modality proves it at 3am.
+
+        Two ways to describe the file: 'attributes' (or the match fields at the
+        top level) for a hypothetical study, or 'group' + 'path' to evaluate a
+        study that is actually on disk. Read-only — nothing is sent, and
+        explain() logs nothing, so this can be hammered from a form."""
+        from . import routing
+        d = request.get_json(silent=True) or {}
+        attrs = d.get("attributes")
+        if attrs is None:
+            attrs = {k: d[k] for k in routing._MATCH_FIELDS if k in d} or None
+        if attrs is not None:
+            if not isinstance(attrs, dict):
+                return jsonify(ok=False, message="'attributes' must be an object"), 400
+            # No log: an explain must never be able to flood the activity buffer.
+            r = routing.Router.from_config(server.cfg, None)
+            described = {str(k): str(v if v is not None else "") for k, v in attrs.items()}
+            return jsonify(ok=True, **r.explain(attrs=described))
+        path = d.get("path")
+        if not path:
+            return jsonify(ok=False, message="need 'attributes' or a study 'path'"), 400
+        res = server.explain_route(d.get("group", "received"), path)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    # ---- instance index (what Q/R and DICOMweb query) ---------------------
+    @app.get("/api/index")
+    def api_index():
+        """The same block /api/status carries, on its own, so a dashboard panel
+        can refresh it without pulling the whole disclosive status payload.
+        index_status() caches the COUNT(DISTINCT) figures itself — do not
+        substitute a raw index.stats() call here, it is not free at a million
+        instances and this route is pollable."""
+        return jsonify(ok=True, index=server.index_status())
+
+    @app.post("/api/index/rescan")
+    def api_index_rescan():
+        """Reconcile the index with what is on disk. The walk can take minutes
+        on a real archive, so the server runs it on its own thread and this
+        returns as soon as it is accepted; the outcome lands in the log."""
+        res = server.rescan_index()
+        return jsonify(res), (200 if res.get("ok") else 400)
 
     # ---- stuck sends (failed / backing-off forwards) ----------------------
     @app.get("/api/stuck")

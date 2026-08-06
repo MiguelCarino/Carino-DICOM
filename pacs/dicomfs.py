@@ -2,7 +2,26 @@
 
 from __future__ import annotations
 
+import inspect
 import os
+
+from pydicom.dataset import Dataset
+
+# How to ask pydicom for a complete Part 10 file (preamble + meta) on whichever
+# version is installed. pydicom 3 renamed write_like_original=False to
+# enforce_file_format=True and left the old spelling working but deprecated, so a
+# call site that hard-codes the old name is silently fine today and raises the day
+# pydicom drops it — taking the C-STORE write path with it. Resolved once, here.
+SAVE_KWARGS = (
+    {"enforce_file_format": True}
+    if "enforce_file_format" in inspect.signature(Dataset.save_as).parameters
+    else {"write_like_original": False}
+)
+
+
+def save_dicom(ds, path) -> None:
+    """Write *ds* as a complete Part 10 file, whatever pydicom version is installed."""
+    ds.save_as(path, **SAVE_KWARGS)
 
 
 def is_dicom(path: str) -> bool:

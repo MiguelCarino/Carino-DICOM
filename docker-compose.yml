@@ -1,0 +1,195 @@
+# Carino PACS — self-hosted DICOM gateway and continuity appliance.
+# AGPL-3.0-or-later. No telemetry: this software does not phone home, check for
+# updates or report crashes, and nothing in this file makes it start.
+#
+#   mkdir -p data && sudo chown -R $(id -u):$(id -g) data
+#   docker compose up -d
+#   docker compose logs -f pacs        # the access token is printed on first boot
+#
+# Then open http://127.0.0.1:8042/ and paste the token when the dashboard asks.
+#
+# This file is meant to be read. Every default here is the conservative one; the
+# comments say what to change and what it costs.
+
+services:
+  pacs:
+    build:
+      context: .
+      args:
+        # Baked into the image's `pacs` account. Keep in step with `user:`
+        # below — both read the same variables, so set them once in a .env file:
+        #   echo "PACS_UID=$(id -u)" >> .env
+        #   echo "PACS_GID=$(id -g)" >> .env
+        PUID: ${PACS_UID:-1000}
+        PGID: ${PACS_GID:-1000}
+    image: carino-pacs:local
+    container_name: carino-pacs
+    restart: unless-stopped
+
+    # ---- uid / gid ------------------------------------------------------
+    # The container never runs as root. It writes patient studies, logs and its
+    # own config into /data, so the host directory bound there must be writable
+    # by THIS uid. A ./data owned by root is the single most common way a first
+    # run fails — the symptom is `pacs init` dying with EACCES.
+    #
+    #   sudo chown -R ${PACS_UID:-1000}:${PACS_GID:-1000} ./data
+    #
+    # If your host account is not 1000, put PACS_UID / PACS_GID in .env and
+    # rebuild (`docker compose up -d --build`) so the image account matches too.
+    user: "${PACS_UID:-1000}:${PACS_GID:-1000}"
+
+    # Rootless Podman only: container uids are mapped into a separate host
+    # range, so ./data owned by your account still looks unwritable inside.
+    # Uncomment this line under podman-compose; leave it commented for Docker,
+    # which does not understand it.
+    # userns_mode: keep-id
+
+    # An init process reaps the short-lived children the dashboard forks. It is
+    # not what makes `docker stop` clean — the entrypoint installs a SIGTERM
+    # handler for that, because a forwarded SIGTERM with no handler still kills
+    # the process without stopping the DICOM listeners.
+    init: true
+    stop_grace_period: 30s
+
+    # ---- data -----------------------------------------------------------
+    # Everything lives under /data: config.json, received/ outgoing/ sent/
+    # pending/ logs/ and the sqlite index. This is patient data — back it up,
+    # and put it on encrypted storage.
+    #
+    # The `:z` suffix relabels the host directory for container access. On
+    # SELinux hosts — Fedora, RHEL, CentOS, Rocky, the usual choice for an
+    # appliance box — a bind mount without it is unwritable no matter who owns
+    # it, and the ownership looks perfectly correct while it fails. It is a
+    # no-op everywhere else, so it stays on by default. Use `:Z` instead if
+    # this directory is never shared with another container.
+    volumes:
+      - ./data:/data:z
+      # Supply the access token as a file instead of an environment variable
+      # (see PACS_AUTH_TOKEN_FILE below). Read-only, and never world-readable.
+      # - ./secrets/auth_token:/run/secrets/pacs_auth_token:ro
+
+    environment:
+      # Which listeners to switch on the FIRST time the container creates its
+      # config. After that the config file wins, so whatever you change in the
+      # dashboard sticks across restarts and this line stops mattering.
+      # Values: scp, scu, print, mwl, qr, ris, dicomweb. Empty = enable nothing
+      # and let the dashboard's setup chooser ask.
+      PACS_SERVICES: "scp"
+
+      # ---- access token ------------------------------------------------
+      # The dashboard API exposes patient identifiers and full control of the
+      # gateway, and has no login of its own. Inside a container it necessarily
+      # binds 0.0.0.0, so an empty token is a hard startup error by design.
+      #
+      # Leave both of these unset and the entrypoint generates a 256-bit token
+      # on first boot and prints it once in the logs. That is the default
+      # because it is the option that keeps the secret out of `docker inspect`
+      # entirely: it exists only in ./data/config.json, which you already own.
+      #
+      # To manage the token yourself, pick ONE of:
+      #
+      #   PACS_AUTH_TOKEN_FILE: /run/secrets/pacs_auth_token   # preferred
+      #   PACS_AUTH_TOKEN: "paste-a-long-random-string-here"   # see warning
+      #
+      # The plain variable is honest but leaky: it shows up in `docker inspect`,
+      # in `docker compose config`, in the environment of every process in the
+      # container, and in this file if you commit it. The _FILE form does not.
+      # Generate one with:
+      #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+      # Dashboard bind address inside the container. 0.0.0.0 on first boot,
+      # which is what makes it reachable from the host at all. Do not "harden"
+      # this to 127.0.0.1 — inside a network namespace that only means
+      # `docker exec`. The publish rules below are the real exposure control.
+      # PACS_WEB_HOST: "0.0.0.0"
+
+      TZ: ${TZ:-UTC}
+
+    # ---- published ports -------------------------------------------------
+    # Everything is published to the host's loopback by default, which means
+    # nothing here is reachable from your network until you decide it should
+    # be. This matters: a Storage SCP accepts studies from anyone by default
+    # (scp.allowed_aets is empty), so publishing 11112 on a host with a public
+    # IP puts an open DICOM archive on the internet.
+    #
+    # To let modalities reach it, set PACS_BIND in .env to the host's LAN
+    # address — not 0.0.0.0 unless the host really has no public interface:
+    #   echo "PACS_BIND=192.168.1.10" >> .env
+    #
+    # Then restrict who may talk to it in the dashboard: scp.allowed_aets,
+    # print.allowed_aets, mwl.allowed_aets, qr.allowed_aets, ris.allowed_hosts.
+    # An empty list means "accept anyone".
+    ports:
+      # Dashboard + DICOMweb (/dicom-web). Required — it is the only way to
+      # administer the container. Keep this one on loopback and reach it over
+      # SSH port-forwarding or a reverse proxy with TLS; the token is a bearer
+      # credential and plain HTTP hands it to anyone on the path.
+      - "127.0.0.1:8042:8042"
+
+      # Storage SCP — C-STORE / C-ECHO. The reason the product exists.
+      - "${PACS_BIND:-127.0.0.1}:11112:11112"
+
+      # ---- optional listeners ---------------------------------------------
+      # Uncomment the port AND add the service to PACS_SERVICES above (on a
+      # first run) or enable it in the dashboard's setup chooser (any time).
+      # A published port with the service disabled listens to nothing; an
+      # enabled service with no published port is reachable only from inside
+      # the container network.
+      #
+      # Virtual film printer — receives print jobs from modalities that can
+      # only "print", and files them as studies.
+      # - "${PACS_BIND:-127.0.0.1}:11113:11113"
+      #
+      # Modality Worklist SCP — serves orders to modalities (C-FIND).
+      # - "${PACS_BIND:-127.0.0.1}:11114:11114"
+      #
+      # Query/Retrieve SCP — C-FIND / C-MOVE / C-GET against the local archive.
+      # - "${PACS_BIND:-127.0.0.1}:11115:11115"
+      #
+      # Emergency RIS — HL7 v2 orders over MLLP. Plain-text patient data on the
+      # wire, so keep this on a segment you trust and set ris.allowed_hosts.
+      # - "${PACS_BIND:-127.0.0.1}:2575:2575"
+      #
+      # Classic DICOM port 104: publish it on the host, never remap it inside
+      # the container — the container's own ports stay above 1024 so it needs
+      # no privileges to bind them.
+      # - "${PACS_BIND:-127.0.0.1}:104:11112"
+
+    # ---- hardening --------------------------------------------------------
+    # Nothing in the app needs a capability: every listener is above 1024 and
+    # no code changes uid. Dropping the lot costs nothing.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # The application only ever writes to /data and /tmp (the printer stages
+    # captured film in a temp directory), so the rest of the filesystem can be
+    # read-only. Comment both lines out if you are debugging something that
+    # wants to write elsewhere.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+
+    # Health is "it is answering", not "the process exists": this asks the
+    # dashboard for /api/status and, when the Storage SCP is enabled, checks
+    # that its port is really listening. `pacs serve` deliberately keeps the
+    # dashboard up when a listener fails to bind — that is how you see the
+    # error — so a process-liveness check would hide a dead DICOM port.
+    #
+    # Repeated here rather than left to the image because Podman's default OCI
+    # image format has nowhere to store a HEALTHCHECK and silently drops it.
+    # Raise start_period if the start-up index rescan on a large archive takes
+    # longer than a minute.
+    healthcheck:
+      test: ["CMD", "python", "/app/docker/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

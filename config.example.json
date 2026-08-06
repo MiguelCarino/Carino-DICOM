@@ -57,6 +57,57 @@
     "auto_close": true,
     "allowed_hosts": []
   },
+  "qr": {
+    "enabled": false,
+    "aet": "CARINOQR",
+    "bind": "0.0.0.0",
+    "port": 11115,
+    "allowed_aets": [],
+    "move_destinations": {
+      "WORKSTATION1": { "host": "127.0.0.1", "port": 104, "aet": "WORKSTATION1" }
+    },
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": ""
+  },
+  "dicomweb": {
+    "enabled": false,
+    "allow_stow": true,
+    "_comment": "cors_origins: browser origins allowed to call /dicom-web cross-site, matched exactly (scheme + host + optional port, no trailing slash or path, no pattern syntax), e.g. [\"https://viewer.example\"]. Empty means no CORS headers are sent at all, which is what a same-origin viewer and every non-browser client want, and nothing is ever reflected back to an origin that is not on the list. A literal \"*\" IS honoured, only because you typed it: from then on every origin is reflected and any page the operator visits can read the whole archive off this machine. Name the viewer instead.",
+    "cors_origins": []
+  },
+  "index": {
+    "enabled": true,
+    "path": "./index.db",
+    "rescan_on_start": true
+  },
+  "routing": {
+    "enabled": false,
+    "rules": [
+      {
+        "_comment": "Every match key is optional and case-insensitive glob; absent or \"\" matches anything. destinations are destination NAMES from the list below; an empty list falls through to the next rule. \"deidentify\": true needs a scrub that can actually be performed: deid.profile set to basic or strict, AND a de-identifier that can be built from the deid settings below. If either is missing these destinations are HELD rather than sent identified (see the deid section for the two causes and their two different remedies).",
+        "name": "CT from the ER to teaching archive, de-identified",
+        "match": {
+          "modality": "CT",
+          "calling_aet": "ER_*",
+          "station": "",
+          "patient_id": "",
+          "study_desc": ""
+        },
+        "destinations": ["Example PACS"],
+        "deidentify": true,
+        "stop": true
+      }
+    ]
+  },
+  "deid": {
+    "_comment": "profile: basic | strict | off. A rule's \"deidentify\" above chooses WHICH destinations get a scrubbed copy; this chooses whether scrubbing happens at all. A destination a rule asks to de-identify for is HELD — not sent to at all, rather than forwarded identified — whenever the scrub cannot be performed. Nothing is lost either way: the study stays in the outgoing folder (never archived, never deleted), every other destination on the same study still receives it, and the log raises an error naming what is withheld and why.",
+    "_comment_hold_causes": "TWO causes, reported apart as hold_cause because they need different fixes. (1) \"profile-off\": this profile is \"off\" while a rule still asks for a scrub — turn the profile on (basic or strict) and the next Auto-send pass releases them. (2) \"no-deidentifier\": the profile is ON but no de-identifier could be built from these settings — the failure is in the log on the send channel; fix it there. Turning the profile off does NOT release a no-deidentifier hold, it only changes which half is stopping the scrub. Taking \"deidentify\" off the rule releases either hold, but it releases the studies as IDENTIFIED copies, which is the one outcome the hold exists to prevent.",
+    "profile": "basic",
+    "keep_private": false,
+    "keep_dates": false,
+    "prefix": "ANON"
+  },
   "emergency": {
     "armed": false,
     "probe_interval_sec": 30,
@@ -80,7 +131,8 @@
   "web": {
     "host": "127.0.0.1",
     "port": 8042,
-    "editor_url": "/editor/"
+    "editor_url": "/editor/",
+    "auth_token": ""
   },
   "logs_dir": "./logs",
   "setup_completed": ""

@@ -6,6 +6,7 @@
     python -m pacs print      # virtual DICOM print receiver only, headless
     python -m pacs ris        # emergency-RIS HL7/MLLP order listener, headless
     python -m pacs mwl        # Modality Worklist SCP (serve orders), headless
+    python -m pacs qr         # Query/Retrieve SCP (C-FIND/C-MOVE/C-GET), headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
 """
@@ -20,7 +21,7 @@ import sys
 import time
 
 from . import APP_NAME, __version__
-from .config import Config, DEFAULT_CONFIG
+from .config import Config, ConfigError, DEFAULT_CONFIG, auth_token_of, is_loopback_host
 from .scu import Destination
 from .server import PacsServer
 
@@ -58,7 +59,15 @@ def cmd_init(args) -> int:
     else:
         example = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.example.json")
         if os.path.exists(example):
-            shutil.copy(example, cfg_path)
+            # copyfile, not copy: copy() brings the example's 0644 with it, and
+            # this file is about to hold web.auth_token. Config.save() creates
+            # at 0600 and a scaffolded config has to match, whether the token
+            # arrives now (--token) or from the dashboard later.
+            shutil.copyfile(example, cfg_path)
+            try:
+                os.chmod(cfg_path, 0o600)
+            except OSError:
+                pass        # Windows / exotic filesystem: best effort only
         else:
             Config(cfg_path).save()
         print(f"Wrote {cfg_path}")
@@ -69,6 +78,18 @@ def cmd_init(args) -> int:
         print(f"  ensured {d}")
     os.makedirs(cfg.logs_dir, exist_ok=True)
     print(f"  ensured {cfg.logs_dir}")
+    if args.token:
+        from .auth import generate_token
+        if auth_token_of(cfg.web):
+            print("  web.auth_token is already set — left alone. Clear it in the config "
+                  "to mint a new one (every logged-in browser is signed out when it changes).")
+        else:
+            cfg.web["auth_token"] = generate_token()
+            cfg.save()
+            # stdout only, once, at creation. The token is never written to the
+            # log buffer or the dated log files, and never appears in a URL.
+            print(f"  API token: {cfg.web['auth_token']}")
+            print("  Copy it now — it is shown here and nowhere else.")
     # A scaffolded config enables no service on purpose: the dashboard's setup
     # chooser is what enrolls them, so say so rather than let `serve` look dead.
     if not str(cfg.data.get("setup_completed", "")).strip():
@@ -80,7 +101,25 @@ def cmd_serve(args) -> int:
     from .web import create_app  # imported lazily so `receive`/`send` don't need Flask
 
     cfg = Config(args.config)
+    host = args.host or cfg.web.get("host", "127.0.0.1")
+    port = args.port or int(cfg.web.get("port", 8042))
+    # Checked BEFORE anything binds. config validation already refuses to SAVE a
+    # reachable host with no token, but --host bypasses it entirely — and this is
+    # the one mistake that publishes patient studies, storage paths and
+    # /api/shutdown to the whole network. Refuse to start, and say how to fix it.
+    if not is_loopback_host(host) and not auth_token_of(cfg.web):
+        print(f"Refusing to serve the dashboard on '{host}': it is reachable from the network "
+              f"and web.auth_token is empty.\n"
+              f"  Set a token:  python -m pacs -c {cfg.path} init --token\n"
+              f"  Or keep it on this machine only:  --host 127.0.0.1",
+              file=sys.stderr)
+        return 2
+
     server = PacsServer(cfg)
+    # Before the services: the receiver hands every stored instance to the index
+    # writer, and a cold boot answers its first query out of whatever the rescan
+    # has reached by then rather than out of an empty database.
+    server.start_index()
     # What runs is what the config enables — the dashboard's setup chooser is
     # what writes those flags, so a machine that has never been through it
     # starts nothing but the dashboard. Auto-start is best-effort: a failure
@@ -99,6 +138,7 @@ def cmd_serve(args) -> int:
         (args.print, server.start_printer, "print receiver", "print"),
         (args.ris, server.start_ris, "RIS listener", "ris"),
         (args.mwl, server.start_mwl, "worklist SCP", "mwl"),
+        (args.qr, server.start_qr, "Query/Retrieve SCP", "qr"),
     ):
         if not flag:
             continue
@@ -113,8 +153,6 @@ def cmd_serve(args) -> int:
     except Exception as exc:
         server.log.error(f"Could not start emergency monitor: {exc}", kind="emergency")
 
-    host = args.host or cfg.web.get("host", "127.0.0.1")
-    port = args.port or int(cfg.web.get("port", 8042))
     app = create_app(server)
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
     print(f"{APP_NAME} {__version__} dashboard → {url}")
@@ -135,6 +173,7 @@ def cmd_receive(args) -> int:
     if args.out:
         cfg.scp["storage_dir"] = args.out
     server = PacsServer(cfg)
+    server.start_index()      # headless receive still feeds the index
     server.start_receiver()
     _block_until_signal(server)
     return 0
@@ -183,6 +222,26 @@ def cmd_mwl(args) -> int:
         cfg.mwl["aet"] = args.aet
     server = PacsServer(cfg)
     server.start_mwl()
+    _block_until_signal(server)
+    return 0
+
+
+def cmd_qr(args) -> int:
+    cfg = Config(args.config)
+    if args.port:
+        cfg.qr["port"] = args.port
+    if args.aet:
+        cfg.qr["aet"] = args.aet
+    server = PacsServer(cfg)
+    # The index is the archive as far as Q/R is concerned: without the rescan a
+    # cold start would answer every C-FIND "no match" on a full disk.
+    server.start_index()
+    try:
+        server.start_qr()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        server.shutdown()
+        return 2
     _block_until_signal(server)
     return 0
 
@@ -237,6 +296,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="start the emergency-RIS HL7/MLLP listener for this run even if config has it off")
     s.add_argument("--mwl", action="store_true", dest="mwl",
                    help="start the Modality Worklist SCP for this run even if config has it off")
+    s.add_argument("--qr", action="store_true", dest="qr",
+                   help="start the Query/Retrieve SCP for this run even if config has it off")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")
@@ -263,6 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
     mw.add_argument("--aet", help="local (worklist) AE title")
     mw.set_defaults(func=cmd_mwl)
 
+    qp = sub.add_parser("qr", help="run the Query/Retrieve SCP (C-FIND/C-MOVE/C-GET) headless")
+    qp.add_argument("--port", type=int, help="listen port (default 11115)")
+    qp.add_argument("--aet", help="local (Q/R) AE title")
+    qp.set_defaults(func=cmd_qr)
+
     e = sub.add_parser("echo", help="C-ECHO connectivity test")
     e.add_argument("--name", help="destination name from config")
     e.add_argument("--host")
@@ -273,6 +339,10 @@ def build_parser() -> argparse.ArgumentParser:
     e.set_defaults(func=cmd_echo)
 
     i = sub.add_parser("init", help="scaffold config.json and its folders")
+    # store_true, not a value: a token typed on a command line lands in shell
+    # history, and one an operator invents is weaker than 256 bits of urandom.
+    i.add_argument("--token", action="store_true",
+                   help="generate web.auth_token (required to serve the dashboard off loopback)")
     i.set_defaults(func=cmd_init)
     return p
 
@@ -288,10 +358,57 @@ def _force_utf8_output() -> None:
             pass
 
 
+def _install_sigterm() -> None:
+    """Make SIGTERM unwind the way Ctrl+C does.
+
+    Without a disposition of its own, SIGTERM is the kernel's default: the
+    process dies where it stands, in ~0.02s, without ever reaching
+    PacsServer.shutdown(). The DICOM listeners are never stopped, associations
+    in flight are cut mid-transfer, and the index writer's backlog is dropped —
+    and SIGTERM is what `docker stop`, `systemctl stop` and every process
+    supervisor send. Only Ctrl+C stopped this engine cleanly.
+
+    Raising KeyboardInterrupt puts SIGTERM on the path the app already handles:
+    Werkzeug catches it inside serve_forever, app.run() returns, and cmd_serve's
+    `finally: server.shutdown()` runs. The headless commands install their own
+    flag-setting handler over this one in _block_until_signal, which is cleaner
+    still — this is the fallback for `serve` and for the startup window before
+    either loop is reached.
+    """
+    if not hasattr(signal, "SIGTERM"):
+        return
+
+    def _term(signum, frame):
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _term)
+    except ValueError:
+        pass        # not the main thread (embedded / test harness): nothing to install
+
+
 def main(argv=None) -> int:
     _force_utf8_output()
+    _install_sigterm()
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ConfigError as exc:
+        # EVERY subcommand builds a Config as its first act, and a file that
+        # will not load is an operator problem, not a bug: the message already
+        # names the file, what is wrong with it and how to get back. Printed
+        # alone because a six-frame traceback above it is what made operators
+        # read this as a crash and go looking for the wrong thing — the last
+        # line of a stack trace is where nobody looks. Only ConfigError is
+        # caught, and only here: an unexpected exception still gets its
+        # traceback, which is the one thing worse to hide than to show.
+        print(str(exc), file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        # A signal arriving outside Werkzeug's own handling (during startup, or
+        # in a command with no signal loop) still means "stop now, cleanly" — a
+        # traceback would make an ordinary `systemctl stop` look like a crash.
+        return 0
 
 
 if __name__ == "__main__":

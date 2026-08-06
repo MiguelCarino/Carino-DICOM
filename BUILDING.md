@@ -10,7 +10,7 @@ Three things, in order of commitment:
 
 ## 1. Run it
 
-Needs **Python 3.8+** (and, for the desktop app, **Node 18+**). Nothing is compiled.
+Needs **Python 3.10+** (and, for the desktop app, **Node 18+**). Nothing is compiled.
 
 ### The DICOM server (CLI / dashboard)
 
@@ -53,7 +53,7 @@ This produces an installer that **bundles Python** — the target machine needs
 nothing preinstalled. You build **on the OS you want the installer for** (you
 cannot build a Windows `.exe` on Linux — see [why](#why-one-os-at-a-time)).
 
-Prerequisites on the build machine: **Python 3.8+** and **Node 18+**.
+Prerequisites on the build machine: **Python 3.10+** and **Node 18+**.
 
 > ⚠️ **Freeze with the venv that has the project deps** (`pydicom`, `pynetdicom`,
 > `flask`). If you freeze with a bare Python, the app starts then crashes with

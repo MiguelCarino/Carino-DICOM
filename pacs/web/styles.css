@@ -382,6 +382,22 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   background: rgba(239, 68, 68, .07); padding: 12px 16px; text-align: center;
 }
 
+/* ── "this config would be refused" banner ──────────────────────
+   Same place and the same weight as the low-disk banner — both are facts about
+   the whole install, not about the panel that happens to be open — but PROSE,
+   not a headline: it carries the engine's validation sentence and a file path,
+   so it wraps at spaces, is left-aligned, and is bounded so a long message
+   cannot stretch the page. Amber rather than red: the PACS is running and
+   receiving; what is broken is that a Save will not go through and some part of
+   the configuration is not doing what the file says. */
+.cfg-warn {
+  font-size: .8rem; line-height: 1.5; color: var(--warn);
+  border: 1px solid var(--warn); border-radius: 10px;
+  background: var(--accent-faint); padding: 12px 16px;
+  max-width: 100%; word-break: normal; overflow-wrap: break-word; hyphens: none;
+}
+.cfg-warn[hidden] { display: none; }
+
 /* Amber badge variant for the ⚠ Stuck button */
 .btn.action .badge.warn { background: var(--warn); color: #050505; }
 
@@ -409,7 +425,16 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 /* ── Inline workspace (the selected tab renders here) ───────────── */
 /* The workspace takes all leftover viewport height; the active inline panel
    fills it and scrolls its own list, so the page body never scrolls. */
-#workspace { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* min-width: 0 for the same reason `minmax(0, 1fr)` replaces `1fr` in the .kv
+   tracks: a flex item defaults to `min-width: auto` and refuses to shrink below
+   its own min-content width. One nowrap line inside a panel — a stuck send's
+   .stuck-err, a history row's .hist-meta — was enough to widen the workspace
+   past the viewport at ~800px, and because body is `overflow: hidden` that
+   overflow does not scroll, it CLIPS: the .stuck-actions column, Retry now
+   included, left the screen with no way to reach it. The panels already know
+   how to be narrow (every one of those lines ellipsises); they were never
+   allowed to try. */
+#workspace { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .workpanel { overflow: hidden; }
 /* Every inline work panel is `.panel.workpanel > .modal-head + .modal-body`,
    and both .panel and .modal-body carry `padding: 20px 22px` — so the panel
@@ -540,6 +565,71 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   .stuck-actions { justify-content: space-between; }
   .stuck-err { max-width: none; }
 }
+/* The ⚠ badge counts FILES, and the two sections below count rows per
+   destination, so the summary prints the badge's own number and says out loud
+   when the sections overlap — otherwise the arithmetic on screen looks wrong on
+   exactly the day a study is both backing off and orphaned. */
+.stuck-summary {
+  background: var(--accent-faint); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+  border-radius: 10px; padding: 9px 13px;
+}
+.stuck-summary-n { font-family: var(--mono); font-size: .8rem; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
+/* PROSE, per the rendering policy at the top of this file. */
+.stuck-summary-sub { margin-top: 3px; font-size: .72rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
+
+/* Section headers. Drawn whenever their section has rows — including when it is
+   the only section — because the header is what says which of the two remedies
+   the rows under it are asking for, and a label that appears only when a
+   sibling happens to exist teaches nothing on the day one of them does not. */
+.stuck-group { margin-top: 6px; }
+.stuck-group:first-child { margin-top: 0; }
+.stuck-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.stuck-group-t { font-family: var(--mono); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--warn); }
+.stuck-group.orphan .stuck-group-t { color: var(--bad); }
+.stuck-group-n { font-family: var(--mono); font-size: .68rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* PROSE — these two sentences are the whole difference between "wait" and
+   "act", so they wrap at spaces and are never clipped. */
+.stuck-group-sub { margin-top: 3px; font-size: .72rem; color: var(--muted); max-width: 68ch; word-break: normal; overflow-wrap: break-word; }
+
+/* Orphaned rows: red rail instead of amber, and no actions column at all —
+   there is no node to dial, so there is no button that could tell the truth. */
+.orphan-row { border-left-color: var(--bad); align-items: flex-start; }
+.orphan-row .stuck-dest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.orphan-pin {
+  font-family: var(--mono); font-size: .58rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--bad); border: 1px solid var(--bad);
+  border-radius: 4px; padding: 1px 6px; white-space: nowrap;
+}
+.orphan-files, .held-files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+/* ATOMIC — a file name is an identifier, so it clips and keeps its full text in
+   a title attr (app.js sets it); it is never broken mid-token. */
+.orphan-files .hist-chip, .held-files .hist-chip { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+/* PROSE, and the engine's own sentence: it carries the remedy. */
+.orphan-msg, .held-msg { margin-top: 7px; font-size: .74rem; color: var(--muted); max-width: 68ch; line-height: 1.45; word-break: normal; overflow-wrap: break-word; }
+
+/* Held rows: nothing failed and nothing is missing — a scrub a rule asked for
+   cannot happen, so the engine is holding these back on purpose. Amber and red
+   both read as "something broke"; the accent rail says "withheld, and waiting
+   on you", which is what a hold is. Like the orphan row it has no actions
+   column: the remedy is a config edit, and no button here performs one. */
+.held-row { border-left-color: var(--accent); align-items: flex-start; }
+.held-row .stuck-dest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+/* WHICH hold. The two causes take opposite remedies — one says turn the profile
+   on, the other says a profile that is already on has nothing behind it — and
+   the sentence that carries them is four lines long, so the row wears its cause
+   next to the destination name. ATOMIC-ish: two or three words that must not be
+   split, sized like the orphan pin so the two tags read as one family. */
+.held-cause {
+  font-family: var(--mono); font-size: .58rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 1px 6px; white-space: nowrap;
+}
+.stuck-group.held .stuck-group-t { color: var(--accent); }
+/* Same localisation hazard as the .kv labels: all-caps Cyrillic at .06em is
+   wider and harder to scan, and Japanese gains nothing from either. */
+html[lang="ru"] .stuck-group-t, html[lang="ja"] .stuck-group-t,
+html[lang="ru"] .orphan-pin, html[lang="ja"] .orphan-pin,
+html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none; letter-spacing: .02em; }
 
 /* ── Pending imports (non-DICOM review queue) ───────────────────── */
 .pend-row {
@@ -784,3 +874,167 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
   background: rgba(5,5,5,.92); backdrop-filter: blur(3px); padding: 24px; }
 .stopped-overlay h2 { margin: 0 0 10px; color: var(--accent); }
 .stopped-overlay p { margin: 0; color: var(--muted); max-width: 420px; }
+
+/* ── Token gate ──────────────────────────────────────────────────
+   Opaque, not translucent: it is shown before the first /api call succeeds
+   and again the moment one 401s, and a dashboard dimly readable behind it
+   would be a dashboard still showing whatever patient line it last drew.
+   Above .stopped-overlay is deliberate — a shutdown notice outranks it. */
+.auth-gate {
+  position: fixed; inset: 0; z-index: 2147483646; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+  background: var(--bg);
+}
+.auth-gate[hidden] { display: none; }
+.auth-card {
+  width: min(440px, 100%); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 14px; padding: 26px 24px;
+}
+.auth-card h2 { margin: 0 0 10px; font-size: 1.15rem; color: var(--accent);
+  word-break: normal; overflow-wrap: break-word; }
+/* PROSE, per the rendering policy at the top of this file. */
+.auth-lede { margin: 0 0 18px; color: var(--muted); font-size: .82rem; line-height: 1.55;
+  word-break: normal; overflow-wrap: break-word; }
+.auth-field { display: flex; flex-direction: column; gap: 6px; font-size: .74rem; color: var(--muted); }
+.auth-field input {
+  background: #070707; border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 10px 12px; font-family: var(--mono); font-size: .86rem;
+  min-width: 0;
+}
+.auth-field input:focus { outline: none; border-color: var(--accent); }
+.auth-msg { margin: 12px 0 0; font-size: .78rem; line-height: 1.5; color: var(--bad);
+  word-break: normal; overflow-wrap: break-word; }
+.auth-msg[hidden] { display: none; }
+.auth-msg.note { color: var(--muted); }
+.auth-actions { display: flex; gap: 10px; margin-top: 18px; }
+.auth-actions .btn { flex: 1 1 auto; }
+.auth-help { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: .72rem; line-height: 1.55;
+  word-break: normal; overflow-wrap: break-word; }
+/* Rotation lives in Settings and is never a pre-filled field — see index.html. */
+.auth-rotate { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.auth-rotate[hidden] { display: none; }
+/* `.settings label { display: flex }` outranks the user agent's
+   `[hidden] { display: none }`, so a label hidden from JS would stay on screen
+   — which for the "current token" proof field means asking for a token that
+   does not exist yet. Author-level rule, or the attribute does nothing. */
+.settings label[hidden] { display: none; }
+.auth-rotate label { margin-bottom: 8px; }
+.hint.bad-note { color: #f8a5a5; }
+.hint.warn-note { color: var(--warn); }
+/* The site-key line inside #deidState. Its own line, and its own colour when no
+   key is set: a missing key does not stop a forward, it quietly makes the
+   pseudonyms reversible, so it has to be visible without being an alarm.
+   PROSE — it is a sentence, and #deidState is amber when the rules disagree, so
+   this span sets its own colour rather than inheriting a warning it is not part of. */
+.deid-key { display: block; margin-top: 4px; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
+.deid-key.warn { color: var(--warn); }
+
+/* ── Instance-index readout (inside its Settings fieldset) ───────
+   Same three-class policy as .kv: counters are prose-safe numbers, the
+   database location is a path and gets the whole row. */
+.idx-stats { margin: 4px 0 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+.idx-stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.idx-stats > div.wide { grid-column: 1 / -1; }
+.idx-stats dt { color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .06em; }
+html[lang="ru"] .idx-stats dt, html[lang="ja"] .idx-stats dt { text-transform: none; letter-spacing: .02em; }
+.idx-stats dd { margin: 0; font-family: var(--mono); font-size: .82rem; min-width: 0;
+  font-variant-numeric: tabular-nums; word-break: normal; overflow-wrap: break-word; }
+.idx-stats dd.path { font-size: .74rem; overflow-wrap: anywhere; }
+.idx-note { color: var(--muted); font-family: var(--mono); font-size: .7rem; min-width: 0;
+  word-break: normal; overflow-wrap: break-word; }
+.idx-note.bad { color: var(--bad); }
+
+/* ── Routing rules ───────────────────────────────────────────────
+   The rule card is its own query container: the field grid folds on the
+   PANEL's width, which the sidebar decides, not the viewport's. */
+.rt-enable { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: .8rem; color: var(--muted); }
+.rt-enable input { width: 15px; height: 15px; accent-color: var(--accent); }
+.rt-rules { display: flex; flex-direction: column; gap: 12px; }
+.rt-rule {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; container-type: inline-size;
+}
+.rt-rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rt-rule-n { flex: 0 0 auto; font-family: var(--mono); font-size: .72rem; color: var(--accent); font-weight: 700; }
+.rt-name {
+  flex: 1 1 auto; min-width: 0; background: #070707; border: 1px solid var(--border);
+  color: var(--text); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: .82rem;
+}
+.rt-name:focus { outline: none; border-color: var(--accent); }
+.rt-rule-tools { flex: 0 0 auto; display: flex; gap: 5px; }
+.rt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.rt-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .68rem; color: var(--muted); min-width: 0; }
+.rt-grid label.wide { grid-column: 1 / -1; }
+.rt-grid input {
+  background: #070707; border: 1px solid var(--border); color: var(--text); min-width: 0;
+  border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: .8rem;
+}
+.rt-grid input:focus { outline: none; border-color: var(--accent); }
+@container (max-width: 380px) {
+  .rt-grid { grid-template-columns: 1fr; }
+  .rt-grid label.wide { grid-column: auto; }
+}
+.rt-dests-wrap { margin-top: 10px; }
+.rt-dests-h { display: block; margin-bottom: 5px; font-size: .68rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; }
+html[lang="ru"] .rt-dests-h, html[lang="ja"] .rt-dests-h { text-transform: none; letter-spacing: .02em; }
+.rt-dests { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.rt-dest { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: .76rem; }
+.rt-dest input { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; }
+/* ATOMIC: a destination name is an identifier and the join key for routing,
+   send state and the archive gate. Clip it, never cut it — app.js mirrors the
+   full name into title=. */
+.rt-dest span { min-width: 0; max-width: 22ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A rule naming a node that is gone or disabled. Kept, checked and flagged:
+   dropping it silently is how a study stops going where it was configured. */
+.rt-dest.missing span { color: var(--bad); text-decoration: line-through; }
+.rt-dests-empty { color: var(--muted); font-family: var(--mono); font-size: .72rem; }
+.rt-rule-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; }
+.rt-rule-foot .check { display: inline-flex; align-items: center; gap: 6px; font-size: .74rem; color: var(--muted); }
+.rt-rule-foot .check input { width: 14px; height: 14px; accent-color: var(--accent); }
+.rt-warn { min-width: 0; color: var(--warn); font-size: .72rem; line-height: 1.4;
+  word-break: normal; overflow-wrap: break-word; }
+.rt-warn:empty { display: none; }
+
+/* ── Routing test ────────────────────────────────────────────────
+   The explain view. Every line names a rule and says what it did, in the
+   router's own vocabulary, because that is the string the log also uses. */
+.rt-test { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+.rt-test-h { margin: 0 0 6px; font-size: .95rem; }
+.rt-test-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px 14px; }
+.rt-test-form label { display: flex; flex-direction: column; gap: 4px; font-size: .68rem; color: var(--muted); min-width: 0; }
+.rt-test-form label.wide { grid-column: 1 / -1; }
+.rt-test-form input {
+  background: #070707; border: 1px solid var(--border); color: var(--text); min-width: 0;
+  border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: .8rem;
+}
+.rt-test-form input:focus { outline: none; border-color: var(--accent); }
+.rt-test-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.rt-test-foot .btn { margin-left: auto; }
+.rt-result { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #070707; }
+.rt-result[hidden] { display: none; }
+.rt-decision { font-size: .84rem; line-height: 1.5; word-break: normal; overflow-wrap: break-word; }
+.rt-decision.fallback { color: var(--warn); }
+.rt-decision.routed { color: var(--ok); }
+.rt-reason { margin: 4px 0 10px; color: var(--muted); font-family: var(--mono); font-size: .72rem;
+  word-break: normal; overflow-wrap: break-word; }
+.rt-trace { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px;
+  padding: 6px 0; border-top: 1px solid #1a1a1a; font-size: .76rem; }
+.rt-trace-n { grid-area: 1 / 1 / 2 / 2; color: var(--accent); font-family: var(--mono); font-size: .72rem; }
+.rt-trace-name { grid-area: 1 / 2 / 2 / 3; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt-trace-act { grid-area: 2 / 2 / 3 / 3; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .7rem;
+  word-break: normal; overflow-wrap: break-word; }
+.rt-trace-why { grid-area: 3 / 2 / 4 / 3; min-width: 0; color: #7a7a7a; font-family: var(--mono); font-size: .68rem;
+  word-break: normal; overflow-wrap: break-word; }
+.rt-trace-why:empty, .rt-trace-act:empty { display: none; }
+.rt-trace.hit .rt-trace-name { color: var(--ok); font-weight: 700; }
+.rt-trace.skip .rt-trace-name { color: var(--warn); }
+/* A rule that matched but whose delivery is HELD (it asks for de-identification
+   while the profile is off). Deliberately not `.hit` green: the study is not
+   going there, and a matched-and-green row is exactly the reassurance that let
+   an identified study leave believing it had been scrubbed. PROSE, so the held
+   line wraps on words like every other sentence here. */
+.rt-trace.held .rt-trace-name { color: var(--bad); font-weight: 700; }
+.rt-held { color: var(--bad); font-family: inherit; font-size: .8rem;
+  word-break: normal; overflow-wrap: break-word; }

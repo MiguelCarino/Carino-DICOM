@@ -1,0 +1,200 @@
+name: Bug report
+description: Something does not work — a study that will not arrive, a service that will not start, a wrong result.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Most DICOM problems are diagnosed from three
+        things: which listener was involved, what the peer equipment is, and the
+        log lines around the failure. The fields below ask for exactly those.
+
+        **Before you paste anything: redact patient data.** See the first
+        checkbox.
+
+  - type: checkboxes
+    id: phi
+    attributes:
+      label: Patient data
+      description: >
+        This is a public issue tracker. Anything you paste here is visible to
+        the world and stays in the repository history even after an edit.
+      options:
+        - label: >
+            I have removed all patient data from everything I am about to paste —
+            names, patient IDs, accession numbers, dates of birth, institution
+            and referring physician, and any study list visible in a screenshot.
+            Where a real value matters, I have replaced it with a placeholder
+            that keeps the same shape.
+          required: true
+        - label: I searched the existing issues and this does not look like one of them.
+          required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        Sent a CT study from the scanner to the receiver. The dashboard shows the
+        association and 412 images received, but the study never appears in the
+        outgoing forward and the destination never gets it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >
+        Numbered steps if you can. If it only happens sometimes, say roughly how
+        often and whether anything distinguishes the times it fails.
+      placeholder: |
+        1. Enable the receiver and the folder watcher.
+        2. Add a destination pointing at ...
+        3. Send any study with `storescu` ...
+        4. The file stays in outgoing and is retried forever.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Carino PACS version
+      description: >
+        Shown in the dashboard, or run `python -m pacs --version`
+        (`./run.sh --version`). If you built from source, the commit hash is
+        even better.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux — Debian / Ubuntu
+        - Linux — Fedora / RHEL
+        - Linux — other
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS version and Python version
+      description: >
+        The OS release, and the output of `python3 --version` if you are running
+        from source. Skip the Python version if you installed a packaged build —
+        it ships its own.
+      placeholder: "Windows 11 23H2 · Python 3.11.9"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - Packaged installer — Windows (.exe / NSIS)
+        - Packaged installer — macOS (.dmg)
+        - Packaged installer — Linux (.AppImage)
+        - Packaged installer — Linux (.rpm)
+        - Packaged installer — Linux (.deb)
+        - From source — CLI (setup.sh / setup.ps1, then run.sh serve)
+        - From source — desktop app in dev mode (npm start)
+        - Container
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: services
+    attributes:
+      label: Which listeners were enabled when it happened
+      description: >
+        Tick everything that was running, not only the one you think is at
+        fault — a port clash or a stopped worker often shows up as a fault
+        somewhere else.
+      options:
+        - label: Storage SCP — receive (default port 11112)
+        - label: Auto-send — folder watcher / forward
+        - label: Print SCP — virtual film printer (default port 11113)
+        - label: Modality Worklist SCP (default port 11114)
+        - label: Query/Retrieve SCP (default port 11115)
+        - label: Emergency RIS — HL7 MLLP order listener (default port 2575)
+        - label: DICOMweb — QIDO-RS / WADO-RS / STOW-RS under /dicom-web
+        - label: Web dashboard (default 127.0.0.1:8042)
+        - label: Emergency failover armed
+
+  - type: textarea
+    id: peer
+    attributes:
+      label: The equipment on the other end
+      description: >
+        The single most useful field in this form. DICOM implementations differ
+        enormously and a lot of bugs are one vendor's interpretation of the
+        standard. Give the make, the model, and the software or firmware version
+        if you can get at it, plus its AE title and the AE title and port it is
+        calling. `storescu`, `dcmtk`, a viewer or another PACS all count as
+        equipment — name the version.
+      placeholder: |
+        Peer: GE Revolution CT, software 16MW32.5
+        Peer AE title: CT_ER1
+        Calling: CARINOPACS on 10.20.1.14:11112
+        Direction: peer -> Carino PACS (C-STORE)
+        TLS: no
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: >
+        From the dated log file in your logs directory —
+        `~/CarinoPACS/logs/YYYY-MM-DD.log` on a source install, or the logs
+        folder inside the per-user data directory on a packaged build. Include a
+        couple of minutes either side of the failure, not just the error line;
+        the association setup before it is usually where the answer is. The
+        Logs tab in the dashboard shows the same stream.
+
+
+        **Redact patient names, patient IDs and accession numbers before
+        pasting.** Log lines routinely contain all three. UIDs and AE titles are
+        normally safe to leave, but redact them too if your institution treats
+        them as identifying.
+      render: text
+      placeholder: |
+        2026-08-05T14:22:10+00:00 INFO  [scp]   Association from CT_ER1 (10.20.1.31)
+        2026-08-05T14:22:11+00:00 INFO  [scp]   Stored PatientID=<redacted> ...
+        2026-08-05T14:22:40+00:00 ERROR [watch] Send to Archive failed: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: >
+        The section of `config.json` for the service involved, plus `web.host`.
+        **Remove `web.auth_token` and any TLS key paths or passphrases** —
+        replace the token with `"<redacted>"` rather than deleting the key, so
+        it is clear whether one was set.
+      render: json
+      placeholder: |
+        "scp": { "enabled": true, "aet": "CARINOPACS", "bind": "0.0.0.0", "port": 11112, "tls": false },
+        "web": { "host": "127.0.0.1", "port": 8042, "auth_token": "<redacted>" }
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        Screenshots (check them for patient data first), whether it used to work
+        and on which version, network specifics such as a firewall or NAT
+        between the two nodes, or anything you already ruled out.

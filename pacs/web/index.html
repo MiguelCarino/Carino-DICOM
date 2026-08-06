@@ -40,6 +40,7 @@
         <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> <span data-i18n>Pending</span><span class="badge" id="pendingBadge" hidden>0</span></button>
         <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> <span data-i18n>Stuck</span><span class="badge warn" id="stuckBadge" hidden>0</span></button>
         <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> <span data-i18n>Destinations</span></button>
+        <button class="navbtn" data-panel="dlgRouting"><span class="nav-ico">🔀</span> <span data-i18n>Routing</span></button>
         <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> <span data-i18n>Settings</span></button>
         <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> <span data-i18n>Logs</span></button>
       </nav>
@@ -276,6 +277,37 @@
         </dl>
         <div class="drop-hint" data-i18n>point a modality here — it pulls open orders by C-FIND</div>
       </article>
+
+      <!-- Query/Retrieve. Always visible, unlike the RIS and Worklist cards:
+           answering C-FIND/C-MOVE is a primary PACS service, not an emergency
+           one, and a service with no card is a service nobody turns on. -->
+      <article class="card" id="qrCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="qrDot"></span> <span data-i18n>Query/Retrieve</span></div>
+          <button class="btn toggle" id="qrToggle" data-on="false" data-i18n>Start</button>
+          <label class="card-pick"><input type="checkbox" class="pick-box" id="pickQr" data-svc="qr" /> <span data-i18n>Use this</span></label>
+        </header>
+        <div class="card-lede" data-i18n-title="A workstation searches this PC by C-FIND and pulls studies back with C-MOVE or C-GET, answered out of the instance index. Turn it on when other equipment must fetch studies from here instead of waiting to be sent them.">
+          <p class="card-tag" data-i18n>Q/R SCP</p>
+          <p class="card-desc" data-i18n>Workstations search this PC and pull studies back.</p>
+          <p class="card-why" data-i18n>A workstation searches this PC by C-FIND and pulls studies back with C-MOVE or C-GET, answered out of the instance index. Turn it on when other equipment must fetch studies from here instead of waiting to be sent them.</p>
+        </div>
+        <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
+        <p class="card-port" id="portQr"></p>
+        <dl class="kv">
+          <div><dt data-i18n>AE title</dt><dd id="qrAet" class="atomic">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="qrAddr" class="atomic">—</dd></div>
+          <div><dt data-i18n>Queries</dt><dd id="qrQueries">0</dd></div>
+          <div><dt data-i18n>Matches</dt><dd id="qrMatches">0</dd></div>
+          <div><dt data-i18n>Sent</dt><dd id="qrSent">0</dd></div>
+          <div><dt data-i18n>Failed</dt><dd id="qrFailed">0</dd></div>
+          <div><dt data-i18n>Errors</dt><dd id="qrErr">0</dd></div>
+          <div><dt data-i18n>Security</dt><dd id="qrTls">—</dd></div>
+        </dl>
+        <!-- The single most common Q/R failure in the field, said where the
+             operator is looking when they configure it. -->
+        <div class="drop-hint" data-i18n>C-MOVE calls out as CARINOQR — allow that AE there</div>
+      </article>
             </section>
           </div>
           <!-- Chooser footer: hidden until the setup state. "Turn these on" is
@@ -376,12 +408,18 @@
       <!-- Stuck sends -->
       <section class="panel workpanel" id="dlgStuck" hidden>
         <header class="modal-head">
-          <h2><span data-i18n>Stuck sends</span> <small data-i18n>forwards that failed and are retrying</small></h2>
+          <h2><span data-i18n>Stuck sends</span> <small data-i18n>forwards that are not moving</small></h2>
           <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
+            <!-- Three sentences because there are three ways a forward stops
+                 moving and three different remedies, and the panel used to
+                 describe only the first: "nothing is dropped, it keeps
+                 retrying" is true of a node that still exists, false of a name
+                 that does not, and false again of a destination being held back
+                 because a scrub it was promised cannot happen. -->
+            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.</p>
             <div class="hist-tools">
               <button class="btn tiny" id="stuckRetryAll" data-i18n-title title="Clear backoff on all stuck sends" data-i18n>↻ Retry all now</button>
               <button class="btn ghost tiny" id="stuckRefresh" data-i18n-title title="Refresh" data-i18n>↻ Refresh</button>
@@ -412,6 +450,49 @@
           <button class="btn ghost" id="addDest" data-i18n>+ Add node</button>
           <button class="btn" id="saveDests" data-i18n>Save destinations</button>
         </footer>
+      </section>
+
+      <!-- Conditional routing — which destinations does a received study go to?
+           The rules live in config (routing.rules), so this panel edits them and
+           saves through the same POST /api/config every other setting uses. The
+           test box is not a nicety: a wrong rule sends images to the wrong
+           hospital, and /api/routing/test is the only way to see the decision
+           before a modality proves it at 3am. -->
+      <section class="panel workpanel" id="dlgRouting" hidden>
+        <header class="modal-head">
+          <h2><span data-i18n>Routing</span> <small data-i18n>rules · which node gets what</small></h2>
+          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <label class="check rt-enable"><input id="rtEnabled" type="checkbox" /> <span data-i18n>Route by rule — otherwise every study goes to every enabled destination</span></label>
+          <div class="hist-bar">
+            <p class="hint" style="margin:0;max-width:70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="rtAdd" data-i18n>+ Add rule</button>
+              <button class="btn tiny" id="rtSave" data-i18n>Save rules</button>
+            </div>
+          </div>
+          <div class="rt-rules" id="rtRules"></div>
+          <p class="hist-empty" id="rtEmpty" hidden data-i18n>No rules yet — every study goes to every enabled destination.</p>
+
+          <!-- Test: describe a study, get the decision and the per-rule trace. -->
+          <section class="rt-test">
+            <h3 class="rt-test-h" data-i18n>Test a study</h3>
+            <p class="hint" style="margin:0 0 10px;max-width:70ch" data-i18n>Fill in what the study would carry and see which rule wins, and why. Nothing is sent and nothing is written to the log. The SAVED rules are what gets tested, so save an edit before you test it.</p>
+            <div class="rt-test-form">
+              <label><span data-i18n>Modality</span> <input id="rtModality" maxlength="16" placeholder="CT" /></label>
+              <label><span data-i18n>Calling AE</span> <input id="rtCallingAet" maxlength="16" data-i18n-placeholder placeholder="the sending AE title" /></label>
+              <label><span data-i18n>Station</span> <input id="rtStation" data-i18n-placeholder placeholder="Station name" /></label>
+              <label><span data-i18n>Patient ID</span> <input id="rtPatientId" /></label>
+              <label class="wide"><span data-i18n>Study description</span> <input id="rtStudyDesc" /></label>
+            </div>
+            <div class="rt-test-foot">
+              <span class="hint" style="margin:0" data-i18n>Blank fields are treated as empty on the study, not as wildcards.</span>
+              <button class="btn tiny" id="rtTest" data-i18n>Explain route</button>
+            </div>
+            <div class="rt-result" id="rtResult" hidden></div>
+          </section>
+        </div>
       </section>
 
       <!-- Settings -->
@@ -511,6 +592,105 @@
               <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
             </fieldset>
             <fieldset>
+              <legend data-i18n>Query/Retrieve (Q/R SCP)</legend>
+              <label class="check"><input id="qrEnabled" type="checkbox" /> <span data-i18n>Start Query/Retrieve on launch</span></label>
+              <label><span data-i18n>Q/R AE title</span> <input id="qrAetIn" maxlength="16" placeholder="CARINOQR" /></label>
+              <label><span data-i18n>Bind address</span> <input id="qrBind" /></label>
+              <label><span data-i18n>Port</span> <input id="qrPort" type="number" min="1" max="65535" placeholder="11115" /></label>
+              <label><span data-i18n>Accept only these AEs</span> <input id="qrAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="qrTlsIn" type="checkbox" /> <span data-i18n>Serve Query/Retrieve over TLS</span></label>
+              <label><span data-i18n>TLS certificate (PEM)</span> <input id="qrTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+              <label><span data-i18n>TLS private key (PEM)</span> <input id="qrTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="qrTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+              <!-- The C-MOVE destination map has no form control on purpose: it
+                   is AE title -> {host, port, aet} and is carried through a save
+                   untouched. This line is where an operator learns the AE title
+                   a C-MOVE actually calls out with, which is not the one they
+                   configured for auto-send. -->
+              <p class="hint" style="margin:2px 0 0" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
+              <p class="hint" id="qrMoveDests" style="margin:6px 0 0"></p>
+            </fieldset>
+            <fieldset>
+              <legend data-i18n>DICOMweb</legend>
+              <label class="check"><input id="dwEnabled" type="checkbox" /> <span data-i18n>Serve DICOMweb (QIDO-RS / WADO-RS / STOW-RS)</span></label>
+              <label class="check"><input id="dwStow" type="checkbox" /> <span data-i18n>Accept STOW-RS uploads (off = read-only)</span></label>
+              <label><span data-i18n>Allowed browser origins (CORS)</span> <input id="dwCors" data-i18n-placeholder placeholder="https://viewer.example.org, blank = same-origin only" /></label>
+              <label><span data-i18n>Base URL for a viewer</span> <input id="dwUrl" readonly /></label>
+              <p class="hint" style="margin:2px 0 0" data-i18n>Paste the base URL into a web viewer as its DICOMweb root. It answers out of the instance index, so keep the index on. Every request needs the API token when one is set; a browser viewer on another origin also has to be listed above.</p>
+              <p class="hint" id="dwState" style="margin:6px 0 0"></p>
+            </fieldset>
+            <fieldset>
+              <legend data-i18n>Instance index</legend>
+              <label class="check"><input id="idxEnabled" type="checkbox" /> <span data-i18n>Keep an index of stored instances</span></label>
+              <label><span data-i18n>Index database file</span> <input id="idxPath" placeholder="./index.db" /></label>
+              <label class="check"><input id="idxRescan" type="checkbox" /> <span data-i18n>Re-walk the storage folders at startup</span></label>
+              <dl class="idx-stats">
+                <div><dt data-i18n>Instances</dt><dd id="idxInstances">—</dd></div>
+                <div><dt data-i18n>Studies</dt><dd id="idxStudies">—</dd></div>
+                <div><dt data-i18n>Patients</dt><dd id="idxPatients">—</dd></div>
+                <div><dt data-i18n>Queued</dt><dd id="idxQueued">—</dd></div>
+                <div class="wide"><dt data-i18n>Last write</dt><dd id="idxLast">—</dd></div>
+                <div class="wide"><dt data-i18n>Database</dt><dd id="idxDbPath" class="path">—</dd></div>
+              </dl>
+              <div class="row-actions">
+                <button class="btn ghost tiny" id="idxRescanNow" data-i18n>↻ Rescan now</button>
+                <span class="idx-note" id="idxNote"></span>
+              </div>
+              <p class="hint" style="margin:8px 0 0" data-i18n>Query/Retrieve and DICOMweb answer from this index, never by walking the disk. Rescan after copying studies into the storage folder behind the app's back — the walk runs in the background and reports in the Activity log.</p>
+            </fieldset>
+            <fieldset>
+              <legend data-i18n>De-identification</legend>
+              <label><span data-i18n>Profile</span>
+                <!-- "off" is not "forward untouched". With any deidentify rule
+                     in play it means those destinations are HELD, and this is
+                     the control an operator reaches for to stop scrubbing for
+                     an afternoon — a label promising a send is the one thing it
+                     must not say. The hint below carries the rest. -->
+                <select id="deidProfile">
+                  <option value="off" data-i18n>Off — nothing scrubbed; de-identify routes are held</option>
+                  <option value="basic" data-i18n>Basic — remove patient identity</option>
+                  <option value="strict" data-i18n>Strict — also remove device and institution</option>
+                </select>
+              </label>
+              <label class="check"><input id="deidKeepPrivate" type="checkbox" /> <span data-i18n>Keep private tags (they routinely carry identifiers)</span></label>
+              <label class="check"><input id="deidKeepDates" type="checkbox" /> <span data-i18n>Keep study dates unshifted</span></label>
+              <label><span data-i18n>Pseudonym prefix</span> <input id="deidPrefix" maxlength="16" placeholder="ANON" /></label>
+              <!-- Said plainly, because the failure is invisible: a scrubbed
+                   header with the patient's name burned into the pixels looks
+                   anonymous in every viewer until a human reads the image. -->
+              <p class="hint bad-note" style="margin:2px 0 0" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
+              <p class="hint" style="margin:6px 0 0" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
+              <p class="hint" id="deidState" style="margin:6px 0 0"></p>
+            </fieldset>
+            <fieldset id="authFs">
+              <legend data-i18n>API access</legend>
+              <p class="hint" id="authState" style="margin:0 0 10px"></p>
+              <!-- Not a plain field, and not part of a Save: GET /api/config
+                   redacts the token, and POST /api/config refuses one outright.
+                   The token changes only through POST /api/auth/token, which
+                   wants the CURRENT token in a header — a session cookie must
+                   not be enough to replace the secret that issued it, so the
+                   operator types it. This dashboard does not have it to send. -->
+              <div class="auth-rotate" id="authRotate" hidden>
+                <label id="authProofWrap"><span data-i18n>Current token</span> <input id="authCurToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="the token this PACS uses now" /></label>
+                <label><span data-i18n>New API token</span> <input id="authNewToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste or generate a token" /></label>
+                <div class="row-actions">
+                  <button class="btn tiny" id="authApply" data-i18n>Apply</button>
+                  <button class="btn ghost tiny" id="authGen" data-i18n>Generate</button>
+                  <button class="btn ghost tiny" id="authShow" data-i18n>Show</button>
+                  <button class="btn ghost tiny danger" id="authClearBtn" data-i18n>Remove token</button>
+                  <button class="btn ghost tiny" id="authRotateCancel" data-i18n>Cancel</button>
+                </div>
+                <p class="hint" style="margin:6px 0 0" data-i18n>Copy the new token somewhere safe first. It takes effect the moment you apply it, signs out every browser including this one, and the dashboard can never show it again.</p>
+                <p class="hint" id="authProofNote" style="margin:6px 0 0" data-i18n>Changing the token needs the current one typed in — a session cookie is not enough to replace the secret that issued it.</p>
+              </div>
+              <div class="row-actions">
+                <button class="btn ghost tiny" id="authRotateBtn" data-i18n>Change token</button>
+                <button class="btn ghost tiny" id="authLogout" data-i18n>Log out</button>
+              </div>
+              <p class="hint" style="margin:8px 0 0" data-i18n>A token is mandatory whenever the dashboard is bound to anything other than this machine, so removing it is refused while that is the case. It is stored in web.auth_token in the config file.</p>
+            </fieldset>
+            <fieldset>
               <legend data-i18n>Integrations</legend>
               <label><span data-i18n>DICOM-editor URL</span>
                 <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
@@ -546,6 +726,27 @@
 
   <!-- global toast -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- API token prompt. The engine serves this shell to anyone (see auth.py:
+       a login form the browser was not allowed to download is an outage), but
+       every /api route answers 401 until a credential arrives. So the gate is
+       rendered INSTEAD of the dashboard on boot, and again on any later 401 —
+       a service restart drops every session by design, and that has to read as
+       "sign in again", not as a fault. -->
+  <div class="auth-gate" id="authGate" hidden>
+    <div class="auth-card">
+      <h2 data-i18n>This PACS needs its access token</h2>
+      <p class="auth-lede" id="authLede" data-i18n>Nothing is shown until you sign in. The dashboard reads and writes patient studies, storage paths and the shutdown control, so it is not served to an unauthenticated browser.</p>
+      <label class="auth-field"><span data-i18n>Access token</span>
+        <input id="authToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste the token" />
+      </label>
+      <p class="auth-msg" id="authMsg" hidden></p>
+      <div class="auth-actions">
+        <button class="btn" id="authLogin" data-i18n>Sign in</button>
+      </div>
+      <p class="auth-help" data-i18n>The token is web.auth_token in this server's config file. A container generates one on first boot and prints it once in its startup output. The dashboard never shows a stored token.</p>
+    </div>
+  </div>
 
   <!-- Emergency activation prompt (pops when a primary goes offline) -->
   <div class="emg-modal" id="emgPrompt" hidden>
@@ -592,6 +793,47 @@
       <div class="stuck-actions">
         <span class="stuck-next"></span>
         <button class="btn tiny stuck-retry" data-i18n-title title="Clear backoff and retry this destination now" data-i18n>Retry now</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Row template for an ORPHANED route: files routed to a name that is no
+       longer an enabled destination and never reached it. Deliberately without
+       a Retry button — POST /api/stuck/retry only clears a backoff timer, and
+       there is no node left to dial, so the button would be a lie next to the
+       one list where nothing is coming to the rescue. The remedy lives in
+       .orphan-msg, which carries the ENGINE's sentence verbatim (it is the copy
+       that knows whether these were pinned) so the two cannot drift apart. -->
+  <template id="orphanRowTpl">
+    <div class="stuck-row orphan-row">
+      <div class="stuck-main">
+        <div class="stuck-dest">
+          <span class="orphan-name"></span>
+          <span class="orphan-pin" hidden data-i18n>hold-and-forward</span>
+        </div>
+        <div class="stuck-meta"></div>
+        <div class="orphan-files"></div>
+        <div class="orphan-msg"></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Row template for a HELD destination: a routing rule asks for a
+       de-identified copy and no copy can be scrubbed, so nothing is sent there
+       at all rather than sent identified. No Retry button either, and for a
+       different reason than the orphan row above: there IS a node to dial and
+       it is answering — what is holding these is not a timer, so clearing one
+       would change nothing while looking like the fix. The remedy is one config
+       edit and it lives in .held-msg, which carries the ENGINE's sentence
+       verbatim (reason and remedy both) so no copy here can drift away from the
+       profile the engine is actually reading. -->
+  <template id="heldRowTpl">
+    <div class="stuck-row held-row">
+      <div class="stuck-main">
+        <div class="stuck-dest"><span class="held-name"></span></div>
+        <div class="stuck-meta"></div>
+        <div class="held-files"></div>
+        <div class="held-msg"></div>
       </div>
     </div>
   </template>
@@ -667,6 +909,51 @@
         <button class="btn tiny danger del" data-i18n-title title="Remove">✕</button>
       </td>
     </tr>
+  </template>
+
+  <!-- Row template for one routing rule. Destinations are checkboxes rather
+       than a multi-select: a rule that names a node which no longer exists must
+       stay visible and stay checked (app.js marks it), because silently
+       dropping it from the list is how a study stops going somewhere it was
+       configured to go. -->
+  <template id="rtRuleTpl">
+    <article class="rt-rule">
+      <header class="rt-rule-head">
+        <span class="rt-rule-n"></span>
+        <input class="rt-name" data-i18n-placeholder placeholder="Rule name" />
+        <span class="rt-rule-tools">
+          <button class="btn tiny ghost rt-up" data-i18n-title title="Move this rule earlier">↑</button>
+          <button class="btn tiny ghost rt-down" data-i18n-title title="Move this rule later">↓</button>
+          <button class="btn tiny danger rt-del" data-i18n-title title="Remove this rule">✕</button>
+        </span>
+      </header>
+      <div class="rt-grid">
+        <label><span data-i18n>Modality</span> <input class="rt-f" data-field="modality" maxlength="16" data-i18n-placeholder placeholder="any" /></label>
+        <label><span data-i18n>Calling AE</span> <input class="rt-f" data-field="calling_aet" maxlength="16" data-i18n-placeholder placeholder="any" /></label>
+        <label><span data-i18n>Station</span> <input class="rt-f" data-field="station" data-i18n-placeholder placeholder="any" /></label>
+        <label><span data-i18n>Patient ID</span> <input class="rt-f" data-field="patient_id" data-i18n-placeholder placeholder="any" /></label>
+        <label class="wide"><span data-i18n>Study description</span> <input class="rt-f" data-field="study_desc" data-i18n-placeholder placeholder="any" /></label>
+      </div>
+      <div class="rt-dests-wrap">
+        <span class="rt-dests-h" data-i18n>Send to</span>
+        <div class="rt-dests"></div>
+      </div>
+      <div class="rt-rule-foot">
+        <label class="check"><input type="checkbox" class="rt-deid" /> <span data-i18n>De-identify</span></label>
+        <label class="check"><input type="checkbox" class="rt-stop" /> <span data-i18n>Stop at this rule</span></label>
+        <span class="rt-warn"></span>
+      </div>
+    </article>
+  </template>
+
+  <!-- One line of the routing test trace: rule number, name, what it did. -->
+  <template id="rtTraceTpl">
+    <div class="rt-trace">
+      <span class="rt-trace-n"></span>
+      <span class="rt-trace-name"></span>
+      <span class="rt-trace-act"></span>
+      <span class="rt-trace-why"></span>
+    </div>
   </template>
 
   <script src="carino-bridge.js"></script>

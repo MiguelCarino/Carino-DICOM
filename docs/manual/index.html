@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual — Carino PACS</title>
+  <meta name="description" content="The Carino PACS manual: getting started, the security model and why the token rule exists, what each service does and when to turn it on, and the honest statement that this is not a medical device. Also in Spanish and Brazilian Portuguese." />
+  <link rel="icon" href="../favicon.webp" />
+  <link rel="stylesheet" href="manual.css" />
+  <script>
+    /* This is the English manual and also the fallback for locales that have
+       no manual yet (ja, ru). Switching the fleet language to one that DOES
+       have a manual takes the reader there; anything else stays put rather
+       than bouncing them to a page that does not exist. */
+    (function () {
+      var MAP = { es: 'es/', 'pt-BR': 'pt-BR/' };
+      window.addEventListener('carino:langchange', function (e) {
+        var to = MAP[e.detail.lang];
+        if (to) location.href = to;
+      });
+      // carino-lang.js writes the fleet locale into documentElement.lang;
+      // this page is English whatever the fleet is set to.
+      document.addEventListener('DOMContentLoaded', function () {
+        document.documentElement.lang = 'en';
+      });
+    })();
+  </script>
+  <!-- The clock is loaded here with the path that is correct at this depth;
+       carino-navbar.js sees [data-carino-clock] and does not load it again. -->
+  <script src="../carino-clock.js" data-carino-clock async></script>
+  <script src="../carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="../carino-lang.js" defer></script>
+</head>
+<body>
+  <main class="doc">
+    <nav class="langs" aria-label="Languages">
+      <span class="here">English</span>
+      <a href="es/" lang="es">Español</a>
+      <a href="pt-BR/" lang="pt-BR">Português (BR)</a>
+      <a href="../">← Carino PACS</a>
+    </nav>
+
+    <h1>The Carino PACS manual</h1>
+    <p class="standfirst">Carino PACS is a <strong>DICOM gateway</strong> and a <strong>continuity
+      appliance</strong>: it receives studies, routes and forwards them, publishes what it holds over
+      Query/Retrieve and DICOMweb, and keeps an imaging department working when the PACS or the RIS stops
+      answering. This manual covers deployment, the security model, every service, and the software's
+      real limits.</p>
+
+    <div class="toc">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#what">What it is and what role it plays</a></li>
+        <li><a href="#start">Getting started</a></li>
+        <li><a href="#security">The security model and the token rule</a></li>
+        <li><a href="#services">The services, one by one</a></li>
+        <li><a href="#not">This is not a medical device</a></li>
+        <li><a href="#help">Licence and where to get help</a></li>
+      </ol>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="what">1. What it is and what role it plays</h2>
+
+    <p>Carino PACS sits <em>between</em> the equipment that produces images and the systems that store or
+      read them. It is not trying to replace your archive; it is trying to be the piece that connects
+      them, and the piece still standing when one of the others falls over.</p>
+
+    <p>It plays two roles, and the distinction matters because it decides which services you enable:</p>
+
+    <ul>
+      <li><strong>Permanent gateway.</strong> Receives over C-STORE, files to disk by
+        patient/study/series, forwards to one or many destinations according to rules, de-identifies the
+        outgoing copy when asked, and publishes what it holds over Query/Retrieve (for older equipment)
+        and DICOMweb (for modern viewers).</li>
+      <li><strong>Safety net.</strong> If the primary PACS stops answering, it can bring up its own
+        <em>Modality Worklist</em> so technologists keep scanning, <strong>hold</strong> what arrives
+        during the outage, and <strong>forward</strong> it automatically once the primary is back. It
+        also takes HL7 orders over MLLP — or hand-keyed ones — when the RIS is what went down.</li>
+    </ul>
+
+    <p>Everything is driven by one <code>config.json</code>, and everything runs headless. The web
+      dashboard is convenient, not required.</p>
+
+    <h3>Default ports</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Service</th><th>Port</th><th>Protocol</th></tr></thead>
+        <tbody>
+          <tr><td>Receiver (Storage SCP)</td><td><code>11112</code></td><td>DICOM / DIMSE</td></tr>
+          <tr><td>Virtual print</td><td><code>11113</code></td><td>DICOM Print</td></tr>
+          <tr><td>Modality Worklist</td><td><code>11114</code></td><td>DICOM C-FIND</td></tr>
+          <tr><td>Query/Retrieve</td><td><code>11115</code></td><td>DICOM C-FIND/C-MOVE/C-GET</td></tr>
+          <tr><td>Emergency RIS</td><td><code>2575</code></td><td>HL7 over MLLP</td></tr>
+          <tr><td>Dashboard + DICOMweb</td><td><code>8042</code></td><td>HTTP</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><b>Why 11112 and not 104.</b> DICOM's registered port is <code>104</code>, which is privileged
+        on Linux and macOS and needs root. The default avoids that. Configure your equipment accordingly,
+        or publish <code>104</code> onto <code>11112</code> at the container or the firewall.</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="start">2. Getting started</h2>
+
+    <h3>Pick a deployment shape</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Shape</th><th>Fits</th><th>Comes back after a power cut</th></tr></thead>
+        <tbody>
+          <tr><td>Desktop app (tray)</td><td>A workstation with a person sitting at it: one room, one
+            clinic, a trial.</td><td>Only with "start at login"</td></tr>
+          <tr><td>Docker / Podman</td><td>A server, or any machine where you want it isolated and
+            movable in one piece.</td><td>Yes (<code>restart: unless-stopped</code>)</td></tr>
+          <tr><td>systemd service</td><td>The permanent box in the corner of the imaging department,
+            with nobody logged in.</td><td>Yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Desktop app</h3>
+    <p>Download the package for your OS from the
+      <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases
+      page</a> and open it. It tucks into the system tray; clicking it opens the dashboard. It is not
+      code-signed yet, so Windows and macOS warn on first launch — the
+      <a href="../">landing page</a> has the exact steps to open it anyway.</p>
+
+    <h3>Docker</h3>
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
+docker compose up -d
+docker compose logs -f pacs</code></pre>
+    <p>The first boot <strong>generates and prints an access token</strong> into the log. Open
+      <code>http://127.0.0.1:8042/</code> and paste it when the dashboard asks. Everything — config,
+      studies, logs, index — lives in <code>./data</code>, which is what you back up.</p>
+    <div class="warn">
+      <p><b>The most common first-run failure</b> is <code>./data</code> owned by root: the container
+        never runs as root and dies with <code>EACCES</code>. If your account is not uid 1000, put
+        <code>PACS_UID</code> and <code>PACS_GID</code> in a <code>.env</code> file and rebuild. On
+        SELinux hosts (Fedora, RHEL, Rocky) the volume's <code>:z</code> suffix is not decoration:
+        without it the bind mount is unwritable while the ownership looks perfectly correct.</p>
+    </div>
+
+    <h3>systemd service (Linux)</h3>
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS.git
+cd Carino-PACS
+sudo packaging/systemd/install.sh</code></pre>
+    <p>The installer creates the <code>carino-pacs</code> system user, copies the code to
+      <code>/opt/carino-pacs</code>, provisions <code>/var/lib/carino-pacs</code>, and installs the
+      unit… <strong>and does not start it</strong>. That is not an oversight: starting a PACS opens
+      listeners that accept patient data, and that decision belongs after reading the config, not before.
+      Edit <code>/var/lib/carino-pacs/config.json</code>, then:</p>
+    <pre><code>sudo systemctl enable --now carino-pacs
+systemctl status carino-pacs
+journalctl -u carino-pacs -f</code></pre>
+    <p>Re-running the installer upgrades the code in place and never touches an existing
+      <code>config.json</code>.</p>
+
+    <h3>Where the data lives</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Shape</th><th>Directory</th></tr></thead>
+        <tbody>
+          <tr><td>Desktop / CLI</td><td><code>~/CarinoPACS/</code></td></tr>
+          <tr><td>Docker</td><td><code>/data</code> in the container → <code>./data</code> on the host</td></tr>
+          <tr><td>systemd</td><td><code>/var/lib/carino-pacs/</code> (mode 0750)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>config.json</code> lives <em>with the data</em>, not in <code>/etc</code>, because relative
+      paths in the config (<code>"./received"</code>, <code>"./logs"</code>, <code>"./index.db"</code>)
+      resolve against the directory the config file itself sits in. A config in <code>/etc</code> would
+      scatter patient studies through <code>/etc</code>.</p>
+
+    <h3>First run, in order</h3>
+    <ol>
+      <li><strong>Choose the services.</strong> Everything ships off. The dashboard's setup chooser asks
+        what <em>this</em> machine should run; enable only that.</li>
+      <li><strong>Add your destinations</strong> (name, host, port, AE title) under <em>Destinations</em>.</li>
+      <li><strong>Prove connectivity with C-ECHO</strong> before moving a single image:
+        <code>./run.sh echo --name "Hospital PACS"</code>. If C-ECHO fails, the problem is not Carino —
+        it is the network, the firewall or the AE title.</li>
+      <li><strong>Point one device at it</strong> using the receiver's AE title, IP and port, and send a
+        test study.</li>
+      <li><strong>Watch the activity log.</strong> If something fails it shows up there; this software
+        would rather shout than fail quietly.</li>
+    </ol>
+
+    <h3>Headless</h3>
+    <pre><code>./run.sh init            # scaffold config.json and its folders
+./run.sh init --token    # and generate web.auth_token
+./run.sh serve           # dashboard at http://127.0.0.1:8042
+./run.sh receive         # receiver only
+./run.sh send            # folder watch / forwarding only
+./run.sh qr              # Query/Retrieve only
+./run.sh mwl             # worklist only
+./run.sh ris             # HL7 order listener only
+./run.sh print           # virtual printer only
+./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS</code></pre>
+    <p>Every command takes <code>-c / --config &lt;path&gt;</code>. On Windows, <code>run.ps1</code>.</p>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="security">3. The security model and the token rule</h2>
+
+    <p>Start with the part that matters: <strong>the dashboard is the key to the archive</strong>. Anyone
+      who opens it can read every stored study, download the DICOM files, change every setting, start and
+      stop services, delete studies and shut the server down. There are no users and no roles: there is
+      one shared secret, and whoever holds it can do everything.</p>
+
+    <h3>The rule</h3>
+    <div class="danger">
+      <p><b>An empty <code>web.auth_token</code> is allowed only while <code>web.host</code> is
+        loopback.</b> If <code>web.host</code> is anything else — <code>0.0.0.0</code>, a LAN address, a
+        hostname — and the token is empty, <strong>the server refuses to start</strong>. That refusal is
+        a feature, not an error to route around.</p>
+    </div>
+
+    <p>The reason is concrete. Unauthenticated on <code>127.0.0.1</code>, the operating system is the
+      access control: only a process on this machine can reach the API. That is defensible. But
+      <code>web.host</code> is operator-configurable, and the moment somebody changes it to
+      <code>0.0.0.0</code> so they can "get in from the other PC" — in a hurry, on a Tuesday, not
+      thinking about security — that same API hands any LAN neighbour the study list, the storage paths,
+      the DICOM bytes and <code>/api/shutdown</code>. The rule exists because that change takes ten
+      seconds and its consequences last years.</p>
+
+    <p><strong>Every container is always in that situation</strong>: a container publishes on
+      <code>0.0.0.0</code> by construction. So the image generates a 256-bit token on first boot when you
+      do not supply one — and <em>prints</em> it. What it never does is generate one quietly: a secret
+      nobody sees is a secret nobody rotates.</p>
+
+    <h3>Generating and presenting the token</h3>
+    <pre><code>./run.sh init --token                                  # writes it into config.json
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+openssl rand -base64 32</code></pre>
+    <p>The server accepts the credential three ways:</p>
+    <ul>
+      <li><code>Authorization: Bearer &lt;token&gt;</code></li>
+      <li><code>X-Carino-Token: &lt;token&gt;</code></li>
+      <li>a session cookie issued by <code>POST /api/login</code></li>
+    </ul>
+    <p>The cookie exists so the dashboard asks for the token <strong>once</strong> instead of holding it
+      in JavaScript, where every XSS and every browser extension can read it. It never carries the token:
+      it carries an HMAC over a secret generated at startup and kept in memory only. That is why a
+      restart logs everyone out — the right trade for a single-operator appliance: no session store on
+      disk, nothing to leak, and at worst the token is retyped once a shift.</p>
+
+    <div class="warn">
+      <p><b>The dashboard speaks plain HTTP.</b> There is no built-in TLS for the web layer. If you
+        expose it beyond loopback, put it behind a reverse proxy that terminates HTTPS. A token sent over
+        cleartext HTTP on a shared network is a token you have given away.</p>
+    </div>
+
+    <h3>The DICOM side</h3>
+    <ul>
+      <li><strong><code>allowed_aets</code></strong> — an allow-list of calling AE titles. Empty means
+        "accept anyone". It is a useful filter, not authentication: DICOM does not authenticate the
+        caller.</li>
+      <li><strong>DICOM-TLS</strong> — available on both sides, independently, including mutual TLS with
+        a client certificate. It uses the <em>same port</em>: a plaintext peer cannot talk to a TLS
+        receiver, and vice versa. TLS encrypts and authenticates the <em>transport</em>, not the
+        <em>application</em> — combine it with <code>allowed_aets</code> or client certificates for real
+        access control.</li>
+      <li><strong>Firewall</strong> — the DICOM listeners bind <code>0.0.0.0</code> by default (though
+        every listener is off until you enable it). That is right for something modalities must reach, and
+        it means restricting them to the modality subnet is your job.</li>
+    </ul>
+
+    <h3>What the model does not protect</h3>
+    <ul>
+      <li><strong>No user management.</strong> No accounts, no roles, no permissions. One shared secret
+        for the whole appliance.</li>
+      <li><strong>No per-user audit trail.</strong> The log records what happened — associations, stores,
+        forwards, matched orders, rejected tokens — with timestamps and peer addresses, but it cannot
+        record <em>who</em>, because the software has no concept of a who. It is plain text with no
+        tamper protection: an operational record, not evidence.</li>
+      <li><strong>No encryption at rest.</strong> Studies are ordinary DICOM files, the sqlite index
+        holds names and identifiers in the clear, orders are JSON, and <code>config.json</code> holds the
+        token in plaintext. Encrypt the volume underneath (LUKS, BitLocker, FileVault) and restrict the
+        data directory's permissions.</li>
+      <li><strong>The HL7/MLLP listener has no TLS and no credential.</strong> It is a TCP socket with
+        MLLP framing. Its only control is <code>allowed_hosts</code>, a peer-address check and therefore
+        spoofable. Anyone who can open a connection to that port can inject orders that appear on the
+        worklist. Bind it to a trusted clinical segment and firewall it.</li>
+      <li><strong>De-identification does not touch pixels.</strong> See that service below: burned-in
+        demographics survive every profile.</li>
+    </ul>
+
+    <div class="note">
+      <p><b>Backups.</b> The sqlite index is a cache and rebuilds itself; the images do not. Back up the
+        storage directories — and test a restore at least once.</p>
+      <p><b>No telemetry.</b> Carino PACS sends nothing anywhere: no analytics, no crash reporting, no
+        update checks, no third-party scripts fetched at runtime. The only outbound connections are the
+        DICOM associations and HL7 acknowledgements you configured, to the peers you named. A change that
+        broke that would be treated as a vulnerability.</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="services">4. The services, one by one</h2>
+
+    <p>Everything that opens a port ships <strong>off</strong>. The right question is not "what can it
+      do?" but "what does <em>this</em> machine need to do?" Every enabled service is one more open
+      port. The index below is the one exception — it starts on its own, because it is a local sqlite
+      cache that binds nothing.</p>
+
+    <div class="svc-doc">
+      <h3>Receiver — Storage SCP</h3>
+      <p class="port">Port 11112 · C-STORE, C-ECHO</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Accepts studies pushed by modalities and files them to disk, optionally organised by
+          Patient / Study / Series. It accepts all transfer syntaxes and stores compressed objects
+          <em>as-is</em> — no transcoding, so nothing is altered on the way in.</dd>
+        <dt>Turn it on when</dt>
+        <dd>Anything needs to <em>send</em> images here: modalities, another PACS, a workstation. This is
+          the central service.</dd>
+        <dt>Leave it off when</dt>
+        <dd>This machine only forwards what something else drops in a folder.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Auto-send — Storage SCU and routing rules</h3>
+      <p class="port">Outbound client · C-STORE</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Watches a folder and forwards every new file to whichever destinations apply. A file is only
+          sent once it is <strong>stable</strong> (size unchanged between two scans), so a half-written
+          file is never forwarded. Progress is tracked <em>per destination</em>: a file counts as done
+          only when <em>every</em> enabled destination has accepted it, and failed hosts are retried on
+          the next scan. On success the original can be kept, moved or deleted.</dd>
+        <dt>Rules</dt>
+        <dd>With routing enabled, a rule picks destinations by modality, calling AE title, station,
+          patient ID or study description (case-insensitive <code>*</code> and <code>?</code> globs).
+          Example: CT from <code>ER_*</code> to the teaching archive, de-identified.</dd>
+        <dt>The guarantee</dt>
+        <dd>A study can <strong>never</strong> end up going nowhere. Routing off, no rule matched, an
+          unreadable header, a rule naming a destination that no longer exists — every one of those falls
+          back to <em>every</em> enabled destination. Over-sending annoys an operator; under-sending
+          loses an image.</dd>
+        <dt>The one exception</dt>
+        <dd>A rule that asks to de-identify for a destination, where the scrub cannot actually be
+          performed, <strong>holds</strong> that destination: it is not sent to at all, rather than
+          sent identified. Two things stop the scrub — the profile is <code>off</code>, or the profile
+          is on and no de-identifier can be built from the settings — and they need different fixes.
+          Nothing is lost either way; see <em>De-identify on forward</em> below.</dd>
+        <dt>Turn it on when</dt>
+        <dd>This machine has to deliver images onward: to the central PACS, to a reading workstation, or
+          as copies to a teaching archive.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>De-identify on forward</h3>
+      <p class="port">PS3.15 Annex E profile · applied only to the copy that leaves</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Applies the <em>Basic Application Level Confidentiality Profile</em> to the object being
+          sent, declaring in <code>(0012,0064)</code> exactly which retain options were used so the
+          recipient can see what was kept. The archived original is <strong>never rewritten</strong> —
+          that asymmetry is the whole idea.</dd>
+        <dt>Profiles</dt>
+        <dd><code>basic</code> retains dates (full or shifted), patient characteristics, device identity
+          and institution identity. <code>strict</code> drops device and institution identity and removes
+          private attributes even if you asked to keep them.</dd>
+        <dt>Turn it on when</dt>
+        <dd>Images leave the clinical environment: teaching, research, a vendor, an outside second
+          opinion.</dd>
+        <dt>Turning it off</dt>
+        <dd>The profile decides whether scrubbing happens at all; a rule's <em>de-identify</em> tick
+          decides which destinations get a scrubbed copy. Set the profile to <code>off</code> while a
+          rule still asks for it and Carino <strong>holds</strong> that destination rather than sending
+          an identified copy to a node whose owner was told it receives none.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>Held, not sent — and this is the answer when studies stop moving.</b> A destination a
+          rule marks <em>de-identify</em> receives nothing whenever the scrub cannot actually be
+          performed. Delivery is deferred, identity is not disclosed: a study waiting on disk is
+          released by an edit, a name that has arrived at an outside node is not recoverable by any
+          edit.</p>
+        <p><b>There are two reasons the scrub cannot happen, and they are not fixed the same way.</b>
+          Every hold records which one it is, and the stuck panel prints the remedy for the cause it
+          recorded rather than guessing:</p>
+        <ul>
+          <li><b>The profile is <code>off</code></b> while a rule still asks for a scrub. Set the
+            profile to <code>basic</code> or <code>strict</code> and the next auto-send pass releases
+            them.</li>
+          <li><b>The profile is on, but no de-identifier could be built</b> from the current settings,
+            so there is still nothing to scrub with. The failure that stopped it is in the Activity
+            log on the send channel — fix that. <b>Turning the profile off does not release this
+            one:</b> it releases nothing and only moves which half is stopping the scrub.</li>
+        </ul>
+        <p>Unticking <em>de-identify</em> on the rule releases either hold, and it releases the
+          studies <b>identified</b> — which is the exact outcome the hold exists to prevent. Make that
+          edit only if that destination is genuinely no longer meant to receive scrubbed data.</p>
+        <p>Nothing is lost and nothing is quiet about it. The studies stay in the
+          <strong>outgoing</strong> folder — never archived, never deleted — every <em>other</em>
+          destination on the same study still receives them, the Activity log raises an <em>error</em>
+          naming the study, the withheld destination and the cause, the de-identification panel in
+          Settings names it too, and the ⚠ <em>Stuck</em> counter includes those files. Nothing
+          releases a hold on its own: no timer runs it down and nothing retries it.</p>
+      </div>
+      <div class="danger">
+        <p><b>It does not clean pixels.</b> Patient demographics <em>burned into</em> the image — the
+          banner an ultrasound or a secondary capture prints inside the frame — survive every profile,
+          and they are the most common way "anonymised" data walks out of a hospital with a name on it.
+          The <em>Clean Pixel Data</em> option (113101) is deliberately not claimed, because it is not
+          done. Nothing inside the program can detect that leak for you: <strong>a human has to look at
+          the images</strong>. Narrative text inside Structured Reports is likewise not read.</p>
+      </div>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Index</h3>
+      <p class="port">sqlite · <code>index.db</code></p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Keeps one row per stored file and derives patient, study and series answers from it, so a
+          study summary can never drift out of step with the instances it summarises. It is the query
+          layer behind Query/Retrieve and DICOMweb.</dd>
+        <dt>Turn it on when</dt>
+        <dd>You use Query/Retrieve or DICOMweb. It is the only dependency of both.</dd>
+        <dt>What it guarantees</dt>
+        <dd>The index is a <em>cache</em>, never the source of truth. Losing it costs a rescan, never an
+          image.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Query/Retrieve — C-FIND, C-MOVE, C-GET</h3>
+      <p class="port">Port 11115 · Patient Root and Study Root</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Lets another system ask "what studies do you have for this patient?" and then "send them to
+          me / to that workstation". This is the half of a PACS that old equipment can actually talk to:
+          a 2009 ultrasound or a CR reader will never speak DICOMweb, but it does speak DIMSE.</dd>
+        <dt>Turn it on when</dt>
+        <dd>Workstations or modalities need to <em>pull</em> studies from here, or you are acting as the
+          temporary archive during a primary-PACS outage.</dd>
+        <dt>What it guarantees</dt>
+        <dd>A C-MOVE never invents its instance list — it resolves through the index. Anything the index
+          knows about but cannot be read off disk is counted as a <strong>failed sub-operation</strong>
+          and named in the Failed SOP Instance UID List. It is never quietly dropped: a C-MOVE that
+          reports success while sending fewer images than it matched is the worst failure this software
+          can have.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>DICOMweb — QIDO-RS, WADO-RS, STOW-RS</h3>
+      <p class="port">HTTP, under <code>/dicom-web</code> on the dashboard port</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Lets modern viewers (OHIF, Weasis and friends) query, retrieve and store over HTTP without
+          negotiating a DICOM association. A STOW-RS upload goes through the <em>same</em> filing a
+          C-STORE uses, so a study posted by a viewer is indistinguishable from one pushed by a
+          modality.</dd>
+        <dt>Turn it on when</dt>
+        <dd>You want a web viewer against the archive. Remember the token protects these routes too.</dd>
+        <dt>CORS</dt>
+        <dd><code>cors_origins</code> is matched <strong>exactly</strong> (scheme + host + port) and is
+          empty by default, so nothing is reflected back to an origin that is not on the list. There is
+          no pattern syntax — but a literal <code>*</code> <em>is</em> honoured, and only because you
+          typed it: from then on every origin is reflected and any page the operator visits could read
+          the archive off this machine. Name the viewer instead.</dd>
+        <dt>What it does not do</dt>
+        <dd><code>/rendered</code>, <code>/thumbnail</code>, bulkdata URIs and transcoding between
+          transfer syntaxes are not implemented and answer <code>406</code>. A half-working viewer is
+          worse than an absent feature: anything that cannot be produced is never faked.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Modality Worklist (MWL)</h3>
+      <p class="port">Port 11114 · worklist C-FIND</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Serves orders to modalities so the technologist does not hand-key patient details. Each order
+          carries a pre-generated <em>Study Instance UID</em> that is burned into the exam, so the study
+          the modality sends back reconciles to its order exactly. An order's <em>target modality AE</em>
+          steers it to one station; blank means every station sees it.</dd>
+        <dt>Turn it on when</dt>
+        <dd>The RIS is not reaching the modalities: because it is down, because the destination simply
+          has no RIS, or to test a RIS→PACS flow without a live RIS.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Emergency RIS — HL7 orders</h3>
+      <p class="port">Port 2575 · HL7 <code>ORM^O01</code> over MLLP</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Receives HL7 orders over MLLP, and also lets you <strong>hand-key</strong> them into the
+          dashboard when nothing upstream is alive. When the study comes back by C-STORE it is matched to
+          its order by accession number (patient ID as a fallback), and the order is closed and archived
+          for the trail — never erased.</dd>
+        <dt>Turn it on when</dt>
+        <dd>The RIS is down, or you are testing an integration.</dd>
+        <dt>What it guarantees</dt>
+        <dd><strong>Image delivery is never gated on an order match.</strong> A study with no matching
+          order is still stored and forwarded; the order simply stays open for manual reconciliation.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>No TLS, no credential.</b> See the security section: anyone who can open a socket to that
+          port can inject orders. Trusted clinical network and a firewall, or not at all.</p>
+      </div>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Emergency failover</h3>
+      <p class="port">C-ECHO monitoring of the destination marked primary</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Mark a destination as primary and arm the monitor: Carino C-ECHOes it periodically and
+          watches forward failures. If it stays unreachable past the threshold you get the prompt to
+          <em>activate the emergency RIS</em>. Activating starts the local worklist so technologists keep
+          scanning, <strong>holds</strong> every study received during the outage, and
+          <strong>forwards</strong> it once the primary is back. You decide when to stand down.</dd>
+        <dt>Turn it on when</dt>
+        <dd>This machine is the gateway to a PACS you depend on. It is why the word "continuity" is in
+          the first line of this manual.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Virtual print</h3>
+      <p class="port">Port 11113 · DICOM Print, PDF output</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Presents itself as a DICOM printer and captures whatever is sent to it as PDF. For equipment
+          whose only output is film, this is how you keep something filable.</dd>
+        <dt>Turn it on when</dt>
+        <dd>You have a print-only modality whose output you want to rescue.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Web dashboard</h3>
+      <p class="port">Port 8042 · HTTP, <code>127.0.0.1</code> by default</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Per-service status, destinations, orders, a live activity log, settings and a bundled DICOM
+          editor. Everything the dashboard does also exists in the CLI.</dd>
+        <dt>Move it off loopback when</dt>
+        <dd>Only with a concrete reason — and then with a token (mandatory) and HTTPS in front. See the
+          token rule.</dd>
+      </dl>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="not">5. This is not a medical device</h2>
+
+    <div class="danger">
+      <p><b>Carino PACS is not a medical device.</b> It is not certified, cleared or registered with any
+        regulator, in any country. It carries no CE marking as a medical device, no FDA clearance, and no
+        registration with ANVISA, COFEPRIS or any equivalent body. Nobody has run a clinical-use
+        validation against it.</p>
+      <p><b>It is not for primary diagnosis.</b> There is no diagnostic viewer here: no windowing, no
+        measurements, no calibrated rendering chain, no control over the display it appears on. Read
+        studies on the validated workstation you already have.</p>
+    </div>
+
+    <p>Stated plainly, because that is more useful than a footnote:</p>
+    <ul>
+      <li><strong>If you deploy it, the validation is yours.</strong> Regulatory compliance, risk
+        assessment, data protection and clinical responsibility sit with the organisation that puts it
+        into production, not with the project.</li>
+      <li><strong>It is distributed with no warranty of any kind</strong>, as its AGPL-3.0 licence
+        says.</li>
+      <li><strong>It does not replace your PACS or your RIS.</strong> It is the gateway between them, and
+        the thing that keeps a department working through an outage until they come back.</li>
+      <li><strong>Treat it as clinical infrastructure anyway.</strong> Not being a medical device does
+        not make it harmless: it moves patient data. Volume encryption, firewalling, TLS, a token and
+        backups are not optional.</li>
+      <li><strong>If a patient's care depends on it, the responsibility for that is yours, not this
+        software's.</strong></li>
+    </ul>
+
+    <p>None of this is pessimism. The project takes seriously that <em>an image that silently never
+      arrives is worse than a crash</em> — which is why it would rather refuse to start, count failed
+      sub-operations explicitly, and over-send than under-send. It withholds a delivery in exactly one
+      case, loudly and reversibly: a destination a rule asks to de-identify for, while the scrub that
+      was promised cannot be performed — because the profile is off, or because the profile is on and
+      no de-identifier could be built. It says which of the two, because the two are fixed
+      differently. But software can only answer for what it does; the rest is yours.</p>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="help">6. Licence and where to get help</h2>
+    <p>Carino PACS is released under <strong>AGPL-3.0-or-later</strong>. Because it is a network server,
+      §13 applies: if you run a modified version as a service, you must offer its source to the people
+      who use it. Keep the <code>LICENSE</code> file and a pointer to the source with any modified
+      deployment.</p>
+    <ul>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">Source and
+        issue tracker on GitHub</a></li>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener">Security
+        policy</a> — what is protected, what is not, and how to report a vulnerability</li>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">How
+        to contribute</a></li>
+    </ul>
+    <p>Found an error in this manual — or a translation a radiologist would never say? Open an issue. The
+      Spanish and Portuguese documentation is part of the project, not an extra.</p>
+
+    <p class="foot">Carino PACS · <a href="../">landing page</a> · part of the
+      <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a> workshop ·
+      AGPL-3.0-or-later.</p>
+  </main>
+</body>
+</html>

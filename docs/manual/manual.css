@@ -1,0 +1,113 @@
+/* Carino PACS manuals — same workshop dark theme as the landing page, laid out
+   for reading rather than for scanning: one column, a fixed measure, and no
+   collapsed sections. A manual someone opens during an outage has to be
+   readable top to bottom, and Ctrl+F has to find everything in it.
+
+   Value-rendering policy, inherited from pacs/web/styles.css:
+     prose  wraps at spaces (word-break: normal + overflow-wrap: break-word)
+     paths / URLs / AE titles are the one class allowed to break mid-token
+            (overflow-wrap: anywhere) — they have no other break point
+     shell commands never wrap; they scroll inside their own box, because a
+            wrapped command is a command someone will paste wrong
+   `word-break: break-all` is never used: a value cut at an arbitrary
+   character is a value read wrong, and here the values are AE titles, ports
+   and paths. */
+:root {
+  --accent: #eab308;
+  --bg: #050505;
+  --bg-2: #0d0d0d;
+  --panel: #111;
+  --border: #262626;
+  --text: #f5f5f5;
+  --muted: #8a8a8a;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+  line-height: 1.65; }
+a { color: var(--accent); }
+
+.doc { width: min(820px, 90%); margin: 0 auto; padding: 34px 0 60px; }
+
+/* Language row — every manual carries every other language, because the
+   reader who needs the Spanish one may well have landed on the English one. */
+.langs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 26px; }
+.langs a, .langs span {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase;
+  padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--muted); text-decoration: none;
+}
+.langs a:hover { color: var(--accent); border-color: var(--accent); }
+.langs .here { color: #050505; background: var(--accent); border-color: var(--accent); }
+
+.doc h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.2; margin: 0 0 10px; font-weight: 800;
+  letter-spacing: -.01em; word-break: normal; overflow-wrap: break-word; }
+.doc .standfirst { margin: 0 0 30px; color: #cfcfcf; font-size: 1.02rem;
+  word-break: normal; overflow-wrap: break-word; }
+.doc h2 { font-size: 1.28rem; margin: 42px 0 12px; padding-top: 14px; border-top: 1px solid var(--border);
+  word-break: normal; overflow-wrap: break-word; }
+.doc h3 { font-size: 1.02rem; margin: 26px 0 8px; color: var(--accent);
+  word-break: normal; overflow-wrap: break-word; }
+.doc p, .doc li { word-break: normal; overflow-wrap: break-word; }
+.doc p { margin: 0 0 14px; color: #d0d0d0; }
+.doc ul, .doc ol { margin: 0 0 16px; padding-left: 22px; color: #d0d0d0; }
+.doc li { margin-bottom: 7px; }
+.doc strong { color: var(--text); }
+
+/* Table of contents */
+.toc { background: linear-gradient(180deg, var(--panel), #0a0a0a); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 20px; margin-bottom: 8px; }
+.toc h2 { margin: 0 0 8px; padding: 0; border: 0; font-size: .72rem; font-family: var(--mono);
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.toc ol { margin: 0; padding-left: 20px; }
+.toc li { margin-bottom: 4px; }
+
+/* Inline code: an identifier or a path, so it may break mid-token — nothing
+   else on the page may. */
+.doc code { font-family: var(--mono); font-size: .84em; background: #000; padding: 1px 5px;
+  border-radius: 4px; overflow-wrap: anywhere; }
+.doc pre { background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  overflow-x: auto; margin: 0 0 16px; }
+.doc pre code { background: none; padding: 0; font-size: .78rem; line-height: 1.7; color: #e8e8e8;
+  white-space: pre; overflow-wrap: normal; }
+
+/* Tables scroll inside their own box; the page body never scrolls sideways. */
+.tablewrap { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--border); border-radius: 10px; }
+.doc table { border-collapse: collapse; width: 100%; min-width: 460px; font-size: .86rem; }
+.doc th, .doc td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border);
+  vertical-align: top; word-break: normal; overflow-wrap: break-word; }
+.doc th { color: var(--muted); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase;
+  font-weight: 600; white-space: nowrap; }
+.doc tbody tr:last-child td { border-bottom: 0; }
+.doc td code { font-size: .78rem; }
+
+/* Callouts. Three weights, and the strongest one is reserved for the things
+   that lose images or leak patients. */
+.note, .warn, .danger { border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px;
+  padding: 14px 17px; margin: 0 0 18px; font-size: .9rem; }
+.note { border-left-color: var(--accent); background: rgba(234, 179, 8, .05); }
+.warn { border-left-color: #f97316; background: rgba(249, 115, 22, .06); }
+.danger { border-left-color: #b91c1c; border-color: #7f1d1d; background: rgba(185, 28, 28, .07); }
+.note p:last-child, .warn p:last-child, .danger p:last-child,
+.note ul:last-child, .warn ul:last-child, .danger ul:last-child { margin-bottom: 0; }
+.note b, .warn b { color: var(--text); }
+.danger b { color: #fca5a5; }
+
+/* Per-service block: what it is, when to turn it on, what it costs. */
+.svc-doc { border: 1px solid var(--border); border-radius: 12px; padding: 16px 19px; margin: 0 0 16px;
+  background: linear-gradient(180deg, var(--panel), #0a0a0a); }
+.svc-doc h3 { margin: 0 0 4px; }
+.svc-doc .port { font-family: var(--mono); font-size: .7rem; color: var(--muted); margin: 0 0 10px;
+  overflow-wrap: anywhere; }
+.svc-doc p:last-child, .svc-doc ul:last-child { margin-bottom: 0; }
+.svc-doc dl { margin: 0; }
+.svc-doc dt { font-family: var(--mono); font-size: .64rem; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--muted); margin-top: 10px; }
+.svc-doc dd { margin: 2px 0 0; color: #d0d0d0; font-size: .9rem;
+  word-break: normal; overflow-wrap: break-word; }
+
+.foot { border-top: 1px solid var(--border); margin-top: 46px; padding-top: 20px; font-size: .82rem;
+  color: var(--muted); }
+.foot a { color: var(--accent); }

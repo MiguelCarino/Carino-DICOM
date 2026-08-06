@@ -1,8 +1,9 @@
 """Persistent per-file send state so restarts don't re-forward everything.
 
 Keyed by absolute path; each entry remembers the file's size+mtime (to detect
-that a same-named file was replaced with new content) and which destinations
-have already accepted it.
+that a same-named file was replaced with new content), which destinations have
+already accepted it, and any destination it was PINNED to — a delivery promised
+by whoever queued the file, which the routing rules may widen but never revoke.
 """
 
 from __future__ import annotations
@@ -43,6 +44,38 @@ class SendState:
         """Return the existing entry for `path` without creating one (read-only)."""
         with self._lock:
             return self._data.get(os.path.abspath(path))
+
+    def pin(self, path: str, names) -> None:
+        """Record destinations this file MUST reach whatever the routing rules
+        decide, and stamp the entry against the bytes on disk right now.
+
+        Emergency hold-and-forward drops a copy of every received instance into
+        the outgoing folder so the primary PACS back-fills when it returns. That
+        promise cannot be left to the rule engine: one `stop` rule aimed
+        elsewhere would send the held copy to a teaching archive, mark it fully
+        sent and let it be archived (or deleted) having never reached the
+        primary — the failover guarantee silently void. The pin travels with the
+        bytes, so get() dropping it along with the rest of the entry when the
+        file is replaced is correct: new content is a new promise."""
+        names = [str(n) for n in names if str(n or "").strip()]
+        if not names:
+            return
+        key = os.path.abspath(path)
+        try:
+            size = os.path.getsize(key)
+            mtime = os.path.getmtime(key)
+        except OSError:
+            return
+        with self._lock:
+            e = self._data.get(key)
+            if not e or e.get("size") != size or e.get("mtime") != mtime:
+                e = {"sent": [], "size": size, "mtime": mtime}
+                self._data[key] = e
+            pinned = e.setdefault("pin", [])
+            for n in names:
+                if n not in pinned:
+                    pinned.append(n)
+            self._dirty = True
 
     def put(self, path: str, entry: dict) -> None:
         with self._lock:

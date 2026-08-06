@@ -1,0 +1,212 @@
+name: CI
+
+# Runs the whole test suite — including the ones that bind real sockets and
+# drive real pynetdicom associations — on every push and pull request.
+#
+# desktop-build.yml only fires on tags and workflow_dispatch, which is right for
+# a packaging job but useless as a safety net: by the time you cut a tag, the
+# change that stopped an image from arriving is already weeks old. This workflow
+# is the net. It is intentionally cheap (~1 min of runner time per cell) so that
+# nobody is tempted to merge before it comes back.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+# A second push to the same ref makes the first run irrelevant. Cancelling keeps
+# the queue short, which is the only reason people actually wait for CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------ gate
+  # Cheap syntax gate. It runs first and everything else waits on it, so a typo
+  # in pacs/ or in the dashboard JS costs one 30-second Linux job instead of
+  # nine matrix cells that all fail with the same SyntaxError.
+  lint:
+    name: compile + syntax gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # -f forces a recompile so a stale __pycache__ can never mask a broken
+      # module, and -q keeps the log to the files that actually failed.
+      - name: Byte-compile the Python tree
+        run: python -m compileall -q -f pacs test_print.py tests
+
+      # node --check parses without executing, which is what we want: the
+      # dashboard JS is loaded by a browser, not by Node, so running it here
+      # would prove nothing. vendor/ is excluded on purpose — dcmjs and the
+      # lossless decoder are third-party bundles, and gating our CI on their
+      # syntax level just means a vendored upgrade breaks the build for a
+      # reason that has nothing to do with this project.
+      - name: Syntax-check the dashboard JS
+        run: |
+          found=0
+          while IFS= read -r -d '' f; do
+            found=$((found + 1))
+            node --check "$f" || exit 1
+          done < <(find pacs/web desktop -name '*.js' \
+                     -not -path '*/node_modules/*' \
+                     -not -path '*/vendor/*' -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no dashboard JS found — the glob is wrong, not the code"
+            exit 1
+          fi
+          echo "node --check passed on $found file(s)"
+
+  # ------------------------------------------------------------------ tests
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # One Python version failing must not hide the state of the other eight.
+      fail-fast: false
+      matrix:
+        # Linux carries the full version sweep because it is the cheapest runner
+        # and the one the container/systemd deployments actually use. macOS and
+        # Windows carry the floor and the ceiling only — they exist to catch
+        # path handling, socket teardown and line-ending problems, and those
+        # break the same way on every point release in between.
+        #
+        # The floor is 3.10 — the same floor README.md, BUILDING.md and
+        # CONTRIBUTING.md state — because pydicom and pynetdicom both declare
+        # Requires-Python >=3.10 and nothing below that can install the
+        # dependencies at all. Testing a version that provably cannot work
+        # would just be theatre, so the matrix starts where the docs do.
+        #
+        # macOS floors at 3.11 rather than 3.10 because macos-latest is arm64
+        # and setup-python's arm64 coverage below 3.11 is unreliable. The 3.10
+        # floor is still enforced on Linux and Windows, so it is covered — just
+        # not twice.
+        include:
+          - {os: ubuntu-latest, python: "3.10"}
+          - {os: ubuntu-latest, python: "3.11"}
+          - {os: ubuntu-latest, python: "3.12"}
+          - {os: ubuntu-latest, python: "3.13"}
+          - {os: ubuntu-latest, python: "3.14"}
+          - {os: macos-latest, python: "3.11"}
+          - {os: macos-latest, python: "3.14"}
+          - {os: windows-latest, python: "3.10"}
+          - {os: windows-latest, python: "3.14"}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # requirements.txt IS the install, and that is deliberate: it is the file
+      # the README tells a user to run, so it is the only version set worth
+      # proving green. CI installing its own hand-written list would test an
+      # environment nobody else has, and the last time the two were allowed to
+      # drift apart the manifest resolved a major version the code could not
+      # run on while CI stayed green throughout.
+      #
+      # pytest and pytest-timeout are added on top rather than added to the
+      # manifest: they are how CI runs the suite, not something a user needs in
+      # order to run the gateway. See pytest.ini for why there is no xdist.
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-timeout
+
+      # What actually got resolved, on the runner, for this cell. requirements.txt
+      # carries floors and no ceilings, so "green here" means green against
+      # whatever was newest that morning — and when a future release of pydicom
+      # or pynetdicom breaks something, this is the line in the log that says
+      # which version the break arrived with.
+      - name: Record the resolved dependency versions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from importlib.metadata import PackageNotFoundError, version
+
+          # Read the names out of the manifest rather than repeating them here,
+          # so a dependency added to requirements.txt cannot quietly go
+          # unreported by a list nobody remembered to update.
+          missing = 0
+          with open("requirements.txt", encoding="utf-8") as fh:
+              for raw in fh:
+                  line = raw.split("#", 1)[0].strip()
+                  if not line:
+                      continue
+                  if ";" in line:
+                      # An environment marker: pip is SUPPOSED to skip this one
+                      # on the platforms it does not select, so "not installed"
+                      # is not evidence of anything. Report it and move on.
+                      print(f"  {line}  (environment marker — not checked)")
+                      continue
+                  # maxsplit by keyword: passing it positionally is deprecated
+                  # from 3.13 on and would put a warning in every CI log.
+                  name = re.split(r"[<>=!~\[ ]", line, maxsplit=1)[0].strip()
+                  try:
+                      print(f"  {name:<12} {version(name)}")
+                  except PackageNotFoundError:
+                      # pip reported success on this file, so a miss here is a
+                      # broken install, not a missing optional extra.
+                      print(f"::error file=requirements.txt::{name} is declared in "
+                            f"requirements.txt but is not installed")
+                      missing += 1
+          raise SystemExit(1 if missing else 0)
+          PY
+
+      # The Q/R and Print suites stand up real SCPs on 127.0.0.1 and associate
+      # against them. Nothing is skipped or mocked on any of the three runners:
+      # loopback binds need no firewall exception on Linux, macOS or Windows,
+      # and a matrix that quietly skipped the DICOM tests on two thirds of its
+      # cells would be worse than having no matrix at all — it would report
+      # green for the exact code path this project exists to protect.
+      #
+      # pytest.ini supplies the paths, -ra and --tb=short; only the colour and
+      # the log capture are CI-specific.
+      - name: Run the suite
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -p no:cacheprovider --color=yes 2>&1 | tee pytest.log
+
+      # Puts the tail of the run on the workflow summary page, so a failure is
+      # readable without expanding a log and scrolling. ANSI is stripped because
+      # the summary is markdown, not a terminal — via python, not sed, because
+      # the macOS runner's BSD sed does not understand \x1b and would silently
+      # leave the escape codes in the summary.
+      - name: Summarise
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.os }} / Python ${{ matrix.python }} — ${{ job.status }}"
+            echo ""
+            echo '```'
+            if [ -f pytest.log ]; then
+              python -c "import re,sys;print(''.join(re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',l) for l in open('pytest.log',encoding='utf-8',errors='replace').readlines()[-30:]))"
+            else
+              echo "(the suite never started — see the dependency step)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

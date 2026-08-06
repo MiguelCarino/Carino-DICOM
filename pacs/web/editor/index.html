@@ -2864,7 +2864,10 @@ function elToString(el) {
   if (Array.isArray(v)) return v.map(x => {
     if (x == null) return '';
     if (typeof x === 'object' && x !== null) {
-      // PersonName stored as {Alphabetic, Ideographic, Phonetic}
+      // A naturalised PersonName — {Alphabetic, Ideographic, Phonetic}. dcmjs
+      // 0.29.8 never hands us one from DicomMessage.readFile (see parseByVR),
+      // but a study arriving through the PACS deep-link or a future bundle
+      // might, and a name shown as "[object Object]" is worse than useless.
       const parts = [x.Alphabetic || '', x.Ideographic, x.Phonetic].filter(c => c != null);
       return parts.join('=').replace(/=+$/, '');
     }
@@ -2878,14 +2881,21 @@ function parseByVR(vr, str) {
   switch (vr) {
     case 'US': case 'UL': case 'SS': case 'SL': case 'FL': case 'FD':
       return parts.map(x => { const n = Number(x); return Number.isFinite(n) ? n : 0; });
-    case 'PN':
-      return parts.map(s => {
-        const [a = '', i = '', p = ''] = s.split('=');
-        const obj = { Alphabetic: a };
-        if (i) obj.Ideographic = i;
-        if (p) obj.Phonetic = p;
-        return obj;
-      });
+    // PN is deliberately absent, and the absence is load-bearing. dcmjs 0.29.8's
+    // PersonName value representation reads a name with `readEncodedString` and
+    // inherits `writeBytes` from EncodedStringRepresentation — so on the raw dict
+    // that DicomMessage.readFile produces and DicomDict.write consumes, a PN
+    // value is a plain string on BOTH sides, component groups still joined by
+    // "=". The {Alphabetic, Ideographic, Phonetic} object belongs to the *other*
+    // dcmjs API, the naturalised dataset, and handing one to the writer makes it
+    // stringify to the literal "[object Object]".
+    //
+    // That mattered far beyond edited names: downloadRange() re-writes every tag
+    // in pendingEdits, and pendingEdits is seeded with the whole dataset at load
+    // — so building objects here destroyed PatientName, ReferringPhysicianName
+    // and every other PN tag on a plain open-and-save with nothing touched. Keep
+    // PN on the string path, and re-read dcmjs's PersonName class before any
+    // bundle refresh: read and write shapes are not symmetric in every version.
     default: return parts;
   }
 }
@@ -3346,12 +3356,19 @@ function applyWindowToFloats(raw, framePixels, wcVal, wwVal, mn, mx) {
   return out;
 }
 
-// Lazy-load the JPEG Lossless decoder (ES module — must use dynamic import)
-const JPEG_LOSSLESS_CDN = './vendor/lossless-min.js';
+// Lazy-load the JPEG Lossless decoder (ES module — must use dynamic import).
+// The path is same-origin and must stay that way: this editor ships inside
+// Carino PACS, which promises it makes no outbound connection the operator did
+// not configure, and runs on air-gapped hospital networks where a remote import
+// would leave the page working right up until someone opens a study. The
+// constant was called JPEG_LOSSLESS_CDN long after it stopped being one, and a
+// reviewer grepping for "CDN" duly reported the promise as broken — the name is
+// part of the claim, so it says what it now is.
+const JPEG_LOSSLESS_MODULE = './vendor/lossless-min.js';
 let _jpegLosslessDecoder = null;
 async function loadJpegLossless() {
   if (_jpegLosslessDecoder) return _jpegLosslessDecoder;
-  const mod = await import(JPEG_LOSSLESS_CDN);
+  const mod = await import(JPEG_LOSSLESS_MODULE);
   _jpegLosslessDecoder = mod.Decoder;
   return _jpegLosslessDecoder;
 }

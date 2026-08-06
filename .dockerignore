@@ -1,0 +1,84 @@
+# What must never reach a build context.
+#
+# The Dockerfile copies named paths rather than `COPY . .`, so this is a second
+# line of defence — but it is the line that matters, because the two worst
+# things in a developer's checkout are patient data and a local config, and both
+# are .gitignore'd (invisible to git, fully visible to docker build).
+
+# Real studies. A developer machine that has run the app has DICOM in these.
+#
+# Two layouts, and both need naming. The root-anchored paths are the desktop
+# layout (~/CarinoPACS or a checkout that has been run in place). /data/ is the
+# layout docker-compose.yml itself tells operators to create — and a pattern
+# anchored at the root never matches below it, so without this entry the whole
+# of ./data ships to the daemon and sits in its build cache.
+/received/
+/outgoing/
+/sent/
+/pending/
+/ris/
+/logs/
+/index.db
+/data/
+*.dcm
+
+# Machine-specific config: AE titles, destination hosts, and the dashboard
+# token. The file the image ships is config.example.json.
+/config.json
+*.pem
+*.key
+*.crt
+
+# The two places compose puts the dashboard token. .env is read by compose
+# itself, so it exists on exactly the machines that build this image.
+/secrets/
+.env
+
+# The app writes atomically — new content to `<name>.tmp.<pid>`, then rename.
+# A file that vanishes mid-COPY fails the build outright, so exclude the
+# window rather than lose builds to a race with a running instance.
+*.tmp
+*.tmp.*
+
+# Host virtualenv. Its interpreter is a copied symlink that does not work
+# anywhere else, and it would be the largest thing in the image.
+.venv/
+venv/
+env/
+
+# Host-architecture bytecode would shadow the container's.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Electron desktop shell and installer output — nothing to do with the server.
+desktop/
+/build/
+/dist/
+*.AppImage
+*.exe
+*.dmg
+
+# Host wrappers that assume a local venv; misleading inside a container.
+run.sh
+run.ps1
+setup.sh
+setup.ps1
+reset.sh
+test_print.py
+
+# Repo furniture
+.git/
+.github/
+.gitignore
+.claude/
+docs/
+tests/
+BUILDING.md
+CHANGELOG.md
+README.md
+docker-compose*.yml
+*.log
+.DS_Store
+Thumbs.db

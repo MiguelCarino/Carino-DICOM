@@ -34,16 +34,36 @@
     const res = await fetch(url, opts);
     let body = {};
     try { body = await res.json(); } catch (e) { /* empty */ }
-    if (!res.ok) throw new Error(body.error || res.statusText);
+    if (!res.ok) {
+      const err = new Error(body.error || body.message || res.statusText);
+      err.status = res.status;
+      // auth.required is the flag to test, not a bare ok:false — every other
+      // error in this API is also ok:false, and "wrong input" and "you are not
+      // signed in" have nothing in common as recoveries. See pacs/auth.py.
+      err.auth = (body.auth && body.auth.required) ? body.auth : null;
+      // Raise the prompt HERE so every caller inherits one recovery path
+      // instead of fifty of them, and so a poll that lands after a service
+      // restart re-prompts instead of failing silently forever.
+      if (err.auth) onAuthRejected(err.auth);
+      throw err;
+    }
     return body;
   };
+  // Every write carries X-Carino: 1 — including POST /api/login, which is a
+  // write like any other. Without it web.py's cross-site guard answers 403
+  // before the credential is ever looked at, and the operator is told the token
+  // is wrong when it is not.
   const post = (url, data) =>
     api(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Carino": "1" }, body: JSON.stringify(data || {}) });
 
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
-  // so an omitted key would otherwise silently reset.
+  // so an omitted key would otherwise silently reset. EVERY section the engine
+  // knows about needs one: a section this file forgets is not left alone, it is
+  // reset to the defaults — which for routing means every forwarding rule is
+  // deleted, and for dicomweb/qr means the service switches itself off.
   let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {}, loadedEmg = {};
+  let loadedQr = {}, loadedDicomweb = {}, loadedRouting = {}, loadedIndex = {}, loadedDeid = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
   // carrying it through a Save, apply_config's merge over DEFAULTS would reset it
@@ -54,10 +74,192 @@
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
   let lastStatus = null;                             // newest /api/status, for the panels that render on demand
 
+  /* ── Authentication ──────────────────────────────────────────────
+     web.auth_token is mandatory for every non-loopback bind and is generated on
+     first boot in a container, so "the dashboard needs a token" is the normal
+     case for anything that is not this machine. The engine serves the shell to
+     anyone — a login form the browser was never allowed to download is an
+     outage — and 401s every /api route until a credential arrives, so this file
+     owns the whole client half:
+
+       * GET /api/auth (public) decides, before anything else is fetched,
+         whether to render the dashboard or the token prompt;
+       * POST /api/login exchanges the token for an HttpOnly SameSite=Strict
+         cookie, so the token itself never lives in JS where an injected script
+         or an extension could read it;
+       * that cookie is per-process and in memory, so a service restart signs
+         every browser out. That is expected, not an error, and it comes back as
+         a plain 401 — handled by re-raising this prompt where the operator was;
+       * while the prompt is up the pollers are STOPPED, so a closed door is
+         knocked on once, not thirty times a minute.  */
+  let authRequired = false;      // the engine wants a token at all
+  let authed = false;            // this browser is holding a good credential
+  let gateOpen = false;
+  let booted = false;            // has the dashboard ever been started in this page-load?
+  let retryTimer = null;         // rate-limit countdown
+
+  function setAuthMsg(msg, isNote) {
+    const el = $("authMsg");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.hidden = !msg;
+    el.classList.toggle("note", !!isNote);
+  }
+
+  function showAuthGate() {
+    const gate = $("authGate");
+    if (!gate) return;
+    gateOpen = true;
+    gate.hidden = false;
+    const input = $("authToken");
+    if (input) input.focus();
+  }
+
+  function hideAuthGate() {
+    const gate = $("authGate");
+    gateOpen = false;
+    if (gate) gate.hidden = true;
+    setAuthMsg("", false);
+    clearInterval(retryTimer);
+    retryTimer = null;
+    const btn = $("authLogin");
+    if (btn) btn.disabled = false;
+  }
+
+  // One 401 ends the session for every request in flight, so this collapses
+  // them into a single prompt rather than a stack of toasts.
+  function onAuthRejected(a) {
+    const wasAuthed = authed;
+    authRequired = true;
+    authed = false;
+    stopPollers();
+    showAuthGate();
+    if (a.reason === "rate_limited") { startRetryCountdown(a.retry_after); return; }
+    if (a.reason === "expired") {
+      setAuthMsg(T("Your session has expired — enter the token again."), true);
+    } else if (wasAuthed) {
+      // A restarted service throws its session secret away, so a perfectly
+      // good cookie comes back "invalid". Telling the operator their token is
+      // wrong there would send them hunting for a problem that does not exist.
+      setAuthMsg(T("This browser is no longer signed in — the service was probably restarted. Enter the token again."), true);
+    }
+  }
+
+  // 429 carries the seconds to wait; showing it beats a generic failure the
+  // operator answers by hammering the button and extending the block.
+  function startRetryCountdown(secs) {
+    let n = Math.max(0, parseInt(secs, 10) || 0);
+    const btn = $("authLogin");
+    clearInterval(retryTimer);
+    retryTimer = null;
+    if (!n) { if (btn) btn.disabled = false; return; }
+    if (btn) btn.disabled = true;
+    const tick = () => {
+      if (n <= 0) {
+        clearInterval(retryTimer);
+        retryTimer = null;
+        if (btn) btn.disabled = false;
+        setAuthMsg(T("You can try again now."), true);
+        return;
+      }
+      setAuthMsg(TF("Too many failed attempts — try again in {n}s.", { n }), false);
+      n -= 1;
+    };
+    tick();
+    retryTimer = setInterval(tick, 1000);
+  }
+
+  async function doLogin(btn) {
+    const input = $("authToken");
+    const token = ((input && input.value) || "").trim();
+    if (!token) { setAuthMsg(T("Enter the token to continue."), true); if (input) input.focus(); return; }
+    btn.disabled = true;
+    setAuthMsg(T("Checking…"), true);
+    try {
+      await post("/api/login", { token });
+      // The token is dropped the instant the cookie exists: it is not kept in a
+      // variable, a field or storage anywhere in this file.
+      if (input) input.value = "";
+      authed = true;
+      hideAuthGate();
+      await startApp();
+    } catch (e) {
+      const a = e.auth || {};
+      if (a.reason === "rate_limited") startRetryCountdown(a.retry_after);
+      else if (e.status === 403) setAuthMsg(T("The sign-in request was rejected as cross-site — reload the page and try again."), false);
+      else if (e.status === 401) setAuthMsg(T("That token is not correct."), false);
+      else setAuthMsg(e.message, false);
+    } finally {
+      if (!retryTimer) btn.disabled = false;
+    }
+  }
+
+  async function doLogout() {
+    // The cookie is cleared server-side; if the request itself fails the
+    // browser is signed out of this page all the same, so the prompt goes up
+    // either way rather than leaving a half-signed-out dashboard polling.
+    try { await post("/api/logout", {}); } catch (e) { /* prompt anyway */ }
+    authed = false;
+    stopPollers();
+    showAuthGate();
+    setAuthMsg(T("Signed out."), true);
+  }
+
+  function startPollers() {
+    if (!statusTimer) statusTimer = setInterval(pollStatus, 2000);
+    if (!logTimer) logTimer = setInterval(pollLog, 1500);
+  }
+  function stopPollers() {
+    if (statusTimer) clearInterval(statusTimer);
+    if (logTimer) clearInterval(logTimer);
+    statusTimer = null;
+    logTimer = null;
+  }
+
+  // Everything that must not run before there is a credential lives here.
+  async function startApp() {
+    if (gateOpen) return;
+    await loadConfig().catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false));
+    if (!booted) {
+      booted = true;
+      openInitialPanel();
+    } else if (loaders[activePanel]) {
+      // Coming back from a 401: the operator's place was never lost, so the
+      // panel they were on is what gets refreshed.
+      loaders[activePanel]();
+    }
+    pollStatus();
+    pollLog();
+    startPollers();
+  }
+
+  async function boot() {
+    let st;
+    try {
+      st = await api("/api/auth");
+    } catch (e) {
+      // /api/auth is public, so a failure here is the engine being unreachable
+      // — asking for a token would be the wrong instruction entirely.
+      showAuthGate();
+      setAuthMsg(TF("Cannot reach the service: {err}", { err: e.message }), false);
+      return;
+    }
+    const a = st.auth || {};
+    authRequired = !!a.required;
+    authed = !!a.authenticated;
+    if (authRequired && !authed) { showAuthGate(); return; }
+    hideAuthGate();
+    await startApp();
+  }
+
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
     const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
+    const qr = s.qr || {};
     lastStatus = s;
+    // The engine reports whether it wants a token on every status payload, so a
+    // token set from another browser (or removed) is picked up without a reload.
+    if (s.auth) authRequired = !!s.auth.required;
     mountServiceChips();      // self-heals if the navbar mounted after us
 
     // This machine's network identity (what remote nodes send to).
@@ -119,12 +321,35 @@
       }
     }
 
+    // The config in force, judged. Config.load() does not validate on purpose —
+    // "a PACS that refuses to start is a PACS the operator cannot fix" — and the
+    // whole price of that decision is meant to be paid by SAYING so: the engine
+    // validates what it loaded and publishes the verdict as status.config_problem.
+    // Nothing rendered it. One log line scrolled past at boot and from then on
+    // the screen showed a healthy PACS running a file it would refuse to save,
+    // which is not a cosmetic gap — deid.prefix as a JSON number is exactly such
+    // a file, and it holds every de-identified forward on this machine.
+    renderConfigProblem(s.config_problem || "", s.config_path || "");
+
     setDot($("rxDot"), rx.running);
     setAtomic("rxAet", rx.aet);
     setAtomic("rxAddr", `${rx.bind}:${rx.port}`);
     setPath("rxDir", rx.storage_dir);
     $("rxCount").textContent = rx.received;
-    $("rxErr").textContent = rx.errors;
+    // `errors` is a store that failed; `refused` is one this receiver turned
+    // away before writing a byte, because the volume was below the free-space
+    // floor. The engine has counted refusals since the floor existed and nothing
+    // drew the number: the low-disk banner covers only what is true RIGHT NOW,
+    // so a burst that stopped when somebody freed space left the card reading
+    // "Received 0, Errors 0" over studies that never arrived. Beside the errors
+    // rather than in a cell of its own — the markup is not this lane's to change
+    // — and a marker plus the count keeps a numeric cell numeric in every
+    // language, with the sentence in the tooltip.
+    const rxErr = $("rxErr");
+    rxErr.textContent = rx.refused ? rx.errors + " ⛔" + rx.refused : rx.errors;
+    rxErr.title = rx.refused
+      ? TF("{n} incoming studies were REFUSED for low disk space and never arrived. Nothing retries them from this side — the sender has to send them again once there is space.", { n: rx.refused })
+      : "";
     $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? T("mTLS") : "TLS") : T("plaintext");
     setToggle($("rxToggle"), rx.running);
     setChip("rx", rx.running);
@@ -168,7 +393,26 @@
     setToggle($("mwToggle"), mw.running);
     setChip("mw", mw.running);
 
+    setDot($("qrDot"), qr.running);
+    setAtomic("qrAet", qr.aet || "—");
+    setAtomic("qrAddr", `${qr.bind || "0.0.0.0"}:${qr.port || "—"}`);
+    $("qrQueries").textContent = qr.queries || 0;
+    $("qrMatches").textContent = qr.matches || 0;
+    const qrSent = $("qrSent");
+    qrSent.textContent = qr.sent || 0;
+    // C-MOVE and C-GET both end in instances sent, but they fail in different
+    // places; the breakdown rides in the tooltip rather than costing two cells.
+    qrSent.title = TF("{moves} C-MOVE · {gets} C-GET", { moves: qr.moves || 0, gets: qr.gets || 0 });
+    $("qrFailed").textContent = qr.move_failures || 0;
+    $("qrErr").textContent = qr.errors || 0;
+    $("qrTls").textContent = qr.tls ? (qr.tls_mutual ? T("mTLS") : "TLS") : T("plaintext");
+    setToggle($("qrToggle"), qr.running);
+    setChip("qr", qr.running);
+
     renderEmergency(s.emergency || {}, rs, mw);
+    renderIndex(s.index || {});
+    renderDicomweb(s.dicomweb || {});
+    renderDeidState(s.deid || {});
 
     // Enrolled and running are two different facts. The border says "this PC is
     // supposed to run it" (the persisted flag), the dot says "the socket is bound
@@ -184,6 +428,7 @@
     // operator who unticked it looking at a running service with no highlight
     // and nothing anywhere saying why.
     setCardState("mwlCard", mw.enabled || mw.wanted, mw.running);
+    setCardState("qrCard", qr.enabled, qr.running);
 
     if (setupActive) {
       // Entered before the first status landed (boot #setup): seed now.
@@ -274,6 +519,211 @@
       pollStatus();
     } catch (e) { flashNote(e.message, false); }
   }
+  /* ── Instance index, DICOMweb, de-identification (Settings readouts) ────
+     All three are drawn from the status poll that is already running, like the
+     Overview panel: no extra request, and nothing is drawn when the markup is
+     not there (a packaged build could ship without one of these fieldsets). */
+  function fmtSize(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(0) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+
+  // All three are drawn from the 2s status poll, so they skip the DOM work
+  // while Settings is closed — same rule as the Overview panel — and showPanel
+  // repaints them from the last poll when it opens.
+  const settingsOpen = () => { const p = $("dlgSettings"); return !!p && !p.hidden; };
+
+  function renderIndex(ix) {
+    if (!settingsOpen()) return;
+    const txt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    txt("idxInstances", ix.instances != null ? ix.instances : "—");
+    txt("idxStudies", ix.studies != null ? ix.studies : "—");
+    txt("idxPatients", ix.patients != null ? ix.patients : "—");
+    txt("idxQueued", ix.queued != null ? ix.queued : "—");
+    // last_write is when the index last actually wrote a row — the honest
+    // answer to "is it keeping up", which a rescan timestamp alone is not.
+    txt("idxLast", ix.last_write ? fmtLogTs(ix.last_write * 1000) : T("never"));
+    setPath("idxDbPath", ix.path ? ix.path + (ix.db_bytes ? "  ·  " + fmtSize(ix.db_bytes) : "") : "—");
+    const note = $("idxNote");
+    if (note) {
+      // Three different states, three different sentences: a disabled index is
+      // not an idle one, and a running rescan is not a finished one.
+      // `rebuilt` is the fourth, and it was published and drawn nowhere: the
+      // schema moved, the table was dropped EMPTY on purpose (everything in it
+      // is re-derivable from the files) and the engine logged "a rescan is
+      // needed" once, at boot. Until that rescan runs, Q/R and DICOMweb answer
+      // from an empty index — a C-FIND for a study that is on this disk comes
+      // back "no such study" — and this panel showed 0 instances with no
+      // sentence next to it. Gated on the index still being empty so it clears
+      // itself the moment the rescan lands, rather than standing for the life of
+      // the process.
+      note.textContent = !ix.enabled ? T("Index off — Query/Retrieve and DICOMweb have nothing to answer from.")
+        : ix.scanning ? T("Rescanning the storage folders…")
+        : (ix.rebuilt && !ix.instances)
+          ? T("The index was rebuilt empty after a version change and nothing has been scanned into it since — press Rescan now, or Query/Retrieve and DICOMweb keep answering as though this PACS held nothing.")
+        : ix.errors ? TN(ix.errors, "{n} index errors — see the log")
+        : "";
+      note.classList.toggle("bad", !ix.enabled || !!ix.errors || !!(ix.rebuilt && !ix.instances));
+    }
+    const btn = $("idxRescanNow");
+    if (btn) btn.disabled = !ix.enabled || !!ix.scanning;
+  }
+
+  function renderDicomweb(dw) {
+    if (!settingsOpen()) return;
+    const url = $("dwUrl");
+    if (url) {
+      // Absolute, because the point of this field is that it is pasted into a
+      // viewer running somewhere else.
+      let abs = dw.url || "/dicom-web";
+      try { abs = new URL(abs, location.origin).href; } catch (e) { /* keep it relative */ }
+      url.value = abs;
+      url.title = abs;
+    }
+    const st = $("dwState");
+    if (!st) return;
+    st.textContent = !dw.enabled
+      ? T("DICOMweb is off — a viewer pointed at that URL gets 503.")
+      : TF("On · {q} queries · {r} retrieved · {s} stored", { q: dw.queries || 0, r: dw.retrieved || 0, s: dw.stored || 0 })
+        + (dw.allow_stow ? "" : "  ·  " + T("read-only (STOW off)"));
+    st.classList.toggle("warn-note", !dw.enabled);
+  }
+
+  /* The standing "this config would be refused" banner, beside the low-disk one
+     at the top of the page: it is a fact about the whole install, not about the
+     panel that happens to be open, and every panel's numbers are being produced
+     by that config. Created here rather than in index.html because the markup is
+     not this lane's to edit; it is inserted once and then only updated. */
+  let cfgWarnEl = null;
+  function renderConfigProblem(problem, path) {
+    const anchor = $("diskWarn");
+    if (!anchor || !anchor.parentNode) return;
+    if (!cfgWarnEl) {
+      cfgWarnEl = document.createElement("div");
+      cfgWarnEl.className = "cfg-warn";
+      cfgWarnEl.id = "cfgWarn";
+      cfgWarnEl.hidden = true;
+      anchor.parentNode.insertBefore(cfgWarnEl, anchor.nextSibling);
+    }
+    cfgWarnEl.hidden = !problem;
+    // The engine's own sentence, in the engine's language, inside a frame that
+    // says what it means — the same division every other engine message on this
+    // dashboard keeps.
+    cfgWarnEl.textContent = problem
+      ? TF("⚠ This configuration would be REFUSED if it were saved from this dashboard, and it is being used exactly as it stands: {problem} Fix it in Settings — no Save will go through until you do — or in the file at {path}.",
+           { problem, path })
+      : "";
+  }
+
+  function renderDeidState(dd) {
+    if (!settingsOpen()) return;
+    const st = $("deidState");
+    if (!st) return;
+    const dests = dd.destinations || [];
+    // Both halves come from the engine's settled routing answer (status.deid),
+    // never from the rules in the form: `destinations` are the nodes that WILL
+    // be scrubbed for, `held` the nodes a rule asks to scrub while nothing can
+    // perform it — those are not sent to at all.
+    const held = dd.held || [];
+    // WHICH of the two ways it cannot be performed, straight from the engine.
+    // The sentence below used to assert the first one over both, which made the
+    // panel's only instruction ("turn a profile on") a no-op at the sites in the
+    // second state — their profile IS on — leaving them the other half of the
+    // sentence, "take de-identify off the rule", as the one thing left to try.
+    // That releases the studies by forwarding them IDENTIFIED to the node a rule
+    // exists to scrub for. Wrong advice on this panel is not a wrong label; it
+    // is the disclosure itself, arrived at by an operator doing as they were told.
+    const cause = dd.hold_cause || "";
+    // Which nodes a rule would actually scrub for is the one thing worth
+    // checking before a research forward goes out; "nothing" is also an answer.
+    st.textContent = !held.length
+      ? (dests.length
+        ? TF("Rules de-identify for: {dests}", { dests: dests.join(", ") })
+        : T("No routing rule asks for de-identification, so nothing is being scrubbed."))
+      : cause === "no-deidentifier"
+        ? TF("Rules ask to de-identify for {dests}. The profile is on, but no de-identifier can be built from these settings, so nothing can be scrubbed and those studies are HELD in the outgoing folder instead of being sent. Repair the de-identification settings below: turning the profile off does NOT release them, and taking de-identify off the rule releases them identified.", { dests: held.join(", ") })
+        : cause === "profile-off"
+          ? TF("Rules ask to de-identify for {dests}, but the de-identification profile is off. Nothing can be scrubbed, so those studies are HELD in the outgoing folder instead of being sent. Turn a profile on, or take de-identify off the rule.", { dests: held.join(", ") })
+          // No cause the engine will name: say what is true and where the answer
+          // is, rather than picking one of the two and being wrong half the time.
+          : TF("Rules ask to de-identify for {dests}, and nothing can be scrubbed, so those studies are HELD in the outgoing folder instead of being sent. Check the profile below: if it is off, turn it on; if it is on, nothing could be built to scrub with and the log says why.", { dests: held.join(", ") });
+    // The colour used to be keyed on "no rule scrubs while a profile is on",
+    // which is the HARMLESS state — a profile configured ahead of the rule that
+    // will use it — and left the dangerous one (rules scrubbing, profile off,
+    // deliveries held) in the ordinary muted note colour. Loud belongs on the
+    // state that stops studies arriving, and it is red rather than amber: an
+    // operator has to act before anything moves.
+    st.classList.toggle("bad-note", !!held.length);
+    st.classList.remove("warn-note");
+    // deid.secret_set is the whole of what the engine will say about the site
+    // key (the key itself is redacted from every payload), and nothing rendered
+    // it — so an install with no key looked exactly like one with a key while
+    // its pseudonyms were a pure function of the input, reproducible by anyone
+    // holding this software. Only shown when a profile is actually on: with the
+    // profile off nothing is scrubbed and the key is not a fact about today.
+    if ((dd.profile || "off") !== "off") {
+      const key = document.createElement("span");
+      key.className = "deid-key" + (dd.secret_set ? "" : " warn");
+      key.textContent = dd.secret_set
+        ? T("A site key is set — pseudonyms and date shifts cannot be reproduced without it.")
+        : T("No site key is set — pseudonyms are derived from the study alone, so anyone with this software can reverse them. Set one with POST /api/deid/secret.");
+      st.appendChild(key);
+    }
+    // The other door. `retrieval_raw` is the engine's list of retrieval services
+    // that are OPEN right now, and none of them scrubs: de-identify-on-forward
+    // happens in the sender, on a temp copy, on the way to a destination a rule
+    // names — C-MOVE, C-GET and WADO-RS all serve the stored file exactly as it
+    // was received. That is a defensible design and a dangerous thing to leave
+    // unsaid three lines under "Rules de-identify for: Research", because the
+    // operator reading it is the one deciding whether to let Research pull.
+    // Only while a scrub is actually configured: with no rule asking for one
+    // there is no promise for a retrieval to undercut, and the line would be
+    // noise on every install that never de-identifies anything.
+    const doors = dd.retrieval_raw || [];
+    if (doors.length && (dests.length || held.length)) {
+      const via = document.createElement("span");
+      via.className = "deid-key warn";
+      // Protocol identifiers, deliberately untranslated — they are what an
+      // operator matches against the other node's configuration.
+      const label = { qr: "Q/R (C-MOVE · C-GET)", dicomweb: "DICOMweb (WADO-RS)" };
+      via.textContent = TF("De-identification applies to FORWARDING only. {doors} are open, and they serve stored studies exactly as they were received — a node allowed to pull from this PACS gets the identified originals whatever the rules scrub for on the way out.",
+                           { doors: doors.map((d) => label[d] || d).join(" · ") });
+      st.appendChild(via);
+    }
+    // Sends that were in flight when these settings moved. The engine keeps the
+    // list (deid.superseded_sends) precisely because such a send finishes under
+    // the settings it started with — so the answer ABOVE is already the new one
+    // while part of a study is still being withheld under the old — and nothing
+    // rendered it, which left the operator with a study that stopped halfway and
+    // a panel with no explanation for it.
+    const stale = dd.superseded_sends || [];
+    if (stale.length) {
+      const sup = document.createElement("span");
+      sup.className = "deid-key warn";
+      sup.textContent = TF("The de-identification settings changed while these studies were being sent, so the rest of each was held rather than sent under settings you have already replaced: {studies}. Press Send again on each to deliver it under the current ones.",
+                           { studies: stale.map((r) => r.study).join(", ") });
+      st.appendChild(sup);
+    }
+  }
+
+  async function rescanIndex(btn) {
+    btn.disabled = true;
+    try {
+      const r = await post("/api/index/rescan", {});
+      flashNote(r.message || T("Rescanning…"), r.ok !== false);
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally {
+      // The poll re-disables it while the walk runs; leaving it disabled here
+      // would strand the button if the request itself failed.
+      btn.disabled = false;
+      pollStatus();
+    }
+  }
+
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
     btn.textContent = on ? T("Stop") : T("Start");
@@ -296,6 +746,7 @@
     { svc: "printer",  card: "printerCard",  pick: "pickPx", port: "portPx", label: "Print receiver", block: "printer" },
     { svc: "ris",      card: "risCard",      pick: "pickRs", port: "portRs", label: "Emergency RIS",  block: "ris" },
     { svc: "mwl",      card: "mwlCard",      pick: "pickMw", port: "portMw", label: "Worklist",       block: "mwl" },
+    { svc: "qr",       card: "qrCard",       pick: "pickQr", port: "portQr", label: "Query/Retrieve", block: "qr" },
   ];
   // setupDismissed is deliberately in memory only: "Not now" must silence the 2s
   // poll for this page-load, but a reload should offer the chooser again while
@@ -482,9 +933,14 @@
     if (!panel || panel.hidden) return;         // badges keep updating; the DOM work is skipped
     const txt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
     const rx = s.receiver || {}, wx = s.watcher || {}, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
+    const qr = s.qr || {};
     const setup = s.setup || {};
 
-    txt("ovServices", [rx, wx, px, rs, mw].filter((b) => b.running).length + "/5");
+    // Six services now: the denominator is the enrollable set (SETUP_CARDS), so
+    // adding one here without adding it there would print a tile that can never
+    // reach its own total.
+    const services = [rx, wx, px, rs, mw, qr];
+    txt("ovServices", services.filter((b) => b.running).length + "/" + services.length);
     txt("ovReceived", rx.received || 0);
     txt("ovSent", wx.sent || 0);
     txt("ovStuck", s.stuck || 0);
@@ -659,6 +1115,9 @@
     { key: "px", label: "Printer",   toggle: "pxToggle" },
     { key: "rs", label: "RIS",       toggle: "rsToggle" },
     { key: "mw", label: "Worklist",  toggle: "mwToggle" },
+    // "Q/R" is the protocol's own abbreviation and stays untranslated in every
+    // locale — the chip is ~10 characters wide and the Russian noun is not.
+    { key: "qr", label: "Q/R",       toggle: "qrToggle" },
   ];
   function mountServiceChips() {
     const nav = document.getElementById("carinoNav");
@@ -724,6 +1183,7 @@
     chip.classList.add("tx");
   }
   async function pollStatus() {
+    if (gateOpen) return;          // nothing to poll for while the prompt is up
     try { renderStatus(await api("/api/status")); } catch (e) { /* keep last */ }
   }
 
@@ -763,11 +1223,12 @@
     if (msg) msg.textContent = lastTick.message;
   }
   async function pollLog() {
+    if (gateOpen) return;
     try {
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false, sawMwl = false;
+      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false, sawMwl = false, sawQr = false;
       for (const e of data.entries) {
         logSeq = e.seq;
         if (e.kind === "store") sawStore = true;   // a file was received
@@ -775,6 +1236,7 @@
         if (e.kind === "print") sawPrint = true;    // a print job / event
         if (e.kind === "ris") sawRis = true;        // an HL7 order / match event
         if (e.kind === "mwl") sawMwl = true;        // a worklist query
+        if (e.kind === "qr") sawQr = true;          // a C-FIND / C-MOVE / C-GET
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -810,6 +1272,7 @@
         if (sawPrint) { blink($("pxDot")); pulseChip("px"); }
         if (sawRis) { blink($("rsDot")); pulseChip("rs"); }
         if (sawMwl) { blink($("mwDot")); pulseChip("mw"); }
+        if (sawQr) { blink($("qrDot")); pulseChip("qr"); }
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -824,9 +1287,14 @@
     loadedRis = c.ris || {};
     loadedMwl = c.mwl || {};
     loadedEmg = c.emergency || {};
-    loadedWeb = c.web || loadedWeb;
+    loadedQr = c.qr || {};
+    loadedDicomweb = c.dicomweb || {};
+    loadedRouting = c.routing || {};
+    loadedIndex = c.index || {};
+    loadedDeid = c.deid || {};
     loadedSetup = c.setup_completed || "";
     loadedLogsDir = c.logs_dir || "";
+    readWebSection(c.web || {});
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
     $("scpBind").value = c.scp.bind;
@@ -885,8 +1353,76 @@
     $("emgRecovery").value = eg.recovery_successes != null ? eg.recovery_successes : 2;
     $("emgAuto").checked = !!eg.auto_activate;
     $("emgHold").checked = eg.hold_and_forward !== false;
+    const qc = c.qr || {};
+    $("qrEnabled").checked = !!qc.enabled;
+    $("qrAetIn").value = qc.aet || "CARINOQR";
+    $("qrBind").value = qc.bind || "0.0.0.0";
+    $("qrPort").value = qc.port != null ? qc.port : 11115;
+    $("qrAllowed").value = (qc.allowed_aets || []).join(", ");
+    $("qrTlsIn").checked = !!qc.tls;
+    $("qrTlsCert").value = qc.tls_cert || "";
+    $("qrTlsKey").value = qc.tls_key || "";
+    $("qrTlsCa").value = qc.tls_ca || "";
+    // The C-MOVE map is carried through a save untouched (no form control), so
+    // the only thing owed to the operator here is what it currently resolves.
+    const moves = Object.keys(qc.move_destinations || {});
+    $("qrMoveDests").textContent = moves.length
+      ? TF("C-MOVE destinations resolved by AE title: {aets}", { aets: moves.join(", ") })
+      : T("No C-MOVE destinations configured — a C-MOVE naming an unknown AE title is refused.");
+    const dw = c.dicomweb || {};
+    $("dwEnabled").checked = !!dw.enabled;
+    $("dwStow").checked = dw.allow_stow !== false;
+    $("dwCors").value = (dw.cors_origins || []).join(", ");
+    const ic = c.index || {};
+    $("idxEnabled").checked = ic.enabled !== false;
+    $("idxPath").value = ic.path || "./index.db";
+    $("idxRescan").checked = ic.rescan_on_start !== false;
+    const dd = c.deid || {};
+    $("deidProfile").value = ["off", "basic", "strict"].indexOf(dd.profile) >= 0 ? dd.profile : "basic";
+    $("deidKeepPrivate").checked = !!dd.keep_private;
+    $("deidKeepDates").checked = !!dd.keep_dates;
+    $("deidPrefix").value = dd.prefix || "ANON";
     renderDests(c.destinations || []);
+    // After the destination table, so a rule's checkboxes are built from the
+    // node list that is actually on screen.
+    $("rtEnabled").checked = !!(c.routing && c.routing.enabled);
+    renderRules((c.routing && c.routing.rules) || []);
+    renderAuthState();
     reflowActive();
+  }
+
+  /* ── web.auth_token is not a config field the dashboard can write ──
+     GET /api/config redacts it (it answers with web.auth_token_set, a boolean)
+     and POST /api/config refuses a token outright — the secret leaves the
+     server only in the reply to the call that mints it. So a Save NEVER carries
+     one: the snapshot drops the key and the read-only mirror beside it, and the
+     token changes only through applyToken() below.
+     Sending a redaction back as if it were the value would replace a working
+     credential with punctuation and lock the operator out of their own PACS, so
+     the rule is the narrow one: post it only if it is plainly the token itself,
+     which after the redaction landed is never. */
+  const AUTH_FLAG_KEYS = ["auth_token_set", "auth_token_present", "has_auth_token", "auth_token_redacted"];
+  const REDACTED_RE = /^(?:[*•·●]{3,}|\(set\)|<redacted>|redacted)$/i;
+  let tokenSet = false;        // does the engine hold a token at all?
+
+  function readWebSection(w) {
+    loadedWeb = { ...w };
+    delete loadedWeb.auth_token;
+    AUTH_FLAG_KEYS.forEach((k) => delete loadedWeb[k]);
+    const raw = w.auth_token;
+    // The rule is one line: post the token back ONLY when what we were handed
+    // is plainly the token itself. Anything else — absent, empty, a mask, a
+    // boolean — is left out, and the engine keeps what it has. That does not
+    // depend on recognising the redaction's shape, which is the part that would
+    // rot: a flag we failed to recognise would otherwise read as "no token" and
+    // a Save would wipe a working credential.
+    const real = typeof raw === "string" && raw.trim() !== "" && !REDACTED_RE.test(raw.trim());
+    if (real) loadedWeb.auth_token = raw;
+    // Whether one EXISTS is a different question, and the engine answers it
+    // directly (GET /api/auth, and every /api/status after it), so the state
+    // line never has to infer it from a value it cannot see.
+    const flag = AUTH_FLAG_KEYS.filter((k) => k in w)[0];
+    tokenSet = flag !== undefined ? !!w[flag] : (real || authRequired);
   }
 
   function renderDests(list) {
@@ -924,6 +1460,8 @@
       }))
       .filter((d) => d.host && d.aet && d.port);
   }
+
+  const csv = (id) => $(id).value.split(",").map((s) => s.trim()).filter(Boolean);
 
   function collectConfig() {
     const allowed = $("scpAllowed").value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -1001,8 +1539,46 @@
         auto_close: $("risAutoClose").checked,
         allowed_hosts: $("risHosts").value.split(",").map((s) => s.trim()).filter(Boolean),
       },
+      qr: {
+        ...loadedQr,
+        enabled: $("qrEnabled").checked,
+        aet: $("qrAetIn").value.trim() || "CARINOQR",
+        bind: $("qrBind").value.trim() || "0.0.0.0",
+        port: parseInt($("qrPort").value, 10),
+        allowed_aets: csv("qrAllowed"),
+        tls: $("qrTlsIn").checked,
+        tls_cert: $("qrTlsCert").value.trim(),
+        tls_key: $("qrTlsKey").value.trim(),
+        tls_ca: $("qrTlsCa").value.trim(),
+      },
+      dicomweb: {
+        ...loadedDicomweb,
+        enabled: $("dwEnabled").checked,
+        allow_stow: $("dwStow").checked,
+        cors_origins: csv("dwCors"),
+      },
+      index: {
+        ...loadedIndex,
+        enabled: $("idxEnabled").checked,
+        path: $("idxPath").value.trim() || "./index.db",
+        rescan_on_start: $("idxRescan").checked,
+      },
+      // The rules come off the panel, not off the snapshot: the panel is
+      // rendered on every config load, so it is always the current truth.
+      routing: {
+        ...loadedRouting,
+        enabled: $("rtEnabled").checked,
+        rules: collectRules(),
+      },
+      deid: {
+        ...loadedDeid,
+        profile: $("deidProfile").value,
+        keep_private: $("deidKeepPrivate").checked,
+        keep_dates: $("deidKeepDates").checked,
+        prefix: $("deidPrefix").value.trim() || "ANON",
+      },
       destinations: collectDests(),
-      web: { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() },
+      web: webSection(),
       // Top-level, no form input: carried through so a Save cannot wipe the
       // onboarding stamp and re-offer the chooser forever.
       setup_completed: loadedSetup,
@@ -1030,12 +1606,152 @@
   }
 
   function flashNote(msg, ok) {
+    // While the token prompt is up it owns the screen and its own message line.
+    // Anything still in flight when a 401 lands would otherwise pile a stack of
+    // "authentication required" toasts behind a modal nobody can read them
+    // through, once per poll.
+    if (gateOpen) return;
     const t = $("toast");
     t.textContent = msg;
     t.className = "toast " + (ok ? "ok" : "bad");
     t.hidden = false;
     clearTimeout(flashNote._t);
     flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  function webSection() {
+    return { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() };
+  }
+
+  /* ── Access token: state line and the rotation affordance ─────── */
+  function renderAuthState() {
+    const el = $("authState");
+    if (!el) return;
+    el.textContent = tokenSet
+      ? T("A token is set. The dashboard exchanges it for a session cookie at sign-in and never stores the token itself, so it cannot show you the one on file.")
+      : T("No token set. The dashboard is unauthenticated, which is only allowed while it is bound to this machine.");
+    el.classList.toggle("warn-note", !tokenSet);
+    const rot = $("authRotate");
+    const logout = $("authLogout");
+    if (logout) logout.hidden = !authRequired;
+    // Nothing to remove, and nothing to prove, before the first token exists —
+    // which is how the first one gets set from a loopback dashboard.
+    const clear = $("authClearBtn");
+    if (clear) clear.hidden = !tokenSet;
+    const proof = $("authProofWrap");
+    if (proof) proof.hidden = !tokenSet;
+    const note = $("authProofNote");
+    if (note) note.hidden = !tokenSet;
+    const change = $("authRotateBtn");
+    if (change) change.hidden = !!(rot && !rot.hidden);
+  }
+
+  // A fresh token generated in the browser: 32 bytes of CSPRNG, URL-safe, the
+  // same shape and strength as the engine's own secrets.token_urlsafe(32).
+  function generateToken() {
+    const c = window.crypto;
+    if (!c || !c.getRandomValues) return "";
+    const bytes = new Uint8Array(32);
+    c.getRandomValues(bytes);
+    let s = "";
+    bytes.forEach((b) => { s += String.fromCharCode(b); });
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function openRotate() {
+    const box = $("authRotate");
+    if (!box) return;
+    box.hidden = false;
+    clearRotateFields(false);
+    renderAuthState();
+    const f = $(tokenSet ? "authCurToken" : "authNewToken");
+    if (f) f.focus();
+  }
+
+  // The typed tokens live in these two fields and nowhere else — not in a
+  // variable, not in storage — and they are wiped the moment they are used.
+  function clearRotateFields(hide) {
+    ["authCurToken", "authNewToken"].forEach((id) => {
+      const f = $(id);
+      if (f) { f.value = ""; f.type = "password"; }
+    });
+    if (hide !== false) { const box = $("authRotate"); if (box) box.hidden = true; }
+  }
+
+  function cancelRotate() {
+    clearRotateFields(true);
+    renderAuthState();
+  }
+
+  /* POST /api/auth/token — the ONLY path that changes the token, and it wants
+     the current one in a header rather than the session cookie, because a
+     cookie that could replace the secret it was issued from would be that
+     secret. Nothing here goes through a config Save: web.py refuses a token in
+     POST /api/config outright. */
+  async function applyToken(action) {
+    const cur = (($("authCurToken") || {}).value || "").trim();
+    const next = (($("authNewToken") || {}).value || "").trim();
+    if (tokenSet && !cur) {
+      flashNote(T("Type the current token first — changing it is proof of holding it."), false);
+      $("authCurToken").focus();
+      return;
+    }
+    if (action === "set" && !next) {
+      flashNote(T("Enter or generate the new token first."), false);
+      $("authNewToken").focus();
+      return;
+    }
+    if (action === "clear" && !confirm(T("Remove the access token?\n\nThe dashboard and DICOMweb stop asking for one. The engine refuses this while the dashboard is bound to anything other than this machine."))) return;
+    const headers = { "Content-Type": "application/json", "X-Carino": "1" };
+    // Sent once, for this request only.
+    if (cur) headers["X-Carino-Token"] = cur;
+    const btn = $("authApply");
+    if (btn) btn.disabled = true;
+    // Deliberately NOT through api(): this is the one request that carries its
+    // own credential in a header, so a rejection is about the token that was
+    // typed and never about the session cookie — which is still perfectly good.
+    // Letting the global 401 handler see it would punish a typo in the proof
+    // field with a full sign-out of a dashboard that was never signed out.
+    let res, body = {};
+    try {
+      res = await fetch("/api/auth/token", {
+        method: "POST", headers,
+        body: JSON.stringify(action === "clear" ? { action: "clear" } : { action: "set", token: next }),
+      });
+      try { body = await res.json(); } catch (e) { /* empty */ }
+    } catch (e) {
+      flashNote(e.message, false);
+      return;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+    if (!res.ok) {
+      const a = body.auth || {};
+      // A wrong proof counts against the same failed-attempt budget as a wrong
+      // login, so the 429 has to say how long rather than read as a fault.
+      flashNote(res.status === 429
+        ? TF("Too many failed attempts — try again in {n}s.", { n: a.retry_after || 30 })
+        : (res.status === 401 || res.status === 403)
+          ? T("That is not the current token — the change was refused.")
+          : (body.error || body.message || res.statusText), false);
+      return;
+    }
+    clearRotateFields(true);
+    tokenSet = action !== "clear";
+    authRequired = tokenSet;
+    renderAuthState();
+    if (!tokenSet) {
+      flashNote(body.message || T("Token removed — this dashboard no longer asks for one."), true);
+      pollStatus();
+      return;
+    }
+    // Every session was signed with the old token's fingerprint, including this
+    // browser's, so it is already dead. Raise the prompt deliberately rather
+    // than let the next poll 401 into it with no explanation.
+    authed = false;
+    stopPollers();
+    showAuthGate();
+    setAuthMsg(T("Token changed — sign in with the new one."), true);
   }
 
   async function saveConfig() {
@@ -1100,8 +1816,7 @@
     if (!confirm(T("Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits."))) return;
     $("killSvc").disabled = true;
     post("/api/shutdown", {}).catch(() => {});   // process may exit before responding
-    if (statusTimer) clearInterval(statusTimer);
-    if (logTimer) clearInterval(logTimer);
+    stopPollers();
     setDot($("rxDot"), false);
     setDot($("wxDot"), false);
     const ov = document.createElement("div");
@@ -1298,32 +2013,200 @@
     const list = $("stuckList");
     listLoading(list);
     try {
-      const data = await api("/api/stuck");
-      renderStuck(data.destinations || []);
+      renderStuck(await api("/api/stuck"));
       reflowActive();
     } catch (e) {
       listError(list, e.message);
     }
   }
 
-  function renderStuck(dests) {
+  /* GET /api/stuck answers with THREE lists, and they are not the same problem:
+       destinations — the node is still configured and is refusing or timing
+                      out. These retry themselves; Retry now only skips the wait.
+       orphaned     — the name they were routed to is not an enabled destination
+                      any more. There is no node left to dial, so NOTHING retries
+                      them; the remedy is a human restoring the node under the
+                      same name or accepting the loss. What happens if nobody
+                      does differs between a pinned hold-and-forward copy and an
+                      ordinary outgrown route, and the engine's per-row `message`
+                      is the only copy that knows which — hence verbatim, below.
+       held         — a routing rule asks to de-identify for that destination and
+                      no copy can be scrubbed, so the engine sends nothing there
+                      rather than sending it identified. Nothing retries these
+                      either, and no timer releases them: the remedy is one
+                      config edit, which the row carries.
+     They are rendered as three sections, not one list, because a Retry button
+     on an orphan or a held row would promise a retry that no endpoint performs.
+
+     This list is added last and it is the third time this defect has shipped:
+     the panel rendered exactly the fields it had been written for, the engine
+     grew a category, and the ⚠ badge counted it while the panel underneath said
+     every forward was up to date — work correctly withheld, reported as fine.
+     Anything added to that response after this belongs here on the same day,
+     and stuck-panel.e2e.mjs now fails on any list it does not find on screen.
+
+     The ⚠ badge counts FILES needing attention (attention_files), where a file
+     owing three dead nodes is one file and a file that is backing off AND
+     orphaned AND held is also one — so the summary line reads that same field
+     rather than adding the section counts up, which would double-count the
+     overlap. */
+  function renderStuck(data) {
+    const d = data || {};
+    const dests = d.destinations || [];
+    const orphans = d.orphaned || [];
+    const holds = d.held || [];
     const list = $("stuckList");
     list.innerHTML = "";
-    if (!dests.length) {
+    // Retry all now clears backoff timers, nothing else. With no destination in
+    // backoff there is no timer to clear, and a live button above a list of
+    // orphaned or held rows reads as an offer the endpoint cannot honour.
+    const all = $("stuckRetryAll");
+    if (all) all.disabled = !dests.length;
+    if (!dests.length && !orphans.length && !holds.length) {
       list.appendChild(emptyNote(T("Nothing stuck — every forward is up to date.")));
       return;
     }
-    dests.forEach((d) => {
-      const row = I18N_IN($("stuckRowTpl").content.cloneNode(true)).querySelector(".stuck-row");
-      row.querySelector(".stuck-dest").textContent = d.name || T("(destination)");
-      row.querySelector(".stuck-meta").textContent =
-        TN(d.instances, "{n} instances waiting") + "  ·  " + TN(d.attempts, "{n} attempts");
-      row.querySelector(".stuck-err").textContent = d.last_error ? TF("last error: {err}", { err: d.last_error }) : "";
-      row.querySelector(".stuck-next").textContent = fmtWait(d.next_in);
-      const btn = row.querySelector(".stuck-retry");
-      btn.addEventListener("click", () => retryStuck(d.name, btn));
-      list.appendChild(row);
+    const attention = Number(d.attention_files || 0);
+    if (attention) {
+      list.appendChild(stuckSummary(
+        attention,
+        Number(d.files || 0) + Number(d.orphaned_files || 0) + Number(d.held_files || 0) > attention));
+    }
+    if (dests.length) {
+      list.appendChild(stuckGroup(
+        T("Retrying automatically"), Number(d.files || 0),
+        T("The node is still configured and has refused or timed out. These clear themselves as soon as it answers — Retry now only skips the wait.")));
+      dests.forEach((x) => list.appendChild(stuckRow(x)));
+    }
+    if (orphans.length) {
+      list.appendChild(stuckGroup(
+        T("No destination left to retry"), Number(d.orphaned_files || 0),
+        T("Routed to a name that is no longer an enabled destination. There is no node left to dial, so nothing retries them — each row says what happens next."),
+        "orphan"));
+      orphans.forEach((x) => list.appendChild(orphanRow(x)));
+    }
+    if (holds.length) {
+      list.appendChild(stuckGroup(
+        T("Held — nothing is being sent"), Number(d.held_files || 0),
+        T("A rule asks to de-identify for these and no copy can be scrubbed, so they are held back rather than sent identified. No timer releases a hold — each row carries the one edit that does."),
+        "held"));
+      holds.forEach((x) => list.appendChild(heldRow(x)));
+    }
+  }
+
+  // The one number the ⚠ badge shows, printed where the operator can see what
+  // it is made of. The second line only appears when the sections overlap,
+  // because that is the only state where their counts do not add up to it —
+  // and every section counts, so the caller adds `held_files` in too. Leaving
+  // one out is not a cosmetic slip: it silently claims the arithmetic on screen
+  // is sound on exactly the day it is not.
+  function stuckSummary(n, overlaps) {
+    const box = document.createElement("div");
+    box.className = "stuck-summary";
+    const head = document.createElement("div");
+    head.className = "stuck-summary-n";
+    head.textContent = TN(n, "{n} files need attention");
+    box.appendChild(head);
+    if (overlaps) {
+      const sub = document.createElement("div");
+      sub.className = "stuck-summary-sub";
+      sub.textContent = T("Some files are in more than one list; each file is counted once.");
+      box.appendChild(sub);
+    }
+    return box;
+  }
+
+  function stuckGroup(title, count, sub, cls) {
+    const box = document.createElement("div");
+    box.className = "stuck-group" + (cls ? " " + cls : "");
+    const head = document.createElement("div");
+    head.className = "stuck-group-head";
+    const t = document.createElement("span");
+    t.className = "stuck-group-t";
+    t.textContent = title;
+    const n = document.createElement("span");
+    n.className = "stuck-group-n";
+    n.textContent = TN(count, "{n} files");
+    head.append(t, n);
+    const p = document.createElement("div");
+    p.className = "stuck-group-sub";
+    p.textContent = sub;
+    box.append(head, p);
+    return box;
+  }
+
+  function stuckRow(d) {
+    const row = I18N_IN($("stuckRowTpl").content.cloneNode(true)).querySelector(".stuck-row");
+    row.querySelector(".stuck-dest").textContent = d.name || T("(destination)");
+    row.querySelector(".stuck-meta").textContent =
+      TN(d.instances, "{n} instances waiting") + "  ·  " + TN(d.attempts, "{n} attempts");
+    row.querySelector(".stuck-err").textContent = d.last_error ? TF("last error: {err}", { err: d.last_error }) : "";
+    row.querySelector(".stuck-next").textContent = fmtWait(d.next_in);
+    const btn = row.querySelector(".stuck-retry");
+    btn.addEventListener("click", () => retryStuck(d.name, btn));
+    return row;
+  }
+
+  function orphanRow(o) {
+    const row = I18N_IN($("orphanRowTpl").content.cloneNode(true)).querySelector(".stuck-row");
+    row.querySelector(".orphan-name").textContent = o.name || T("(destination)");
+    // A pin is a promise somebody already made on this study's behalf while a
+    // node was down, so it is flagged rather than left to be read out of prose.
+    const pin = row.querySelector(".orphan-pin");
+    pin.hidden = !o.pinned;
+    if (o.pinned) pin.title = T("At least one of these was held for this node while it was offline.");
+    row.querySelector(".stuck-meta").textContent = TN(o.instances, "{n} instances waiting");
+    fileChips(row.querySelector(".orphan-files"), o);
+    // The engine's sentence, verbatim and never recomposed from the fields
+    // beside it: it is the only copy that knows whether these were pinned, and
+    // a second copy here would be free to drift away from it.
+    row.querySelector(".orphan-msg").textContent = o.message || "";
+    return row;
+  }
+
+  function heldRow(h) {
+    const row = I18N_IN($("heldRowTpl").content.cloneNode(true)).querySelector(".stuck-row");
+    row.querySelector(".held-name").textContent = h.name || T("(destination)");
+    // The cause, as a tag beside the name, because the two causes take opposite
+    // remedies and the sentence carrying them is four lines long: an operator
+    // scanning a panel of rows has to be able to see at a glance that these two
+    // rows are not the same problem. Only when the engine names one — a row
+    // whose instances disagree carries `cause: ""`, and no tag is the honest
+    // rendering of that.
+    const tag = { "profile-off": T("profile off"), "no-deidentifier": T("no de-identifier") }[h.cause];
+    if (tag) {
+      const chip = document.createElement("span");
+      chip.className = "held-cause";
+      chip.textContent = tag;
+      row.querySelector(".stuck-dest").appendChild(chip);
+    }
+    row.querySelector(".stuck-meta").textContent = TN(h.instances, "{n} instances waiting");
+    fileChips(row.querySelector(".held-files"), h);
+    // `message` is `reason` + `remedy`, and it is taken whole for the same
+    // reason the orphan sentence is: the engine knows which profile it is
+    // actually reading and which rule asked for the scrub. Composing the line
+    // here from the two halves would put a second, stale explanation of a
+    // withheld study on the one screen the operator trusts.
+    row.querySelector(".held-msg").textContent = h.message || "";
+    return row;
+  }
+
+  // The named files on an orphan or held row, bounded by the engine to a sample
+  // with the rest carried in `more`.
+  function fileChips(box, r) {
+    (r.files || []).forEach((f) => {
+      const chip = document.createElement("span");
+      chip.className = "hist-chip";
+      chip.textContent = f;
+      chip.title = f;                       // ATOMIC: the chip ellipsises, the name stays reachable
+      box.appendChild(chip);
     });
+    if (Number(r.more) > 0) {
+      const chip = document.createElement("span");
+      chip.className = "hist-chip more";
+      chip.textContent = TF("+{n} more", { n: r.more });
+      box.appendChild(chip);
+    }
   }
 
   async function retryStuck(dest, btn) {
@@ -1336,7 +2219,12 @@
       pollStatus();
     } catch (e) {
       flashNote(e.message, false);
-      if (btn) { btn.disabled = false; btn.textContent = old; }
+    } finally {
+      // Retry all now is static markup: the redraw above replaces the per-row
+      // buttons but never touches that one, so restoring it only on the error
+      // path left a SUCCESSFUL click reading "…" and disabled until the next
+      // language switch. renderStuck() has the last word on `disabled`.
+      if (btn) { btn.textContent = old; btn.disabled = false; }
     }
   }
 
@@ -1561,13 +2449,331 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
+  /* ── Conditional routing ─────────────────────────────────────────
+     The rules are config, so this panel edits them and saves through the same
+     POST /api/config as everything else — there is no separate rules endpoint
+     to drift from. Two things are load-bearing here and neither is cosmetic:
+
+       * a rule may name a destination that has since been renamed, disabled or
+         deleted. That name is KEPT, kept ticked and flagged. Quietly dropping
+         it would rewrite the operator's routing on their behalf, and the next
+         Save would make the narrowing permanent;
+       * keys this form has no control for (a "_comment", a field a later
+         version adds) are spread back untouched, for the same reason the other
+         sections keep their snapshots. */
+  const MATCH_FIELDS = ["modality", "calling_aet", "station", "patient_id", "study_desc"];
+  // Spellings the engine also accepts (routing._ALIASES). A rule written by
+  // hand with one of them is normalised into its canonical field here, so the
+  // form does not end up posting the same condition twice under two names.
+  const MATCH_ALIASES = {
+    source_aet: "calling_aet", calling_ae: "calling_aet",
+    station_name: "station", study_description: "study_desc",
+  };
+
+  // Destination names a rule may pick from: the enabled rows of the table the
+  // operator is looking at, not a copy from load time.
+  function destNames() {
+    const body = $("destBody");
+    if (!body) return [];
+    return [...body.querySelectorAll("tr")]
+      .filter((tr) => tr.querySelector(".d-en").checked)
+      .map((tr) => tr.querySelector(".d-name").value.trim())
+      .filter(Boolean);
+  }
+
+  function renderRules(rules) {
+    const box = $("rtRules");
+    if (!box) return;
+    box.innerHTML = "";
+    (rules || []).filter((r) => r && typeof r === "object").forEach((r) => box.appendChild(ruleRow(r)));
+    numberRules();
+  }
+
+  function ruleRow(rule) {
+    const node = I18N_IN($("rtRuleTpl").content.cloneNode(true)).querySelector(".rt-rule");
+    const match = (rule.match && typeof rule.match === "object" && !Array.isArray(rule.match)) ? rule.match : {};
+    node._rule = rule;
+    node._matchExtra = {};
+    const canon = {};
+    Object.keys(match).forEach((k) => {
+      const low = String(k).toLowerCase();
+      const key = MATCH_ALIASES[low] || low;
+      if (MATCH_FIELDS.indexOf(key) >= 0) canon[key] = match[k];
+      else node._matchExtra[k] = match[k];      // preserved, and reported below
+    });
+    node.querySelector(".rt-name").value = rule.name || "";
+    node.querySelectorAll(".rt-f").forEach((inp) => {
+      const v = canon[inp.dataset.field];
+      inp.value = Array.isArray(v) ? v.join(", ") : (v == null ? "" : String(v));
+    });
+    node.querySelector(".rt-deid").checked = !!rule.deidentify;
+    node.querySelector(".rt-stop").checked = !!rule.stop;
+    fillRuleDests(node, (rule.destinations || []).filter((d) => typeof d === "string" && d.trim()));
+    const extra = Object.keys(node._matchExtra).filter((k) => !k.startsWith("_"));
+    if (extra.length) {
+      // The engine skips a rule with an unknown match key rather than treating
+      // it as "matches anything", so this is why a rule never fires.
+      node.querySelector(".rt-warn").textContent =
+        TF("Unknown match field {keys} — the engine skips this rule entirely.", { keys: extra.join(", ") });
+    }
+    node.querySelector(".rt-del").addEventListener("click", () => { node.remove(); numberRules(); });
+    node.querySelector(".rt-up").addEventListener("click", () => moveRule(node, -1));
+    node.querySelector(".rt-down").addEventListener("click", () => moveRule(node, 1));
+    return node;
+  }
+
+  function fillRuleDests(node, picked) {
+    const box = node.querySelector(".rt-dests");
+    box.innerHTML = "";
+    const names = destNames();
+    const all = names.slice();
+    picked.forEach((p) => { if (all.indexOf(p) < 0) all.push(p); });
+    if (!all.length) {
+      const e = document.createElement("span");
+      e.className = "rt-dests-empty";
+      e.textContent = T("No destinations configured yet.");
+      box.appendChild(e);
+      return;
+    }
+    all.forEach((n) => {
+      const gone = names.indexOf(n) < 0;
+      const lab = document.createElement("label");
+      lab.className = "rt-dest" + (gone ? " missing" : "");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = n;
+      cb.checked = picked.indexOf(n) >= 0;
+      const sp = document.createElement("span");
+      sp.textContent = n;                       // ATOMIC: ellipsised, full name in title
+      sp.title = gone ? TF("{name} — not an enabled destination, so this rule cannot deliver to it", { name: n }) : n;
+      lab.append(cb, sp);
+      box.appendChild(lab);
+    });
+  }
+
+  // The destination table can change while the rules are on screen; re-offer the
+  // current node list without disturbing what each rule has ticked.
+  function refreshRuleDests() {
+    const box = $("rtRules");
+    if (!box) return;
+    [...box.querySelectorAll(".rt-rule")].forEach((node) => {
+      const picked = [...node.querySelectorAll(".rt-dests input:checked")].map((c) => c.value);
+      fillRuleDests(node, picked);
+    });
+  }
+
+  function numberRules() {
+    const box = $("rtRules");
+    if (!box) return;
+    const rows = [...box.querySelectorAll(".rt-rule")];
+    rows.forEach((node, i) => {
+      node.querySelector(".rt-rule-n").textContent = "#" + (i + 1);
+      node.querySelector(".rt-up").disabled = i === 0;
+      node.querySelector(".rt-down").disabled = i === rows.length - 1;
+    });
+    const empty = $("rtEmpty");
+    if (empty) empty.hidden = rows.length > 0;
+  }
+
+  function moveRule(node, dir) {
+    const sib = dir < 0 ? node.previousElementSibling : node.nextElementSibling;
+    if (!sib) return;
+    if (dir < 0) node.parentNode.insertBefore(node, sib);
+    else node.parentNode.insertBefore(sib, node);
+    numberRules();
+  }
+
+  function collectRules() {
+    const box = $("rtRules");
+    if (!box) return loadedRouting.rules || [];
+    return [...box.querySelectorAll(".rt-rule")].map((node) => {
+      const match = { ...(node._matchExtra || {}) };
+      node.querySelectorAll(".rt-f").forEach((inp) => {
+        // Comma-separated means "any of these" — the engine takes a list of
+        // globs for a field. One value stays a plain string so a hand-written
+        // config round-trips unchanged.
+        const parts = inp.value.split(",").map((s) => s.trim()).filter(Boolean);
+        if (parts.length === 1) match[inp.dataset.field] = parts[0];
+        else if (parts.length > 1) match[inp.dataset.field] = parts;
+      });
+      return {
+        ...(node._rule || {}),
+        name: node.querySelector(".rt-name").value.trim(),
+        match: match,
+        destinations: [...node.querySelectorAll(".rt-dests input:checked")].map((c) => c.value),
+        deidentify: node.querySelector(".rt-deid").checked,
+        stop: node.querySelector(".rt-stop").checked,
+      };
+    });
+    // Deliberately unfiltered: a rule with no name is refused by the engine with
+    // its number in the message. Dropping it here instead would silently delete
+    // something the operator typed.
+  }
+
+  function addRule() {
+    const box = $("rtRules");
+    if (!box) return;
+    box.appendChild(ruleRow({ name: "", match: {}, destinations: [] }));
+    numberRules();
+    const last = box.lastElementChild;
+    if (last) last.querySelector(".rt-name").focus();
+  }
+
+  async function testRoute(btn) {
+    const attrs = {
+      modality: $("rtModality").value.trim(),
+      calling_aet: $("rtCallingAet").value.trim(),
+      station: $("rtStation").value.trim(),
+      patient_id: $("rtPatientId").value.trim(),
+      study_desc: $("rtStudyDesc").value.trim(),
+    };
+    btn.disabled = true;
+    try {
+      renderRouteResult(await post("/api/routing/test", { attributes: attrs }));
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally { btn.disabled = false; }
+  }
+
+  /* One /api/routing/test decision with the half that endpoint cannot see
+     folded in — the LAST place a held node can still be drawn as "de-identified
+     for", and the one this lane could not close in the engine.
+   *
+   * The dry run posts `attributes` (a hypothetical study), and that branch is
+   * answered in pacs/web.py by a bare Router: rules plus deid.profile, with no
+   * de-identifier anywhere near it. So it reports the config-half answer, which
+   * is right for "the profile is off" and wrong for "the profile is on and
+   * nothing can be built" — the second cause is invisible to a Router, and that
+   * branch is not this lane's file to change.
+   *
+   * What is corrected here is NOT re-derived here: `hold_cause` is the engine's
+   * own settled answer off the status poll (server.py `_settled_deid`, the same
+   * Decision.honoured_by every sender goes through), and "no de-identifier can
+   * be built" is a fact about the CONFIG, not about the file — it holds every
+   * destination any rule scrubs for, hypothetical or not. This applies that one
+   * fact; it never asks the scrub question a second time. */
+  function settledRoute(d) {
+    const live = (lastStatus && lastStatus.deid) || {};
+    const asks = d.deidentify || [];
+    if (!asks.length || live.hold_cause !== "no-deidentifier") return d;
+    return Object.assign({}, d, {
+      deidentify: [],
+      held: (d.held || []).concat(asks).sort(),
+      hold_cause: live.hold_cause,
+      sendable: (d.sendable || d.destinations || []).filter((n) => asks.indexOf(n) < 0),
+    });
+  }
+
+  function renderRouteResult(r) {
+    const box = $("rtResult");
+    if (!box) return;
+    box.innerHTML = "";
+    box.hidden = false;
+    const d = settledRoute(r.decision || {});
+    // `sendable`, not `destinations`: a held destination is in the decision but
+    // is not dialled, and drawing it as an arrow said the study went there.
+    const dests = d.sendable || d.destinations || [];
+    const held = d.held || [];
+    const head = document.createElement("div");
+    head.className = "rt-decision " + (dests.length ? (d.fallback ? "fallback" : "routed") : "fallback");
+    head.textContent = dests.length ? "→ " + dests.join(", ")
+      : held.length ? T("→ nowhere: every destination is held.")
+                    : T("→ nowhere: there is no enabled destination at all.");
+    box.appendChild(head);
+    if (held.length) {
+      const hz = document.createElement("p");
+      hz.className = "rt-reason rt-held";
+      // Same branch as the de-identification panel, and for the same reason: a
+      // dry run that blames a profile which is on teaches the operator to go and
+      // turn something on that is already on, and then to take the scrub off the
+      // rule when that does nothing.
+      hz.textContent = d.hold_cause === "no-deidentifier"
+        ? TF("HELD — not sent to {dests}: a rule asks for de-identification, the profile is on, and no de-identifier can be built from these settings, so nothing can be scrubbed.", { dests: held.join(", ") })
+        : d.hold_cause === "profile-off"
+          ? TF("HELD — not sent to {dests}: a rule asks for de-identification and the profile is off, so nothing can be scrubbed.", { dests: held.join(", ") })
+          : TF("HELD — not sent to {dests}: a rule asks for de-identification and nothing can be scrubbed.", { dests: held.join(", ") });
+      box.appendChild(hz);
+    }
+    const why = document.createElement("p");
+    why.className = "rt-reason";
+    // The decision's reason is the engine's own wording — the same string the
+    // log uses — so it stays in the server's language, like every engine message.
+    why.textContent = d.reason || "";
+    box.appendChild(why);
+    if ((d.deidentify || []).length) {
+      const dz = document.createElement("p");
+      dz.className = "rt-reason";
+      dz.textContent = TF("De-identified for: {dests}", { dests: d.deidentify.join(", ") });
+      box.appendChild(dz);
+    }
+    (d.unresolved || []).forEach((u) => {
+      const w = document.createElement("p");
+      w.className = "rt-reason";
+      w.style.color = "var(--warn)";
+      w.textContent = TF("Names a destination that does not exist or is disabled: {what}", { what: u });
+      box.appendChild(w);
+    });
+    const rows = r.rules || [];
+    if (!rows.length) {
+      box.appendChild(emptyNote(r.routing_enabled === false
+        ? T("Routing is off — every study goes to every enabled destination.")
+        : T("No rules were evaluated.")));
+      return;
+    }
+    const heldNow = held.slice();
+    rows.forEach((row) => {
+      const el = I18N_IN($("rtTraceTpl").content.cloneNode(true)).querySelector(".rt-trace");
+      const hit = !!row.matched && (row.destinations || []).length > 0;
+      // Against the decision's held set rather than the row's own copy of it:
+      // the engine fills row.held for the hold IT can see, and a rule whose
+      // delivery is held for the cause it cannot would otherwise stay green and
+      // arrowed — "matched → Research" over a study going nowhere is the same
+      // reassurance, one panel further down.
+      const blocked = (row.destinations || []).filter((n) => heldNow.indexOf(n) >= 0);
+      // Held outranks hit: the rule matched, and nothing is being delivered.
+      const cls = blocked.length ? "held"
+        : hit ? "hit" : ((row.unknown_match_keys || []).length ? "skip" : "");
+      if (cls) el.classList.add(cls);
+      el.querySelector(".rt-trace-n").textContent = "#" + row.index;
+      const nm = el.querySelector(".rt-trace-name");
+      nm.textContent = row.name || "";
+      nm.title = row.name || "";
+      el.querySelector(".rt-trace-act").textContent =
+        (row.action || "") + ((row.destinations || []).length ? " → " + row.destinations.join(", ") : "")
+        // The engine's own action text already carries its hold; this adds the
+        // one it could not know about, and never a second copy of the first.
+        + (blocked.length && !(row.held || []).length
+          ? " — " + TF("HELD, not sent to {dests}", { dests: blocked.join(", ") }) : "");
+      // Field by field, with the study's value and the pattern it was tested
+      // against: "did not match" without saying against what is not an answer.
+      el.querySelector(".rt-trace-why").textContent = (row.fields || []).map((f) =>
+        f.field + "=" + (f.value || T("(empty)")) + " " + (f.matched ? "✓" : "✗") + " " + (f.patterns || []).join(" | ")
+      ).join("   ·   ");
+      box.appendChild(el);
+    });
+  }
+
   /* ── Sidebar workspace: each nav button expands its panel in the pane ──
      Every panel renders inline in the viewport-bound workspace and scrolls its
      own content; there is no popup/backdrop anymore. */
   // Overview leads the list (hash routing + sidebar order match) but Services
   // stays the landing panel: the unattended screen must not show patient names.
-  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgSettings", "dlgLogs"];
-  const loaders = { dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck };
+  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgRouting", "dlgSettings", "dlgLogs"];
+  // Routing needs no fetch — its rules arrive with the config — but the
+  // destination table may have gained or lost a node since they were drawn, so
+  // opening the panel re-offers the current list without losing a tick.
+  const loaders = {
+    dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck,
+    dlgRouting: refreshRuleDests,
+    // No fetch either: the index / DICOMweb / de-identification readouts ride
+    // on the status poll, which skips them while the panel is shut.
+    dlgSettings: () => {
+      if (!lastStatus) return;
+      renderIndex(lastStatus.index || {});
+      renderDicomweb(lastStatus.dicomweb || {});
+      renderDeidState(lastStatus.deid || {});
+    },
+  };
   let activePanel = "dlgServices";
 
   function showPanel(id) {
@@ -1604,13 +2810,48 @@
       if (e.target.dataset.on !== "true") $("mwlEnabled").checked = true;
       toggle("mwl", e.target);
     });
+    $("qrToggle").addEventListener("click", (e) => {
+      // Like the printer and RIS cards: starting from the card also flips the
+      // "start on launch" flag, because toggle() persists the config first.
+      if (e.target.dataset.on !== "true") $("qrEnabled").checked = true;
+      toggle("qr", e.target);
+    });
     $("emgActivate").addEventListener("click", () => emergencyAction("activate"));
     $("emgDismiss").addEventListener("click", () => emergencyAction("dismiss"));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", () => saveConfig());
-    $("saveDests").addEventListener("click", () => saveConfig());
+    $("saveDests").addEventListener("click", async () => {
+      if (await saveConfig()) refreshRuleDests();   // a renamed node must show up in the rules
+    });
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
+
+    // Token prompt.
+    $("authLogin").addEventListener("click", () => doLogin($("authLogin")));
+    $("authToken").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin($("authLogin")); });
+    $("authLogout").addEventListener("click", doLogout);
+    $("authRotateBtn").addEventListener("click", openRotate);
+    $("authRotateCancel").addEventListener("click", cancelRotate);
+    $("authApply").addEventListener("click", () => applyToken("set"));
+    $("authClearBtn").addEventListener("click", () => applyToken("clear"));
+    $("authGen").addEventListener("click", () => {
+      const tok = generateToken();
+      if (!tok) { flashNote(T("This browser cannot generate a token — paste one instead."), false); return; }
+      const f = $("authNewToken");
+      f.value = tok;
+      f.type = "text";                  // it has to be readable to be copied — it is shown once
+      flashNote(T("Copy the token now — it is not shown again once it is applied."), true);
+    });
+    $("authShow").addEventListener("click", () => {
+      const f = $("authNewToken");
+      f.type = f.type === "password" ? "text" : "password";
+    });
+
+    // Routing.
+    $("rtAdd").addEventListener("click", addRule);
+    $("rtSave").addEventListener("click", () => saveConfig());
+    $("rtTest").addEventListener("click", () => testRoute($("rtTest")));
+    $("idxRescanNow").addEventListener("click", () => rescanIndex($("idxRescanNow")));
 
     // Service chooser. Three of the four doors are buttons (the fourth is the
     // first status that says nothing has ever been chosen); every one of them is
@@ -1677,21 +2918,18 @@
       paintTicker();
       if (lastStatus) renderOverview(lastStatus);
       retitleWatcherWarn();
+      // Rendered by this file, so the language pass does not reach them.
+      renderAuthState();
+      if (lastStatus) {
+        renderIndex(lastStatus.index || {});
+        renderDicomweb(lastStatus.dicomweb || {});
+        renderDeidState(lastStatus.deid || {});
+      }
+      if (gateOpen) return;      // behind the prompt there is nothing to refetch
       pollStatus();
       if (loaders[activePanel]) loaders[activePanel]();
     });
 
-    loadConfig().catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false));
-    // Deep-link: #dlgSettings etc. opens that panel; default is the cards.
-    // #setup is not a panel but a state of the cards, so it is branched BEFORE
-    // the fallback — that line would otherwise swallow it as an unknown hash.
-    const fromHash = (location.hash || "").replace("#", "");
-    if (fromHash === "setup") {
-      showPanel("dlgServices");
-      enterSetup();
-    } else {
-      showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
-    }
     // Persist the panel in the hash so a reload comes back where the operator
     // was — except Overview. #dlgOverview stays deep-linkable (someone who asks
     // for it by URL gets it), but it must never become the panel an UNATTENDED
@@ -1705,9 +2943,25 @@
         try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {}
       }));
     retitleWatcherWarn();
-    pollStatus();
-    pollLog();
-    statusTimer = setInterval(pollStatus, 2000);
-    logTimer = setInterval(pollLog, 1500);
+    // Auth before anything else. With a token configured every /api route 401s,
+    // so loading the config or starting the pollers first would just knock on a
+    // closed door — GET /api/auth is public precisely so this decision can be
+    // made before a single protected request is made.
+    boot();
   });
+
+  // Deep-link: #dlgSettings etc. opens that panel; default is the cards. #setup
+  // is not a panel but a state of the cards, so it is branched BEFORE the
+  // fallback — that line would otherwise swallow it as an unknown hash. Run
+  // once, when the dashboard actually starts: behind the token prompt there is
+  // no panel to open yet.
+  function openInitialPanel() {
+    const fromHash = (location.hash || "").replace("#", "");
+    if (fromHash === "setup") {
+      showPanel("dlgServices");
+      enterSetup();
+    } else {
+      showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
+    }
+  }
 })();

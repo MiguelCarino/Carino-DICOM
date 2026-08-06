@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual — Carino PACS</title>
+  <meta name="description" content="Manual completo de Carino PACS en español: puesta en marcha, modelo de seguridad y la regla del token, qué hace cada servicio y cuándo activarlo, y por qué esto no es un producto sanitario." />
+  <link rel="icon" href="../../favicon.webp" />
+  <link rel="stylesheet" href="../manual.css" />
+  <script>
+    /* Este manual está escrito en español; el conmutador de idioma de la barra
+       superior es del sitio entero, así que lo usamos para llevar al lector al
+       manual de SU idioma en vez de dejarlo aquí. Solo hay manual en español,
+       portugués e inglés: ja/ru caen al inglés en lugar de fingir. */
+    (function () {
+      var HERE = 'es';
+      var MAP = { 'pt-BR': '../pt-BR/', en: '../', ja: '../', ru: '../' };
+      // El saludo lo pinta carino-navbar.js con window.t; sin esto saludaría en
+      // inglés sobre una página en español.
+      var GREET = {
+        'Late shift.': 'Turno nocturno.',
+        'Good morning.': 'Buenos días.',
+        'Good afternoon.': 'Buenas tardes.',
+        'Good evening.': 'Buenas noches.',
+      };
+      window.t = function (s) { return GREET[s] || s; };
+      window.addEventListener('carino:langchange', function (e) {
+        var to = MAP[e.detail.lang];
+        if (to) location.href = to;
+      });
+      // carino-lang.js escribe documentElement.lang con el idioma de la flota;
+      // esta página es española pase lo que pase.
+      document.addEventListener('DOMContentLoaded', function () {
+        document.documentElement.lang = HERE;
+      });
+    })();
+  </script>
+  <!-- El reloj se carga aquí con la ruta correcta para esta profundidad;
+       carino-navbar.js lo detecta por [data-carino-clock] y no lo repite. -->
+  <script src="../../carino-clock.js" data-carino-clock async></script>
+  <script src="../../carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="../../carino-lang.js" defer></script>
+</head>
+<body>
+  <main class="doc">
+    <nav class="langs" aria-label="Idiomas">
+      <span class="here">Español</span>
+      <a href="../pt-BR/" lang="pt-BR">Português (BR)</a>
+      <a href="../" lang="en">English</a>
+      <a href="../../">← Carino PACS</a>
+    </nav>
+
+    <h1>Manual de Carino PACS</h1>
+    <p class="standfirst">Carino PACS es una <strong>pasarela DICOM</strong> y un <strong>equipo de
+      continuidad</strong>: recibe estudios, los enruta y los reenvía, los publica por Query/Retrieve y
+      DICOMweb, y sostiene el servicio de imagen cuando el PACS o el RIS dejan de responder. Este manual
+      cubre la puesta en marcha, el modelo de seguridad, cada servicio y sus límites reales.</p>
+
+    <div class="toc">
+      <h2>Contenido</h2>
+      <ol>
+        <li><a href="#que-es">Qué es y qué papel juega</a></li>
+        <li><a href="#primeros-pasos">Primeros pasos</a></li>
+        <li><a href="#seguridad">El modelo de seguridad y la regla del token</a></li>
+        <li><a href="#servicios">Los servicios, uno por uno</a></li>
+        <li><a href="#no-es">Esto no es un producto sanitario</a></li>
+        <li><a href="#ayuda">Licencia y dónde pedir ayuda</a></li>
+      </ol>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="que-es">1. Qué es y qué papel juega</h2>
+
+    <p>Carino PACS se instala <em>entre</em> los equipos que generan imágenes y los sistemas que las
+      guardan o las leen. No pretende sustituir a tu archivo: pretende ser la pieza que los conecta y
+      la que sigue en pie cuando alguna de las otras se cae.</p>
+
+    <p>Hace dos papeles, y conviene distinguirlos porque determinan qué servicios activas:</p>
+
+    <ul>
+      <li><strong>Pasarela permanente.</strong> Recibe por C-STORE, archiva en disco por
+        paciente/estudio/serie, reenvía a uno o varios destinos según reglas, anonimiza la copia que sale
+        si lo pides, y publica lo que tiene por Query/Retrieve (para equipos antiguos) y por DICOMweb
+        (para visores modernos).</li>
+      <li><strong>Red de seguridad.</strong> Si el PACS principal deja de responder, puede activar su
+        propia <em>Modality Worklist</em> para que los técnicos sigan estudiando, <strong>retener</strong>
+        lo que llega durante la caída y <strong>reenviarlo</strong> automáticamente cuando el principal
+        vuelve. También recibe órdenes HL7 por MLLP —o las capturas a mano— cuando el RIS es el que
+        está caído.</li>
+    </ul>
+
+    <p>Todo se define en un único <code>config.json</code> y todo puede ejecutarse sin interfaz gráfica.
+      El panel web es cómodo, no obligatorio.</p>
+
+    <h3>Puertos por defecto</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Servicio</th><th>Puerto</th><th>Protocolo</th></tr></thead>
+        <tbody>
+          <tr><td>Receptor (Storage SCP)</td><td><code>11112</code></td><td>DICOM / DIMSE</td></tr>
+          <tr><td>Impresión virtual</td><td><code>11113</code></td><td>DICOM Print</td></tr>
+          <tr><td>Modality Worklist</td><td><code>11114</code></td><td>DICOM C-FIND</td></tr>
+          <tr><td>Query/Retrieve</td><td><code>11115</code></td><td>DICOM C-FIND/C-MOVE/C-GET</td></tr>
+          <tr><td>RIS de emergencia</td><td><code>2575</code></td><td>HL7 sobre MLLP</td></tr>
+          <tr><td>Panel web + DICOMweb</td><td><code>8042</code></td><td>HTTP</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><b>Por qué 11112 y no 104.</b> El puerto registrado de DICOM es el <code>104</code>, que en
+        Linux y macOS es privilegiado y exige arrancar como root. El valor por defecto evita eso.
+        Configura tus equipos en consecuencia, o publica <code>104</code> hacia <code>11112</code> desde
+        el contenedor o el cortafuegos.</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="primeros-pasos">2. Primeros pasos</h2>
+
+    <h3>Elige la forma de ejecutarlo</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Forma</th><th>Para qué caso</th><th>Arranca sola tras un corte</th></tr></thead>
+        <tbody>
+          <tr><td>App de escritorio (bandeja)</td><td>Un puesto con alguien sentado delante: una sala,
+            un consultorio, una prueba.</td><td>Solo si activas «iniciar al abrir sesión»</td></tr>
+          <tr><td>Docker / Podman</td><td>Un servidor, o cualquier máquina donde quieras aislarlo y
+            moverlo entero.</td><td>Sí (<code>restart: unless-stopped</code>)</td></tr>
+          <tr><td>Servicio systemd</td><td>La cajita permanente del servicio de imagen, sin nadie con
+            sesión iniciada.</td><td>Sí</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>App de escritorio</h3>
+    <p>Descarga el paquete de tu sistema desde la
+      <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">página
+      de releases</a> y ábrelo. Se queda en la bandeja del sistema; al hacer clic se abre el panel. Como
+      todavía no está firmado digitalmente, Windows y macOS avisan la primera vez: en la
+      <a href="../../">portada</a> están los pasos exactos para abrirlo igualmente.</p>
+
+    <h3>Docker</h3>
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
+docker compose up -d
+docker compose logs -f pacs</code></pre>
+    <p>El primer arranque <strong>genera e imprime un token de acceso</strong> en el log. Abre
+      <code>http://127.0.0.1:8042/</code> y pégalo cuando el panel lo pida. Todo —configuración,
+      estudios, logs, índice— vive en <code>./data</code>, que es lo que tienes que respaldar.</p>
+    <div class="warn">
+      <p><b>El fallo más común del primer arranque</b> es que <code>./data</code> pertenezca a root:
+        el contenedor nunca corre como root y muere con <code>EACCES</code>. Si tu usuario no es el
+        1000, pon <code>PACS_UID</code> y <code>PACS_GID</code> en un fichero <code>.env</code> y
+        reconstruye. En hosts con SELinux (Fedora, RHEL, Rocky) el sufijo <code>:z</code> del volumen
+        no es decorativo: sin él el montaje es inescribible aunque los permisos parezcan correctos.</p>
+    </div>
+
+    <h3>Servicio systemd (Linux)</h3>
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS.git
+cd Carino-PACS
+sudo packaging/systemd/install.sh</code></pre>
+    <p>El instalador crea el usuario de sistema <code>carino-pacs</code>, copia el código a
+      <code>/opt/carino-pacs</code>, prepara <code>/var/lib/carino-pacs</code> y deja la unidad
+      instalada… <strong>y no la arranca</strong>. No es un olvido: arrancar un PACS abre puertos que
+      aceptan datos de pacientes, y esa decisión se toma después de leer la configuración, no antes.
+      Edita <code>/var/lib/carino-pacs/config.json</code> y luego:</p>
+    <pre><code>sudo systemctl enable --now carino-pacs
+systemctl status carino-pacs
+journalctl -u carino-pacs -f</code></pre>
+    <p>Volver a ejecutar el instalador actualiza el código sin tocar tu <code>config.json</code>.</p>
+
+    <h3>Dónde viven los datos</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Forma</th><th>Directorio</th></tr></thead>
+        <tbody>
+          <tr><td>Escritorio / CLI</td><td><code>~/CarinoPACS/</code></td></tr>
+          <tr><td>Docker</td><td><code>/data</code> dentro del contenedor → <code>./data</code> en el host</td></tr>
+          <tr><td>systemd</td><td><code>/var/lib/carino-pacs/</code> (modo 0750)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>El <code>config.json</code> vive <em>con los datos</em>, no en <code>/etc</code>, porque las rutas
+      relativas del config (<code>"./received"</code>, <code>"./logs"</code>, <code>"./index.db"</code>)
+      se resuelven contra el directorio del propio fichero de configuración. Un config en
+      <code>/etc</code> repartiría estudios de pacientes por <code>/etc</code>.</p>
+
+    <h3>Primer arranque, en orden</h3>
+    <ol>
+      <li><strong>Elige los servicios.</strong> Todo viene apagado. El asistente del panel pregunta qué
+        debe ejecutar <em>esta</em> máquina; enciende solo eso.</li>
+      <li><strong>Añade los destinos</strong> (nombre, host, puerto, AE title) en <em>Destinos</em>.</li>
+      <li><strong>Comprueba la conectividad con C-ECHO</strong> antes de mover una sola imagen:
+        <code>./run.sh echo --name "PACS del hospital"</code>. Si el C-ECHO no pasa, no es un problema de
+        Carino: es red, cortafuegos o AE title.</li>
+      <li><strong>Apunta un equipo hacia aquí</strong> con el AE title, la IP y el puerto del receptor, y
+        envía un estudio de prueba.</li>
+      <li><strong>Mira el registro de actividad.</strong> Si algo falla, ahí aparece; este software
+        prefiere gritar a fallar en silencio.</li>
+    </ol>
+
+    <h3>Sin interfaz gráfica</h3>
+    <pre><code>./run.sh init            # crea config.json y sus carpetas
+./run.sh init --token    # además genera web.auth_token
+./run.sh serve           # panel en http://127.0.0.1:8042
+./run.sh receive         # solo el receptor
+./run.sh send            # solo el vigilante de carpeta / reenvío
+./run.sh qr              # solo Query/Retrieve
+./run.sh mwl             # solo la worklist
+./run.sh ris             # solo el receptor de órdenes HL7
+./run.sh print           # solo la impresora virtual
+./run.sh echo --host 10.0.0.5 --port 104 --aet PACSREMOTO</code></pre>
+    <p>Todos los comandos aceptan <code>-c / --config &lt;ruta&gt;</code>. En Windows, <code>run.ps1</code>.</p>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="seguridad">3. El modelo de seguridad y la regla del token</h2>
+
+    <p>Empecemos por lo importante: <strong>el panel es la llave del archivo</strong>. Quien lo abre puede
+      leer todos los estudios guardados, descargar los ficheros DICOM, cambiar cualquier ajuste, arrancar
+      y parar servicios, borrar estudios y apagar el servidor. No hay usuarios ni roles: hay un único
+      secreto compartido, y quien lo tiene lo puede todo.</p>
+
+    <h3>La regla</h3>
+    <div class="danger">
+      <p><b><code>web.auth_token</code> vacío solo se admite mientras <code>web.host</code> sea
+        loopback.</b> Si <code>web.host</code> es cualquier otra cosa —<code>0.0.0.0</code>, una IP de la
+        red, un nombre— y el token está vacío, <strong>el servidor se niega a arrancar</strong>. Esa
+        negativa es una función del programa, no un error que haya que rodear.</p>
+    </div>
+
+    <p>La razón es concreta. Sin autenticación, en <code>127.0.0.1</code>, el sistema operativo es el
+      control de acceso: solo un proceso de esa misma máquina puede hablar con la API. Es defendible.
+      Pero <code>web.host</code> lo configura el operador, y el día que alguien lo cambia a
+      <code>0.0.0.0</code> para «poder entrar desde el otro PC» —con prisa, un martes, sin pensar en
+      seguridad— esa misma API le entrega a cualquier vecino de la red la lista de estudios, las rutas de
+      almacenamiento, los bytes DICOM y <code>/api/shutdown</code>. La regla existe porque ese cambio se
+      hace en diez segundos y sus consecuencias duran años.</p>
+
+    <p><strong>Todo contenedor está siempre en ese caso</strong>: un contenedor publica en
+      <code>0.0.0.0</code> por construcción. Por eso la imagen genera un token de 256 bits en el primer
+      arranque si no le das uno — y lo <em>imprime</em>. Lo que nunca hace es generarlo en silencio: un
+      secreto que nadie ve es un secreto que nadie rota.</p>
+
+    <h3>Cómo generar y entregar el token</h3>
+    <pre><code>./run.sh init --token                                  # lo escribe en config.json
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+openssl rand -base64 32</code></pre>
+    <p>El servidor acepta la credencial de tres maneras:</p>
+    <ul>
+      <li><code>Authorization: Bearer &lt;token&gt;</code></li>
+      <li><code>X-Carino-Token: &lt;token&gt;</code></li>
+      <li>una <em>cookie</em> de sesión que emite <code>POST /api/login</code></li>
+    </ul>
+    <p>La cookie existe para que el panel pida el token <strong>una vez</strong> en lugar de guardarlo en
+      JavaScript, donde lo lee cualquier XSS y cualquier extensión del navegador. La cookie no lleva el
+      token: lleva un HMAC calculado con un secreto generado al arrancar y guardado solo en memoria. Por
+      eso un reinicio cierra todas las sesiones — es el precio correcto para un equipo de un solo
+      operador: nada que robar en disco, y como mucho hay que volver a teclear el token una vez por
+      turno.</p>
+
+    <div class="warn">
+      <p><b>El panel habla HTTP en claro.</b> No trae TLS propio. Si lo publicas más allá de loopback,
+        ponlo detrás de un proxy inverso que termine HTTPS. Un token enviado por HTTP sin cifrar en una
+        red compartida es un token regalado.</p>
+    </div>
+
+    <h3>El lado DICOM</h3>
+    <ul>
+      <li><strong><code>allowed_aets</code></strong> — lista blanca de AE titles que pueden asociarse.
+        Vacía significa «acepta a cualquiera». Es un filtro útil, no una autenticación: DICOM no
+        autentica al llamante.</li>
+      <li><strong>DICOM-TLS</strong> — disponible en ambos lados y de forma independiente, incluido TLS
+        mutuo con certificado de cliente. Usa el <em>mismo puerto</em>: un par en claro no puede hablar
+        con un receptor TLS, ni al revés. TLS cifra y autentica el <em>transporte</em>, no la
+        <em>aplicación</em>: combínalo con <code>allowed_aets</code> o con certificados de cliente para
+        tener control de acceso de verdad.</li>
+      <li><strong>Cortafuegos</strong> — los listeners DICOM escuchan en <code>0.0.0.0</code> por
+        defecto (aunque todo listener está apagado hasta que lo enciendes). Eso es correcto para algo
+        que las modalidades tienen que alcanzar, y significa que debes limitarlo por cortafuegos a la
+        subred de las modalidades.</li>
+    </ul>
+
+    <h3>Lo que el modelo no protege</h3>
+    <ul>
+      <li><strong>No hay gestión de usuarios.</strong> Ni cuentas, ni roles, ni permisos. Un solo secreto
+        compartido para todo el equipo.</li>
+      <li><strong>No hay auditoría por usuario.</strong> El log registra qué pasó —asociaciones, envíos,
+        reenvíos, órdenes conciliadas, tokens rechazados— con hora y dirección del par, pero no puede
+        registrar <em>quién</em>, porque el software no tiene concepto de «quién». Y es texto plano sin
+        protección contra manipulación: es un registro operativo, no una prueba.</li>
+      <li><strong>No hay cifrado en reposo.</strong> Los estudios son ficheros DICOM normales, el índice
+        sqlite guarda nombres e identificadores en claro, las órdenes son JSON y
+        <code>config.json</code> contiene el token en texto plano. Cifra el volumen por debajo (LUKS,
+        BitLocker, FileVault) y restringe los permisos del directorio de datos.</li>
+      <li><strong>El listener HL7/MLLP no tiene ni TLS ni credenciales.</strong> Es un socket TCP con
+        trama MLLP. Su único control es <code>allowed_hosts</code>, que comprueba la dirección del par y
+        por tanto es suplantable. Quien pueda abrir una conexión a ese puerto puede inyectar órdenes que
+        aparecerán en la worklist. Átalo a un segmento clínico de confianza y ponle cortafuegos.</li>
+      <li><strong>La anonimización no toca los píxeles.</strong> Ver el servicio correspondiente más
+        abajo: los datos quemados en la imagen sobreviven a todos los perfiles.</li>
+    </ul>
+
+    <div class="note">
+      <p><b>Copias de seguridad.</b> El índice sqlite es una caché y se reconstruye solo; las imágenes
+        no. Respalda los directorios de almacenamiento, y compruébalo restaurando alguna vez.</p>
+      <p><b>Sin telemetría.</b> Carino PACS no envía nada a ninguna parte: ni analítica, ni informes de
+        errores, ni comprobación de actualizaciones, ni scripts de terceros cargados en tiempo de
+        ejecución. Las únicas conexiones salientes son las asociaciones DICOM y los ACK HL7 que tú
+        configuraste, hacia los pares que tú nombraste. Que dejara de ser así se trataría como una
+        vulnerabilidad.</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="servicios">4. Los servicios, uno por uno</h2>
+
+    <p>Todo lo que abre un puerto viene <strong>apagado</strong>. La pregunta correcta no es «¿qué
+      puede hacer?», sino «¿qué necesita hacer <em>esta</em> máquina?». Cada servicio encendido es un
+      puerto abierto más. El índice de abajo es la única excepción: arranca solo, porque es una caché
+      sqlite local que no abre ningún puerto.</p>
+
+    <div class="svc-doc">
+      <h3>Receptor — Storage SCP</h3>
+      <p class="port">Puerto 11112 · C-STORE, C-ECHO</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Acepta estudios enviados por las modalidades y los archiva en disco, opcionalmente
+          organizados por Paciente / Estudio / Serie. Acepta todas las sintaxis de transferencia y
+          guarda lo comprimido <em>tal cual</em>: no hay transcodificación, así que ningún dato se
+          altera al entrar.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Siempre que algo tenga que <em>enviarle</em> imágenes: modalidades, otro PACS, una estación.
+          Es el servicio central.</dd>
+        <dt>Cuándo no</dt>
+        <dd>Si esta máquina solo reenvía lo que otro deja en una carpeta.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Auto-envío — Storage SCU y reglas de enrutamiento</h3>
+      <p class="port">Cliente saliente · C-STORE</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Vigila una carpeta y reenvía cada fichero nuevo a los destinos que correspondan. Un fichero
+          solo se envía cuando está <strong>estable</strong> (su tamaño no ha cambiado entre dos
+          pasadas), así que nunca se reenvía un fichero a medio escribir. El progreso se lleva
+          <em>por destino</em>: se da por terminado cuando <em>todos</em> los destinos habilitados lo
+          han aceptado, y los que fallan se reintentan en la siguiente pasada. Al terminar puede
+          conservar, mover o borrar el original.</dd>
+        <dt>Reglas</dt>
+        <dd>Con el enrutamiento activado, una regla decide destinos según modalidad, AE title de origen,
+          estación, ID de paciente o descripción del estudio (comodines <code>*</code> y <code>?</code>,
+          sin distinguir mayúsculas). Ejemplo: la TC procedente de <code>ER_*</code> al archivo docente,
+          anonimizada.</dd>
+        <dt>La garantía</dt>
+        <dd>Un estudio <strong>nunca</strong> puede quedarse sin destino. Si el enrutamiento está
+          apagado, si ninguna regla coincide, si la cabecera no se puede leer o si una regla nombra un
+          destino que ya no existe, el fichero va a <em>todos</em> los destinos habilitados. Enviar de
+          más molesta al operador; enviar de menos pierde una imagen.</dd>
+        <dt>La única excepción</dt>
+        <dd>Una regla que pide anonimizar para un destino, cuando la limpieza no se puede hacer de
+          verdad, deja ese destino <strong>retenido</strong>: no se le envía nada, en vez de enviarle
+          el estudio identificado. Hay dos cosas que impiden la limpieza —que el perfil esté en
+          <code>off</code>, o que el perfil esté activo pero no se pueda construir ningún
+          anonimizador con los ajustes actuales— y se arreglan de forma distinta. En ambos casos no se
+          pierde nada: ver <em>Anonimización al reenviar</em> más abajo.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando esta máquina tenga que entregar imágenes a otro sistema: reenviar al PACS central,
+          alimentar una estación de lectura, sacar copias a un archivo docente.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Anonimización al reenviar</h3>
+      <p class="port">Perfil PS3.15 Anexo E · se aplica solo a la copia que sale</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Aplica el <em>Basic Application Level Confidentiality Profile</em> al objeto que se envía,
+          declarando en <code>(0012,0064)</code> exactamente qué opciones de retención se usaron, para
+          que quien lo reciba pueda comprobar qué se conservó. El original archivado <strong>no se
+          reescribe jamás</strong>: esa asimetría es la idea entera.</dd>
+        <dt>Perfiles</dt>
+        <dd><code>basic</code> conserva fechas (completas o desplazadas), características del paciente,
+          identidad del equipo e institución. <code>strict</code> quita identidad de equipo e
+          institución y elimina los atributos privados aunque pidas conservarlos.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando las imágenes salgan del entorno clínico: docencia, investigación, un proveedor, una
+          segunda opinión externa.</dd>
+        <dt>Al desactivarlo</dt>
+        <dd>El perfil decide si se limpia algo; la casilla <em>anonimizar</em> de una regla decide qué
+          destinos reciben la copia limpia. Si pones el perfil en <code>off</code> mientras una regla
+          sigue pidiéndolo, Carino <strong>retiene</strong> ese destino en vez de mandarle una copia
+          identificada a un nodo cuyo responsable cree que no recibe ninguna.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>Retenido, no enviado; y es la respuesta cuando los estudios dejan de moverse.</b>
+          Un destino marcado como <em>anonimizar</em> por una regla no recibe nada siempre que la
+          limpieza no se pueda hacer de verdad. Se aplaza la entrega, no se revela la identidad: un
+          estudio que espera en disco se libera con una edición, mientras que un nombre que ya llegó a
+          un nodo externo no se recupera con ninguna.</p>
+        <p><b>Hay dos motivos por los que la limpieza no se puede hacer, y no se arreglan igual.</b>
+          Cada retención guarda cuál de los dos es, y el panel de atascados imprime el remedio del
+          motivo que quedó registrado en vez de adivinarlo:</p>
+        <ul>
+          <li><b>El perfil está en <code>off</code></b> mientras una regla sigue pidiendo la limpieza.
+            Pon el perfil en <code>basic</code> o <code>strict</code> y la siguiente pasada de
+            auto-envío los libera.</li>
+          <li><b>El perfil está activo, pero no se pudo construir ningún anonimizador</b> con los
+            ajustes actuales, así que sigue sin haber con qué limpiar. El fallo que lo impidió está en
+            el registro de Actividad, en el canal de envío: arréglalo ahí. <b>Apagar el perfil no
+            libera esta retención:</b> no libera nada, solo cambia cuál de las dos mitades está
+            impidiendo la limpieza.</li>
+        </ul>
+        <p>Quitar la marca <em>anonimizar</em> de la regla libera cualquiera de las dos retenciones, y
+          las libera <b>identificadas</b>, que es justo lo que la retención existe para evitar. Haz esa
+          edición solo si de verdad ese destino ya no debe recibir datos anonimizados.</p>
+        <p>No se pierde nada y nada de esto es silencioso. Los estudios se quedan en la carpeta de
+          <strong>salida</strong> —nunca se archivan ni se borran—, el <em>resto</em> de destinos del
+          mismo estudio lo siguen recibiendo, el registro de Actividad lo saca como <em>error</em>
+          nombrando el estudio, el destino retenido y el motivo, el panel de anonimización de Ajustes
+          también lo nombra, y el contador ⚠ <em>Atascados</em> cuenta esos ficheros. Nada libera una
+          retención por sí solo: ningún temporizador la agota y nada la reintenta.</p>
+      </div>
+      <div class="danger">
+        <p><b>No limpia los píxeles.</b> Los datos del paciente <em>quemados</em> en la imagen —la
+          cabecera que imprime un ecógrafo o una captura secundaria— sobreviven a todos los perfiles, y
+          son la forma más común de que datos «anonimizados» salgan del hospital con nombre y apellidos.
+          La opción <em>Clean Pixel Data</em> (113101) no se declara a propósito, porque no se hace.
+          Nada dentro del programa puede detectar esa fuga por ti: <strong>alguien tiene que mirar las
+          imágenes</strong>. El texto libre dentro de informes estructurados tampoco se analiza.</p>
+      </div>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Índice</h3>
+      <p class="port">sqlite · <code>index.db</code></p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Mantiene una fila por fichero almacenado y deriva de ahí las respuestas de paciente, estudio
+          y serie, para que un resumen de estudio nunca pueda desfasarse de las instancias que resume.
+          Es la capa de consulta que hay debajo de Query/Retrieve y de DICOMweb.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Siempre que uses Query/Retrieve o DICOMweb. Es la única dependencia de ambos.</dd>
+        <dt>Qué garantiza</dt>
+        <dd>El índice es una <em>caché</em>, nunca la fuente de verdad. Perderlo cuesta un reescaneo,
+          nunca una imagen.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Query/Retrieve — C-FIND, C-MOVE, C-GET</h3>
+      <p class="port">Puerto 11115 · Patient Root y Study Root</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Permite que otro sistema pregunte «¿qué estudios tienes de este paciente?» y luego «mándamelos
+          a mí / a esa estación». Es la mitad del PACS con la que puede hablar el equipamiento antiguo:
+          un ecógrafo de 2009 o un digitalizador de CR nunca hablarán DICOMweb, pero sí DIMSE.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando estaciones de trabajo o modalidades tengan que <em>traerse</em> estudios de aquí, o
+          cuando hagas de archivo temporal durante una caída del PACS principal.</dd>
+        <dt>Qué garantiza</dt>
+        <dd>Un C-MOVE nunca inventa la lista de instancias: la resuelve por el índice. Lo que el índice
+          conoce pero no se puede leer del disco se cuenta como <strong>sub-operación fallida</strong> y
+          se nombra en la lista de UIDs fallidos. Nunca se descuenta en silencio: un C-MOVE que informa
+          de éxito enviando menos imágenes de las que encontró es el peor fallo posible de este
+          software.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>DICOMweb — QIDO-RS, WADO-RS, STOW-RS</h3>
+      <p class="port">HTTP, bajo <code>/dicom-web</code> en el puerto del panel</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Deja que visores modernos (OHIF, Weasis y compañía) consulten, descarguen y suban estudios
+          por HTTP sin negociar una asociación DICOM. Lo que se sube por STOW-RS pasa por el
+          <em>mismo</em> archivado que un C-STORE, así que un estudio enviado desde un visor es
+          indistinguible de uno enviado por una modalidad.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando quieras enchufar un visor web al archivo. Recuerda que el token protege también estas
+          rutas.</dd>
+        <dt>CORS</dt>
+        <dd><code>cors_origins</code> se compara de forma <strong>exacta</strong> (esquema + host +
+          puerto) y viene vacía, así que no se devuelve nada a un origen que no esté en la lista. No hay
+          sintaxis de patrones, pero un <code>*</code> literal <em>sí</em> se respeta, y solo porque lo
+          escribiste tú: a partir de ahí se refleja cualquier origen y cualquier página que visite el
+          operador podría leer el archivo desde esta máquina. Mejor nombra el visor.</dd>
+        <dt>Qué no hace</dt>
+        <dd><code>/rendered</code>, <code>/thumbnail</code>, URIs de <em>bulkdata</em> y la conversión
+          entre sintaxis de transferencia no están implementados y responden <code>406</code>. Un visor a
+          medias es peor que una función ausente: lo que no se puede producir no se finge.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Modality Worklist (MWL)</h3>
+      <p class="port">Puerto 11114 · C-FIND de worklist</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Sirve órdenes a las modalidades para que el técnico no teclee los datos del paciente a mano.
+          Cada orden lleva un <em>Study Instance UID</em> pregenerado que se graba en el estudio, de modo
+          que lo que la modalidad devuelve concilia exactamente con su orden. El campo <em>AE de destino</em>
+          dirige una orden a una estación concreta; en blanco, la ven todas.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando el RIS no llega hasta las modalidades: porque está caído, porque el destino
+          sencillamente no tiene RIS, o para probar un flujo RIS→PACS sin un RIS real.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>RIS de emergencia — órdenes HL7</h3>
+      <p class="port">Puerto 2575 · HL7 <code>ORM^O01</code> sobre MLLP</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Recibe órdenes HL7 por MLLP y también permite <strong>teclearlas a mano</strong> en el panel
+          cuando no queda nada vivo aguas arriba. Cuando el estudio vuelve por C-STORE, se concilia con
+          su orden por número de accession (con el ID de paciente como reserva) y la orden se cierra y
+          se archiva para la traza — nunca se borra.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Durante una caída del RIS, o en pruebas de integración.</dd>
+        <dt>Qué garantiza</dt>
+        <dd><strong>La entrega de imágenes nunca depende de que exista una orden.</strong> Un estudio sin
+          orden que le corresponda se guarda y se reenvía igual; la orden simplemente queda abierta para
+          conciliarla a mano.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>Sin TLS y sin credenciales.</b> Ver el apartado de seguridad: quien pueda abrir un socket a
+          ese puerto puede inyectar órdenes. Solo en red clínica de confianza y con cortafuegos.</p>
+      </div>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Failover de emergencia</h3>
+      <p class="port">Vigilancia por C-ECHO del PACS marcado como principal</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Marca un destino como principal y arma el monitor: Carino le hace C-ECHO periódicamente y
+          observa los fallos de reenvío. Si sigue inalcanzable pasado el umbral, avisa y ofrece
+          <em>activar el RIS de emergencia</em>. Al activarlo arranca la worklist local para que los
+          técnicos sigan estudiando, <strong>retiene</strong> lo que llega durante la caída y lo
+          <strong>reenvía</strong> automáticamente cuando el principal vuelve. Vuelves a la normalidad
+          cuando tú lo decides.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>En la máquina que hace de pasarela hacia un PACS del que dependes. Es la razón por la que
+          existe la palabra «continuidad» en la primera línea de este manual.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Impresión virtual</h3>
+      <p class="port">Puerto 11113 · DICOM Print, salida PDF</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Se presenta como una impresora DICOM y captura como PDF lo que le manden. Para equipos cuya
+          única salida es la placa, es la forma de conservar algo archivable.</dd>
+        <dt>Cuándo activarlo</dt>
+        <dd>Cuando tengas una modalidad que solo sabe imprimir y quieras rescatar su resultado.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Panel web</h3>
+      <p class="port">Puerto 8042 · HTTP, <code>127.0.0.1</code> por defecto</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Estado de cada servicio, destinos, órdenes, registro de actividad en vivo, ajustes y un editor
+          DICOM incluido. Todo lo que hace el panel existe también en la CLI.</dd>
+        <dt>Cuándo moverlo de loopback</dt>
+        <dd>Solo con un motivo concreto — y entonces con token obligatorio y HTTPS delante. Ver la regla
+          del token.</dd>
+      </dl>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="no-es">5. Esto no es un producto sanitario</h2>
+
+    <div class="danger">
+      <p><b>Carino PACS no es un producto sanitario.</b> No está certificado, ni autorizado, ni
+        registrado ante ninguna autoridad reguladora, en ningún país. No lleva marcado CE como producto
+        sanitario, no tiene autorización de la FDA, ni registro de COFEPRIS, ANMAT, INVIMA, ISP ni de
+        ningún organismo equivalente. Nadie ha ejecutado sobre él una validación para uso clínico.</p>
+      <p><b>No sirve para diagnóstico primario.</b> Aquí no hay visor diagnóstico: no hay ventaneo, ni
+        mediciones, ni cadena de renderizado calibrada, ni control de la pantalla en la que se muestra.
+        Interpreta los estudios en la estación de trabajo validada que ya tienes.</p>
+    </div>
+
+    <p>Dicho sin rodeos, porque es más útil que una nota al pie:</p>
+    <ul>
+      <li><strong>Si lo despliegas, la validación es tuya.</strong> El cumplimiento normativo, la
+        evaluación de riesgos, la protección de datos y la responsabilidad clínica recaen sobre la
+        organización que lo pone en producción, no sobre el proyecto.</li>
+      <li><strong>Se distribuye sin garantía de ningún tipo</strong>, como dice su licencia AGPL-3.0.</li>
+      <li><strong>No sustituye a tu PACS ni a tu RIS.</strong> Es la pasarela entre ellos y lo que
+        mantiene el servicio en marcha durante una caída, hasta que vuelvan.</li>
+      <li><strong>Trátalo como infraestructura clínica de todos modos.</strong> Que no sea un producto
+        sanitario no lo hace inocuo: mueve datos de pacientes. Cifrado del volumen, cortafuegos, TLS,
+        token y copias de seguridad no son opcionales.</li>
+      <li><strong>Si la atención de un paciente depende de esto, la responsabilidad es tuya, no del
+        software.</strong></li>
+    </ul>
+
+    <p>Nada de esto es pesimismo: el proyecto se toma en serio que <em>una imagen que nunca llega en
+      silencio es peor que un fallo ruidoso</em>, y por eso prefiere negarse a arrancar, contar
+      explícitamente las sub-operaciones fallidas y reenviar de más antes que de menos. Solo retiene una
+      entrega en un caso, de forma ruidosa y reversible: un destino para el que una regla pide
+      anonimizar cuando la limpieza prometida no se puede hacer, sea porque el perfil está apagado o
+      porque el perfil está activo y no se pudo construir ningún anonimizador. Dice cuál de los dos es,
+      porque los dos se arreglan de forma distinta. Pero el software solo puede responder de lo que hace
+      él; del resto respondes tú.</p>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="ayuda">6. Licencia y dónde pedir ayuda</h2>
+    <p>Carino PACS se publica bajo <strong>AGPL-3.0-or-later</strong>. Como es un servidor de red, se
+      aplica el §13: si ejecutas una versión modificada como servicio, debes ofrecer su código a quienes
+      la usen. Conserva el fichero <code>LICENSE</code> y un enlace al código con cualquier despliegue
+      modificado.</p>
+    <ul>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">Código y
+        seguimiento de incidencias en GitHub</a></li>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener">Política
+        de seguridad</a> — qué está protegido, qué no, y cómo reportar una vulnerabilidad</li>
+      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Cómo
+        contribuir</a></li>
+    </ul>
+    <p>Si encuentras un error en este manual —o una traducción que un radiólogo no diría nunca— abre una
+      incidencia. La documentación en español y portugués es parte del proyecto, no un extra.</p>
+
+    <p class="foot">Carino PACS · <a href="../../">portada</a> · parte del taller
+      <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a> ·
+      AGPL-3.0-or-later.</p>
+  </main>
+</body>
+</html>

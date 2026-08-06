@@ -46,7 +46,13 @@ class LogBuffer:
                 kind = entry.get("kind", "")
                 prefix = (kind + " ") if kind else ""
                 line = "%s [%-5s] %s%s\n" % (entry["ts"], entry["level"].upper(), prefix, entry["message"])
-                with open(os.path.join(self.log_dir, day + ".log"), "a", encoding="utf-8") as fh:
+                # 0640, not the 0644 a plain open() gives: these lines carry
+                # patient names, patient IDs, accession numbers and the AE titles
+                # of every node this box talks to. On a shared machine that is a
+                # patient list any unprivileged account could read.
+                path = os.path.join(self.log_dir, day + ".log")
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
+                with os.fdopen(fd, "a", encoding="utf-8") as fh:
                     fh.write(line)
             except OSError:
                 pass
