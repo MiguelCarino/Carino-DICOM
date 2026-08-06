@@ -49,13 +49,21 @@
             <section class="cards">
       <article class="card" id="receiverCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="rxDot"></span> <span data-i18n>Receiver</span> <small data-i18n>Storage SCP</small></div>
-          <button class="btn toggle" id="rxToggle" data-on="false">Start</button>
+          <div class="card-title"><span class="dot" id="rxDot"></span> <span data-i18n>Receiver</span></div>
+          <button class="btn toggle" id="rxToggle" data-on="false" data-i18n>Start</button>
         </header>
+        <!-- Lede: protocol tag + one plain sentence. The data-i18n-title value IS
+             the i18n key (applyI18nIn keeps a pre-filled data-i18n-title and
+             writes t(key) into title), so the same string serves the tooltip now
+             and the first-boot wizard later. -->
+        <div class="card-lede" data-i18n-title="Studies a modality or another PACS send here are saved straight to a folder on this PC. Leave it on: it is what makes this machine a destination other equipment can send to.">
+          <p class="card-tag" data-i18n>Storage SCP</p>
+          <p class="card-desc" data-i18n>Studies a modality sends here are saved on this PC.</p>
+        </div>
         <dl class="kv">
-          <div><dt data-i18n>AE title</dt><dd id="rxAet">—</dd></div>
-          <div><dt data-i18n>Listening</dt><dd id="rxAddr">—</dd></div>
-          <div><dt data-i18n>Store to</dt><dd id="rxDir" class="path">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="rxAet" class="atomic">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="rxAddr" class="atomic">—</dd></div>
+          <div class="wide"><dt data-i18n>Store to</dt><dd id="rxDir" class="path">—</dd></div>
           <div><dt data-i18n>Received</dt><dd id="rxCount">0</dd></div>
           <div><dt data-i18n>Errors</dt><dd id="rxErr">0</dd></div>
           <div><dt data-i18n>Security</dt><dd id="rxTls">—</dd></div>
@@ -65,12 +73,16 @@
 
       <article class="card" id="watcherCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="wxDot"></span> <span data-i18n>Auto-send</span> <small data-i18n>folder watcher</small></div>
-          <button class="btn toggle" id="wxToggle" data-on="false">Start</button>
+          <div class="card-title"><span class="dot" id="wxDot"></span> <span data-i18n>Auto-send</span></div>
+          <button class="btn toggle" id="wxToggle" data-on="false" data-i18n>Start</button>
         </header>
+        <div class="card-lede" data-i18n-title="Files put in the watched folder are forwarded to every enabled destination and retried until each one accepts, so nothing is dropped. Turn it on when studies must move onward.">
+          <p class="card-tag" data-i18n>folder watcher</p>
+          <p class="card-desc" data-i18n>Studies put in the watched folder are sent onward.</p>
+        </div>
         <dl class="kv">
-          <div><dt data-i18n>Watching</dt><dd id="wxDir" class="path">—</dd></div>
-          <div><dt data-i18n>Calling AE</dt><dd id="wxAet">—</dd></div>
+          <div class="wide"><dt data-i18n>Watching</dt><dd id="wxDir" class="path">—</dd></div>
+          <div><dt data-i18n>Calling AE</dt><dd id="wxAet" class="atomic">—</dd></div>
           <div><dt data-i18n>On success</dt><dd id="wxMode">—</dd></div>
           <div><dt data-i18n>Sent</dt><dd id="wxSent">0</dd></div>
           <div><dt data-i18n>Failed</dt><dd id="wxFailed">0</dd></div>
@@ -81,12 +93,16 @@
 
       <article class="card" id="printerCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="pxDot"></span> <span data-i18n>Print receiver</span> <small data-i18n>virtual film printer</small></div>
-          <button class="btn toggle" id="pxToggle" data-on="false">Start</button>
+          <div class="card-title"><span class="dot" id="pxDot"></span> <span data-i18n>Print receiver</span></div>
+          <button class="btn toggle" id="pxToggle" data-on="false" data-i18n>Start</button>
         </header>
+        <div class="card-lede" data-i18n-title="A modality that can only print sends its film here, and each sheet is captured into Pending review, not printed. Use it for older ultrasound, CR or dental units that cannot send.">
+          <p class="card-tag" data-i18n>Print SCP</p>
+          <p class="card-desc" data-i18n>Film from a print-only unit is captured here for review.</p>
+        </div>
         <dl class="kv">
-          <div><dt data-i18n>AE title</dt><dd id="pxAet">—</dd></div>
-          <div><dt data-i18n>Listening</dt><dd id="pxAddr">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="pxAet" class="atomic">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="pxAddr" class="atomic">—</dd></div>
           <div><dt data-i18n>Mode</dt><dd id="pxMode">—</dd></div>
           <div><dt data-i18n>Printed</dt><dd id="pxCount">0</dd></div>
           <div><dt data-i18n>Errors</dt><dd id="pxErr">0</dd></div>
@@ -97,34 +113,42 @@
 
       <article class="card" id="risCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="rsDot"></span> <span data-i18n>Emergency RIS</span> <small data-i18n>HL7 order intake</small></div>
-          <button class="btn toggle" id="rsToggle" data-on="false">Start</button>
+          <div class="card-title"><span class="dot" id="rsDot"></span> <span data-i18n>Emergency RIS</span></div>
+          <button class="btn toggle" id="rsToggle" data-on="false" data-i18n>Start</button>
         </header>
+        <div class="card-lede" data-i18n-title="Orders arrive as HL7 messages or are typed in by hand, and close themselves when the matching study arrives. Turn it on when the RIS feed is down and orders must keep flowing.">
+          <p class="card-tag" data-i18n>HL7 order intake</p>
+          <p class="card-desc" data-i18n>Exam orders arrive here when the hospital RIS is down.</p>
+        </div>
         <dl class="kv">
-          <div><dt data-i18n>Listening</dt><dd id="rsAddr">—</dd></div>
-          <div><dt data-i18n>Protocol</dt><dd>HL7 / MLLP</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="rsAddr" class="atomic">—</dd></div>
+          <div><dt data-i18n>Protocol</dt><dd class="atomic" title="HL7 / MLLP">HL7 / MLLP</dd></div>
           <div><dt data-i18n>Match on</dt><dd id="rsMatch">—</dd></div>
           <div><dt data-i18n>Open orders</dt><dd id="rsOpen">0</dd></div>
           <div><dt data-i18n>Received</dt><dd id="rsRecv">0</dd></div>
           <div><dt data-i18n>Errors</dt><dd id="rsErr">0</dd></div>
         </dl>
-        <div class="drop-hint" data-i18n>orders appear under 📋 Orders — key the accession into the modality to match</div>
+        <div class="drop-hint" data-i18n>orders appear under 📋 Orders — match by accession</div>
       </article>
 
       <article class="card" id="mwlCard">
         <header class="card-head">
-          <div class="card-title"><span class="dot" id="mwDot"></span> <span data-i18n>Worklist</span> <small data-i18n>Modality Worklist SCP</small></div>
-          <button class="btn toggle" id="mwToggle" data-on="false">Start</button>
+          <div class="card-title"><span class="dot" id="mwDot"></span> <span data-i18n>Worklist</span></div>
+          <button class="btn toggle" id="mwToggle" data-on="false" data-i18n>Start</button>
         </header>
+        <div class="card-lede" data-i18n-title="The tech picks the patient on the scanner instead of typing name and accession; only open orders are served. Turn it on when the RIS worklist is down, or for a room with no RIS.">
+          <p class="card-tag" data-i18n>MWL SCP</p>
+          <p class="card-desc" data-i18n>Modalities pull their patient list from this PC.</p>
+        </div>
         <dl class="kv">
-          <div><dt data-i18n>AE title</dt><dd id="mwAet">—</dd></div>
-          <div><dt data-i18n>Listening</dt><dd id="mwAddr">—</dd></div>
+          <div><dt data-i18n>AE title</dt><dd id="mwAet" class="atomic">—</dd></div>
+          <div><dt data-i18n>Listening</dt><dd id="mwAddr" class="atomic">—</dd></div>
           <div><dt data-i18n>Serving</dt><dd id="mwServing" data-i18n>open orders</dd></div>
           <div><dt data-i18n>Queries</dt><dd id="mwQueries">0</dd></div>
           <div><dt data-i18n>Matches</dt><dd id="mwMatches">0</dd></div>
           <div><dt data-i18n>Security</dt><dd id="mwTls">—</dd></div>
         </dl>
-        <div class="drop-hint" data-i18n>point a modality here as its worklist source — it pulls open orders by C-FIND</div>
+        <div class="drop-hint" data-i18n>point a modality here — it pulls open orders by C-FIND</div>
       </article>
             </section>
           </div>
@@ -153,7 +177,7 @@
       <!-- RIS orders (emergency RIS: intake + reconciliation) -->
       <section class="panel workpanel" id="dlgOrders" hidden>
         <header class="modal-head">
-          <h2><span data-i18n>RIS orders</span> <small data-i18n-html>received &amp; hand-keyed — matched when the study arrives</small></h2>
+          <h2><span data-i18n>RIS orders</span> <small data-i18n>RIS + manual entry</small></h2>
           <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">

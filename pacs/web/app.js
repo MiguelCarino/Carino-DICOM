@@ -4,6 +4,13 @@
 
   const $ = (id) => document.getElementById(id);
 
+  /* Card values that can never be shortened — AE titles, bind:port, paths — are
+     rendered by CSS as .atomic (nowrap + ellipsis) or .path. The ellipsis hides
+     the tail, so mirror the value into title= and nothing is ever unrecoverable. */
+  const dash = (v) => (v == null || v === "" ? "—" : v);
+  function setAtomic(id, value) { const el = $(id); if (!el) return; el.textContent = dash(value); el.title = dash(value); }
+  function setPath(id, p) { const el = $(id); if (!el) return; el.textContent = dash(p); el.title = dash(p); }
+
   /* ── i18n ────────────────────────────────────────────────────────
      Dictionaries and the [data-i18n] markup pass live in i18n.js, which is
      deferred and loaded before this file. Everything below is rendered by JS,
@@ -106,18 +113,18 @@
     }
 
     setDot($("rxDot"), rx.running);
-    $("rxAet").textContent = rx.aet;
-    $("rxAddr").textContent = `${rx.bind}:${rx.port}`;
-    $("rxDir").textContent = rx.storage_dir;
+    setAtomic("rxAet", rx.aet);
+    setAtomic("rxAddr", `${rx.bind}:${rx.port}`);
+    setPath("rxDir", rx.storage_dir);
     $("rxCount").textContent = rx.received;
     $("rxErr").textContent = rx.errors;
-    $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? T("TLS (mutual)") : "TLS") : T("plaintext");
+    $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? T("mTLS") : "TLS") : T("plaintext");
     setToggle($("rxToggle"), rx.running);
     setChip("rx", rx.running);
 
     setDot($("wxDot"), wx.running);
-    $("wxDir").textContent = wx.watch_dir;
-    $("wxAet").textContent = wx.aet;
+    setPath("wxDir", wx.watch_dir);
+    setAtomic("wxAet", wx.aet);
     $("wxMode").textContent = T(wx.on_success);
     $("wxSent").textContent = wx.sent;
     $("wxFailed").textContent = wx.failed;
@@ -126,10 +133,10 @@
     setChip("wx", wx.running);
 
     setDot($("pxDot"), px.running);
-    $("pxAet").textContent = px.aet || "—";
-    $("pxAddr").textContent = `${px.bind || "0.0.0.0"}:${px.port}`;
-    $("pxMode").textContent = (px.color ? T("grayscale + color") : T("grayscale")) +
-      " · " + (px.layout === "image" ? T("→ image") : T("→ PDF"));
+    setAtomic("pxAet", px.aet || "—");
+    setAtomic("pxAddr", `${px.bind || "0.0.0.0"}:${px.port}`);
+    $("pxMode").textContent = (px.color ? T("gray + color") : T("grayscale")) +
+      " · " + (px.layout === "image" ? T("→ SC") : T("→ PDF"));
     $("pxCount").textContent = px.printed || 0;
     $("pxErr").textContent = px.errors || 0;
     $("pxTls").textContent = px.tls ? "TLS" : T("plaintext");
@@ -137,7 +144,7 @@
     setChip("px", px.running);
 
     setDot($("rsDot"), rs.running);
-    $("rsAddr").textContent = `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`;
+    setAtomic("rsAddr", `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`);
     $("rsMatch").textContent = rs.match_on === "accession_or_patient" ? T("accession / patient ID") : T("accession");
     $("rsOpen").textContent = (rs.counts && rs.counts.open) || 0;
     $("rsRecv").textContent = rs.received || 0;
@@ -146,8 +153,8 @@
     setChip("rs", rs.running);
 
     setDot($("mwDot"), mw.running);
-    $("mwAet").textContent = mw.aet || "—";
-    $("mwAddr").textContent = `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`;
+    setAtomic("mwAet", mw.aet || "—");
+    setAtomic("mwAddr", `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`);
     $("mwQueries").textContent = mw.queries || 0;
     $("mwMatches").textContent = mw.matches || 0;
     $("mwTls").textContent = mw.tls ? "TLS" : T("plaintext");
