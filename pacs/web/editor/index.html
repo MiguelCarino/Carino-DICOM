@@ -153,7 +153,13 @@
     .diag-dropdown.open { opacity: 1; visibility: visible; transform: translateY(0); }
     .diag-section { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); margin: 12px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
     .diag-section:first-child { margin-top: 0; }
-    .diag-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: .78rem; padding: 3px 0; }
+    .diag-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: .78rem; padding: 2px 0; }
+
+    /* Two short readings share one line. Each half keeps its natural width, so a
+       long value (a filename, a transfer syntax) wraps the pair back into
+       full-width rows instead of truncating — the panel is only 280px. */
+    .diag-pair { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 20px; }
+    .diag-pair > .diag-row { flex: 0 1 auto; min-width: max-content; gap: 8px; }
     .diag-lbl { color: var(--text-muted); flex-shrink: 0; }
     .diag-val { font-family: var(--mono); color: var(--text); text-align: right; word-break: break-all; }
     @media (max-width: 1150px) { .header-clock { display: none; } }
@@ -1359,9 +1365,13 @@
         <div class="diag-row"><span class="diag-lbl" data-i18n>Loaded</span><span class="diag-val" id="diagCount">0</span></div>
         <div class="diag-row"><span class="diag-lbl" data-i18n>Current</span><span class="diag-val" id="diagName">—</span></div>
         <div class="diag-section" data-i18n>Image</div>
-        <div class="diag-row"><span class="diag-lbl" data-i18n>Modality</span><span class="diag-val" id="diagModality">—</span></div>
+        <!-- Only these two stay short enough to share a line; a filename or a
+             transfer syntax needs the full 280px, so those keep their own row. -->
+        <div class="diag-pair">
+          <div class="diag-row"><span class="diag-lbl" data-i18n>Modality</span><span class="diag-val" id="diagModality">—</span></div>
+          <div class="diag-row"><span class="diag-lbl" data-i18n>Frames</span><span class="diag-val" id="diagFrames">—</span></div>
+        </div>
         <div class="diag-row"><span class="diag-lbl" data-i18n>Dimensions</span><span class="diag-val" id="diagDims">—</span></div>
-        <div class="diag-row"><span class="diag-lbl" data-i18n>Frames</span><span class="diag-val" id="diagFrames">—</span></div>
         <div class="diag-row"><span class="diag-lbl" data-i18n>Transfer syntax</span><span class="diag-val" id="diagTs">—</span></div>
         <div class="diag-section" data-i18n>Session</div>
         <div class="diag-row"><span class="diag-lbl" data-i18n>Local time</span><span class="diag-val" id="diagClock">--:--:--</span></div>
