@@ -697,17 +697,35 @@ That is a guarantee, not a preference: a change adding an outbound call to
 anything else would be treated as a vulnerability, and
 [CONTRIBUTING.md](CONTRIBUTING.md) says such a patch will be rejected on sight.
 
-**Licensed under the GNU Affero General Public License v3.0 or later** — see
-[LICENSE](LICENSE). Copyright © 2026 Miguel Carino.
+### What is mine
+
+**GNU Affero General Public License v3.0 or later** — see [LICENSE](LICENSE).
+Copyright © 2026 Miguel Carino. This covers the server, the dashboard, the DICOM
+editor, the configuration and the documentation: everything in this repository
+except the paths listed under *What is not mine* below.
 
 Because this is a network server, AGPL §13 applies: if you run a modified
 version as a service, you must offer its users the modified source. Practically,
 that means you can run it, read every line of it, change it, and never be
 metered, phoned home to, or told your licence expired — and neither can anyone
-who hands you a modified copy. Bundled dependencies
-([`pynetdicom`](https://github.com/pydicom/pynetdicom),
-[`pydicom`](https://github.com/pydicom/pydicom), `dcmjs`) keep their own
-permissive licences.
+who hands you a modified copy.
+
+### What is not mine
+
+These are third-party works redistributed here. The AGPL above does not cover
+them and could not: they are not mine to relicense. Each keeps its own terms and
+carries its own notice.
+
+| Path | What it is | Licence | Notice |
+| --- | --- | --- | --- |
+| [`pacs/web/editor/fonts/`](pacs/web/editor/fonts/) | IBM Plex Sans, IBM Plex Mono, Red Hat Display, Red Hat Text | SIL OFL 1.1 | [`OFL.txt`](pacs/web/editor/fonts/OFL.txt), plus per-family texts |
+| [`pacs/web/editor/vendor/`](pacs/web/editor/vendor/) | `dcmjs`, `lossless-min.js` and their bundled dependencies | Permissive — MIT / BSD, per package | Five `LICENSE-*.txt` files in that directory |
+
+Runtime Python dependencies — [`pynetdicom`](https://github.com/pydicom/pynetdicom)
+and [`pydicom`](https://github.com/pydicom/pydicom) — are **not vendored**. They
+are installed from PyPI, keep their own MIT licences, and are not redistributed
+by this repository. If you ever build an appliance image or a frozen bundle that
+does ship them, their notices must ship with it.
 
 > Planned relicense: the AGPL protection is intended for the pre-1.0 → 1.x
 > development window. A future **2.0.0** may relicense to MPL-2.0 for wider
