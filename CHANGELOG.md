@@ -91,6 +91,25 @@ release also queries, retrieves, routes and de-identifies.
   identifiers, thirty-five of them marked *remove*. The copy bundled here was
   the correct one and is what upstream was repaired from, so no Carino PACS
   release ever shipped the short table. (`pacs/web/editor/deid-profile.js`)
+- **Podman, natively** — `packaging/podman/carino-pacs.container`, a Quadlet
+  unit that runs the same image rootless under systemd, with no compose provider
+  involved. `podman compose` is a shim over `podman-compose` or Docker's own
+  `docker-compose` and neither ships with Podman, so on a stock Fedora, RHEL or
+  Rocky box — the distributions that ship Podman as the default engine — the
+  compose path fails before it reads a line of the file. Three things are better
+  on this path than on the Docker one, not merely different: `keep-id:uid=1000,
+  gid=1000` maps the invoking account onto the image's baked one, so the data
+  directory comes out owned by whoever ran it and the `PUID`/`PGID` build
+  arguments stop mattering; `Notify=healthy` holds the unit in *activating*
+  until the Storage SCP is genuinely accepting associations, so `systemctl
+  start` returning means the gateway is up rather than that a process exists;
+  and the logs go to the journal beside everything else on the machine. The one
+  thing that is worse is that rootless cannot publish below port 1024, so
+  classic DICOM port 104 needs `net.ipv4.ip_unprivileged_port_start` lowered
+  machine-wide — documented rather than worked around. Verified end to end on
+  Podman 5.8.4: dashboard, API, bundled editor and its WebAssembly decoders,
+  a real `pynetdicom` C-ECHO on 11112, graceful stop, and data surviving a
+  restart. (`packaging/podman/`, `packaging/README.md`)
 - **Disk-space guard** — refuses ingest below a free-space threshold
   (`scp.min_free_gb`), on C-STORE and on STOW-RS alike, measured with
   `shutil.disk_usage` so it needs no extra dependency. (`pacs/scp.py`,

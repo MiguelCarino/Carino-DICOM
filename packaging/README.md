@@ -15,7 +15,8 @@ file and a pointer to the source with any modified deployment.
 
 | Path | Purpose |
 | --- | --- |
-| `systemd/` | Run it as a Linux system service. This document's main subject. |
+| `systemd/` | Run it as a Linux system service, from source. This document's main subject. |
+| `podman/` | Run it as a rootless container under systemd, via Quadlet. |
 | `engine_entry.py` | PyInstaller entry point for the frozen `pacs-engine` binary. |
 | `pacs-engine.spec` | PyInstaller spec the Electron desktop app builds against. |
 
@@ -347,6 +348,104 @@ system user with a nonexistent home produces confusing failures.
 | Restart loop every 15 s | A config error. Read the preflight message, fix `config.json`; it will pick itself up without further action. |
 
 ---
+
+---
+
+## Linux (Podman, rootless)
+
+Podman is the default container engine on Fedora, RHEL, CentOS and Rocky — the
+usual choice for an appliance box — and it is a different deployment shape from
+the two above rather than a variation on either. The image is the same one
+`docker-compose.yml` builds; what changes is who owns the process and how the
+uids line up.
+
+### Why not just `podman compose`
+
+You can, and `docker-compose.yml` is written to work under it — the `:z` volume
+label and the service-level healthcheck are both there for Podman's sake. But
+`podman compose` is a shim that shells out to `podman-compose` or to Docker's own
+`docker-compose`, and neither ships with Podman. On a stock Fedora install the
+command fails with *"looking up compose provider failed"* before it reads a line
+of the file. Installing one is fine if you already think in compose; if you are
+standing up an appliance, Quadlet is fewer moving parts and a better fit.
+
+### Quadlet
+
+Quadlet is Podman's native systemd integration: you write a `.container` file,
+systemd generates a real unit from it, and the container is managed like any
+other service. It replaces both `docker compose up -d` and the deprecated
+`podman generate systemd`.
+
+```bash
+mkdir -p ~/CarinoPACS
+podman build --format docker -t carino-pacs:local .
+install -Dm644 packaging/podman/carino-pacs.container \
+        ~/.config/containers/systemd/carino-pacs.container
+systemctl --user daemon-reload
+systemctl --user start carino-pacs
+journalctl --user -u carino-pacs -f      # the access token prints on first boot
+```
+
+Then open <http://127.0.0.1:8042/> and paste the token when the dashboard asks.
+
+`packaging/podman/carino-pacs.container` is written to be read, the same way
+`docker-compose.yml` is. It carries the same conservative defaults — loopback
+only, all capabilities dropped, read-only root filesystem, the Storage SCP as
+the one enrolled listener.
+
+### Three things that are genuinely different from Docker
+
+**The uid mapping is simpler, not harder.** Rootless Podman maps container uids
+into a subordinate range on the host, so a data directory owned by your account
+looks unwritable from inside no matter how the ownership reads — the classic
+first-run failure, and the reason `docker-compose.yml` carries a commented
+`userns_mode: keep-id`. The unit uses `keep-id:uid=1000,gid=1000`, which maps
+*your* account onto the image's baked `pacs` account whatever uid you happen to
+be. The data directory stays yours on the host and the image needs no `PUID` /
+`PGID` build arguments at all.
+
+**`systemctl start` waits for the DICOM port.** The unit sets `Notify=healthy`,
+so systemd holds it in *activating* until the healthcheck passes — which asks
+the dashboard for `/api/status` and checks that the Storage SCP is really
+listening. `systemctl --user start carino-pacs` returns after about thirty
+seconds, and when it returns the gateway is genuinely accepting associations.
+Anything ordered `After=` it waits for that too. Compose has no equivalent:
+`docker compose up -d` returns when the process has begun to exist.
+
+**Rootless cannot publish below port 1024.** Classic DICOM port 104 is a host-side
+publish either way — the container's own ports stay above 1024 so it needs no
+privileges — but rootless Podman refuses the *host* side too until the threshold
+is lowered for the whole machine:
+
+```bash
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=104
+```
+
+That is a machine-wide change to satisfy one listener. Weigh it against telling
+the modality which port to use, which is usually a field in its configuration.
+
+### Surviving a logout
+
+A rootless user service stops when your last session ends, which on a box nobody
+logs into means it never starts at all:
+
+```bash
+loginctl enable-linger $USER
+systemctl --user enable carino-pacs
+```
+
+For a machine-wide service instead, put the same file in `/etc/containers/systemd/`
+and drop `--user`. Read the `UserNS=` comment in the unit first: the uid mapping
+is a rootless mechanism and does nothing in system scope, where the data
+directory has to be owned by uid 1000 on the host.
+
+### Verified
+
+Against Podman 5.8.4 on Fedora, rootless, with the unit exactly as it ships:
+the dashboard, the API, the bundled editor and its WebAssembly decoders all
+answer; `systemctl start` blocks for 31s and returns healthy; a real C-ECHO from
+`pynetdicom` is accepted on 11112; `systemctl stop` is graceful in under a
+second; and `~/CarinoPACS` comes out owned by the invoking user.
 
 ## macOS (launchd)
 

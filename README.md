@@ -98,9 +98,37 @@ conservative one, and the comments say what to change and what it costs. The
 first things you will want are `PACS_BIND` (so modalities can reach the DICOM
 port) and `PACS_SERVICES` (which listeners to enrol on first boot).
 
-Podman works too: build with `podman build --format docker` if you want the
-image-level healthcheck to survive, and uncomment `userns_mode: keep-id` in the
-compose file.
+### Podman
+
+Podman runs the same image, and on Fedora, RHEL, CentOS and Rocky it is the
+engine already installed. Note that `podman compose` is a shim over
+`podman-compose` or Docker's own `docker-compose`, and neither ships with
+Podman — on a stock install it fails before it reads the compose file. The
+native path has fewer moving parts:
+
+```bash
+mkdir -p ~/CarinoPACS
+podman build --format docker -t carino-pacs:local .
+install -Dm644 packaging/podman/carino-pacs.container \
+        ~/.config/containers/systemd/carino-pacs.container
+systemctl --user daemon-reload
+systemctl --user start carino-pacs
+journalctl --user -u carino-pacs -f      # the token prints on first boot
+```
+
+That is a Quadlet unit: systemd generates a real service from it and manages the
+container like any other. It is rootless, the data directory comes out owned by
+you rather than by a subordinate uid, and `systemctl start` returns only once the
+DICOM port is genuinely accepting associations rather than once the process
+exists. See [`packaging/README.md`](packaging/README.md#linux-podman-rootless)
+for what differs from Docker, and
+[`packaging/podman/carino-pacs.container`](packaging/podman/carino-pacs.container),
+which is written to be read.
+
+If you prefer compose, `docker-compose.yml` does work under Podman once a
+provider is installed — the `:z` volume label and the service-level healthcheck
+are already there for it. Build with `podman build --format docker` to keep the
+image-level healthcheck as well, and uncomment `userns_mode: keep-id`.
 
 ### From source
 

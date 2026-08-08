@@ -41,7 +41,15 @@ services:
     # Rootless Podman only: container uids are mapped into a separate host
     # range, so ./data owned by your account still looks unwritable inside.
     # Uncomment this line under podman-compose; leave it commented for Docker,
-    # which does not understand it.
+    # which does not understand it. `keep-id:uid=1000,gid=1000` is better still
+    # where your compose provider passes it through — it maps your account onto
+    # the image's baked one, so the PUID/PGID build args above stop mattering.
+    #
+    # Note that `podman compose` is a shim over podman-compose or Docker's own
+    # docker-compose and neither ships with Podman; on a stock install it fails
+    # before reading this file. packaging/podman/carino-pacs.container is the
+    # native path — a Quadlet unit, no compose provider, and systemd waits for
+    # the DICOM port to answer before calling the service started.
     # userns_mode: keep-id
 
     # An init process reaps the short-lived children the dashboard forks. It is

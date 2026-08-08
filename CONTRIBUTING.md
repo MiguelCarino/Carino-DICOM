@@ -344,8 +344,9 @@ which DICOM encodings the browser on this workstation decodes correctly.
 `pacs/web/editor/vendor/README.md` says what may and may not be copied over.
 
 **`desktop/`** — the Electron tray app. **`packaging/`** — the PyInstaller spec
-and entry point, plus the systemd unit and installer for a Linux service
-deployment. **`docker/`**, `Dockerfile`, `docker-compose.yml` — the container
+and entry point, the systemd unit and installer for a from-source Linux service
+deployment, and `packaging/podman/` for the rootless-container one (a Quadlet
+unit; Podman needs no compose provider on that path). **`docker/`**, `Dockerfile`, `docker-compose.yml` — the container
 image. Remember that a container binds `0.0.0.0` inherently, so anything you
 change there must keep `web.auth_token` mandatory. **`docs/`** — the project
 website (GitHub Pages), including

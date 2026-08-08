@@ -1,0 +1,187 @@
+# Carino PACS — Podman Quadlet unit (rootless)
+#
+# Quadlet is Podman's native systemd integration: drop this file in, reload, and
+# systemd owns the container the way it owns any other service. It replaces both
+# `docker compose up -d` and the deprecated `podman generate systemd`.
+#
+#   mkdir -p ~/CarinoPACS
+#   podman build --format docker -t carino-pacs:local .
+#   install -Dm644 packaging/podman/carino-pacs.container \
+#           ~/.config/containers/systemd/carino-pacs.container
+#   systemctl --user daemon-reload
+#   systemctl --user start carino-pacs
+#   journalctl --user -u carino-pacs -f      # the access token prints on first boot
+#
+# Then open http://127.0.0.1:8042/ and paste the token when the dashboard asks.
+#
+#   loginctl enable-linger $USER
+#
+# is what makes it survive a logout and come back at boot — without it a rootless
+# user service stops when your last session ends, which on an appliance box that
+# nobody logs into means it never starts at all.
+#
+# For a machine-wide service instead, put this in /etc/containers/systemd/ and
+# use `systemctl` without --user. Read the ROOTFUL note under UserNS= first: the
+# uid mapping below is a rootless mechanism and does nothing there.
+#
+# Everything in docker-compose.yml applies here too — it is the longer document
+# and it explains what each default costs. This file only says what is different
+# about Podman.
+
+[Unit]
+Description=Carino PACS — DICOM gateway and continuity appliance
+Documentation=https://github.com/MiguelCarino/Carino-PACS
+Documentation=file:%h/.config/containers/systemd/carino-pacs.container
+
+# The DICOM listeners bind a concrete address from config.json — often a LAN IP
+# rather than 0.0.0.0 — and a bind to an address the kernel does not have yet
+# fails. network-online.target waits for an interface to be configured;
+# network.target only means the stack came up.
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=carino-pacs
+
+# Built locally: this project publishes no image, and an appliance that pulls a
+# floating tag from a registry is an appliance whose version changed without
+# anyone deciding. Build it, tag it, keep the tag. If you do host it somewhere,
+# put the digest here rather than a tag, and add AutoUpdate=registry only if you
+# actively want unattended updates to a medical device.
+Image=localhost/carino-pacs:local
+
+# ---- uid mapping, and why this is not the compose file's problem ----------
+# Rootless Podman maps container uids into a subordinate range on the host, so a
+# ./data owned by your account looks unwritable from inside no matter how the
+# ownership reads. `keep-id:uid=1000,gid=1000` maps YOUR host account onto the
+# image's baked `pacs` account, whatever uid you happen to be — so the data
+# directory below stays yours on the host, and the image needs no PUID/PGID
+# build arguments at all. That is the one place this file is simpler than
+# docker-compose.yml rather than merely different.
+#
+# ROOTFUL: delete this line. There is no user namespace to keep an id in, the
+# container runs as the image's uid 1000 directly, and the data directory has to
+# be owned by 1000 on the host.
+UserNS=keep-id:uid=1000,gid=1000
+
+# ---- data ---------------------------------------------------------------
+# config.json, received/ outgoing/ sent/ pending/ logs/ audit/ and the sqlite
+# index. This is patient data: back it up, and put it on encrypted storage.
+#
+# `:z` relabels for SELinux, which is enforcing on the distributions Podman ships
+# as the default engine — Fedora, RHEL, CentOS, Rocky. Without it the mount is
+# unwritable while the ownership looks perfectly correct. Use `:Z` if this
+# directory is never shared with another container.
+#
+# %h is your home directory. ~/CarinoPACS is also where a from-source run puts
+# its data, so the two deployments read the same archive.
+Volume=%h/CarinoPACS:/data:z
+
+# Supply the token as a file rather than an environment variable — a variable is
+# visible in `podman inspect` and in the environment of every process in the
+# container. Leave both unset and the entrypoint generates one on first boot and
+# prints it once to the journal.
+# Volume=%h/CarinoPACS/secrets/auth_token:/run/secrets/pacs_auth_token:ro
+# Environment=PACS_AUTH_TOKEN_FILE=/run/secrets/pacs_auth_token
+
+# ---- published ports ----------------------------------------------------
+# Loopback only, so nothing here is reachable from your network until you decide
+# it should be. The Storage SCP accepts studies from anyone by default
+# (scp.allowed_aets empty), so publishing 11112 on a host with a public IP puts
+# an open DICOM archive on the internet.
+#
+# To let modalities reach it, replace 127.0.0.1 with the host's LAN address on
+# the 11112 line — not 0.0.0.0 unless the host really has no public interface —
+# and then restrict who may talk to it in the dashboard.
+#
+# Keep the dashboard on loopback and reach it over an SSH tunnel or a reverse
+# proxy with TLS: the token is a bearer credential and plain HTTP hands it to
+# anyone on the path.
+PublishPort=127.0.0.1:8042:8042
+PublishPort=127.0.0.1:11112:11112
+
+# Optional listeners. Uncomment the port AND enrol the service — either in
+# PACS_SERVICES below on a first run, or in the dashboard at any time. A
+# published port with the service disabled listens to nothing.
+# PublishPort=127.0.0.1:11113:11113     # virtual film printer
+# PublishPort=127.0.0.1:11114:11114     # Modality Worklist SCP
+# PublishPort=127.0.0.1:11115:11115     # Query/Retrieve SCP
+# PublishPort=127.0.0.1:2575:2575       # Emergency RIS, HL7 v2 over MLLP
+#
+# Classic DICOM port 104 maps on the host side only — the container's own ports
+# stay above 1024 so it needs no privileges to bind them. Rootless Podman cannot
+# publish below 1024 at all until you lower the threshold for the whole host:
+#   sudo sysctl -w net.ipv4.ip_unprivileged_port_start=104
+# Weigh that against just telling the modality which port to use.
+# PublishPort=127.0.0.1:104:11112
+
+# Which listeners to switch on the FIRST time the container writes its config.
+# After that the config file wins and this stops mattering.
+# Values: scp, scu, print, mwl, qr, ris, dicomweb.
+Environment=PACS_SERVICES=scp
+Timezone=local
+
+# ---- hardening ----------------------------------------------------------
+# Nothing here needs a capability: every listener is above 1024 and no code
+# changes uid.
+DropCapability=ALL
+NoNewPrivileges=true
+
+# The application writes only to /data and /tmp — the printer stages captured
+# film in a temp directory. Comment both out if you are debugging something that
+# wants to write elsewhere.
+ReadOnly=true
+Tmpfs=/tmp:size=256m,mode=1777
+
+# Reaps the short-lived children the dashboard forks. It is not what makes a
+# stop clean: the entrypoint installs its own SIGTERM handler, because a
+# forwarded SIGTERM with no handler kills the process without stopping the DICOM
+# listeners.
+RunInit=true
+StopTimeout=30
+
+# ---- health -------------------------------------------------------------
+# "It is answering", not "the process exists": this asks the dashboard for
+# /api/status and, when the Storage SCP is enabled, checks that its port is
+# really listening. `pacs serve` deliberately keeps the dashboard up when a
+# listener fails to bind — that is how you see the error — so a process-liveness
+# check would hide a dead DICOM port.
+#
+# Declared here rather than left to the image because `podman build` defaults to
+# the OCI format, which has nowhere to store a HEALTHCHECK and drops it with a
+# warning. Build with --format docker and you get both; this way it works either
+# way.
+HealthCmd=python /app/docker/healthcheck.py
+HealthInterval=30s
+HealthTimeout=10s
+HealthStartPeriod=60s
+HealthRetries=3
+
+# The one thing compose cannot do. systemd holds the unit in "activating" until
+# the healthcheck passes, so `systemctl --user start carino-pacs` returns only
+# once the DICOM port is genuinely accepting associations — and anything ordered
+# After= this unit waits for that too, rather than for a process that has begun
+# to exist. Raise HealthStartPeriod above if a start-up index rescan on a large
+# archive takes longer than a minute, or the unit will be killed mid-rescan.
+Notify=healthy
+
+# journald rather than a json file: it is where the rest of this machine's logs
+# already are, it rotates by the journal's own limits, and `journalctl --user -u
+# carino-pacs` is then the single place to look. The application keeps its own
+# dated logs under /data/logs regardless.
+LogDriver=journald
+
+[Service]
+# Restart=always, not on-failure: a DICOM gateway that has stopped is a modality
+# that cannot send, and the operator finds out from a technologist rather than
+# from a monitor. Pair it with StartLimitIntervalSec=0 so a crash loop keeps
+# retrying instead of giving up after five tries in ten seconds.
+Restart=always
+RestartSec=10
+
+# Comfortably above StopTimeout, so systemd never kills the `podman rm` that
+# tidies up after a stop.
+TimeoutStopSec=70
+
+[Install]
+WantedBy=default.target
