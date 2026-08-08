@@ -47,6 +47,8 @@
       answering. This manual covers deployment, the security model, every service, and the software's
       real limits.</p>
 
+    <p class="shots-note">Every screenshot here is a live instance of this software, holding studies that were invented for the picture. No patient appears anywhere in this manual.</p>
+
     <div class="toc">
       <h2>Contents</h2>
       <ol>
@@ -190,6 +192,18 @@ journalctl -u carino-pacs -f</code></pre>
         would rather shout than fail quietly.</li>
     </ol>
 
+    <figure class="shot">
+      <img src="img/en/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The dashboard's setup chooser, with a card per service — receiver, auto-send, print receiver, emergency RIS — each with a Use this tick box, and a footer reading: nothing selected." />
+      <figcaption>Step 1. Nothing is ticked and nothing is running: the footer says so, and no port opens until you apply. Each card names what the service is for, so the choice is made from the description rather than from the protocol name.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="img/en/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The Activity panel: a timestamped stream. Startup lines name each listener and its port; a red block explains that a routing rule asks for de-identification while the profile is off; an amber line reports a rejected association and when it will be retried." />
+      <figcaption>Step 5. The activity stream. Every line that matters says what it wants done about it — the red block here is a de-identification hold naming the remedy, and the amber line is a refused destination naming its next retry.</figcaption>
+    </figure>
+
     <h3>Headless</h3>
     <pre><code>./run.sh init            # scaffold config.json and its folders
 ./run.sh init --token    # and generate web.auth_token
@@ -206,6 +220,12 @@ journalctl -u carino-pacs -f</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="security">3. The security model and the token rule</h2>
 
+    <figure class="shot">
+      <img src="img/en/gate.webp" width="1150" height="950" loading="lazy" decoding="async"
+        alt="The sign-in gate: a card headed “This PACS needs its access token”, one password field, a Sign in button, and a note saying the token is web.auth_token in the config file and that the dashboard never shows a stored one." />
+      <figcaption>This is served instead of the dashboard, and again on any later 401 — a restart drops every session by design, so signing in again is normal rather than a fault.</figcaption>
+    </figure>
+
     <p>Start with the part that matters: <strong>the dashboard is the key to the archive</strong>. Anyone
       who opens it can read every stored study, download the DICOM files, change every setting, start and
       stop services, delete studies and shut the server down. Out of the box there is one shared secret
@@ -213,6 +233,18 @@ journalctl -u carino-pacs -f</code></pre>
       them on</strong>. Once you do, each person signs in as themselves with their own permissions,
       their own view of patient identifiers, and their own name in the audit trail; the shared token
       keeps working as an administrator so nothing that already uses it breaks.</p>
+
+    <figure class="shot">
+      <img src="img/en/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The People panel with four profiles. The IT profile is expanded: a grid of capabilities, some ticked and some not, and below it a Can see row of patient identifiers where patient name, date of birth, sex and referring physician are unticked." />
+      <figcaption>Profiles, once they are on. Permissions are per person and enforced at every endpoint, not hidden in the browser — and <em>Can see</em> is separate from <em>Can do</em>: this IT profile can re-route a study by its accession number without ever reading a patient's name. Anything unticked is shown as <code>***</code> wherever it would have appeared.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="img/en/gate-people.webp" width="1200" height="1080" loading="lazy" decoding="async"
+        alt="The same gate on an appliance that uses profiles: four buttons — Administrator, IT, Radiologist, Reception — each with a padlock, and a link reading “Sign in with the access token instead”." />
+      <figcaption>The gate an appliance with profiles shows. The picker is only drawn while <code>users.list_profiles</code> is on — publishing the staff list to anyone who can reach the port is a real disclosure, and it is your call. The token still works, folded away underneath, because it is the way back in when somebody locks themselves out.</figcaption>
+    </figure>
 
     <h3>The rule</h3>
     <div class="danger">
@@ -309,12 +341,30 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
+    <figure class="shot">
+      <img src="img/en/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The audit panel: a Check integrity button, an Export button, a line giving the file count and the chain head digest, and rows of timestamped records — logins that succeeded and one that was denied." />
+      <figcaption>The audit trail, with the chain head printed above it — that digest is the value worth copying somewhere this machine cannot reach. Refusals are recorded as faithfully as successes: the denied row is a request that was turned down.</figcaption>
+    </figure>
+
     <h2 id="services">4. The services, one by one</h2>
 
     <p>Everything that opens a port ships <strong>off</strong>. The right question is not "what can it
       do?" but "what does <em>this</em> machine need to do?" Every enabled service is one more open
       port. The index below is the one exception — it starts on its own, because it is a local sqlite
       cache that binds nothing.</p>
+
+    <figure class="shot">
+      <img src="img/en/services.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The Services panel: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a green dot, a Stop button, its AE title, what it is listening on, and its counters." />
+      <figcaption>Each service starts and stops on its own, and each card carries the two numbers worth watching: what it has handled and what it has failed. The dashboard is not the engine — stopping one here stops that listener, not the appliance.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="img/en/overview.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The Overview panel: counting tiles for services on, received, sent, stuck, pending, open orders and free space, over cards naming this machine's address, its receiver, its config and storage paths, the reachability of each destination, and the last study received." />
+      <figcaption>Overview answers "is this machine working" in one screen. Every tile is a button onto the panel that owns the thing it counts, so a number you did not expect is one click from its detail.</figcaption>
+    </figure>
 
     <div class="svc-doc">
       <h3>Receiver — Storage SCP</h3>
@@ -330,6 +380,11 @@ openssl rand -base64 32</code></pre>
         <dt>Leave it off when</dt>
         <dd>This machine only forwards what something else drops in a folder.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Transaction history panel, on its Received tab: a row per study with patient, ID, date, description, modality and image count, its series listed underneath, and per-row Send, Attach, Edit tags, Go to file and Delete actions." />
+        <figcaption>What arrived, newest first, with the series each study is made of. <em>Go to file</em> opens where it actually landed on disk — the filing is a real folder tree, not a database somebody has to export from.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -361,6 +416,23 @@ openssl rand -base64 32</code></pre>
         <dd>This machine has to deliver images onward: to the central PACS, to a reading workstation, or
           as copies to a teaching archive.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Destinations panel: three rows — Main archive, Reading room, Teaching archive — each with host, port, AE title, tick boxes for TLS, no RIS and emergency primary, and an Echo button." />
+        <figcaption>Destinations are named here and referred to by name everywhere else, so renaming a node does not orphan the rules that point at it. <em>Echo</em> proves the association before any image depends on it.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="img/en/routing.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Routing panel: a Route by rule tick box, then numbered rules with match fields for modality, calling AE, station, patient ID and study description, and a Send to row of destination tick boxes plus De-identify and Stop at this rule." />
+        <figcaption>Rules are read top to bottom, and the blank fields say <em>any</em> — a rule is a filter, not a form to fill in. The order matters, which is why each rule carries arrows to move it.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="img/en/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Stuck sends panel, split in two: “Retrying automatically”, listing a destination that has refused seven attempts with the next retry in seconds, and “Held — nothing is being sent”, listing six instances for a destination tagged profile off, with a paragraph naming the two edits that release them." />
+        <figcaption>The two halves are different problems and the panel keeps them apart. The top is a node that is down and will clear itself; the bottom is a de-identification hold, which no timer ever releases — so each row spells out the edit that does.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -513,6 +585,11 @@ openssl rand -base64 32</code></pre>
         <dd><strong>Image delivery is never gated on an order match.</strong> A study with no matching
           order is still stored and forwarded; the order simply stays open for manual reconciliation.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/orders.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The RIS orders panel: a New order (manual entry) disclosure, Open and Closed tabs, and three open orders each showing accession number, patient, modality, requested procedure, the HL7 sender and the time queued, with Capture study, Cancel and Delete actions." />
+        <figcaption>Orders that arrived over HL7, and the disclosure at the top for typing one in when nothing upstream is alive. Each closes itself when the matching study lands — and is archived rather than erased.</figcaption>
+      </figure>
       <div class="warn">
         <p><b>No TLS, no credential.</b> See the security section: anyone who can open a socket to that
           port can inject orders. Trusted clinical network and a firewall, or not at all.</p>
@@ -545,6 +622,11 @@ openssl rand -base64 32</code></pre>
         <dt>Turn it on when</dt>
         <dd>You have a print-only modality whose output you want to rescue.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Pending imports panel: two queued items, a PDF and a JPEG, each with patient name, patient ID, accession number, study date and study description already filled in from the study they arrived beside, a Preview link, and Approve &amp; send / Discard buttons." />
+        <figcaption>Captured film — and any PDF or image found beside a study — waits here with the study's own details filled in, rather than being converted to DICOM on a guess. You confirm the identity, then approve.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -558,6 +640,23 @@ openssl rand -base64 32</code></pre>
         <dd>Only with a concrete reason — and then with a token (mandatory) and HTTPS in front. See the
           token rule.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Settings panel: the receiver's AE title, bind address, port, storage folder, free-space floor, AE allow-list and TLS fields on the left; the auto-send calling AE, watch folder, poll interval, what to do after a file is sent, and its TLS trust settings on the right." />
+        <figcaption>Everything in <code>config.json</code>, in a form. The file stays the source of truth — an edit here writes it, and a config the dashboard would refuse to save is refused with the reason, not silently rewritten.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="img/en/editor.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The bundled DICOM editor with a sample study open: the image on the left with window centre and width sliders, a Featured clinical panel on the right listing patient, modality and study description with the patient's name masked behind a Show button, and a Technical panel below it giving SOP Instance UID, transfer syntax, photometric interpretation and the file's SHA-256." />
+        <figcaption>The bundled editor, opened from a study in History or on its own. It runs entirely in the browser — nothing is uploaded anywhere — and the patient's name starts masked, because the most common reason to open a header is to read a UID.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="img/en/editor-tags.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The editor's Edit tab: a toolbar with Anonymize all, Randomize all, add Tag, JSON, CSV, Print and Download all; a strip of the five loaded series; filter chips for patient, study, series, image, equipment, UIDs and private tags; and the tag table itself, one row per attribute with its group and element numbers, description, VR and an editable value." />
+        <figcaption>The tag table, where a header is corrected before a study is re-sent — a wrong accession number or a mistyped patient ID, fixed at the gateway rather than at the modality that has already moved on.</figcaption>
+      </figure>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->

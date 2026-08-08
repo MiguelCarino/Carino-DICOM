@@ -108,6 +108,27 @@ a { color: var(--accent); }
 .svc-doc dd { margin: 2px 0 0; color: #d0d0d0; font-size: .9rem;
   word-break: normal; overflow-wrap: break-word; }
 
+/* Said once, at the top, rather than under every figure: sixteen repetitions of
+   "this is demo data" is sixteen chances to stop reading it. */
+.shots-note { font-family: var(--mono); font-size: .72rem; color: var(--muted);
+  margin: -18px 0 26px; }
+
+/* Screenshots. Every one is a live dashboard holding invented studies, captured
+   at 2× the column width so the monospace values — ports, AE titles, paths —
+   stay legible when a reader zooms in on them, which on this page is the whole
+   reason a picture is here at all.
+
+   `loading="lazy"` and the intrinsic width/height are in the markup rather than
+   here: a manual is read from the top, there are sixteen of these, and a
+   figure whose box is known before the bytes arrive does not shove the
+   paragraph somebody is reading down the page. */
+.shot { margin: 0 0 20px; }
+.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg-2); }
+.shot figcaption { margin-top: 8px; font-family: var(--mono); font-size: .7rem; line-height: 1.5;
+  color: var(--muted); word-break: normal; overflow-wrap: break-word; }
+.svc-doc .shot { margin-top: 14px; }
+
 .foot { border-top: 1px solid var(--border); margin-top: 46px; padding-top: 20px; font-size: .82rem;
   color: var(--muted); }
 .foot a { color: var(--accent); }

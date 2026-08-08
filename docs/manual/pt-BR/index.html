@@ -57,6 +57,8 @@
       DICOMweb, e sustenta o setor de imagem quando o PACS ou o RIS param de responder. Este manual cobre
       a instalação, o modelo de segurança, cada serviço e os limites reais do software.</p>
 
+    <p class="shots-note">Todas as capturas deste manual são de uma instância real deste software com estudos inventados para a foto. Nenhum paciente aparece aqui.</p>
+
     <div class="toc">
       <h2>Conteúdo</h2>
       <ol>
@@ -202,6 +204,18 @@ journalctl -u carino-pacs -f</code></pre>
         gritar a falhar em silêncio.</li>
     </ol>
 
+    <figure class="shot">
+      <img src="../img/pt-BR/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O assistente de configuração do painel, com um cartão por serviço — receptor, encaminhamento automático, receptor de impressão, RIS de emergência —, cada um com uma caixa «Usar isto», e um rodapé dizendo que nada foi selecionado." />
+      <figcaption>Passo 1. Nada está marcado e nada está rodando: o rodapé diz isso, e nenhuma porta abre até você aplicar. Cada cartão explica para que serve o serviço, então a escolha vem da descrição e não do nome do protocolo.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="../img/pt-BR/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O painel de atividade: um fluxo com marcações de hora. As linhas de arranque nomeiam cada listener e sua porta; um bloco vermelho explica que uma regra pede anonimização enquanto o perfil está desligado; uma linha âmbar relata uma associação recusada e quando será tentada de novo." />
+      <figcaption>Passo 5. O fluxo de atividade. Cada linha que importa diz o que fazer a respeito: o bloco vermelho é uma retenção por anonimização que nomeia o remédio, e a linha âmbar é um destino que recusou a conexão e anuncia a próxima tentativa.</figcaption>
+    </figure>
+
     <h3>Sem interface gráfica</h3>
     <pre><code>./run.sh init            # cria config.json e as pastas
 ./run.sh init --token    # e ainda gera o web.auth_token
@@ -218,6 +232,12 @@ journalctl -u carino-pacs -f</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="seguranca">3. O modelo de segurança e a regra do token</h2>
 
+    <figure class="shot">
+      <img src="../img/pt-BR/gate.webp" width="1150" height="950" loading="lazy" decoding="async"
+        alt="A tela de acesso: um cartão com o título «Este PACS precisa do seu token de acesso», um campo de senha, um botão de entrar e uma nota dizendo que o token é web.auth_token no arquivo de configuração e que o painel nunca mostra um token guardado." />
+      <figcaption>Isto é servido no lugar do painel, e de novo em qualquer 401 posterior: um reinício derruba todas as sessões de propósito, então entrar de novo é o normal, não uma falha.</figcaption>
+    </figure>
+
     <p>Comecemos pelo que importa: <strong>o painel é a chave do acervo</strong>. Quem abre o painel pode
       ler todos os estudos armazenados, baixar os arquivos DICOM, mudar qualquer configuração, iniciar e
       parar serviços, apagar estudos e desligar o servidor. De fábrica há um único segredo compartilhado
@@ -225,6 +245,18 @@ journalctl -u carino-pacs -f</code></pre>
       Ao ativar, cada pessoa entra como ela mesma, com as próprias permissões, a própria visão dos
       identificadores do paciente e o próprio nome na auditoria; o token compartilhado continua
       funcionando como administrador, então nada que já o utilize deixa de funcionar.</p>
+
+    <figure class="shot">
+      <img src="../img/pt-BR/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O painel de Pessoas com quatro perfis. O perfil de TI está aberto: uma grade de permissões, algumas marcadas e outras não, e abaixo dela uma linha «pode ver» de identificadores do paciente em que nome, data de nascimento, sexo e médico solicitante estão desmarcados." />
+      <figcaption>Os perfis, depois de ligados. As permissões são por pessoa e são verificadas em cada endpoint, não no navegador; e «pode ver» é separado de «pode fazer»: este perfil de TI consegue reencaminhar um estudo pelo número de accession sem nunca ler o nome de um paciente. O que estiver desmarcado aparece como <code>***</code> onde teria aparecido.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="../img/pt-BR/gate-people.webp" width="1200" height="1080" loading="lazy" decoding="async"
+        alt="A mesma tela de acesso em um equipamento com perfis: quatro botões, cada um com um cadeado, e um link para entrar com o token de acesso." />
+      <figcaption>A tela de acesso de um equipamento com perfis. O seletor só é desenhado enquanto <code>users.list_profiles</code> estiver ligado: publicar a lista de pessoal para quem alcançar a porta é uma divulgação de verdade, e a decisão é sua. O token continua funcionando, dobrado embaixo, porque é a volta para dentro quando alguém se tranca fora.</figcaption>
+    </figure>
 
     <h3>A regra</h3>
     <div class="danger">
@@ -324,12 +356,30 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
+    <figure class="shot">
+      <img src="../img/pt-BR/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O painel de auditoria: um botão de verificar integridade, outro de exportar, uma linha com a contagem de arquivos e o resumo da cabeça da cadeia, e linhas com marcação de hora: acessos que deram certo e um que foi negado." />
+      <figcaption>A trilha de auditoria, com a cabeça da cadeia impressa acima: esse resumo é o valor que vale copiar para um lugar que esta máquina não alcança. As recusas são registradas com a mesma fidelidade que os acertos: a linha negada é um pedido que não passou.</figcaption>
+    </figure>
+
     <h2 id="servicos">4. Os serviços, um a um</h2>
 
     <p>Tudo o que abre uma porta vem <strong>desligado</strong>. A pergunta certa não é «o que ele
       consegue fazer?», e sim «o que <em>esta</em> máquina precisa fazer?». Cada serviço ligado é mais
       uma porta aberta. O índice abaixo é a única exceção: ele sobe sozinho, porque é um cache sqlite
       local que não abre porta nenhuma.</p>
+
+    <figure class="shot">
+      <img src="../img/pt-BR/services.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O painel de Serviços: um cartão por serviço — receptor, encaminhamento automático, receptor de impressão, RIS de emergência, worklist, Query/Retrieve —, cada um com um ponto verde, um botão de parar, seu AE title, onde está escutando e seus contadores." />
+      <figcaption>Cada serviço liga e desliga sozinho, e cada cartão traz os dois números que valem atenção: o que ele atendeu e o que falhou. O painel não é o motor: parar um aqui para aquele listener, não o equipamento.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <img src="../img/pt-BR/overview.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="O painel de Resumo: blocos contando serviços ligados, recebidos, enviados, travados, pendentes, pedidos abertos e espaço livre, sobre cartões com o endereço desta máquina, seu receptor, seus caminhos de configuração e de armazenamento, se cada destino responde e o último estudo recebido." />
+      <figcaption>O resumo responde «esta máquina está funcionando?» em uma tela só. Cada bloco é um botão para o painel que governa o que ele conta, então um número inesperado fica a um clique do seu detalhe.</figcaption>
+    </figure>
 
     <div class="svc-doc">
       <h3>Receptor — Storage SCP</h3>
@@ -346,6 +396,11 @@ openssl rand -base64 32</code></pre>
         <dt>Quando não</dt>
         <dd>Se esta máquina só encaminha o que outra deixa numa pasta.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/pt-BR/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de Histórico, na aba de recebidos: uma linha por estudo com paciente, ID, data, descrição, modalidade e número de imagens, suas séries logo abaixo, e ações por linha: enviar, anexar, editar tags, ir ao arquivo e apagar." />
+        <figcaption>O que chegou, do mais recente para o mais antigo, com as séries de cada estudo. «Ir ao arquivo» abre onde ele realmente caiu no disco: o arquivamento é uma árvore de pastas de verdade, não um banco de dados de onde alguém precisa exportar.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -380,6 +435,23 @@ openssl rand -base64 32</code></pre>
         <dd>Quando esta máquina tiver que entregar imagens a outro sistema: encaminhar ao PACS central,
           alimentar uma estação de laudo, mandar cópias para um arquivo de ensino.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/pt-BR/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de Destinos: três linhas, cada uma com host, porta, AE title, caixas para TLS, sem RIS e primário de emergência, e um botão de Echo." />
+        <figcaption>Os destinos são nomeados aqui e referidos pelo nome em todo o resto, então renomear um nó não deixa órfãs as regras que apontam para ele. O «Echo» prova a associação antes que qualquer imagem dependa dela.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../img/pt-BR/routing.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de Roteamento: uma caixa para rotear por regras e depois regras numeradas com campos de modalidade, AE chamador, estação, ID do paciente e descrição do estudo, e uma linha «enviar para» com caixas de destino mais anonimizar e parar nesta regra." />
+        <figcaption>As regras são lidas de cima para baixo, e os campos em branco querem dizer «qualquer»: uma regra é um filtro, não um formulário para preencher. A ordem importa, e por isso cada regra traz setas para movê-la.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../img/pt-BR/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de envios travados, dividido em dois: «tentando de novo automaticamente», com um destino que recusou sete tentativas e a próxima tentativa em segundos, e «retidos: nada está sendo enviado», com seis instâncias para um destino marcado com o perfil desligado e um parágrafo que nomeia as duas edições que os liberam." />
+        <figcaption>As duas metades são problemas diferentes e o painel as mantém separadas. Em cima, um nó fora do ar que vai se resolver sozinho; embaixo, uma retenção por anonimização, que nenhum temporizador libera: por isso cada linha soletra a edição que libera.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -535,6 +607,11 @@ openssl rand -base64 32</code></pre>
           pedido correspondente é armazenado e encaminhado do mesmo jeito; o pedido apenas fica em aberto
           para conciliação manual.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/pt-BR/orders.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de pedidos do RIS: um bloco para novo pedido manual, abas de abertos e fechados, e três pedidos abertos com número de accession, paciente, modalidade, procedimento solicitado, o remetente HL7 e a hora em que entraram, com ações de capturar estudo, cancelar e apagar." />
+        <figcaption>Pedidos que chegaram por HL7, e o bloco de cima para digitar um quando não sobrou nada vivo acima. Cada um se fecha sozinho quando o estudo correspondente cai — e é arquivado em vez de apagado.</figcaption>
+      </figure>
       <div class="warn">
         <p><b>Sem TLS e sem credencial.</b> Veja a seção de segurança: quem conseguir abrir um socket
           nessa porta consegue injetar pedidos. Só em rede clínica confiável e com firewall.</p>
@@ -568,6 +645,11 @@ openssl rand -base64 32</code></pre>
         <dt>Quando ligar</dt>
         <dd>Quando você tiver uma modalidade que só sabe imprimir e quiser resgatar o resultado dela.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/pt-BR/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de pendentes: dois itens na fila, um PDF e um JPEG, cada um com nome do paciente, ID, número de accession, data e descrição do estudo já preenchidos a partir do estudo ao lado do qual chegaram, um link de pré-visualização e botões de aprovar e enviar ou descartar." />
+        <figcaption>O filme capturado — e qualquer PDF ou imagem encontrado ao lado de um estudo — espera aqui com os dados do próprio estudo já preenchidos, em vez de virar DICOM no chute. Você confirma a identidade e então aprova.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -581,6 +663,23 @@ openssl rand -base64 32</code></pre>
         <dd>Só com um motivo concreto — e então com token obrigatório e HTTPS na frente. Veja a regra do
           token.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/pt-BR/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O painel de Configurações: à esquerda o AE title do receptor, o endereço de escuta, a porta, a pasta de armazenamento, o mínimo de espaço livre, a lista de AE permitidos e os campos TLS; à direita o AE chamador do encaminhamento automático, a pasta vigiada, o intervalo de varredura, o que fazer depois de enviar um arquivo e as configurações de confiança TLS." />
+        <figcaption>Tudo o que está em <code>config.json</code>, em um formulário. O arquivo continua sendo a fonte da verdade: editar aqui o escreve, e uma configuração que o painel se recusaria a salvar é recusada com o motivo, não reescrita em silêncio.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../img/pt-BR/editor.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="O editor DICOM embutido com um estudo de amostra aberto: a imagem à esquerda com deslizadores de centro e largura de janela, um painel clínico à direita com paciente, modalidade e descrição do estudo — com o nome do paciente escondido atrás de um botão de mostrar — e abaixo um painel técnico com o SOP Instance UID, a sintaxe de transferência, a interpretação fotométrica e o SHA-256 do arquivo." />
+        <figcaption>O editor embutido, aberto a partir de um estudo do histórico ou sozinho. Ele roda inteiro no navegador — nada é enviado para lugar nenhum — e o nome do paciente começa escondido, porque o motivo mais comum para abrir um cabeçalho é ler um UID.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../img/pt-BR/editor-tags.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="A aba de edição do editor: uma barra com anonimizar tudo, randomizar tudo, adicionar tag, JSON, CSV, imprimir e baixar tudo; uma tira com as cinco séries carregadas; filtros por paciente, estudo, série, imagem, equipamento, UIDs e tags privadas; e a tabela de tags, uma linha por atributo com seu grupo e elemento, descrição, VR e um valor editável." />
+        <figcaption>A tabela de tags, onde um cabeçalho é corrigido antes de o estudo ser reenviado: um número de accession errado ou um ID de paciente digitado torto, consertado no gateway e não na modalidade que já seguiu adiante.</figcaption>
+      </figure>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
