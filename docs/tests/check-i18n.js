@@ -29,11 +29,7 @@ const LOCALES = ['es', 'pt-BR', 'ja', 'ru'];
 // as [data-i18n] in the markup, so the orphan check has to know about them.
 // '#version' starts as plain text and is translated by applyVersionPlaceholder,
 // so it carries no data-i18n attribute either.
-const RUNTIME_KEYS = [
-    'Latest release:', 'Latest release', 'has no installers yet —',
-    'all versions & notes', 'see releases', 'Version',
-    'Checking for the latest version…',
-];
+const RUNTIME_KEYS = ['Version', 'Checking for the latest version…'];
 // Greetings belong to the shared navbar (carino-navbar.js), not to this page.
 const NAVBAR_KEYS = ['Late shift.', 'Good morning.', 'Good afternoon.', 'Good evening.'];
 

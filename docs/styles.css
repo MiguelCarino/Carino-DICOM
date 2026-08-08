@@ -20,7 +20,16 @@
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55; }
+/* One screen: the hero takes whatever height the navbar leaves and centres its
+   content in it, so the page reads as composed rather than as a page that ran
+   out. `min-height` and `margin: auto` rather than a fixed 100dvh and
+   `justify-content: center` — both of those clip the top of the content when it
+   does not fit, and this has to degrade into an ordinary scrolling page on a
+   short screen, at 200% zoom, or in a locale that runs long. */
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55;
+  min-height: 100dvh; display: flex; flex-direction: column; }
+.hero { flex: 1 0 auto; display: flex; }
+.hero > .wrap { margin-block: auto; width: min(1040px, 90%); }
 a { color: var(--accent); }
 .wrap { width: min(1040px, 90%); margin: 0 auto; }
 .gold { color: var(--accent); }
@@ -34,15 +43,17 @@ a { color: var(--accent); }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---- hero (compact, holds the downloads) ---- */
-.hero { padding: 46px 0 40px; text-align: center;
+/* The whole page is this one block now, so it is sized against the viewport
+   rather than against its own content: everything scales down together on a
+   short screen instead of the last row falling off the bottom. The clamps are
+   what make a 768px laptop and a 1080p monitor both work without a media query
+   per element. Nothing is pinned to 100vh and nothing forbids scrolling — a
+   reader at 200% zoom, or in a locale whose lede runs long, still gets a
+   scrollbar rather than losing the bottom of the page. */
+.hero { padding: clamp(18px, 4vh, 46px) 0 clamp(16px, 3.4vh, 34px); text-align: center;
   background: radial-gradient(1100px 360px at 50% -12%, rgba(234,179,8,.10), transparent 70%); }
-.badge {
-  display: inline-block; font-family: var(--mono); font-size: .66rem; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--accent); border: 1px solid var(--border);
-  border-radius: 999px; padding: 5px 13px; margin-bottom: 18px;
-}
-.hero h1 { font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 1.1; margin: 0 0 16px; font-weight: 800; letter-spacing: -.01em; }
-.lede { max-width: 660px; margin: 0 auto 26px; color: #d4d4d4; font-size: 1.05rem; }
+.hero h1 { font-size: clamp(1.6rem, 3.6vw + .4vh, 2.7rem); line-height: 1.1; margin: 0 0 clamp(8px, 1.5vh, 16px); font-weight: 800; letter-spacing: -.01em; }
+.lede { max-width: 660px; margin: 0 auto clamp(12px, 2.4vh, 26px); color: #d4d4d4; font-size: clamp(.92rem, .55rem + .5vh, 1.05rem); }
 .lede abbr { text-decoration: underline dotted var(--muted); cursor: help; }
 .lede em { color: var(--text); font-style: normal; border-bottom: 1px solid var(--accent); }
 
@@ -69,8 +80,118 @@ a { color: var(--accent); }
   font-family: var(--mono); font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; padding: 2px 8px; white-space: nowrap;
 }
 
-.version { margin: 20px 0 0; font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+/* Above the buttons now, so it reads as their label rather than as a footnote.
+   The number itself is gold: it is the one thing in the line worth reading, and
+   the word "Version" is only there to say what the number is. */
+.version { margin: 0 0 clamp(7px, 1.2vh, 14px); font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+.version strong { color: var(--accent); font-size: .92rem; letter-spacing: .02em; }
 .version a { color: var(--accent); }
+.dl-manual { margin: clamp(9px, 1.6vh, 18px) 0 0; }
+.dl-all { margin: clamp(6px, 1vh, 10px) 0 0; font-size: .82rem; }
+/* A language the manual has not been written in yet. app.js puts this on the
+   manual button when it is about to hand a non-English reader the English page.
+   The marker is decoration, so it lives here rather than inside the label —
+   otherwise it is a translated string somebody has to remember to remove. */
+.btn.soon { opacity: .62; }
+.btn.soon::after { content: " · EN"; font-family: var(--mono); font-size: .72em; opacity: .8; }
+.btn.soon:hover { opacity: 1; }
+.dl-all a { color: var(--accent); text-decoration: none; }
+.dl-all a:hover { text-decoration: underline; }
+
+/* Server: a <button> among <a>s, so it needs the anchor resets an <a> gets for
+   free, and it never takes .recommended — see the markup. */
+.dl-server { font: inherit; cursor: pointer; text-align: center; }
+.dl-server .fmt { text-transform: none; letter-spacing: 0; }
+
+/* ---- modal ----
+   The branding system's component (branding.carino.systems §17), built on
+   <dialog> rather than a scrim div toggled with `hidden`: the element supplies
+   the focus trap, Escape, the backdrop and an inert background, none of which a
+   div gets for free. The anatomy and the naming are the reference's — head with
+   a title and an ✕, a scrolling body — so this reads as the same component
+   wherever it turns up in the fleet.
+
+   The title is --sans, not the reference's --display: this page self-hosts no
+   fonts, so Red Hat Display is not here to use. The treatment is the same. */
+/* `display` only when open. The reference's .modal is a div inside a scrim that
+   carries `hidden`; on a <dialog> a bare `display: flex` overrides the UA's
+   `dialog:not([open]) { display: none }` and every sheet renders inline, always. */
+.modal[open] { display: flex; }
+.modal {
+  flex-direction: column; padding: 0; overflow: hidden;
+  width: min(92vw, 640px); max-height: min(88vh, 900px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.75); color: var(--text);
+}
+.modal.wide { width: min(94vw, 1080px); }
+.modal::backdrop { background: rgba(0,0,0,.65); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.modal-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.modal-title { margin: 0; flex: 1; font-family: var(--sans); font-weight: 900; font-size: 1.05rem;
+  text-transform: uppercase; letter-spacing: .5px; }
+.modal-sub { margin: 0; font-family: var(--mono); font-size: .65rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .08em; }
+.modal-head form { margin: 0; }
+.modal-x { border: none; background: transparent; color: var(--muted); font-size: 1.05rem; line-height: 1;
+  cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: .15s; }
+.modal-x:hover { color: var(--accent); background: var(--accent-faint, rgba(234,179,8,.1)); }
+.modal-body { padding: 18px; overflow-y: auto; }
+
+/* ---- the row that opens them ----
+   Buttons, not a bespoke pill: the reference has one button component and its
+   pills are for status, not navigation. `.sm` is a size, nothing else. */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+  margin: clamp(10px, 2vh, 18px) auto 0; max-width: min(980px, 94vw); }
+.btn.sm { padding: 6px 13px; font-size: .7rem; letter-spacing: .06em; }
+.btn.sm:hover { color: var(--accent); border-color: var(--accent); background: rgba(234,179,8,.08); }
+
+/* A phone has the same content and a third of the height, and the download
+   buttons are the biggest thing on it — four of them wrap to two rows. Trimming
+   their padding and the gaps around them is what keeps the chip row on screen
+   instead of half a row below it. */
+/* Short screens, any width. Russian runs about a line longer than English
+   everywhere it appears, which is enough to push a 1366x768 laptop over by
+   itself — so the trim is keyed to the height that is short rather than to the
+   language that is long. */
+@media (max-height: 780px) {
+  /* Font size only — narrowing max-width here would wrap the text to MORE lines
+     and make the block taller, which is the opposite of the point. */
+  .lede { font-size: .95rem; max-width: 720px; }
+  .dl-note { font-size: .78rem; max-width: 640px; }
+}
+
+@media (max-width: 560px) {
+  .dl-btn { min-width: 118px; padding: 9px 14px; gap: 0; }
+  .dl-btn b { font-size: .95rem; }
+  .downloads { gap: 8px; }
+  .lede { font-size: .88rem; }
+  .dl-note { font-size: .76rem; }
+  .chips { gap: 6px; }
+  .chip { padding: 4px 10px; font-size: .72rem; }
+  .btn.ghost { padding: 7px 13px; }
+}
+/* Stacked, not three columns. The commands are the reason the dialog exists and
+   they scroll rather than wrap — a wrapped shell line is a line somebody pastes
+   wrong — so each one needs the full width to be readable at all. Side by side,
+   every command was cut off at its first argument. */
+.server-opts { display: grid; gap: 18px; text-align: left; }
+.server-opts article { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 6px 20px; align-items: start; }
+.server-opts h3 { margin: 0; font-size: 1rem; grid-column: 1; }
+.server-opts p { margin: 0; color: var(--muted); font-size: .84rem; grid-column: 1; }
+/* The commands are the one place a horizontal scrollbar is the right answer:
+   a wrapped shell command is a command someone will paste wrong. */
+.server-opts pre { margin: 0; overflow-x: auto; grid-column: 2; grid-row: 1 / span 3;
+  background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 13px; }
+.server-opts pre code { font-family: var(--mono); font-size: .76rem; line-height: 1.65;
+  color: #e8e8e8; white-space: pre; }
+.server-opts a { color: var(--accent); text-decoration: none; font-size: .82rem; grid-column: 1; }
+.server-opts a:hover { text-decoration: underline; }
+@media (max-width: 640px) {
+  .server-opts article { grid-template-columns: 1fr; }
+  .server-opts pre { grid-column: 1; grid-row: auto; }
+}
+.server-foot { margin: 18px 0 0; font-size: .84rem; }
+.server-foot a { color: var(--accent); text-decoration: none; }
+.server-foot a:hover { text-decoration: underline; }
 
 /* The download chips used to be the only way in; Docker and systemd are now
    first-class, so the hero says so before the visitor scrolls past them. */
@@ -113,54 +234,8 @@ a { color: var(--accent); }
 .sub.left { margin-left: 0; margin-right: 0; text-align: left; }
 
 
-/* ---- releases ----
-   Three cards rather than prose: the question a visitor arrives with is "which
-   one am I downloading", and that is answered by putting the three side by
-   side, not by a paragraph they have to parse. */
-.rel { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 18px; }
-.rel-item {
-  background: linear-gradient(180deg, var(--panel), #0a0a0a); border: 1px solid var(--border);
-  border-radius: 11px; padding: 16px 18px; min-width: 0;
-}
-.rel-item.next { border-color: var(--accent); }
-.rel-item.later { opacity: .82; }
-.rel-tag {
-  display: inline-block; font-family: var(--mono); font-size: .68rem; letter-spacing: .06em;
-  color: var(--accent); border: 1px solid var(--border); border-radius: 999px;
-  padding: 2px 9px; margin-bottom: 9px;
-}
-.rel-item.later .rel-tag { color: var(--muted); }
-.rel-item b { display: block; margin-bottom: 6px; font-size: .95rem;
-  word-break: normal; overflow-wrap: break-word; }
-.rel-item p { margin: 0; font-size: .84rem; line-height: 1.55; color: #b0b0b0;
-  word-break: normal; overflow-wrap: break-word; }
-.rel-item code { font-family: var(--mono); background: #000; padding: 1px 5px; border-radius: 4px;
-  overflow-wrap: anywhere; }
-/* The arrow is decoration, so it lives here rather than inside a translated
-   string — that keeps "Security policy" one key shared with the tech box
-   instead of two that differ by a glyph. */
-.rel-link { display: inline-block; margin-top: 10px; font-size: .8rem; }
-.rel-link::after { content: " \2197"; }
-
 /* The manuals are a centred strip rather than a section with a heading and a
    standfirst — three buttons did not need three paragraphs around them. */
-.doclinks.center-row { justify-content: center; padding: 4px 0; }
-
-/* ---- server quick start (Docker / systemd side by side) ---- */
-.quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 22px; }
-.quick-col h3 { margin: 0 0 10px; font-size: .98rem; }
-/* The commands are the one place a horizontal scrollbar is the right answer:
-   a wrapped shell command is a command someone will paste wrong. */
-.quick pre { background: #000; border: 1px solid var(--border); border-radius: 10px;
-  padding: 13px; overflow-x: auto; margin: 0; }
-.quick pre code { font-family: var(--mono); font-size: .76rem; line-height: 1.65; color: #e8e8e8;
-  white-space: pre; }
-.quick p { margin: 10px 0 0; font-size: .84rem; color: #b8b8b8;
-  word-break: normal; overflow-wrap: break-word; }
-.quick code { font-family: var(--mono); background: #000; padding: 1px 5px; border-radius: 4px; }
-/* Paths and URLs inline in prose: the one class of value where breaking
-   mid-token is acceptable, because there is no other break point. */
-.quick p code { font-size: .76rem; overflow-wrap: anywhere; }
 
 /* ---- what it does ---- */
 .svc { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 18px; }
@@ -211,7 +286,6 @@ a { color: var(--accent); }
 .notbox-foot { margin: 14px 0 0; font-size: .84rem; color: var(--muted);
   word-break: normal; overflow-wrap: break-word; }
 
-.doclinks { display: flex; gap: 10px; flex-wrap: wrap; }
 
 
 /* ---- tech (collapsed by default) ---- */

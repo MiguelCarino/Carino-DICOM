@@ -17,14 +17,25 @@
   <!-- ── Hero + downloads (above the fold) ────────────────────────── -->
   <header class="hero">
     <div class="wrap">
-      <div class="badge" data-i18n>Your PACS systems are down? Urgent patients cannot wait.</div>
-      <h1><span data-i18n>Keep the images moving,</span><br><span class="gold" data-i18n>even when a system is down.</span></h1>
+      <!-- The badge said this above the headline and the headline said something
+           else; two hooks competing for the same second of attention. This is
+           the one that names the reader's problem, so it is the headline now. -->
+      <h1><span data-i18n>Your PACS systems are down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
       <p class="lede">
         <strong>Carino PACS</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
-        gateway and continuity appliance. It receives studies, routes and forwards them,
-        answers <em>Query/Retrieve</em> and <em>DICOMweb</em>, and can serve the worklist
-        itself while your PACS is unreachable. One config file, one process, no cloud.
+        gateway and continuity appliance. It receives studies, routes and forwards them by
+        rules you write, answers <em>Query/Retrieve</em> and <em>DICOMweb</em>, and serves the
+        worklist itself while your PACS is unreachable — holding everything that arrives and
+        back-filling it the moment the primary answers again. It can de-identify a copy on
+        the way out and keeps an audit trail of who did what. One config file, one process,
+        no cloud.
       </p>
+
+      <!-- The version sits ABOVE the buttons: it is what they will hand you,
+           and a label that follows the thing it labels is a label you read
+           second. app.js rewrites the tag if a newer release actually carries
+           installers, so this line and the buttons can never disagree. -->
+      <p class="version" id="version">Checking for the latest version…</p>
 
       <div class="downloads" id="downloads">
         <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-PACS/releases/download/v1.0.0/carinopacs-windows-v.1.0.0.zip" target="_blank" rel="noopener">
@@ -33,40 +44,127 @@
           <span class="rec" data-i18n>recommended</span><b> macOS</b><span class="fmt">.zip</span></a>
         <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-PACS/releases/download/v1.0.0/carinopacs-ubuntu-latest-v1.0.0.zip" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.zip</span></a>
+        <!-- A button, not a link: there is nothing to download. The three
+             server deployments run from a container image you build or from
+             source, so this opens the chooser instead of starting a transfer.
+             It never gets .recommended — OS detection is about the machine you
+             are reading this on, and a server is a decision rather than a
+             detection. -->
+        <button class="dl-btn dl-server" data-os="server" id="serverBtn" type="button"
+                aria-haspopup="dialog" aria-expanded="false" aria-controls="serverDialog">
+          <b data-i18n>🖥 Server</b><span class="fmt">Docker · Podman · systemd</span></button>
       </div>
-      <p class="version" id="version">Checking for the latest version…</p>
+
+      <!-- The manual in the language the page is being read in. app.js keeps the
+           href in step with the language switcher; without JS it is the English
+           one, which is the same answer the switcher gives for a language the
+           manual does not have yet. -->
+      <p class="dl-manual"><a class="btn ghost" id="manualLink" href="manual/" data-i18n>📖 Read the manual</a></p>
+
+      <p class="dl-all"><a href="https://github.com/MiguelCarino/Carino-PACS/releases"
+         target="_blank" rel="noopener" data-i18n>All versions and changelogs →</a></p>
+
       <!-- One note, not two. It used to be a line about Docker followed by a
            line about versions, and they are the same sentence: what you can
            download, versus what you can run. -->
       <p class="dl-note release-note" id="dl-release">These installers are <b>v1.0.0</b> — store and forward only.
-        Everything else on this page ships in <b>v1.1.0</b>, which runs today from Docker, systemd or source.
-        <a href="#releases">What is in each release ↓</a></p>
-      <details class="firstrun">
-        <summary data-i18n>First launch shows a security warning? Here's how to open it</summary>
-        <ul>
-          <li id="fr-win"><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
-          <li id="fr-mac"><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>. If it says
-            <em>"damaged and can't be opened"</em>, clear the download quarantine:
-            <code>xattr -dr com.apple.quarantine /Applications/Carino-PACS.app</code></li>
-          <li id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
-            <code>.deb</code> (Debian/Ubuntu) from the
-            <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.
-            The <code>.AppImage</code> needs FUSE — <code>sudo dnf install fuse-libs</code>
-            (Fedora) / <code>sudo apt install libfuse2</code> (Debian), or run it with
-            <code>--appimage-extract-and-run</code>.</li>
-        </ul>
-        <p data-i18n>The warning appears because the app isn't code-signed yet — it's safe.</p>
-      </details>
+        Everything else on this page ships in <b>v1.1.0</b>, which runs today from Docker, Podman, systemd or source.</p>
+
+      <!-- What used to be three sections and a disclosure below the fold. They
+           are dialogs now, opened from here, so the page is one screen and
+           nothing has to be scrolled past to reach a download. The content did
+           not go anywhere — a dialog is markup, not a fetch — so it is still one
+           Ctrl-F away and still indexed.
+           Two chips open the same dialog: "what it is" and "what it is not" are
+           one thought, and separating them is how the honest half ended up being
+           the half nobody read. data-focus scrolls the second one into view. -->
+      <nav class="chips" aria-label="More about Carino PACS">
+        <button class="btn sm" type="button" data-sheet="whatDialog" data-i18n>What it is (and is not)</button>
+        <button class="btn sm" type="button" data-sheet="doesDialog" data-i18n>Features</button>
+        <button class="btn sm" type="button" data-sheet="firstrunDialog" data-i18n>First launch</button>
+        <button class="btn sm" type="button" data-sheet="techDialog" data-i18n>For technical users</button>
+      </nav>
     </div>
   </header>
 
-  <!-- ── What it is / what it is not, side by side ─────────────────────
-       Moved up here and paired. "What it is not" used to sit near the bottom
-       on its own, which meant the honest half was the half nobody scrolled to.
-       Reading them together is the point: each column is only meaningful
-       against the other. -->
-  <section class="section alt">
-    <div class="wrap">
+  <!-- ── Server chooser ────────────────────────────────────────────────
+       A native <dialog>: it gets the focus trap, Escape, the backdrop and the
+       inert background from the browser, and none of that has to be written or
+       maintained here. Kept next to the button that opens it rather than at the
+       end of the document, because the two are one control.
+
+       This is now the only place on the page that says how to run a server —
+       there used to be a "Running it on a server" section below as well, and two
+       copies of an install command is one copy that goes stale. So each option
+       carries the whole sequence, starting from the clone, and the sentence that
+       section used to add. Commands are not translated: a shell command is the
+       same in every locale, and a translated one is a command that does not run. -->
+  <dialog class="modal wide" id="serverDialog" aria-labelledby="serverDialogTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="serverDialogTitle" data-i18n>Run it on a server</h2>
+      <form method="dialog"><button class="modal-x" id="serverClose" aria-label="Close">✕</button></form>
+    </div>
+    <div class="modal-body">
+    <p class="server-lede" data-i18n>No installer for these — all three run the same application. Pick the one your machine already speaks.</p>
+
+    <div class="server-opts">
+      <article>
+        <h3>🐳 Docker</h3>
+        <p data-i18n>Compose file, everything on loopback. The first boot prints an access token — open http://127.0.0.1:8042/ and paste it when the dashboard asks.</p>
+<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
+docker compose up -d
+docker compose logs -f pacs</code></pre>
+        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
+      </article>
+
+      <article>
+        <h3>🦭 Podman</h3>
+        <p data-i18n>Rootless, and systemd owns it. Needs no compose provider, and the token prints to the journal on first boot.</p>
+<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+mkdir -p ~/CarinoPACS
+podman build --format docker -t carino-pacs:local .
+install -Dm644 packaging/podman/carino-pacs.container \
+        ~/.config/containers/systemd/carino-pacs.container
+systemctl --user daemon-reload
+systemctl --user start carino-pacs
+journalctl --user -u carino-pacs -f</code></pre>
+        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/podman/carino-pacs.container" target="_blank" rel="noopener" data-i18n>Details →</a>
+      </article>
+
+      <article>
+        <h3>🐧 systemd</h3>
+        <p data-i18n>From source, as a system service with an account of its own. The installer stops before starting it — opening listeners that accept patient data stays your decision.</p>
+<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS
+sudo packaging/systemd/install.sh
+# then edit /var/lib/carino-pacs/config.json and:
+sudo systemctl start carino-pacs</code></pre>
+        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
+      </article>
+    </div>
+
+    <p class="server-foot">
+      <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/README.md"
+         target="_blank" rel="noopener" data-i18n>Full deployment guide →</a></p>
+    </div>
+  </dialog>
+
+
+  <!-- ── The sheets ────────────────────────────────────────────────────
+       One <dialog> each, all built the same way as the server chooser above:
+       the browser supplies the focus trap, Escape, the backdrop and the inert
+       background, so none of that is written here. They scroll inside
+       themselves when they must, which is why the page does not have to. -->
+  <dialog class="modal wide" id="whatDialog" aria-labelledby="whatTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="whatTitle" data-i18n>What it is (and is not)</h2>
+      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+    </div>
+    <div class="modal-body">
+
       <div class="contrast">
         <div class="isbox">
           <h2 data-i18n>What it is</h2>
@@ -89,12 +187,15 @@
         </div>
       </div>
     </div>
-  </section>
+  </dialog>
 
-  <!-- ── What it does ─────────────────────────────────────────────── -->
-  <section class="section">
-    <div class="wrap">
-      <h2 class="center" data-i18n>What it does</h2>
+  <dialog class="modal wide" id="doesDialog" aria-labelledby="doesTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="doesTitle" data-i18n>Features</h2>
+      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+    </div>
+    <div class="modal-body">
+
       <p class="sub" data-i18n>Every service is off until you turn it on. The tag on each card is the release it ships in.</p>
       <div class="svc">
         <div class="svc-item">
@@ -140,82 +241,39 @@
         </div>
       </div>
     </div>
-  </section>
+  </dialog>
 
-  <!-- ── Releases ─────────────────────────────────────────────────
-       Replaces a "Coming in v1.1.0" list that repeated the feature grid
-       above it item for item. Each card there now carries its release tag,
-       so this section only has to answer what a release IS, not re-list it. -->
-  <section class="section alt" id="releases">
-    <div class="wrap">
-      <h2 class="center" data-i18n>Releases</h2>
-      <div class="rel">
-        <div class="rel-item">
-          <span class="rel-tag">v1.0.0</span>
-          <b data-i18n>Available now</b>
-          <p data-i18n>What the installers at the top of this page give you: a Storage SCP that receives studies, and a folder watcher that forwards them. Nothing else.</p>
-        </div>
-        <div class="rel-item next">
-          <span class="rel-tag">v1.1.0</span>
-          <b data-i18n>Next — and running today</b>
-          <p id="rel-next">Everything else on this page. It is written, tested and merged on <code>main</code>; what is missing is a tagged release with signed installers. Run it now with Docker or from source.</p>
-          <a class="rel-link" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n>Full changelog</a>
-        </div>
-        <div class="rel-item later">
-          <span class="rel-tag">—</span>
-          <b data-i18n>Not scheduled</b>
-          <p data-i18n>Encryption at rest, and directory integration (LDAP, Active Directory, single sign-on). Both are deliberate gaps rather than things forgotten — the security policy sets out the reasoning, and an encrypted disk underneath covers the first one today.</p>
-          <a class="rel-link" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n>Security policy</a>
-        </div>
-      </div>
+  <dialog class="modal" id="firstrunDialog" aria-labelledby="firstrunTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="firstrunTitle" data-i18n>First launch shows a security warning? Here's how to open it</h2>
+      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
     </div>
-  </section>
-
-  <!-- ── Docker / server quick start ──────────────────────────────── -->
-  <section class="section">
-    <div class="wrap">
-      <h2 class="center" data-i18n>Running it on a server</h2>
-      <div class="quick">
-        <div class="quick-col">
-          <h3>🐳 Docker</h3>
-          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
-cd Carino-PACS
-mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
-docker compose up -d
-docker compose logs -f pacs</code></pre>
-          <p id="q-docker">The first boot prints an access token. Open
-            <code>http://127.0.0.1:8042/</code> and paste it when the dashboard asks.
-            Everything — config, studies, logs, index — lives in <code>./data</code>.</p>
-        </div>
-        <div class="quick-col">
-          <h3 data-i18n>🐧 Linux service (systemd)</h3>
-          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
-cd Carino-PACS
-sudo packaging/systemd/install.sh</code></pre>
-          <p id="q-systemd">The installer sets everything up and then <em>stops</em>: starting a PACS
-            opens listeners that accept patient data, so that stays your decision. Edit
-            <code>/var/lib/carino-pacs/config.json</code>, then
-            <code>systemctl start carino-pacs</code>.</p>
-        </div>
-      </div>
+    <div class="modal-body">
+    <div class="firstrun">
+        <ul>
+          <li id="fr-win"><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
+          <li id="fr-mac"><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>. If it says
+            <em>"damaged and can't be opened"</em>, clear the download quarantine:
+            <code>xattr -dr com.apple.quarantine /Applications/Carino-PACS.app</code></li>
+          <li id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
+            <code>.deb</code> (Debian/Ubuntu) from the
+            <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.
+            The <code>.AppImage</code> needs FUSE — <code>sudo dnf install fuse-libs</code>
+            (Fedora) / <code>sudo apt install libfuse2</code> (Debian), or run it with
+            <code>--appimage-extract-and-run</code>.</li>
+        </ul>
+        <p data-i18n>The warning appears because the app isn't code-signed yet — it's safe.</p>    </div>
     </div>
-  </section>
+  </dialog>
 
-  <!-- ── Manuals — a strip, not a section. It was a heading and a
-       standfirst wrapped around three buttons. -->
-  <section class="section alt">
-    <div class="wrap doclinks center-row">
-      <a class="btn ghost" href="manual/" data-i18n>Manual (English)</a>
-      <a class="btn ghost" href="manual/es/" lang="es">Manual (Español)</a>
-      <a class="btn ghost" href="manual/pt-BR/" lang="pt-BR">Manual (Português&nbsp;BR)</a>
+  <dialog class="modal wide" id="techDialog" aria-labelledby="techTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="techTitle" data-i18n>For technical users</h2>
+      <p class="modal-sub" data-i18n>— DICOM details, CLI &amp; source</p>
+      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
     </div>
-  </section>
-
-  <!-- ── For technical users (collapsed) ──────────────────────────── -->
-  <section class="section">
-    <div class="wrap">
-      <details class="techbox">
-        <summary><b data-i18n>For technical users</b> <span data-i18n>— DICOM details, CLI &amp; source</span></summary>
+    <div class="modal-body">
+    <div class="techbox">
         <div class="tech-body">
           <p id="tech-intro">Built on <code>pynetdicom</code>/<code>pydicom</code> with a Flask
             dashboard; the desktop app is an Electron tray shell around the same engine.</p>
@@ -248,9 +306,9 @@ cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/BUILDING.md" target="_blank" rel="noopener" data-i18n>Build &amp; release</a>
           </div>
         </div>
-      </details>
     </div>
-  </section>
+    </div>
+  </dialog>
 
   <script src="app.js"></script>
 </body>
