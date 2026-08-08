@@ -342,6 +342,36 @@ async function main() {
   const made = await cdp.eval(`fetch('/api/ris/orders', {method:'POST',headers:{'Content-Type':'application/json','X-Carino':'1'},body:${JSON.stringify(JSON.stringify(ORDER))}}).then(r => r.text())`);
   check(JSON.parse(made).ok === true, "an order with real demographics is in the store");
 
+  /* ---- 2b. the gate survives a language switch ------------------------
+     #authTitle and #authLede carry data-i18n with the TOKEN wording in the
+     markup, and setGateMode() overwrites them with the picker wording at
+     runtime. So the language pass — which rewrites every data-i18n node from
+     the markup — used to put the token question back over a screen that shows
+     no token field: "This PACS needs its access token", above four profile
+     buttons, in whichever language you had just chosen. Anybody who switches
+     language at the gate sees it, which is the one moment a reader most likely
+     will. */
+  await cdp.eval("(async () => { try { await fetch('/api/logout', {method:'POST',headers:{'X-Carino':'1'}}); } catch(e){} })()");
+  await cdp.goto(BASE + "/");
+  await cdp.waitFor("document.querySelectorAll('#authPeople .person').length > 0", 10000,
+                    "the profile picker");
+  const gateEn = await cdp.eval("document.getElementById('authTitle').textContent.trim()");
+  check(gateEn === "Who is using this station?",
+        "the gate asks who is at the station, not for a token: " + JSON.stringify(gateEn));
+  await cdp.eval("window.CarinoLang.set('es'); 1");
+  await sleep(700);
+  const gateEs = await cdp.eval(`(function () {
+    return { title: document.getElementById('authTitle').textContent.trim(),
+             picker: document.querySelectorAll('#authPeople .person').length,
+             tokenField: !document.getElementById('authTokenWrap').hidden };
+  })()`);
+  check(gateEs.title === "¿Quién está usando este puesto?",
+        "…and still asks it after a language switch: " + JSON.stringify(gateEs.title));
+  check(gateEs.picker === 4 && gateEs.tokenField === false,
+        "…with the picker still drawn and no token field behind the question");
+  await cdp.eval("window.CarinoLang.set('en'); 1");
+  await sleep(500);
+
   /* ---- 3. Reception -------------------------------------------------- */
   await signInAs("Reception");
   const rec = await cdp.eval(SNAP);

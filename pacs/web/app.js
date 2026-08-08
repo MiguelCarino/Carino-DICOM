@@ -3581,6 +3581,12 @@
       retitleWatcherWarn();
       // Rendered by this file, so the language pass does not reach them.
       renderAuthState();
+      // The gate's heading and lede are the opposite problem: they DO carry
+      // data-i18n, so the language pass writes the token wording back over
+      // whichever shape the gate is actually in. Switch language in front of
+      // the profile picker and it starts asking for an access token that is
+      // not on screen. Re-applying the mode restores both lines.
+      if (gateOpen) setGateMode(gateMode);
       if (lastStatus) {
         renderIndex(lastStatus.index || {});
         renderDicomweb(lastStatus.dicomweb || {});
