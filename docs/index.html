@@ -20,6 +20,16 @@
       <!-- The badge said this above the headline and the headline said something
            else; two hooks competing for the same second of attention. This is
            the one that names the reader's problem, so it is the headline now. -->
+      <!-- The same EKG the desktop splash and the editor's loading overlay draw:
+           a faint full trace with a bright pulse sweeping across it. It is the
+           one piece of motion on the page and it sits above the headline on
+           purpose — a heartbeat, then the sentence about patients waiting.
+           Decorative, so aria-hidden: it says nothing a screen reader needs and
+           the headline underneath says all of it. -->
+      <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+        <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+      </svg>
       <h1><span data-i18n>Your PACS systems are down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
       <p class="lede">
         <strong>Carino PACS</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>

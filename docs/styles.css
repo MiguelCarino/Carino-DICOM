@@ -50,8 +50,31 @@ a { color: var(--accent); }
    per element. Nothing is pinned to 100vh and nothing forbids scrolling — a
    reader at 200% zoom, or in a locale whose lede runs long, still gets a
    scrollbar rather than losing the bottom of the page. */
-.hero { padding: clamp(18px, 4vh, 46px) 0 clamp(16px, 3.4vh, 34px); text-align: center;
+/* Leaner than it was, to pay for the EKG above the headline. It costs nothing
+   to look at: the wrap is centred with `margin-block: auto`, so on a screen
+   with room to spare this padding never positions anything — it only bites once
+   the content fills the viewport, which is exactly the moment the page would
+   rather spend the pixels on the content than on its own margins. Measured at
+   1024×600, where the trim gives back what the animation takes. */
+.hero { padding: clamp(12px, 2.4vh, 46px) 0 clamp(10px, 2vh, 34px); text-align: center;
   background: radial-gradient(1100px 360px at 50% -12%, rgba(234,179,8,.10), transparent 70%); }
+/* The EKG above the headline. Sized off the viewport HEIGHT rather than its
+   width — height is the scarce dimension on this page, so the one new block on
+   it shrinks with the thing it competes against. `width: auto` + the viewBox's
+   own 5:1 ratio keeps the trace undistorted at every size, and overflow stays
+   visible so the pulse's glow is not clipped by the box.
+   Motion is decoration here, and a reader who has asked their system for less
+   of it gets the static trace: the shape carries the meaning, the sweep only
+   carries the mood. */
+.ekg { display: block; margin: 0 auto clamp(3px, .7vh, 12px);
+  height: clamp(16px, 3vh, 38px); width: auto; aspect-ratio: 5 / 1; overflow: visible; }
+.ekg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.ekg .trace { stroke: var(--accent); stroke-width: 2; opacity: .12; }
+.ekg .pulse { stroke: var(--accent); stroke-width: 2.6; stroke-dasharray: 22 120;
+  filter: drop-shadow(0 0 6px rgba(234,179,8,.9)); animation: ekg 1.5s linear infinite; }
+@keyframes ekg { from { stroke-dashoffset: 142; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .ekg .pulse { animation: none; stroke-dasharray: none; } }
+
 .hero h1 { font-size: clamp(1.6rem, 3.6vw + .4vh, 2.7rem); line-height: 1.1; margin: 0 0 clamp(8px, 1.5vh, 16px); font-weight: 800; letter-spacing: -.01em; }
 .lede { max-width: 660px; margin: 0 auto clamp(12px, 2.4vh, 26px); color: #d4d4d4; font-size: clamp(.92rem, .55rem + .5vh, 1.05rem); }
 .lede abbr { text-decoration: underline dotted var(--muted); cursor: help; }
