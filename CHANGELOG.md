@@ -63,6 +63,34 @@ release also queries, retrieves, routes and de-identifies.
   no CDN, so it works on an air-gapped network — with the third-party versions
   and licence texts recorded beside the bundles in
   `pacs/web/editor/vendor/README.md`. (`pacs/web/editor/`)
+
+  Resynced from upstream. What is new to an operator: **burned-in pixel
+  redaction**, which draws boxes over the patient banner an ultrasound or
+  secondary capture writes into the image, overwrites the stored samples in
+  every frame and records the PS3.15 Clean Pixel Data code — the one hole the
+  de-identification story admitted to; **the PS3.15 optional profiles** (Retain
+  UIDs, Device Identity, Institution Identity, Patient Characteristics, Full
+  Dates) as toggles beside Anonymize, each asserting its own CID 7050 code;
+  **JPEG 2000 and JPEG-LS decoding** through vendored WebAssembly, loaded only
+  when a study of that syntax is opened; **nested sequences** browsable and
+  editable in the tag table, where an SQ used to render as one blank row;
+  **whole-study folder loading** by drop or picker, including the extensionless
+  files a PACS export is made of; and **one archive instead of many downloads**
+  — the old per-file loop was silently losing five files in six past ten,
+  because browsers stop honouring automatic downloads.
+
+  Also serves `.wasm` as `application/wasm` explicitly (`pacs/web.py`), because
+  Python resolves MIME types from the Windows registry on Windows and `.wasm`
+  is frequently absent from it.
+
+  **This sync also restored 38 attributes to the de-identification profile.**
+  Upstream had regenerated `deid-profile.js` from a source tracking an older
+  edition of PS3.15 Annex E and lost them — the patient pronoun and
+  gender-identity block, the alternative-calendar birth dates, the four
+  diagnosis code sequences, both SR observer names and the capture-device
+  identifiers, thirty-five of them marked *remove*. The copy bundled here was
+  the correct one and is what upstream was repaired from, so no Carino PACS
+  release ever shipped the short table. (`pacs/web/editor/deid-profile.js`)
 - **Disk-space guard** — refuses ingest below a free-space threshold
   (`scp.min_free_gb`), on C-STORE and on STOW-RS alike, measured with
   `shutil.disk_usage` so it needs no extra dependency. (`pacs/scp.py`,

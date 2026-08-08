@@ -426,10 +426,14 @@ and the bundled editor render is served from this machine.
 The **bundled DICOM editor** under `/editor/` is held to the same line and is
 worth stating separately, because it is the largest piece of third-party code
 here: every script, stylesheet, font, module and source map it references
-resolves to a path this server serves. Its two JavaScript bundles (`dcmjs` and
-the JPEG-lossless decoder) are vendored in `pacs/web/editor/vendor/`, with their
-versions and licences listed in `pacs/web/editor/vendor/README.md`; the fonts
-are self-hosted under `pacs/web/editor/fonts/`. **Nothing is fetched from a CDN
+resolves to a path this server serves. Its four bundles — `dcmjs`, the
+JPEG-lossless decoder, and the OpenJPEG and CharLS **WebAssembly** decoders that
+read JPEG 2000 and JPEG-LS — are vendored in `pacs/web/editor/vendor/`, with
+their versions and licences listed in `pacs/web/editor/vendor/README.md`; the
+fonts are self-hosted under `pacs/web/editor/fonts/`. The two WebAssembly
+modules are compiled C libraries, they are fetched lazily from this server the
+first time a study of that transfer syntax is opened, and like everything else
+here they are fetched from this server or not at all. **Nothing is fetched from a CDN
 at runtime**, which also means the editor works unchanged on an air-gapped
 network — the deployment where a silent CDN dependency would present as a page
 that renders and then refuses to open a study.

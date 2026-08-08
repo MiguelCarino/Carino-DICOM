@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import json
+import mimetypes
 import os
 import sys
 import threading
@@ -28,6 +29,14 @@ from . import APP_NAME, __version__, audit, auth, users
 from .config import (auth_token_of, deid_secret_of, is_loopback_host,
                      notify_secrets_of, web_host_of)
 from .server import PacsServer
+
+# The bundled editor's JPEG 2000 and JPEG-LS decoders are WebAssembly, and a
+# .wasm served as anything other than application/wasm cannot be handed to the
+# streaming compiler — the loader falls back to a buffered compile and logs it,
+# which is a slow decode and a console full of noise on a reading-room machine.
+# Python resolves MIME types from /etc/mime.types on Linux and from the registry
+# on Windows, where .wasm is frequently absent. Register it rather than hope.
+mimetypes.add_type("application/wasm", ".wasm")
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 # When frozen by PyInstaller the package modules live in the archive; the web/

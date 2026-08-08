@@ -719,7 +719,7 @@ carries its own notice.
 | Path | What it is | Licence | Notice |
 | --- | --- | --- | --- |
 | [`pacs/web/editor/fonts/`](pacs/web/editor/fonts/) | IBM Plex Sans, IBM Plex Mono, Red Hat Display, Red Hat Text | SIL OFL 1.1 | [`OFL.txt`](pacs/web/editor/fonts/OFL.txt), plus per-family texts |
-| [`pacs/web/editor/vendor/`](pacs/web/editor/vendor/) | `dcmjs`, `lossless-min.js` and their bundled dependencies | Permissive — MIT / BSD, per package | Five `LICENSE-*.txt` files in that directory |
+| [`pacs/web/editor/vendor/`](pacs/web/editor/vendor/) | `dcmjs`, `lossless-min.js`, the OpenJPEG and CharLS WebAssembly decoders, and their bundled dependencies | Permissive — MIT / BSD, per package | Nine `LICENSE-*.txt` files in that directory |
 
 Runtime Python dependencies — [`pynetdicom`](https://github.com/pydicom/pynetdicom)
 and [`pydicom`](https://github.com/pydicom/pydicom) — are **not vendored**. They

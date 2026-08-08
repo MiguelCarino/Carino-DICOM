@@ -335,7 +335,13 @@ DICOM-TLS on both the server and client sides.
 **`pacs/web/`** — the dashboard front end. Vanilla JS, no build step, no bundler,
 no framework, nothing from a CDN. `index.html`, `app.js`, `styles.css`,
 `i18n.js`, plus the shared fleet scripts (`carino-navbar.js`, `carino-lang.js`,
-`carino-bridge.js`) and the bundled DICOM editor under `web/editor/`.
+`carino-bridge.js`) and the bundled DICOM editor under `web/editor/`. That
+editor is a vendored copy of upstream DICOM-editor and is meant to stay
+byte-identical to it — including `web/editor/tests/`, which is not development
+scaffolding here: `dicom-forge.js` builds the sample studies the empty state
+offers, and `tests/suites/*.js` are what `/editor/#selftest` runs to report
+which DICOM encodings the browser on this workstation decodes correctly.
+`pacs/web/editor/vendor/README.md` says what may and may not be copied over.
 
 **`desktop/`** — the Electron tray app. **`packaging/`** — the PyInstaller spec
 and entry point, plus the systemd unit and installer for a Linux service

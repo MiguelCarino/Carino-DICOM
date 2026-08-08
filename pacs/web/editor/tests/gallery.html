@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forge gallery — DICOM test images</title>
+<link rel="stylesheet" href="../fonts.css">
+<style>
+  /* A copy of the token block at the top of ../index.html, kept in step by hand.
+     Verified identical value by value on 2026-08-08. One page is not enough
+     consumers to justify extracting a shared stylesheet, but if a third one
+     appears, extract it rather than making a third copy. */
+  :root {
+    --surface: #0d0d0d; --surface-solid: #080808; --border: #262626;
+    --text: #fff; --text-dim: #a3a3a3; --text-muted: #666;
+    --accent: #eab308; --accent-glow: rgba(234,179,8,.15);
+    --font: 'IBM Plex Sans', 'Red Hat Text', 'Liberation Sans', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', 'Liberation Mono', ui-monospace, monospace;
+    --r-md: 10px; --r-sm: 4px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-solid); color: var(--text);
+         font-family: var(--font); font-size: 14px; line-height: 1.55; }
+  header { border-bottom: 1px solid var(--border); padding: 28px 24px 22px; }
+  h1 { margin: 0 0 6px; font-size: 1.25rem; letter-spacing: -.01em; }
+  h1 span { color: var(--accent); }
+  header p { margin: 0 0 14px; color: var(--text-dim); max-width: 68ch; }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-size: .8rem; padding: 7px 14px; border-radius: var(--r-sm);
+           border: 1px solid var(--border); background: var(--surface); color: var(--text);
+           cursor: pointer; }
+  button:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  .count { color: var(--text-muted); font-family: var(--mono); font-size: .75rem; }
+  main { display: grid; gap: 16px; padding: 24px;
+         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+          overflow: hidden; display: flex; flex-direction: column; }
+  .shot { background: #000; display: flex; align-items: center; justify-content: center;
+          aspect-ratio: 1; padding: 12px; }
+  .shot canvas { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+  .shot.none { color: var(--text-muted); font-family: var(--mono); font-size: .72rem;
+               text-align: center; padding: 20px; }
+  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .id { font-family: var(--mono); font-size: .68rem; color: var(--accent); letter-spacing: .02em; }
+  .title { font-size: .84rem; font-weight: 600; }
+  .note { font-size: .76rem; color: var(--text-dim); flex: 1; }
+  .frames { font-family: var(--mono); font-size: .68rem; color: var(--text-muted); }
+  .acts { display: flex; gap: 6px; }
+  .acts > * { flex: 1; text-align: center; }
+  .acts a { text-decoration: none; }
+  .sec { grid-column: 1 / -1; margin: 6px 0 0; font-size: .95rem; }
+  .sec + .sec-note { grid-column: 1 / -1; margin: -6px 0 2px; color: var(--text-dim); max-width: 72ch; }
+  .back { display: inline-block; margin-bottom: 10px; font-size: .8rem; text-decoration: none; }
+  .back:hover { text-decoration: underline; }
+  footer { border-top: 1px solid var(--border); padding: 20px 24px 40px; color: var(--text-dim); }
+  footer code { font-family: var(--mono); font-size: .78rem; color: var(--text); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <!-- Relative, not the public hostname: the same link then works from a local
+       ./tests/run.sh server, from a checkout opened over python -m http.server,
+       and from dicom.carino.systems, without knowing which one it is on. -->
+  <a class="back" href="../index.html">← Back to the DICOM editor</a>
+  <h1>Forge gallery <span>— reference renderings</span></h1>
+  <p>
+    Every image below is drawn from the sample values a test file was built from, not
+    from the file itself. That makes them an oracle: this is what the
+    <a href="../index.html">DICOM editor</a> should show when the same file is opened
+    in it. Open a case straight in the viewer, or download it and drop it in yourself.
+    Anything that does not match is a bug in the viewer, not in the file.
+  </p>
+  <div class="bar">
+    <button class="primary" id="all">Download every case</button>
+    <!-- A cross-page link, so it arrives as a fresh load — which is the only
+         state the self-test is allowed to run in. -->
+    <a href="../index.html#selftest"><button>Run the suites in your browser</button></a>
+    <span class="count" id="count">building…</span>
+  </div>
+</header>
+
+<main id="grid"></main>
+
+<footer>
+  The same corpus drives the automated suites: <code>./tests/run.sh</code> from the repo root.
+</footer>
+
+<script src="dicom-forge.js"></script>
+<script>
+(async () => {
+  const count = document.getElementById('count');
+  try {
+  const grid = document.getElementById('grid');
+  const demos = Forge.samples();
+  const cases = await Forge.corpus();
+  count.textContent = `${demos.length} samples · ${cases.length} cases`;
+
+  function save(c) {
+    const url = URL.createObjectURL(new Blob([c.bytes], { type: 'application/dicom' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = c.file || `${c.id}.dcm`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function section(heading, text) {
+    const h = document.createElement('h2'); h.className = 'sec'; h.textContent = heading;
+    const p = document.createElement('p'); p.className = 'sec-note'; p.textContent = text;
+    grid.append(h, p);
+  }
+
+  function render(c, kind) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    // Frame 0 is what the viewer opens on, so that is what we show.
+    const ref = c.frameRef ? c.frameRef(0) : c.ref;
+    let shot;
+    if (ref) {
+      shot = document.createElement('div');
+      shot.className = 'shot';
+      const cv = document.createElement('canvas');
+      cv.width = c.w; cv.height = c.h;
+      cv.getContext('2d').putImageData(new ImageData(Forge.expected(ref, c.w, c.h), c.w, c.h), 0, 0);
+      shot.appendChild(cv);
+    } else {
+      shot = document.createElement('div');
+      shot.className = 'shot none';
+      shot.textContent = 'deliberately malformed — there is no correct picture, only correct behaviour';
+    }
+
+    const body = document.createElement('div');
+    body.className = 'body';
+    const id = document.createElement('div'); id.className = 'id'; id.textContent = c.id;
+    const title = document.createElement('div'); title.className = 'title'; title.textContent = c.title;
+    const note = document.createElement('div'); note.className = 'note'; note.textContent = c.note || '';
+    const meta = document.createElement('div'); meta.className = 'frames';
+    meta.textContent = `${c.w}×${c.h}${c.frames > 1 ? ` · ${c.frames} frames` : ''} · ${(c.bytes.length / 1024).toFixed(1)} kB`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Download .dcm';
+    btn.addEventListener('click', () => save(c));
+
+    // The viewer rebuilds this exact case from the same forge, so the link is a
+    // case id rather than a file — which makes it something you can paste into a
+    // bug report and have the other person land on the same picture.
+    const open = document.createElement('a');
+    open.href = `../index.html#${kind}=${encodeURIComponent(c.id)}`;
+    open.innerHTML = '<button style="width:100%">Open in the viewer</button>';
+
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    acts.append(btn, open);
+
+    body.append(id, title, note, meta, acts);
+    card.append(shot, body);
+    grid.appendChild(card);
+  }
+
+  section('Demo samples',
+          'The five files behind "Load a sample" on the editor\'s empty state. They are ' +
+          'the only ones here built to be looked at rather than to break something.');
+  for (const d of demos) render(d, 'sample');
+
+  section('Test corpus',
+          'One case per encoding, geometry or defect the decoder has to survive. The ' +
+          'patterns are chosen so a transpose, a flip or an off-by-one is unmissable.');
+  for (const c of cases) render(c, 'case');
+
+  // Browsers throttle a burst of downloads, so space them out.
+  document.getElementById('all').addEventListener('click', () => {
+    cases.forEach((c, i) => setTimeout(() => save(c), i * 250));
+  });
+  } catch (e) {
+    // A silent empty page would be indistinguishable from "no cases", so say so.
+    count.textContent = 'failed: ' + ((e && e.message) || e);
+  }
+})();
+</script>
+</body>
+</html>
