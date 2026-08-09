@@ -370,8 +370,8 @@ none are quoted here to go stale:
 
 ```bash
 ./.venv/bin/python tests/test_auth.py tests/test_deid.py tests/test_dicomweb.py \
-                   tests/test_index.py tests/test_qr.py tests/test_routing.py \
-                   tests/test_web_auth.py          # one at a time, or under pytest
+                   tests/test_index.py tests/test_qr.py tests/test_ris.py \
+                   tests/test_routing.py tests/test_web_auth.py   # or under pytest
 node pacs/web/tests/i18n-parity.mjs               # four locales at parity
 node pacs/web/tests/dashboard-auth.e2e.mjs        # the login flow, in a real DOM
 node pacs/web/tests/stuck-panel.e2e.mjs

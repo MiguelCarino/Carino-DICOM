@@ -16,6 +16,11 @@ Flow (see the module design notes):
 
   1. Order arrives — via ``ORM^O01`` on the MLLP listener, or the manual "New
      order" form.  It lands in the :class:`OrderStore` with status ``open``.
+     A message about an order already here is an **amendment or a cancellation**,
+     not a second order: :meth:`OrderStore.apply` recognises it by placer/filler
+     order number or accession and honours ORC-1.  This matters more than it
+     looks — two open orders for one accession carry two different Study
+     Instance UIDs, and the modality can then burn the wrong one into the exam.
   2. The dashboard displays open orders + the accession the tech must type in.
   3. When the study is C-STORE'd to the receiver, :meth:`OrderStore.match`
      looks for an open order by Accession Number (primary) or Patient ID
@@ -59,7 +64,32 @@ ORDER_FIELDS = (
     "patient_birthdate", "patient_sex",
     "study_desc", "modality", "scheduled_dt", "referring", "priority",
     "station_aet", "station_name", "sps_id", "procedure_id", "study_uid",
+    # The order's identity as the sending system knows it. ORC-2 is assigned by
+    # the placer (the ordering system), ORC-3 by the filler (the performing
+    # one, often later). They are what make a second message about the same
+    # order recognisable as such — see IDENTITY_FIELDS.
+    "placer_order_number", "filler_order_number",
 )
+
+# How two messages are recognised as being about ONE order, strongest first.
+# The accession is last because it is the weakest of the three: it is derived
+# from whichever of four fields the sender populated, and some feeds do not
+# assign one until the exam is scheduled.
+IDENTITY_FIELDS = ("filler_order_number", "placer_order_number", "accession")
+
+# ORC-1 order control codes that mean "stop this order". Everything else is
+# treated as an upsert, deliberately: real feeds carry codes this list has never
+# seen, and the asymmetry matters. An unrecognised code that we treat as an
+# upsert leaves an extra open order, which is visible and cancellable by hand.
+# An unrecognised code that we treated as a cancel would close a live order
+# silently, and a technologist would never perform the exam.
+CANCEL_CONTROLS = frozenset({
+    "CA",   # cancel order request
+    "OC",   # order cancelled
+    "CR",   # cancelled as requested
+    "DC",   # discontinue order request
+    "OD",   # order discontinued
+})
 
 
 # --------------------------------------------------------------------- HL7
@@ -162,10 +192,26 @@ def parse_order(msg: HL7Message) -> dict:
         # Placer/filler order numbers double as procedure/step ids for MWL.
         "procedure_id": msg.field("OBR", 2) or msg.field("ORC", 2),
         "sps_id": msg.field("OBR", 2) or msg.field("ORC", 2),
+        # The identity fields, kept as their own values rather than folded into
+        # `accession`. First component only: these are EI datatypes and the
+        # namespace/universal-id components after the ^ are not part of the id.
+        "placer_order_number": _first_component(msg.field("ORC", 2) or msg.field("OBR", 2), msg.comp_sep),
+        "filler_order_number": _first_component(msg.field("ORC", 3) or msg.field("OBR", 3), msg.comp_sep),
         # station_aet / station_name / study_uid: not carried by ORM — the
         # operator picks the target modality; study_uid is generated on add().
     }
     return order
+
+
+def _first_component(raw: str, comp_sep: str = "^") -> str:
+    return str(raw or "").split(comp_sep)[0].strip()
+
+
+def order_control(msg: HL7Message) -> str:
+    """ORC-1, the order control code, upper-cased. '' when the message has no
+    ORC segment — which is not an error: a sparse ORM still yields an order, and
+    an absent code is treated as 'new or changed' like any other unknown one."""
+    return _first_component(msg.field("ORC", 1), msg.comp_sep).upper()
 
 
 def build_ack(msg: HL7Message, code: str = "AA", text: str = "") -> str:
@@ -238,6 +284,13 @@ class OrderStore:
     # ---- CRUD --------------------------------------------------------------
     def add(self, fields: dict, source: str = "manual") -> dict:
         """Create an order from a partial field dict; returns the stored order."""
+        with self._lock:
+            order = self._add_locked(fields, source)
+            self._save_locked()
+        self._log_created(order, source)
+        return order
+
+    def _add_locked(self, fields: dict, source: str) -> dict:
         oid = uuid.uuid4().hex[:12]
         order = {k: str(fields.get(k, "") or "").strip() for k in ORDER_FIELDS}
         if not order.get("patient") and order.get("patient_name"):
@@ -252,22 +305,139 @@ class OrderStore:
             "status": "open",
             "source": source,
             "created": self._now(),
+            "updated": "",
+            "revision": 1,
             "closed": "",
             "matched_study": "",
         })
+        self._orders[oid] = order
+        return dict(order)
+
+    def _log_created(self, order: dict, source: str) -> None:
+        if not self.log:
+            return
+        self.log.info(
+            f"RIS order queued: {order.get('patient') or '?'} "
+            f"[acc {order.get('accession') or '—'}] {order.get('study_desc') or ''} "
+            f"(via {source})",
+            kind="ris",
+        )
+
+    # ---- identity ----------------------------------------------------------
+    def _find_identity_locked(self, fields: dict) -> Optional[dict]:
+        """The stored order these fields are about, or None.
+
+        Tries each identifier in turn rather than building one composite key:
+        the filler order number is routinely absent from the first message and
+        present in the second, so a composite would make the same order look
+        like two."""
+        for key in IDENTITY_FIELDS:
+            want = _norm(fields.get(key))
+            if not want:
+                continue
+            for o in self._orders.values():
+                if _norm(o.get(key)) == want:
+                    return o
+        return None
+
+    def find_identity(self, fields: dict) -> Optional[dict]:
         with self._lock:
-            self._orders[oid] = order
-            self._save_locked()
-        if self.log:
+            found = self._find_identity_locked(fields)
+            return dict(found) if found else None
+
+    def apply_hl7(self, msg: HL7Message, source: str) -> tuple[Optional[dict], str]:
+        """File one HL7 order message. Returns ``(order, action)``."""
+        return self.apply(parse_order(msg), order_control(msg), source=source)
+
+    def apply(self, fields: dict, control: str = "", source: str = "hl7") -> tuple[Optional[dict], str]:
+        """Upsert one order message, honouring its ORC-1 order control code.
+
+        This is the difference between an emergency trickle and a live feed. A
+        real RIS re-sends: it amends an order, it cancels one, it emits status
+        changes. Treating every message as a new order — which is what this did
+        before — turns each of those into a duplicate, and two open orders for
+        one accession is worse than none: they carry two different Study
+        Instance UIDs, so the modality can burn the wrong one into the exam and
+        reconciliation then closes one order and orphans the other for good.
+
+        Actions returned: ``created``, ``updated``, ``cancelled``,
+        ``already-closed`` (a cancel for an order that is already shut),
+        ``ignored-closed`` (an amendment for one that is), ``cancel-unknown``.
+        """
+        cancelling = (control or "").strip().upper() in CANCEL_CONTROLS
+        with self._lock:
+            existing = self._find_identity_locked(fields)
+
+            if existing is None:
+                if cancelling:
+                    # Nothing to cancel. Deliberately does NOT invent a closed
+                    # order to hang the message on: a phantom row in the Orders
+                    # panel is a fact about the feed, not about this department.
+                    return None, "cancel-unknown"
+                snapshot = self._add_locked(fields, source)
+                action = "created"
+            elif existing.get("status") == "closed":
+                # Never reopened, never silently rewritten. A status message
+                # after the study already landed is the common case, and
+                # resurrecting a completed exam — or mutating its record behind
+                # the operator — are both worse than leaving it alone and
+                # saying so.
+                snapshot = dict(existing)
+                action = "already-closed" if cancelling else "ignored-closed"
+            elif cancelling:
+                self._close_locked(existing, reason="cancelled by the RIS")
+                snapshot = dict(existing)
+                action = "cancelled"
+            else:
+                # An amendment. Only non-empty values are written: a sparse
+                # status message must not blank the demographics an earlier full
+                # order carried, and the target modality is the operator's to
+                # set — no ORM carries station_aet, so an amendment must not
+                # wipe it.
+                self._update_locked(existing, fields, only_nonempty=True)
+                snapshot = dict(existing)
+                action = "updated"
+            if action in ("created", "cancelled", "updated"):
+                self._save_locked()
+
+        # Logging is file I/O and belongs outside the lock. A live feed arrives
+        # in bursts, and this is the one path every message in a burst takes.
+        self._log_action(snapshot, action, source)
+        return snapshot, action
+
+    def _log_action(self, order: dict, action: str, source: str) -> None:
+        if not self.log:
+            return
+        acc = order.get("accession") or "—"
+        if action == "created":
+            self._log_created(order, source)
+        elif action == "updated":
             self.log.info(
-                f"RIS order queued: {order.get('patient') or '?'} "
-                f"[acc {order.get('accession') or '—'}] {order.get('study_desc') or ''} "
-                f"(via {source})",
+                f"RIS order amended (rev {order.get('revision')}): "
+                f"{order.get('patient') or '?'} [acc {acc}]",
                 kind="ris",
             )
-        return order
+        elif action == "cancelled":
+            self.log.warn(
+                f"RIS cancelled order [acc {acc}] {order.get('patient') or '?'} — "
+                f"it is closed and will not appear on any worklist",
+                kind="ris",
+            )
+        elif action == "already-closed":
+            self.log.info(
+                f"RIS cancelled an order that was already closed [acc {acc}] — nothing to do",
+                kind="ris",
+            )
+        elif action == "ignored-closed":
+            self.log.warn(
+                f"RIS sent an update for a CLOSED order [acc {acc}] — left as it is. "
+                f"If this is a new exam reusing the accession, key it in by hand",
+                kind="ris",
+            )
 
     def add_from_hl7(self, msg: HL7Message, source: str) -> dict:
+        """Back-compatible single-order create. Prefer :meth:`apply_hl7`, which
+        honours ORC-1 and de-duplicates."""
         return self.add(parse_order(msg), source=source)
 
     def list(self, status: Optional[str] = None) -> list[dict]:
@@ -293,15 +463,32 @@ class OrderStore:
             return self._orders.get(oid)
 
     def update(self, oid: str, fields: dict) -> Optional[dict]:
+        """Edit an order. Full overwrite: an empty value CLEARS the field, which
+        is what an operator editing the form means. The HL7 path uses
+        ``only_nonempty`` instead — see :meth:`apply`."""
         with self._lock:
             o = self._orders.get(oid)
             if not o:
                 return None
-            for k in ORDER_FIELDS:
-                if k in fields:
-                    o[k] = str(fields.get(k, "") or "").strip()
+            self._update_locked(o, fields)
             self._save_locked()
             return dict(o)
+
+    def _update_locked(self, o: dict, fields: dict, only_nonempty: bool = False) -> None:
+        for k in ORDER_FIELDS:
+            if k not in fields:
+                continue
+            v = str(fields.get(k, "") or "").strip()
+            if only_nonempty and not v:
+                continue
+            o[k] = v
+        # study_uid is never rewritten here — it is not in the HL7 field set and
+        # an operator edit that cleared it would strand the exam the modality
+        # already stamped with it. _add_locked is the only place it is minted.
+        if not o.get("patient") and o.get("patient_name"):
+            o["patient"] = _fmt_hl7_name(o["patient_name"])
+        o["updated"] = self._now()
+        o["revision"] = int(o.get("revision") or 1) + 1
 
     def close(self, oid: str, reason: str = "cancelled", matched_study: str = "") -> Optional[dict]:
         """Mark an order closed (matched or cancelled). Keeps it for the audit
@@ -310,13 +497,16 @@ class OrderStore:
             o = self._orders.get(oid)
             if not o:
                 return None
-            o["status"] = "closed"
-            o["closed"] = self._now()
-            o["close_reason"] = reason
-            if matched_study:
-                o["matched_study"] = matched_study
+            self._close_locked(o, reason, matched_study)
             self._save_locked()
             return dict(o)
+
+    def _close_locked(self, o: dict, reason: str = "cancelled", matched_study: str = "") -> None:
+        o["status"] = "closed"
+        o["closed"] = self._now()
+        o["close_reason"] = reason
+        if matched_study:
+            o["matched_study"] = matched_study
 
     def delete(self, oid: str) -> bool:
         with self._lock:
@@ -424,7 +614,10 @@ class RisListener:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self.received_count = 0
-        self.order_count = 0
+        self.order_count = 0        # orders CREATED — a live feed also amends and cancels
+        self.updated_count = 0
+        self.cancelled_count = 0
+        self.noop_count = 0         # messages about orders this PACS has closed or never had
         self.error_count = 0
 
     @property
@@ -546,9 +739,26 @@ class RisListener:
         mtype = (msg.message_type.split("^")[0] or "").upper()
         if mtype in self.accept_types:
             try:
-                order = self.store.add_from_hl7(msg, source=f"HL7 {peer}")
+                _order, action = self.store.apply_hl7(msg, source=f"HL7 {peer}")
                 with self._lock:
-                    self.order_count += 1
+                    if action == "created":
+                        self.order_count += 1
+                    elif action == "updated":
+                        self.updated_count += 1
+                    elif action == "cancelled":
+                        self.cancelled_count += 1
+                    else:
+                        # cancel-unknown / already-closed / ignored-closed. Not
+                        # errors — the feed is entitled to talk about orders this
+                        # machine never saw — but counted so a feed that is all
+                        # no-ops does not read as silence.
+                        self.noop_count += 1
+                if action == "cancel-unknown":
+                    self.log.warn(
+                        f"RIS: {peer} cancelled an order this PACS never received "
+                        f"(ORC-1 {order_control(msg) or '—'}) — nothing to cancel",
+                        kind="ris",
+                    )
                 return build_ack(msg, "AA")
             except Exception as exc:
                 with self._lock:

@@ -2212,6 +2212,12 @@ class PacsServer:
                 "auto_close": bool(rcfg.get("auto_close", True)),
                 "received": ris.received_count if ris else 0,
                 "orders_in": ris.order_count if ris else 0,
+                # A live feed does not only create. Amendments and cancellations
+                # used to arrive as duplicate orders; now they land on the order
+                # they are about, and these say how often that happens.
+                "orders_amended": ris.updated_count if ris else 0,
+                "orders_cancelled": ris.cancelled_count if ris else 0,
+                "orders_noop": ris.noop_count if ris else 0,
                 "errors": ris.error_count if ris else 0,
                 # Anchors received/orders_in/errors ONLY. `counts` below comes
                 # from the persisted store and survives restarts entirely — it

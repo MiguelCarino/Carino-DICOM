@@ -58,6 +58,8 @@ For MWL conformance and both use cases, extend with:
 | `patient_sex` | PatientSex (0010,0040) | MWL patient identification |
 | `station_aet` | ScheduledStationAETitle (0040,0001) | **the "destination" for A**; MWL filter key |
 | `station_name` | ScheduledStationName (0040,0010) | optional display |
+| `placer_order_number` | ORC-2 (HL7) | order identity — what makes a second message about this order recognisable |
+| `filler_order_number` | ORC-3 (HL7) | ditto; often assigned only on the second message, so both are kept |
 | `sps_id` | ScheduledProcedureStepID (0040,0009) | MWL procedure step |
 | `procedure_id` | RequestedProcedureID (0040,1001) | MWL requested procedure |
 | `study_uid` | StudyInstanceUID (0020,000D) | **generated at order creation** so the exam burns the right UID and reconciliation is exact |
