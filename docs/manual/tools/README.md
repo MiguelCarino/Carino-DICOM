@@ -29,8 +29,8 @@ conversion, and this repository's virtualenv for the two Python scripts.
 ## 1. Build the image and bring up two instances
 
 The peer exists so that forwarding has somewhere to succeed; the demo needs at
-least one destination that accepts and one that refuses, or the Stuck panel has
-nothing in it.
+least one destination that accepts and one that refuses, or the Stuck tab of
+Studies has nothing in it.
 
     podman build --format docker -t carino-pacs:local .
     podman network create pacsdemo
@@ -43,15 +43,21 @@ nothing in it.
 
     podman run -d --name pacs-demo --network pacsdemo \
       --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/demo:/data:z \
-      -p 127.0.0.1:18042:8042 -p 127.0.0.1:11412:11112 -p 127.0.0.1:12575:2575 \
+      -p 127.0.0.1:18042:8042 -p 127.0.0.1:11512:11112 -p 127.0.0.1:12575:2575 \
       -e PACS_SERVICES=scp,scu,print,mwl,qr,ris,dicomweb \
       -e PACS_AUTH_TOKEN=manual-screenshots-token \
       localhost/carino-pacs:local
 
-Those published ports are deliberately not the obvious ones. `tests/` allocates
-DICOM ports from **11211** upward, so a demo instance published on `11212` makes
-`test_print.py` fail with `EADDRINUSE` — a failure that looks like a bug in the
-print SCP and is really a screenshot session nobody remembered was still up.
+Those published ports are deliberately not the obvious ones. The suites take
+DICOM ports in two arcs, a fresh number per test and never one twice:
+`test_print.py` counts up from **11211**, and `tests/test_qr.py` counts up from
+**11401**. A demo instance published inside either arc makes that suite fail
+with `EADDRINUSE` — a failure that reads as a bug in the print SCP or the
+query/retrieve SCP and is really a screenshot session nobody remembered was
+still up. `11512` is clear of both with room for either arc to grow. Earlier
+versions of this file published on `11412`, which is inside `test_qr.py`'s
+range: if the query/retrieve tests start failing on a machine that has taken
+screenshots, look for an old container before looking at the code.
 
 ## 2. Give the demo something worth photographing
 
@@ -60,22 +66,47 @@ figures need:
 
 * **destinations** — `Main archive` and `Reading room` at `pacs-peer:11112`
   (these accept), and `Teaching archive` at `pacs-peer:11199` (nothing listens:
-  it refuses at once, which is what fills the Stuck panel without waiting out a
+  it refuses at once, which is what fills the Stuck tab without waiting out a
   TCP timeout).
-* **routing** — a rule per shape the manual describes: MR to the reading room
-  (`stop`), CT to the teaching archive with **de-identify** ticked, ultrasound
-  to the reading room, CR to the teaching archive.
+* **routing** — `"enabled": true` first: the engine ships off, and with it off
+  every study fans out to every enabled destination exactly as it did before
+  rules existed, no rule fires and nothing is ever held. Then a rule per shape
+  the manual describes: MR to the reading room (`stop`), CT to the teaching
+  archive with **de-identify** ticked, ultrasound to the reading room, CR to the
+  teaching archive.
+
+  A rule's destination list is keyed **`destinations`** — that spelling, plural
+  (`pacs/routing.py`, and the worked rule in `config.example.json`). Nothing
+  rejects another one: config validation checks the shape of the key it knows
+  and ignores keys it does not, so `"destination"` or `"dests"` loads clean, and
+  the rule then matches with an empty destination list. The engine reads that as
+  a *filter* and drops through to the next rule, and finally to the
+  all-destinations fallback. The demo comes up looking nearly right — studies
+  arrive, the Routing tab lists the rules, every rule reads as configured — and
+  the Stuck tab is empty because nothing was ever routed anywhere in particular,
+  not because the hold below is working. Check the key before you check anything
+  else; it cost a debugging session. A misspelled key inside `match` does not do
+  this: the trace names it and skips the rule.
 * **`deid.profile: "off"`** while that CT rule still asks for a scrub. This is
-  what produces the *held, nothing is being sent* half of the Stuck panel — the
-  case the manual spends a warning box on, and the one worth a picture.
+  what produces the *held, nothing is being sent* half of the Stuck tab — the
+  case the manual spends a warning box on, and the one worth a picture. It is
+  the easiest state to arrange in which a held row is drawn at all, not the only
+  one: the engine records two causes for a hold — this one (`profile-off`) and a
+  profile that is on with no de-identifier buildable from the de-identification
+  settings (`no-deidentifier`) — and the row template carries the same two jump
+  buttons either way, to the Settings tab and the Routing tab, the two places the
+  hold is released. This cause is one config key; the other takes a broken
+  de-identifier to arrange. The manual now tells the reader to use those buttons,
+  so without this combination the `stuck` figure does not show the repair its own
+  paragraph describes.
 * **`scu.on_success: "move"`**, so the archive pass runs and sweeps the PDF and
-  the JPEG into Pending review. With `keep` it never runs and Pending stays
+  the JPEG into the Pending tab. With `keep` it never runs and Pending stays
   empty.
 
 ## 3. Traffic
 
     .venv/bin/python docs/manual/tools/forge-studies.py /tmp/pacsdemo/forged
-    .venv/bin/python docs/manual/tools/seed-traffic.py /tmp/pacsdemo/forged 11412 12575
+    .venv/bin/python docs/manual/tools/seed-traffic.py /tmp/pacsdemo/forged 11512 12575
 
     # two invented attachments — a referral note and a scanned film
     magick -size 900x1200 xc:white -fill black -pointsize 34 \
@@ -89,7 +120,7 @@ figures need:
       -annotate +60+120 "OUTSIDE STUDY (demo)" \
       -annotate +60+180 "scanned film, not DICOM" /tmp/pacsdemo/outside-film.jpg
 
-    # a study folder with them beside it -> Pending review
+    # a study folder with them beside it -> the Pending tab
     mkdir -p /tmp/pacsdemo/demo/outgoing/MR-BRAIN-DEMO-0004
     cp /tmp/pacsdemo/forged/DEMO-0004_*.dcm \
        /tmp/pacsdemo/referral.pdf /tmp/pacsdemo/outside-film.jpg \
@@ -97,7 +128,10 @@ figures need:
 
 Send the studies **after** the last restart. The Overview's *received* and
 *sent* tiles count from when the service last started, so a restart after this
-step photographs two zeroes and a machine that looks idle.
+step photographs two zeroes and a machine that looks idle. A config save does
+the same to *received* on its own — the receiver is rebuilt by a save and its
+counter starts again, while the watcher's *sent* survives — so make any
+last-minute edit in the dashboard before this step, not after.
 
 ## 4. Capture
 
@@ -109,18 +143,36 @@ step photographs two zeroes and a machine that looks idle.
         http://127.0.0.1:18042/ manual-screenshots-token panels
     done
 
+The sidebar is six rows, and most figures are a tab inside one of them, so each
+capture clicks the nav row and then the tab — `stuck` is Studies then Stuck,
+`routing` is Configuration then Routing. Capture signs in with the API token,
+which is an administrator and therefore sees every tab; a run signed in as one
+of the seeded profiles would find some of the strip missing, because a tab a
+profile's capabilities do not pay for is not drawn at all, and those figures
+come out as `! name: tab hidden for this profile` lines — or `! name: nav row
+hidden for this profile`, when the whole row is gone — rather than files. Read
+the run's output either way: `panels` mode prints eleven dashboard names and
+then `editor` and `editor-tags`, and every `!` line in place of one of them is a
+figure that will be missing from all three manuals.
+
 **`gate` and `first-run`** come from an instance that has never been set up: the
 container entrypoint marks setup done on first boot, so bring up a third one,
 blank `setup_completed` in its `config.json`, turn every service off, restart,
 and capture it in `setup` mode.
 
 **`people` and `gate-people`** come from an instance that *has* profiles, which
-is a one-way door — do them last, on the demo instance, in `people` mode. Seed
-the four presets first. The dashboard's own *Turn on profiles* button refuses
-here, and correctly: it would create a passwordless administrator on a container
-that publishes on `0.0.0.0`. Create them through the API with passwords instead
-(`POST /api/profiles/save`, which needs an `X-Carino` header as well as the
-token — that header is the CSRF guard, and every POST wants it).
+is a one-way door — do them last, on the demo instance, in `people` mode. That
+mode opens Configuration and selects its People tab, which is where People lives
+now; the tab is there before the profiles are, but it holds the *Turn on
+profiles* invitation rather than the table the figure is of. Seed the four
+presets first — but not with the dashboard's own *Turn on profiles* button.
+Nothing refuses that button: it writes the four presets with no passwords at all
+and signs the browser that pressed it in as the administrator it just made, so a
+container reachable by anything but loopback ends up with an open Administrator
+that any visitor picks out of the sign-in list in one click. Create the four
+through the API with passwords instead (`POST /api/profiles/save`, one call each
+— a body with no `id` creates a profile. It needs an `X-Carino` header as well
+as the token: that header is the CSRF guard, and every POST wants it).
 
 ## 5. Convert and place
 

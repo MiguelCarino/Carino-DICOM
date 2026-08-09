@@ -182,25 +182,26 @@ journalctl -u carino-pacs -f</code></pre>
     <ol>
       <li><strong>Choose the services.</strong> Everything ships off. The dashboard's setup chooser asks
         what <em>this</em> machine should run; enable only that.</li>
-      <li><strong>Add your destinations</strong> (name, host, port, AE title) under <em>Destinations</em>.</li>
+      <li><strong>Add your destinations</strong> (name, host, port, AE title) on the <em>Destinations</em>
+        tab of <em>Configuration</em>, which is the tab that row opens on.</li>
       <li><strong>Prove connectivity with C-ECHO</strong> before moving a single image:
         <code>./run.sh echo --name "Hospital PACS"</code>. If C-ECHO fails, the problem is not Carino —
         it is the network, the firewall or the AE title.</li>
       <li><strong>Point one device at it</strong> using the receiver's AE title, IP and port, and send a
         test study.</li>
-      <li><strong>Watch the activity log.</strong> If something fails it shows up there; this software
-        would rather shout than fail quietly.</li>
+      <li><strong>Watch the activity log</strong>, on the <em>Logs</em> tab of <em>Activity</em>. If
+        something fails it shows up there; this software would rather shout than fail quietly.</li>
     </ol>
 
     <figure class="shot">
       <img src="img/en/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The dashboard's setup chooser, with a card per service — receiver, auto-send, print receiver, emergency RIS — each with a Use this tick box, and a footer reading: nothing selected." />
+        alt="The dashboard's setup chooser, headed “Choose the services this PC should run”: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a Use this tick box, every one unticked, over a footer reading “Nothing selected — this PC will not receive or send anything” beside Not now and Turn these on buttons." />
       <figcaption>Step 1. Nothing is ticked and nothing is running: the footer says so, and no port opens until you apply. Each card names what the service is for, so the choice is made from the description rather than from the protocol name.</figcaption>
     </figure>
 
     <figure class="shot">
       <img src="img/en/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The Activity panel: a timestamped stream. Startup lines name each listener and its port; a red block explains that a routing rule asks for de-identification while the profile is off; an amber line reports a rejected association and when it will be retried." />
+        alt="The Logs tab of Activity: a timestamped stream. Startup lines name each listener and its port; a red block explains that a routing rule asks for de-identification while the profile is off; an amber line reports a rejected association and when it will be retried." />
       <figcaption>Step 5. The activity stream. Every line that matters says what it wants done about it — the red block here is a de-identification hold naming the remedy, and the amber line is a refused destination naming its next retry.</figcaption>
     </figure>
 
@@ -236,9 +237,16 @@ journalctl -u carino-pacs -f</code></pre>
 
     <figure class="shot">
       <img src="img/en/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The People panel with four profiles. The IT profile is expanded: a grid of capabilities, some ticked and some not, and below it a Can see row of patient identifiers where patient name, date of birth, sex and referring physician are unticked." />
-      <figcaption>Profiles, once they are on. Permissions are per person and enforced at every endpoint, not hidden in the browser — and <em>Can see</em> is separate from <em>Can do</em>: this IT profile can re-route a study by its accession number without ever reading a patient's name. Anything unticked is shown as <code>***</code> wherever it would have appeared.</figcaption>
+        alt="The People tab of Configuration, under a line reading four profiles: Administrator, IT, Radiologist and Reception. The Administrator's card is short — its “Administrator (everything, including future permissions)” box is ticked, so it carries no permission grid at all. The IT card below it shows its full Can do grid of tick boxes, and the screenshot cuts off partway through its Can see row. An Add someone button is pinned at the bottom right." />
+      <figcaption>Profiles, once they are on. Permissions are per person and enforced at every endpoint, not hidden in the browser — and <em>Can see</em> is separate from <em>Can do</em>: a profile can be allowed to re-route a study by its accession number without ever reading a patient's name. Anything unticked is shown as <code>***</code> wherever it would have appeared.</figcaption>
     </figure>
+
+    <p>Permissions also decide what the dashboard draws. A profile sees only the sidebar rows, and only
+      the tabs inside them, that its capabilities pay for: a Radiologist who holds
+      <code>routing.read</code> but not <code>config.read</code> gets <em>Configuration</em> with
+      <em>Destinations</em> and <em>Routing</em> and no <em>Settings</em> tab, and Reception, holding
+      none of the three, has no <em>Configuration</em> row at all. The service chips in the top
+      header are the deliberate exception — see <em>Web dashboard</em> below.</p>
 
     <figure class="shot">
       <img src="img/en/gate-people.webp" width="1200" height="1080" loading="lazy" decoding="async"
@@ -343,8 +351,8 @@ openssl rand -base64 32</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <figure class="shot">
       <img src="img/en/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The audit panel: a Check integrity button, an Export button, a line giving the file count and the chain head digest, and rows of timestamped records — logins that succeeded and one that was denied." />
-      <figcaption>The audit trail, with the chain head printed above it — that digest is the value worth copying somewhere this machine cannot reach. Refusals are recorded as faithfully as successes: the denied row is a request that was turned down.</figcaption>
+        alt="The Audit tab of Activity: in the panel header, above the tab strip, a Clear view button, a Check integrity button and an Export button; under the tabs, a line giving the file count, the size on disk and the chain head digest; and below it five timestamped rows, each one the system logging in with an api token, each one ok." />
+      <figcaption>The audit trail, with the chain head printed above it — that digest is the value worth copying somewhere this machine cannot reach. The three buttons belong to the panel and not to the tab, so <em>Clear view</em>, <em>Check integrity</em> and <em>Export</em> are equally at hand on <em>Logs</em>. Refusals are recorded as faithfully as successes: a request that was turned down is a row here like any other.</figcaption>
     </figure>
 
     <h2 id="services">4. The services, one by one</h2>
@@ -363,7 +371,7 @@ openssl rand -base64 32</code></pre>
     <figure class="shot">
       <img src="img/en/overview.webp" width="1920" height="1200" loading="lazy" decoding="async"
         alt="The Overview panel: counting tiles for services on, received, sent, stuck, pending, open orders and free space, over cards naming this machine's address, its receiver, its config and storage paths, the reachability of each destination, and the last study received." />
-      <figcaption>Overview answers "is this machine working" in one screen. Every tile is a button onto the panel that owns the thing it counts, so a number you did not expect is one click from its detail.</figcaption>
+      <figcaption>Overview answers "is this machine working" in one screen. Every tile that counts something with a home is a button onto the panel that owns it — <em>Stuck</em> and <em>Pending</em> open their own tab of <em>Studies</em> — so a number you did not expect is one click from its detail. <em>Free space</em> is the exception: it leads nowhere, so it stays a plain readout rather than a button that would do nothing.</figcaption>
     </figure>
 
     <div class="svc-doc">
@@ -382,7 +390,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Transaction history panel, on its Received tab: a row per study with patient, ID, date, description, modality and image count, its series listed underneath, and per-row Send, Attach, Edit tags, Go to file and Delete actions." />
+          alt="The History tab of Studies, on its Received strip: a row per study with patient, ID, date, description, modality and image count, its series listed underneath, and per-row Send, Attach, Edit tags, Go to file and Delete actions." />
         <figcaption>What arrived, newest first, with the series each study is made of. <em>Go to file</em> opens where it actually landed on disk — the filing is a real folder tree, not a database somebody has to export from.</figcaption>
       </figure>
     </div>
@@ -418,20 +426,20 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Destinations panel: three rows — Main archive, Reading room, Teaching archive — each with host, port, AE title, tick boxes for TLS, no RIS and emergency primary, and an Echo button." />
+          alt="The Destinations tab of Configuration: three rows — Main archive, Reading room and Teaching archive — each with host, port, AE title, tick boxes for TLS, no RIS and emergency primary, and an Echo button." />
         <figcaption>Destinations are named here and referred to by name everywhere else, so renaming a node does not orphan the rules that point at it. <em>Echo</em> proves the association before any image depends on it.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="img/en/routing.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Routing panel: a Route by rule tick box, then numbered rules with match fields for modality, calling AE, station, patient ID and study description, and a Send to row of destination tick boxes plus De-identify and Stop at this rule." />
+          alt="The Routing tab of Configuration: a Route by rule tick box, then numbered rules with match fields for modality, calling AE, station, patient ID and study description, and a Send to row of destination tick boxes plus De-identify and Stop at this rule." />
         <figcaption>Rules are read top to bottom, and the blank fields say <em>any</em> — a rule is a filter, not a form to fill in. The order matters, which is why each rule carries arrows to move it.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="img/en/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Stuck sends panel, split in two: “Retrying automatically”, listing a destination that has refused seven attempts with the next retry in seconds, and “Held — nothing is being sent”, listing six instances for a destination tagged profile off, with a paragraph naming the two edits that release them." />
-        <figcaption>The two halves are different problems and the panel keeps them apart. The top is a node that is down and will clear itself; the bottom is a de-identification hold, which no timer ever releases — so each row spells out the edit that does.</figcaption>
+          alt="The Stuck tab of Studies, under a banner reading “5 files need attention” and split in two: “Retrying automatically”, listing the teaching archive with two instances waiting, its last error in red, a Retry now button and a countdown to the next attempt; and “Held — nothing is being sent”, listing the main archive tagged profile off, with three instances waiting, the three .dcm files named, a paragraph giving the edit that releases them and two buttons, De-identification settings and The rule that asks for it." />
+        <figcaption>The two halves here are different problems and the tab keeps them apart. The top is a node that is down and will clear itself; the bottom is a de-identification hold, which no timer ever releases — so each row spells out the edit that does, and carries the two buttons that go and make it. A third section, <em>No destination left to retry</em>, is drawn only when it has something to hold: files routed to a name that is no longer an enabled destination. Nothing retries those, because there is no node left to dial — the remedy is to restore the destination or to accept the loss, and until one of the two happens they sit in the outgoing folder rather than being archived or deleted.</figcaption>
       </figure>
     </div>
 
@@ -464,26 +472,36 @@ openssl rand -base64 32</code></pre>
           released by an edit, a name that has arrived at an outside node is not recoverable by any
           edit.</p>
         <p><b>There are two reasons the scrub cannot happen, and they are not fixed the same way.</b>
-          Every hold records which one it is, and the stuck panel prints the remedy for the cause it
-          recorded rather than guessing:</p>
+          Every hold records which one it is, and the <em>Stuck</em> tab of <em>Studies</em> prints the
+          remedy for the cause it recorded rather than guessing:</p>
         <ul>
           <li><b>The profile is <code>off</code></b> while a rule still asks for a scrub. Set the
             profile to <code>basic</code> or <code>strict</code> and the next auto-send pass releases
             them.</li>
           <li><b>The profile is on, but no de-identifier could be built</b> from the current settings,
-            so there is still nothing to scrub with. The failure that stopped it is in the Activity
-            log on the send channel — fix that. <b>Turning the profile off does not release this
+            so there is still nothing to scrub with. The failure that stopped it is on the
+            <em>Logs</em> tab of <em>Activity</em>, on the send channel — fix that. <b>Turning the
+            profile off does not release this
             one:</b> it releases nothing and only moves which half is stopping the scrub.</li>
         </ul>
         <p>Unticking <em>de-identify</em> on the rule releases either hold, and it releases the
           studies <b>identified</b> — which is the exact outcome the hold exists to prevent. Make that
           edit only if that destination is genuinely no longer meant to receive scrubbed data.</p>
+        <p>Whichever of these edits is the right one, it is a click from the row that reports the hold.
+          Each held row carries a <em>De-identification settings</em> button that opens the
+          <em>Settings</em> tab of <em>Configuration</em>, and a <em>The rule that asks for it</em>
+          button that opens the <em>Routing</em> tab. Both open the tab and nothing more: neither
+          scrolls down to the rule that asks for the scrub, and neither highlights it. Even so, the row
+          that names the problem is the way to both places it is fixed, so this repair is shorter than
+          it was when each of them was a sidebar row to find.</p>
         <p>Nothing is lost and nothing is quiet about it. The studies stay in the
           <strong>outgoing</strong> folder — never archived, never deleted — every <em>other</em>
-          destination on the same study still receives them, the Activity log raises an <em>error</em>
-          naming the study, the withheld destination and the cause, the de-identification panel in
-          Settings names it too, and the ⚠ <em>Stuck</em> counter includes those files. Nothing
-          releases a hold on its own: no timer runs it down and nothing retries it.</p>
+          destination on the same study still receives them, the <em>Logs</em> tab of <em>Activity</em>
+          raises an <em>error</em> naming the study, the withheld destination and the cause, the
+          de-identification fieldset on the <em>Settings</em> tab names it too, and the ⚠ badge beside
+          <em>Studies</em> counts those files — and that badge is itself a button, which opens the
+          <em>Stuck</em> tab. Nothing releases a hold on its own: no timer runs it down and nothing
+          retries it.</p>
       </div>
       <div class="danger">
         <p><b>It does not clean pixels.</b> Patient demographics <em>burned into</em> the image — the
@@ -624,7 +642,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Pending imports panel: two queued items, a PDF and a JPEG, each with patient name, patient ID, accession number, study date and study description already filled in from the study they arrived beside, a Preview link, and Approve &amp; send / Discard buttons." />
+          alt="The Pending tab of Studies: two queued items, a PDF and a JPEG, each with patient name, patient ID, accession number, study date and study description already filled in from the study they arrived beside, a Preview link, and Approve &amp; send / Discard buttons." />
         <figcaption>Captured film — and any PDF or image found beside a study — waits here with the study's own details filled in, rather than being converted to DICOM on a guess. You confirm the identity, then approve.</figcaption>
       </figure>
     </div>
@@ -636,20 +654,45 @@ openssl rand -base64 32</code></pre>
         <dt>What it does</dt>
         <dd>Per-service status, destinations, orders, a live activity log, settings and a bundled DICOM
           editor. Everything the dashboard does also exists in the CLI.</dd>
+        <dt>Getting around</dt>
+        <dd>The sidebar has six rows: <em>Overview</em>, <em>Services</em>, <em>Studies</em>,
+          <em>Orders</em>, <em>Configuration</em> and <em>Activity</em>. The three questions asked of the
+          same pile of files are the tabs of <em>Studies</em> — <em>History</em>, <em>Pending</em> and
+          <em>Stuck</em>; what you set when commissioning the machine are the tabs of
+          <em>Configuration</em> — <em>Destinations</em>, <em>Routing</em>, <em>Settings</em> and
+          <em>People</em>, and it opens on <em>Destinations</em>, not on <em>Settings</em>; and the two
+          records are the tabs of <em>Activity</em> — <em>Logs</em> and <em>Audit</em>. <em>Orders</em>
+          keeps its own strip of open and closed. The <em>Studies</em> row carries two counts that are
+          buttons in their own right, 📎 pending and ⚠ stuck, and each opens its own tab: so reaching
+          <em>Stuck</em> is one click while something is stuck, and two — the row, then the tab — when
+          nothing is, because a count of zero hides itself. A counter that permanently reads 0 is an
+          alarm that is always on, and nobody looks at those. <em>Orders</em> carries its own count on the
+          same terms. Every panel and tab has its own address — <code>#studies/stuck</code>,
+          <code>#configuration/routing</code>, <code>#activity/logs</code> — so a place in the dashboard
+          can be bookmarked, read out over a phone during an outage, and left with the browser's Back
+          button; older <code>#dlgStuck</code>-style links still resolve. <em>Overview</em> is the one
+          exception: it answers to <code>#overview</code> if you type it, but it is never written to the
+          address bar and leaves no history entry, because it prints a patient's name and an unattended
+          screen must not come back to it after a reload.</dd>
+        <dt>The chips in the header</dt>
+        <dd>The service chips along the top are unchanged for anyone who may start and stop services.
+          A profile without <code>services.control</code> still sees them, as indicators, but they are
+          disabled: service state is not privileged — the front desk has to be able to see that the
+          receiver is dead — and a switch the server would refuse is not worth offering.</dd>
         <dt>Move it off loopback when</dt>
         <dd>Only with a concrete reason — and then with a token (mandatory) and HTTPS in front. See the
           token rule.</dd>
       </dl>
       <figure class="shot">
         <img src="img/en/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Settings panel: the receiver's AE title, bind address, port, storage folder, free-space floor, AE allow-list and TLS fields on the left; the auto-send calling AE, watch folder, poll interval, what to do after a file is sent, and its TLS trust settings on the right." />
+          alt="The Settings tab of Configuration, its twelve fieldsets in three columns on a wide screen: the receiver's AE title, bind address, port, storage folder, free-space floor, AE allow-list and TLS fields; the auto-send calling AE, watch folder, poll interval, what to do after a file is sent and its TLS trust settings; and beside them the print receiver, failover, worklist, RIS, Query/Retrieve, DICOMweb, index, de-identification, API access and integration fieldsets." />
         <figcaption>Everything in <code>config.json</code>, in a form. The file stays the source of truth — an edit here writes it, and a config the dashboard would refuse to save is refused with the reason, not silently rewritten.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="img/en/editor.webp" width="1920" height="1200" loading="lazy" decoding="async"
           alt="The bundled DICOM editor with a sample study open: the image on the left with window centre and width sliders, a Featured clinical panel on the right listing patient, modality and study description with the patient's name masked behind a Show button, and a Technical panel below it giving SOP Instance UID, transfer syntax, photometric interpretation and the file's SHA-256." />
-        <figcaption>The bundled editor, opened from a study in History or on its own. It runs entirely in the browser — nothing is uploaded anywhere — and the patient's name starts masked, because the most common reason to open a header is to read a UID.</figcaption>
+        <figcaption>The bundled editor, opened from a study on the History tab or on its own. It runs entirely in the browser — nothing is uploaded anywhere — and the patient's name starts masked, because the most common reason to open a header is to read a UID.</figcaption>
       </figure>
 
       <figure class="shot">

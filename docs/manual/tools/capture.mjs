@@ -1,14 +1,19 @@
-/* Capture the dashboard panels the manual shows, in one language per run.
+/* Capture the dashboard figures the manual shows, in one language per run.
  *
  *   node capture.mjs <lang> <outDir> [baseUrl] [token] [mode]
  *
- * mode: "panels" (default) — the gate, every panel, and the bundled editor
+ * mode: "panels" (default) — every figure the dashboard holds, and the bundled
+ *                            editor. The dashboard is six nav rows now, and
+ *                            most of these figures are a tab inside one of
+ *                            them, so a figure is a row click and then a tab
+ *                            click (see open() below).
  *       "setup"            — the token gate and the first-run service chooser,
  *                            which only exist on an appliance that has never
  *                            been set up (see README.md)
- *       "people"           — People and the profile picker, which only exist
- *                            on one that has. Run this LAST: it is the one that
- *                            leaves the instance changed.
+ *       "people"           — the People tab of Configuration and the profile
+ *                            picker, which only exist on one that has. Run this
+ *                            LAST: it is the one that leaves the instance
+ *                            changed.
  *
  * Drives headless Chromium over CDP with node's built-in WebSocket, so this has
  * no dependencies at all — no puppeteer, no npm install, nothing to keep in step
@@ -34,7 +39,10 @@ if (!OUT) {
 
 // 1440×900 at 2×: the manual's column is 820px, so this is a little over 2×
 // device pixels once it is scaled down — enough that a reader who zooms into a
-// port number or an AE title still reads it.
+// port number or an AE title still reads it. It is also wide enough for the
+// three-column form of Settings, which is what the wider wrap buys and what the
+// manual's figure of it is expected to show; a narrower window photographs two
+// columns and makes the pane look twice as long as it is.
 const W = 1440, H = 900, SCALE = 2;
 const PORT = 9400 + (process.pid % 400);
 // A fresh profile every run, deliberately: a session cookie left in the profile
@@ -99,6 +107,41 @@ const signIn = async () => evaluate(`(async () => {
   return document.getElementById('authGate').hidden;
 })()`).then(hidden => { if (!hidden) throw new Error('sign-in did not dismiss the gate'); });
 
+/* Put a figure on screen: click the nav ROW that owns it, then the TAB inside
+ * that row's panel. The sidebar is six rows now, and most of what the manual
+ * photographs no longer has a nav button of its own: History, Pending and Stuck
+ * are tabs of Studies; Destinations, Routing, Settings and People are tabs of
+ * Configuration; Logs and Audit are tabs of Activity. The old one-click form
+ * looked for buttons that eight of these figures no longer have.
+ *
+ * Both the panel and the pane are checked, because a pane's `hidden` no longer
+ * says anything about whether its panel is open: the tab strips are reconciled
+ * even inside closed panels, so an un-hidden pane can easily be the selected
+ * tab of a panel nobody opened. A pass on the pane alone would photograph
+ * whatever panel happened to be on screen and name the file after this one.
+ *
+ * The pane id comes from the tab button's aria-controls rather than a table
+ * kept here, so a tab that is renamed or moved to another panel is followed
+ * automatically instead of silently capturing the wrong pane.
+ */
+const open = (panel, tab) => evaluate(`(async () => {
+  const row = document.querySelector('.navbtn[data-panel="${panel}"]');
+  if (!row) return 'no nav row';
+  if (row.hidden) return 'nav row hidden for this profile';
+  row.click();
+  await new Promise(r => setTimeout(r, 1200));
+  const p = document.getElementById('${panel}');
+  if (!p || p.hidden) return 'panel stayed hidden';
+${tab ? `  const t = p.querySelector('.panel-tabs .hist-tab[data-tab="${tab}"]');
+  if (!t) return 'no tab button';
+  if (t.hidden) return 'tab hidden for this profile';
+  t.click();
+  await new Promise(r => setTimeout(r, 1600));
+  const pane = document.getElementById(t.getAttribute('aria-controls'));
+  if (!pane || pane.hidden) return 'pane stayed hidden';
+` : ''}  return 'ok';
+})()`);
+
 await send('Page.enable');
 await send('Emulation.setDeviceMetricsOverride',
   { width: W, height: H, deviceScaleFactor: SCALE, mobile: false });
@@ -116,11 +159,12 @@ if (MODE === 'setup') {
   await shot('gate-people');
   await signIn();
   await sleep(2000);
-  await evaluate(`(async () => {
-    document.querySelector('.navbtn[data-panel="dlgPeople"]').click();
-    await new Promise(r => setTimeout(r, 2000));
-    return 1;
-  })()`);
+  // People is the fourth tab of Configuration. Thrown rather than named: this
+  // mode captures one figure, so there is nothing left to salvage by going on,
+  // and 'tab hidden for this profile' here means the token this run signed in
+  // with does not hold auth.manage.
+  const ok = await open('dlgConfig', 'people');
+  if (ok !== 'ok') throw new Error(`people: ${ok}`);
   await sleep(1500);
   await shot('people');
 
@@ -128,22 +172,26 @@ if (MODE === 'setup') {
   await signIn();
   await sleep(2500);
 
-  const PANELS = [
-    ['dlgOverview', 'overview'], ['dlgServices', 'services'], ['dlgHistory', 'history'],
-    ['dlgOrders', 'orders'], ['dlgPending', 'pending'], ['dlgStuck', 'stuck'],
-    ['dlgDests', 'destinations'], ['dlgRouting', 'routing'], ['dlgSettings', 'settings'],
-    ['dlgLogs', 'logs'], ['dlgAudit', 'audit'],
+  // Nav row, tab within it, figure name. The names are what the three manuals
+  // reference, so they stay as they are however the dashboard is rearranged —
+  // only the route to each one moves. Overview, Services and Orders have no tab
+  // strip and take null.
+  const FIGURES = [
+    ['dlgOverview', null,           'overview'],
+    ['dlgServices', null,           'services'],
+    ['dlgStudies',  'history',      'history'],
+    ['dlgOrders',   null,           'orders'],
+    ['dlgStudies',  'pending',      'pending'],
+    ['dlgStudies',  'stuck',        'stuck'],
+    ['dlgConfig',   'destinations', 'destinations'],
+    ['dlgConfig',   'routing',      'routing'],
+    ['dlgConfig',   'settings',     'settings'],
+    ['dlgActivity', 'logs',         'logs'],
+    ['dlgActivity', 'audit',        'audit'],
   ];
-  for (const [panel, name] of PANELS) {
-    const ok = await evaluate(`(async () => {
-      const b = document.querySelector('.navbtn[data-panel="${panel}"]');
-      if (!b) return 'no nav button';
-      b.click();
-      await new Promise(r => setTimeout(r, 1600));
-      const p = document.getElementById('${panel}');
-      return (p && !p.hidden) ? 'ok' : 'panel stayed hidden';
-    })()`);
-    // Named rather than thrown: one panel that would not open should not cost
+  for (const [panel, tab, name] of FIGURES) {
+    const ok = await open(panel, tab);
+    // Named rather than thrown: one figure that would not open should not cost
     // the other ten, and a silent gap in the output is how a missing figure
     // gets shipped.
     if (ok !== 'ok') { console.log(`  ! ${name}: ${ok}`); continue; }
@@ -173,5 +221,15 @@ if (MODE === 'setup') {
 
 ws.close();
 chrome.kill();
-await rm(PROFILE, { recursive: true, force: true });
+// Wait for the process to actually go before deleting its profile: kill() only
+// sends the signal, and chromium still has files open in there for a moment
+// after. Deleting underneath it throws ENOTEMPTY even with force:true, which
+// exits non-zero AFTER every figure has been written — so a `for L in en es
+// pt-BR` loop under `set -e` stops on a run that in fact succeeded.
+await new Promise((r) => { chrome.on('exit', r); setTimeout(r, 3000); });
+try {
+  await rm(PROFILE, { recursive: true, force: true });
+} catch {
+  // A throwaway directory in the temp dir. Not worth failing a capture over.
+}
 process.exit(0);

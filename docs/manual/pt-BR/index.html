@@ -194,25 +194,26 @@ journalctl -u carino-pacs -f</code></pre>
     <ol>
       <li><strong>Escolha os serviços.</strong> Tudo vem desligado. O assistente do painel pergunta o que
         <em>esta</em> máquina deve rodar; ligue só isso.</li>
-      <li><strong>Cadastre os destinos</strong> (nome, host, porta, AE title) em <em>Destinos</em>.</li>
+      <li><strong>Cadastre os destinos</strong> (nome, host, porta, AE title) na aba <em>Destinos</em> de
+        <em>Configuração</em> — é a aba com que ela abre.</li>
       <li><strong>Teste a conectividade com C-ECHO</strong> antes de mover uma única imagem:
         <code>./run.sh echo --name "PACS do hospital"</code>. Se o C-ECHO não passa, o problema não é o
         Carino: é rede, firewall ou AE title.</li>
       <li><strong>Aponte um equipamento para cá</strong> com o AE title, o IP e a porta do receptor, e
         envie um estudo de teste.</li>
-      <li><strong>Olhe o log de atividade.</strong> Se algo falhar, aparece ali; este software prefere
-        gritar a falhar em silêncio.</li>
+      <li><strong>Olhe a aba <em>Registro</em> de <em>Atividade</em>.</strong> Se algo falhar, aparece
+        ali; este software prefere gritar a falhar em silêncio.</li>
     </ol>
 
     <figure class="shot">
       <img src="../img/pt-BR/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="O assistente de configuração do painel, com um cartão por serviço — receptor, encaminhamento automático, receptor de impressão, RIS de emergência —, cada um com uma caixa «Usar isto», e um rodapé dizendo que nada foi selecionado." />
-      <figcaption>Passo 1. Nada está marcado e nada está rodando: o rodapé diz isso, e nenhuma porta abre até você aplicar. Cada cartão explica para que serve o serviço, então a escolha vem da descrição e não do nome do protocolo.</figcaption>
+        alt="O assistente do primeiro arranque, com o título «Escolha os serviços que este PC deve executar» e seis cartões — Receptor, Auto-envio, Impressão, RIS de emergência, Worklist e Consulta/Recuperação —, cada um com uma caixa «Usar», todas desmarcadas, e um rodapé que diz «Nada marcado: este PC não vai receber nem enviar nada», com os botões «Agora não» e «Ligar os marcados»." />
+      <figcaption>Passo 1. Os seis serviços são oferecidos de uma vez, e nenhum vem marcado: nada está rodando, o rodapé diz isso e nenhuma porta abre até você clicar em «Ligar os marcados». Cada cartão explica para que serve o serviço, então a escolha vem da descrição e não do nome do protocolo.</figcaption>
     </figure>
 
     <figure class="shot">
       <img src="../img/pt-BR/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="O painel de atividade: um fluxo com marcações de hora. As linhas de arranque nomeiam cada listener e sua porta; um bloco vermelho explica que uma regra pede anonimização enquanto o perfil está desligado; uma linha âmbar relata uma associação recusada e quando será tentada de novo." />
+        alt="A aba Registro de Atividade: um fluxo com marcações de hora. As linhas de arranque nomeiam cada listener e sua porta; um bloco vermelho explica que uma regra pede anonimização enquanto o perfil está desligado; uma linha âmbar relata uma associação recusada e quando será tentada de novo." />
       <figcaption>Passo 5. O fluxo de atividade. Cada linha que importa diz o que fazer a respeito: o bloco vermelho é uma retenção por anonimização que nomeia o remédio, e a linha âmbar é um destino que recusou a conexão e anuncia a próxima tentativa.</figcaption>
     </figure>
 
@@ -248,13 +249,20 @@ journalctl -u carino-pacs -f</code></pre>
 
     <figure class="shot">
       <img src="../img/pt-BR/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="O painel de Pessoas com quatro perfis. O perfil de TI está aberto: uma grade de permissões, algumas marcadas e outras não, e abaixo dela uma linha «pode ver» de identificadores do paciente em que nome, data de nascimento, sexo e médico solicitante estão desmarcados." />
-      <figcaption>Os perfis, depois de ligados. As permissões são por pessoa e são verificadas em cada endpoint, não no navegador; e «pode ver» é separado de «pode fazer»: este perfil de TI consegue reencaminhar um estudo pelo número de accession sem nunca ler o nome de um paciente. O que estiver desmarcado aparece como <code>***</code> onde teria aparecido.</figcaption>
+        alt="A aba Pessoas de Configuração, com a faixa de abas à vista e Pessoas selecionada, e uma linha que diz «4 perfis.» acima da lista — Administrador, TI, Radiologista e Recepção. O cartão do Administrador é curto: sua caixa «Administrador (tudo, incluindo permissões futuras)» está marcada. Abaixo dele, o cartão de TI mostra a grade «Pode fazer» de caixas marcadas e desmarcadas, e a imagem corta na linha «Pode ver». No canto inferior direito, um botão fixo «Adicionar alguém»." />
+      <figcaption>Os perfis, depois de ligados. As permissões são por pessoa e são verificadas em cada endpoint, não no navegador. O cartão do Administrador é curto de propósito: com «tudo, incluindo permissões futuras» marcado não sobra grade para mostrar, porque não há nada a negar. Nos demais, «pode ver» é separado de «pode fazer» — um perfil pode reencaminhar um estudo pelo número de accession sem nunca ler o nome de um paciente —, e o identificador que ficar desmarcado aparece como <code>***</code> onde teria aparecido.</figcaption>
     </figure>
+
+    <p>As mesmas permissões desenham a navegação. Uma linha da lateral aparece se o perfil tiver alguma
+      das permissões que as abas dela pedem, e depois cada aba é conferida por conta própria: um
+      <em>Radiologista</em>, que tem <code>routing.read</code> e não tem <code>config.read</code>, abre
+      <em>Configuração</em> e enxerga <em>Destinos</em> e <em>Rotas</em>, mas nenhuma aba
+      <em>Configurações</em>, que é onde ficam o token da API e o desligamento do servidor. A
+      <em>Recepção</em>, que não tem nenhuma das três permissões, não vê a linha <em>Configuração</em>.</p>
 
     <figure class="shot">
       <img src="../img/pt-BR/gate-people.webp" width="1200" height="1080" loading="lazy" decoding="async"
-        alt="A mesma tela de acesso em um equipamento com perfis: quatro botões, cada um com um cadeado, e um link para entrar com o token de acesso." />
+        alt="A mesma tela de acesso em um equipamento com perfis: quatro botões — Administrador, TI, Radiologista e Recepção —, cada um com um cadeado, e um link para entrar com o token de acesso." />
       <figcaption>A tela de acesso de um equipamento com perfis. O seletor só é desenhado enquanto <code>users.list_profiles</code> estiver ligado: publicar a lista de pessoal para quem alcançar a porta é uma divulgação de verdade, e a decisão é sua. O token continua funcionando, dobrado embaixo, porque é a volta para dentro quando alguém se tranca fora.</figcaption>
     </figure>
 
@@ -358,8 +366,8 @@ openssl rand -base64 32</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <figure class="shot">
       <img src="../img/pt-BR/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="O painel de auditoria: um botão de verificar integridade, outro de exportar, uma linha com a contagem de arquivos e o resumo da cabeça da cadeia, e linhas com marcação de hora: acessos que deram certo e um que foi negado." />
-      <figcaption>A trilha de auditoria, com a cabeça da cadeia impressa acima: esse resumo é o valor que vale copiar para um lugar que esta máquina não alcança. As recusas são registradas com a mesma fidelidade que os acertos: a linha negada é um pedido que não passou.</figcaption>
+        alt="A aba Auditoria de Atividade: no cabeçalho do painel, acima da faixa de abas, os botões «Limpar exibição», «Verificar integridade» e «Exportar»; abaixo, uma linha com a contagem de arquivos, o tamanho e o topo da cadeia; e cinco linhas todas do mesmo formato, cada uma com marcação de hora e os campos system, login, api token e ok." />
+      <figcaption>A trilha de auditoria, com o topo da cadeia impresso acima: esse resumo é o valor que vale copiar para um lugar que esta máquina não alcança. Os três botões ficam no cabeçalho do painel, acima da faixa de abas, e por isso estão à vista tanto em <em>Registro</em> quanto em <em>Auditoria</em>. Aqui todas as linhas são entradas que deram certo — o token de API abrindo sessão —, mas as recusas são registradas com a mesma fidelidade que os acertos: um pedido que não passa deixa a sua linha do mesmo jeito.</figcaption>
     </figure>
 
     <h2 id="servicos">4. Os serviços, um a um</h2>
@@ -378,7 +386,7 @@ openssl rand -base64 32</code></pre>
     <figure class="shot">
       <img src="../img/pt-BR/overview.webp" width="1920" height="1200" loading="lazy" decoding="async"
         alt="O painel de Resumo: blocos contando serviços ligados, recebidos, enviados, travados, pendentes, pedidos abertos e espaço livre, sobre cartões com o endereço desta máquina, seu receptor, seus caminhos de configuração e de armazenamento, se cada destino responde e o último estudo recebido." />
-      <figcaption>O resumo responde «esta máquina está funcionando?» em uma tela só. Cada bloco é um botão para o painel que governa o que ele conta, então um número inesperado fica a um clique do seu detalhe.</figcaption>
+      <figcaption>O resumo responde «esta máquina está funcionando?» em uma tela só. Os blocos que contam algo com casa são botões para o painel que governa o que eles contam — <em>Travados</em> e <em>Pendentes</em> abrem a sua própria aba de <em>Estudos</em> —, então um número inesperado continua a um clique do seu detalhe. <em>Espaço livre</em> é o único que não é botão: não conta nada que tenha uma tela, e um botão que não faz nada é pior que uma leitura simples.</figcaption>
     </figure>
 
     <div class="svc-doc">
@@ -398,7 +406,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/pt-BR/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de Histórico, na aba de recebidos: uma linha por estudo com paciente, ID, data, descrição, modalidade e número de imagens, suas séries logo abaixo, e ações por linha: enviar, anexar, editar tags, ir ao arquivo e apagar." />
+          alt="A aba Histórico de Estudos, mostrando os recebidos: uma linha por estudo com paciente, ID, data, descrição, modalidade e número de imagens, suas séries logo abaixo, e ações por linha: enviar, anexar, editar tags, ir ao arquivo e apagar." />
         <figcaption>O que chegou, do mais recente para o mais antigo, com as séries de cada estudo. «Ir ao arquivo» abre onde ele realmente caiu no disco: o arquivamento é uma árvore de pastas de verdade, não um banco de dados de onde alguém precisa exportar.</figcaption>
       </figure>
     </div>
@@ -437,21 +445,31 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/pt-BR/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de Destinos: três linhas, cada uma com host, porta, AE title, caixas para TLS, sem RIS e primário de emergência, e um botão de Echo." />
+          alt="A aba Destinos de Configuração: três linhas — Main archive, Reading room e Teaching archive —, cada uma com host, porta, AE title, caixas para TLS, sem RIS e primário de emergência, e um botão de Echo." />
         <figcaption>Os destinos são nomeados aqui e referidos pelo nome em todo o resto, então renomear um nó não deixa órfãs as regras que apontam para ele. O «Echo» prova a associação antes que qualquer imagem dependa dela.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/pt-BR/routing.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de Roteamento: uma caixa para rotear por regras e depois regras numeradas com campos de modalidade, AE chamador, estação, ID do paciente e descrição do estudo, e uma linha «enviar para» com caixas de destino mais anonimizar e parar nesta regra." />
+          alt="A aba Rotas de Configuração: uma caixa para rotear por regras e depois regras numeradas com campos de modalidade, AE chamador, estação, ID do paciente e descrição do estudo, e uma linha «enviar para» com caixas de destino mais anonimizar e parar nesta regra." />
         <figcaption>As regras são lidas de cima para baixo, e os campos em branco querem dizer «qualquer»: uma regra é um filtro, não um formulário para preencher. A ordem importa, e por isso cada regra traz setas para movê-la.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/pt-BR/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de envios travados, dividido em dois: «tentando de novo automaticamente», com um destino que recusou sete tentativas e a próxima tentativa em segundos, e «retidos: nada está sendo enviado», com seis instâncias para um destino marcado com o perfil desligado e um parágrafo que nomeia as duas edições que os liberam." />
-        <figcaption>As duas metades são problemas diferentes e o painel as mantém separadas. Em cima, um nó fora do ar que vai se resolver sozinho; embaixo, uma retenção por anonimização, que nenhum temporizador libera: por isso cada linha soletra a edição que libera.</figcaption>
+          alt="A aba Travados de Estudos, com um aviso de que há arquivos precisando de atenção e duas seções. «Tentando automaticamente»: uma linha do Teaching archive com duas instâncias aguardando, uma linha vermelha com o último erro, um botão «Tentar agora» e a contagem para a próxima tentativa. «Retido — nada está sendo enviado»: uma linha do Main archive marcada «perfil desligado», três instâncias aguardando, os nomes dos três arquivos .dcm, o parágrafo que nomeia as edições que os liberam e dois botões, «Configurações de anonimização» e «A regra que pede isso»." />
+        <figcaption>As duas seções são problemas diferentes e a aba as mantém separadas. Em cima, um nó fora do ar que vai se resolver sozinho, com o relógio da próxima tentativa à vista; embaixo, uma retenção por anonimização, que nenhum temporizador libera: por isso cada linha soletra a edição que libera e traz os dois botões que abrem a aba onde cada uma se faz.</figcaption>
       </figure>
+      <p>A aba tem ainda uma terceira seção, <em>Sem destino para tentar</em>, que esta captura não mostra
+        porque este equipamento não tem nenhum caso: são os arquivos encaminhados a um nome que deixou de
+        ser um destino habilitado — apagado ou desligado na aba <em>Destinos</em> depois de a rota já ter
+        sido decidida. Não sobrou nó para discar, então nada os tenta de novo e nenhum relógio corre a
+        favor deles; o remédio também é outro, restaurar um destino com o mesmo nome. Cada linha diz o que
+        será dos arquivos, e a distinção importa: uma cópia que a retenção e encaminhamento já prometeu
+        àquele nó espera indefinidamente na pasta de saída, sem ser arquivada nem apagada, enquanto uma
+        que ninguém prometeu é reencaminhada na varredura seguinte sem aquele nome e então arquivada ou
+        apagada conforme o seu <em>Ao enviar</em>, sem nunca ter chegado lá — restaurar o nó só ajuda
+        antes dessa varredura.</p>
     </div>
 
     <div class="svc-doc">
@@ -483,7 +501,7 @@ openssl rand -base64 32</code></pre>
           em disco se libera com uma edição, enquanto um nome que já chegou a um nó externo não se
           recupera com edição nenhuma.</p>
         <p><b>Há dois motivos para a limpeza não acontecer, e eles não se resolvem do mesmo jeito.</b>
-          Cada retenção registra qual dos dois é, e o painel de travados imprime o remédio do motivo
+          Cada retenção registra qual dos dois é, e a aba <em>Travados</em> imprime o remédio do motivo
           registrado em vez de adivinhá-lo:</p>
         <ul>
           <li><b>O perfil está em <code>off</code></b> enquanto uma regra continua pedindo a limpeza.
@@ -491,19 +509,26 @@ openssl rand -base64 32</code></pre>
             encaminhamento automático os libera.</li>
           <li><b>O perfil está ligado, mas nenhum anonimizador pôde ser construído</b> com as
             configurações atuais, então continua não havendo com o que limpar. A falha que impediu isso
-            está no log de Atividade, no canal de envio — corrija ali. <b>Desligar o perfil não libera
-            esta retenção:</b> não libera nada, só muda qual das duas metades está impedindo a
-            limpeza.</li>
+            está na aba <em>Registro</em> de <em>Atividade</em>, no canal de envio — corrija ali.
+            <b>Desligar o perfil não libera esta retenção:</b> não libera nada, só muda qual das duas
+            metades está impedindo a limpeza.</li>
         </ul>
+        <p>Os dois lugares onde a retenção se solta ficam a um clique da própria linha: ela traz dois
+          botões, <em>Configurações de anonimização</em>, que abre a aba <em>Configurações</em>, onde
+          fica o perfil, e <em>A regra que pede isso</em>, que abre a aba <em>Rotas</em>. Os dois abrem
+          a aba e param aí: nenhum rola até a regra nem a destaca, então a regra você ainda procura na
+          lista. Antes de <em>Configuração</em> ser uma linha só, chegar aos dois era procurar painéis
+          na lateral; agora o conserto é ler a retenção e clicar.</p>
         <p>Desmarcar <em>anonimizar</em> na regra libera qualquer uma das duas retenções, e as libera
           <b>identificadas</b> — exatamente o desfecho que a retenção existe para impedir. Faça essa
           edição só se aquele destino realmente não deve mais receber dados anonimizados.</p>
         <p>Nada se perde e nada disso é silencioso. Os estudos ficam na pasta de <strong>saída</strong>
           — nunca são arquivados nem apagados —, os <em>demais</em> destinos do mesmo estudo continuam
-          recebendo, o log de Atividade levanta um <em>erro</em> nomeando o estudo, o destino retido e o
-          motivo, o painel de anonimização em Configurações também o nomeia, e o contador ⚠
-          <em>Travados</em> inclui esses arquivos. Nada libera uma retenção sozinho: nenhum
-          temporizador a esgota e nada a tenta de novo.</p>
+          recebendo, a aba <em>Registro</em> levanta um <em>erro</em> nomeando o estudo, o destino retido
+          e o motivo, o bloco de anonimização da aba <em>Configurações</em> também o nomeia, e o contador
+          ⚠ ao lado da linha <em>Estudos</em> inclui esses arquivos — e esse contador é um botão que abre
+          a aba <em>Travados</em> direto. Nada libera uma retenção sozinho: nenhum temporizador a esgota
+          e nada a tenta de novo.</p>
       </div>
       <div class="danger">
         <p><b>Não limpa os pixels.</b> Os dados do paciente <em>gravados</em> na imagem — a tarja que um
@@ -647,7 +672,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/pt-BR/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de pendentes: dois itens na fila, um PDF e um JPEG, cada um com nome do paciente, ID, número de accession, data e descrição do estudo já preenchidos a partir do estudo ao lado do qual chegaram, um link de pré-visualização e botões de aprovar e enviar ou descartar." />
+          alt="A aba Pendentes de Estudos: dois itens na fila, um PDF e um JPEG, cada um com nome do paciente, ID, número de accession, data e descrição do estudo já preenchidos a partir do estudo ao lado do qual chegaram, um link de pré-visualização e botões de aprovar e enviar ou descartar." />
         <figcaption>O filme capturado — e qualquer PDF ou imagem encontrado ao lado de um estudo — espera aqui com os dados do próprio estudo já preenchidos, em vez de virar DICOM no chute. Você confirma a identidade e então aprova.</figcaption>
       </figure>
     </div>
@@ -657,22 +682,48 @@ openssl rand -base64 32</code></pre>
       <p class="port">Porta 8042 · HTTP, <code>127.0.0.1</code> por padrão</p>
       <dl>
         <dt>O que faz</dt>
-        <dd>Estado de cada serviço, destinos, pedidos, log de atividade ao vivo, configurações e um editor
-          DICOM embutido. Tudo o que o painel faz também existe na CLI.</dd>
+        <dd>Estado de cada serviço, destinos, pedidos, registro de atividade ao vivo, configurações e um
+          editor DICOM embutido. Tudo o que o painel faz também existe na CLI.</dd>
+        <dt>Como se navega</dt>
+        <dd>A lateral tem seis linhas: <em>Resumo</em>, <em>Serviços</em>, <em>Estudos</em>,
+          <em>Pedidos</em>, <em>Configuração</em> e <em>Atividade</em>. As três perguntas que se fazem
+          sobre o mesmo monte de arquivos são as abas de <em>Estudos</em> — <em>Histórico</em>,
+          <em>Pendentes</em> e <em>Travados</em>; o que se ajusta ao comissionar o equipamento são as abas de
+          <em>Configuração</em> — <em>Destinos</em>, <em>Rotas</em>, <em>Configurações</em> e
+          <em>Pessoas</em>, e ela abre em <em>Destinos</em>, não em <em>Configurações</em>; e os dois
+          registros são as abas de <em>Atividade</em> — <em>Registro</em> e <em>Auditoria</em>.
+          <em>Pedidos</em> mantém a própria faixa de abertos e fechados. A linha <em>Estudos</em> carrega
+          dois contadores que são botões, 📎 pendentes e ⚠ travados, e cada um abre a sua aba direto, então
+          chegar aos travados é um clique <em>enquanto houver algo travado</em>: um contador em zero fica
+          escondido, porque um contador que marca 0 é um alarme sempre ligado, e sem ele o caminho é o de
+          sempre — a linha, depois a aba, dois cliques. <em>Pedidos</em> tem o seu próprio contador. Cada
+          painel e cada aba tem endereço na URL — <code>#studies/stuck</code>,
+          <code>#configuration/routing</code>, <code>#activity/logs</code> —, então um lugar do painel
+          pode ir para os favoritos e ser ditado por telefone durante uma queda, que é por que esses
+          endereços são palavras e não ids de elemento; o botão «voltar» do navegador funciona e os
+          endereços antigos no estilo <code>#dlgStuck</code> continuam resolvendo. <em>Resumo</em> é a exceção: ele atende por <code>#overview</code> se você digitar,
+          mas nunca é escrito na barra de endereços nem deixa entrada no histórico, porque imprime o nome
+          de um paciente e uma tela sem ninguém na frente não pode voltar sozinha para ele depois de um
+          recarregamento.</dd>
+        <dt>Os chips do cabeçalho</dt>
+        <dd>Os chips de serviço no alto continuam iguais para quem pode iniciar e parar serviços. Um
+          perfil que não pode continua enxergando-os como indicadores, mas desabilitados: o estado de um
+          serviço não é informação privilegiada, e a recepção precisa ver um receptor morto sem receber um
+          interruptor que o servidor recusaria.</dd>
         <dt>Quando tirar do loopback</dt>
         <dd>Só com um motivo concreto — e então com token obrigatório e HTTPS na frente. Veja a regra do
           token.</dd>
       </dl>
       <figure class="shot">
         <img src="../img/pt-BR/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="O painel de Configurações: à esquerda o AE title do receptor, o endereço de escuta, a porta, a pasta de armazenamento, o mínimo de espaço livre, a lista de AE permitidos e os campos TLS; à direita o AE chamador do encaminhamento automático, a pasta vigiada, o intervalo de varredura, o que fazer depois de enviar um arquivo e as configurações de confiança TLS." />
+          alt="A aba Configurações de Configuração, com seus doze blocos em três colunas numa tela larga: o AE title do receptor, o endereço de escuta, a porta, a pasta de armazenamento, o mínimo de espaço livre, a lista de AE permitidos e os campos TLS; o AE chamador do envio automático, a pasta vigiada, o intervalo de varredura, o que fazer depois de enviar um arquivo e as configurações de confiança TLS; e ao lado os blocos de impressão, failover de emergência, Modality Worklist, RIS de emergência, Consulta/Recuperação, DICOMweb, índice de instâncias, anonimização, acesso à API e integrações." />
         <figcaption>Tudo o que está em <code>config.json</code>, em um formulário. O arquivo continua sendo a fonte da verdade: editar aqui o escreve, e uma configuração que o painel se recusaria a salvar é recusada com o motivo, não reescrita em silêncio.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/pt-BR/editor.webp" width="1920" height="1200" loading="lazy" decoding="async"
           alt="O editor DICOM embutido com um estudo de amostra aberto: a imagem à esquerda com deslizadores de centro e largura de janela, um painel clínico à direita com paciente, modalidade e descrição do estudo — com o nome do paciente escondido atrás de um botão de mostrar — e abaixo um painel técnico com o SOP Instance UID, a sintaxe de transferência, a interpretação fotométrica e o SHA-256 do arquivo." />
-        <figcaption>O editor embutido, aberto a partir de um estudo do histórico ou sozinho. Ele roda inteiro no navegador — nada é enviado para lugar nenhum — e o nome do paciente começa escondido, porque o motivo mais comum para abrir um cabeçalho é ler um UID.</figcaption>
+        <figcaption>O editor embutido, aberto a partir de um estudo da aba <em>Histórico</em> ou sozinho. Ele roda inteiro no navegador — nada é enviado para lugar nenhum — e o nome do paciente começa escondido, porque o motivo mais comum para abrir um cabeçalho é ler um UID.</figcaption>
       </figure>
 
       <figure class="shot">

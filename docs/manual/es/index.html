@@ -192,25 +192,26 @@ journalctl -u carino-pacs -f</code></pre>
     <ol>
       <li><strong>Elige los servicios.</strong> Todo viene apagado. El asistente del panel pregunta qué
         debe ejecutar <em>esta</em> máquina; enciende solo eso.</li>
-      <li><strong>Añade los destinos</strong> (nombre, host, puerto, AE title) en <em>Destinos</em>.</li>
+      <li><strong>Añade los destinos</strong> (nombre, host, puerto, AE title) en la pestaña
+        <em>Destinos</em> de <em>Configuración</em>, que es la que abre por defecto.</li>
       <li><strong>Comprueba la conectividad con C-ECHO</strong> antes de mover una sola imagen:
         <code>./run.sh echo --name "PACS del hospital"</code>. Si el C-ECHO no pasa, no es un problema de
         Carino: es red, cortafuegos o AE title.</li>
       <li><strong>Apunta un equipo hacia aquí</strong> con el AE title, la IP y el puerto del receptor, y
         envía un estudio de prueba.</li>
-      <li><strong>Mira el registro de actividad.</strong> Si algo falla, ahí aparece; este software
-        prefiere gritar a fallar en silencio.</li>
+      <li><strong>Mira el registro</strong> en la pestaña <em>Registro</em> de <em>Actividad</em>.
+        Si algo falla, ahí aparece; este software prefiere gritar a fallar en silencio.</li>
     </ol>
 
     <figure class="shot">
       <img src="../img/es/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El asistente de configuración del panel, con una tarjeta por servicio —receptor, auto-envío, receptor de impresión, RIS de emergencia—, cada una con una casilla «Usar esto», y un pie que dice que no hay nada seleccionado." />
-      <figcaption>Paso 1. Nada está marcado y nada está en marcha: el pie lo dice, y no se abre ningún puerto hasta que aplicas. Cada tarjeta explica para qué sirve el servicio, así que la decisión se toma leyendo la descripción y no el nombre del protocolo.</figcaption>
+        alt="El asistente de configuración del panel, titulado «Elige los servicios que debe ejecutar este PC», con seis tarjetas —receptor, auto-envío, receptor de impresión, RIS de emergencia, worklist y Query/Retrieve—, cada una con su casilla «Usar» sin marcar, y debajo un pie que dice que no has marcado nada y que este PC no recibirá ni enviará nada, con los botones «Ahora no» y «Activar los marcados»." />
+      <figcaption>Paso 1. Los seis servicios se ofrecen aquí, ninguno está marcado y nada está en marcha: el pie lo dice, y no se abre ningún puerto hasta que pulsas <em>Activar los marcados</em>. Cada tarjeta explica para qué sirve el servicio, así que la decisión se toma leyendo la descripción y no el nombre del protocolo.</figcaption>
     </figure>
 
     <figure class="shot">
       <img src="../img/es/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El panel de actividad: un flujo con marcas de tiempo. Las líneas de arranque nombran cada listener y su puerto; un bloque rojo explica que una regla pide anonimizar mientras el perfil está apagado; una línea ámbar informa de una asociación rechazada y de cuándo se reintentará." />
+        alt="La pestaña Registro de Actividad: un flujo con marcas de tiempo. Las líneas de arranque nombran cada listener y su puerto; un bloque rojo explica que una regla pide anonimizar mientras el perfil está apagado; una línea ámbar informa de una asociación rechazada y de cuándo se reintentará." />
       <figcaption>Paso 5. El flujo de actividad. Cada línea que importa dice qué hacer al respecto: el bloque rojo es una retención por anonimización que nombra el remedio, y la línea ámbar es un destino que rechazó la conexión y anuncia su próximo reintento.</figcaption>
     </figure>
 
@@ -247,13 +248,21 @@ journalctl -u carino-pacs -f</code></pre>
 
     <figure class="shot">
       <img src="../img/es/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El panel de Personas con cuatro perfiles. El perfil de IT está desplegado: una rejilla de permisos, unos marcados y otros no, y debajo una fila «Puede ver» de identificadores del paciente donde el nombre, la fecha de nacimiento, el sexo y el médico solicitante están sin marcar." />
-      <figcaption>Los perfiles, una vez activados. Los permisos son por persona y se comprueban en cada endpoint, no en el navegador; y «puede ver» va aparte de «puede hacer»: este perfil de IT puede reenrutar un estudio por su número de accession sin leer jamás el nombre de un paciente. Lo que no está marcado se muestra como <code>***</code> allí donde habría aparecido.</figcaption>
+        alt="La pestaña Personas de Configuración, con su tira de pestañas arriba y una línea que dice «4 perfiles»: Administrador, TI, Radiólogo y Recepción. La ficha del Administrador es corta, con la casilla «Administrador (todo, incluidos los permisos futuros)» marcada y por eso sin rejilla de permisos; debajo, la de TI muestra entera su rejilla «Puede hacer», con unas casillas marcadas y otras no, y la imagen se corta a la altura de su fila «Puede ver». Abajo a la derecha, fijado, el botón «Añadir a alguien»." />
+      <figcaption>Los perfiles, una vez activados. Los permisos son por persona y se comprueban en cada endpoint, no en el navegador. Un perfil marcado como administrador no enseña rejilla: esa casilla ya lo concede todo, incluidos los permisos que aún no existen. Para el resto, «puede ver» va aparte de «puede hacer»: un perfil de TI puede reenrutar un estudio por su número de accession sin leer jamás el nombre de un paciente. Lo que no está marcado se muestra como <code>***</code> allí donde habría aparecido.</figcaption>
     </figure>
+
+    <p>El menú se dibuja según lo que cada perfil puede hacer. Una fila aparece si el perfil tiene
+      alguno de los permisos que necesitan sus pestañas, y después cada pestaña se comprueba por su
+      cuenta: el perfil <em>Radiólogo</em>, que tiene <code>routing.read</code> pero no
+      <code>config.read</code>, abre <em>Configuración</em> y ve <em>Destinos</em> y <em>Rutas</em>,
+      pero no <em>Ajustes</em>, que es donde están el token de la API y el apagado del servidor.
+      <em>Recepción</em>, que no tiene ninguno de los tres permisos, no ve la fila de
+      <em>Configuración</em>.</p>
 
     <figure class="shot">
       <img src="../img/es/gate-people.webp" width="1200" height="1080" loading="lazy" decoding="async"
-        alt="La misma pantalla de acceso en un equipo con perfiles: cuatro botones, cada uno con un candado, y un enlace para entrar con el token de acceso." />
+        alt="La misma pantalla de acceso en un equipo con perfiles: cuatro botones —Administrador, TI, Radiólogo y Recepción—, cada uno con un candado, y un enlace para entrar con el token de acceso." />
       <figcaption>La pantalla de acceso de un equipo con perfiles. El selector solo se dibuja mientras <code>users.list_profiles</code> está activo: publicar la lista del personal a quien pueda alcanzar el puerto es una divulgación real, y es decisión suya. El token sigue funcionando, plegado debajo, porque es la vuelta a casa cuando alguien se queda fuera.</figcaption>
     </figure>
 
@@ -357,8 +366,8 @@ openssl rand -base64 32</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <figure class="shot">
       <img src="../img/es/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El panel de auditoría: un botón de comprobar integridad, otro de exportar, una línea con el número de ficheros y el resumen de la cabecera de la cadena, y filas con marca de tiempo: accesos correctos y uno denegado." />
-      <figcaption>La auditoría, con la cabecera de la cadena impresa encima: ese resumen es el valor que conviene copiar a un sitio que esta máquina no pueda tocar. Los rechazos se registran con la misma fidelidad que los aciertos: la fila denegada es una petición que no pasó.</figcaption>
+        alt="La pestaña Auditoría de Actividad: en la cabecera del panel, encima de la tira de pestañas, los botones de limpiar vista, comprobar integridad y exportar; debajo, una línea con el número de archivos, su tamaño y el resumen de la cabecera de la cadena, y cinco filas todas de la misma forma: marca de tiempo, «system», «login», «api token» y «ok»." />
+      <figcaption>La auditoría, con la cabecera de la cadena impresa encima: ese resumen es el valor que conviene copiar a un sitio que esta máquina no pueda tocar. Los tres botones son del panel, no de la pestaña: están igual de a mano en <em>Registro</em>. Aquí cada fila es un acceso correcto con el token compartido, que se anota como <em>system</em> y no como una persona; los rechazos se registran con la misma fidelidad que los aciertos, y en esta máquina todavía no ha habido ninguno.</figcaption>
     </figure>
 
     <h2 id="servicios">4. Los servicios, uno por uno</h2>
@@ -377,7 +386,7 @@ openssl rand -base64 32</code></pre>
     <figure class="shot">
       <img src="../img/es/overview.webp" width="1920" height="1200" loading="lazy" decoding="async"
         alt="El panel de Resumen: baldosas con servicios encendidos, recibidos, enviados, atascados, pendientes, órdenes abiertas y espacio libre, sobre tarjetas con la dirección de esta máquina, su receptor, sus rutas de configuración y almacenamiento, si cada destino responde y el último estudio recibido." />
-      <figcaption>El resumen responde «¿esta máquina está funcionando?» en una sola pantalla. Cada baldosa es un botón hacia el panel que gobierna lo que cuenta, así que un número inesperado está a un clic de su detalle.</figcaption>
+      <figcaption>El resumen responde «¿esta máquina está funcionando?» en una sola pantalla. Cada baldosa que cuenta algo con casa propia es un botón hacia ella —<em>Atascados</em> y <em>Pendientes</em> abren su pestaña de <em>Estudios</em>—, así que un número inesperado está a un clic de su detalle. <em>Espacio libre</em> es la excepción: no lleva a ninguna parte, así que se queda como una lectura y no como un botón que no hace nada.</figcaption>
     </figure>
 
     <div class="svc-doc">
@@ -397,7 +406,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de Historial, en la pestaña de recibidos: una fila por estudio con paciente, ID, fecha, descripción, modalidad y número de imágenes, sus series debajo, y acciones por fila: enviar, adjuntar, editar etiquetas, ir al fichero y borrar." />
+          alt="La pestaña Historial de Estudios, en su vista de recibidos: una fila por estudio con paciente, ID, fecha, descripción, modalidad y número de imágenes, sus series debajo, y acciones por fila: enviar, adjuntar, editar etiquetas, ir al fichero y borrar." />
         <figcaption>Lo que ha llegado, lo más reciente primero, con las series de cada estudio. «Ir al fichero» abre dónde aterrizó de verdad en el disco: el archivado es un árbol de carpetas real, no una base de datos de la que haya que exportar.</figcaption>
       </figure>
     </div>
@@ -436,21 +445,28 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de Destinos: tres filas, cada una con host, puerto, AE title, casillas de TLS, sin RIS y principal de emergencia, y un botón de Echo." />
+          alt="La pestaña Destinos de Configuración: tres filas —Main archive, Reading room y Teaching archive—, cada una con host, puerto, AE title, casillas de TLS, sin RIS y principal de emergencia, y un botón de Echo." />
         <figcaption>Los destinos se nombran aquí y se referencian por nombre en todas partes, así que renombrar un nodo no deja huérfanas las reglas que lo apuntan. «Echo» comprueba la asociación antes de que ninguna imagen dependa de ella.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/es/routing.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de Enrutamiento: una casilla para enrutar por reglas y luego reglas numeradas con campos de modalidad, AE llamante, estación, ID de paciente y descripción del estudio, y una fila «enviar a» con casillas de destino más anonimizar y parar en esta regla." />
+          alt="La pestaña Rutas de Configuración: una casilla para enrutar por reglas y luego reglas numeradas con campos de modalidad, AE llamante, estación, ID de paciente y descripción del estudio, y una fila «enviar a» con casillas de destino más anonimizar y parar en esta regla." />
         <figcaption>Las reglas se leen de arriba abajo, y los campos vacíos significan «cualquiera»: una regla es un filtro, no un formulario que rellenar. El orden importa, y por eso cada regla lleva flechas para moverla.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/es/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de envíos atascados, partido en dos: «reintentando automáticamente», con un destino que ha rechazado siete intentos y el siguiente reintento en segundos, y «retenidos: no se está enviando nada», con seis instancias para un destino etiquetado con el perfil apagado y un párrafo que nombra las dos ediciones que los liberan." />
-        <figcaption>Las dos mitades son problemas distintos y el panel las mantiene separadas. Arriba, un nodo caído que se arreglará solo; abajo, una retención por anonimización, que ningún temporizador libera: por eso cada fila deletrea la edición que sí lo hace.</figcaption>
+          alt="La pestaña Atascados de Estudios, con un aviso arriba de que hay archivos que necesitan atención y dos secciones debajo. «Reintentando automáticamente»: una fila del destino Teaching archive, con las instancias que esperan, el número de intentos, una línea roja con el último error, un botón «Reintentar ahora» y la cuenta atrás del próximo intento. «Retenido: no se envía nada»: una fila del destino Main archive, etiquetada «perfil desactivado», con tres instancias en espera, los nombres de sus tres archivos .dcm, el párrafo que nombra la edición que las libera y dos botones, «Ajustes de anonimización» y «La regla que lo pide», que abren la pestaña de Ajustes y la de Rutas." />
+        <figcaption>Las dos secciones son problemas distintos y la pestaña las mantiene separadas. Arriba, un nodo caído que se arreglará solo; abajo, una retención por anonimización, que ningún temporizador libera: por eso cada fila deletrea la edición que sí lo hace y lleva los dos botones que abren la pestaña donde se hace, <em>Ajustes de anonimización</em> hacia <em>Ajustes</em> y <em>La regla que lo pide</em> hacia <em>Rutas</em>.</figcaption>
       </figure>
+
+      <p>La pestaña puede dibujar una tercera sección, <em>Sin destino al que reintentar</em>, que aquí
+        no sale porque en esta máquina no hay ninguno: son archivos enviados a un nombre que ya no es un
+        destino habilitado. No queda ningún nodo al que llamar, así que nada los reintenta y ninguna
+        edición de anonimización los mueve; cada fila dice qué pasará con ellos. Se arregla en
+        <em>Destinos</em>, volviendo a habilitar ese destino con el mismo nombre o corrigiendo el nombre
+        en la regla que los mandó allí.</p>
     </div>
 
     <div class="svc-doc">
@@ -482,26 +498,33 @@ openssl rand -base64 32</code></pre>
           estudio que espera en disco se libera con una edición, mientras que un nombre que ya llegó a
           un nodo externo no se recupera con ninguna.</p>
         <p><b>Hay dos motivos por los que la limpieza no se puede hacer, y no se arreglan igual.</b>
-          Cada retención guarda cuál de los dos es, y el panel de atascados imprime el remedio del
-          motivo que quedó registrado en vez de adivinarlo:</p>
+          Cada retención guarda cuál de los dos es, y la pestaña <em>Atascados</em> imprime el
+          remedio del motivo que quedó registrado en vez de adivinarlo:</p>
         <ul>
           <li><b>El perfil está en <code>off</code></b> mientras una regla sigue pidiendo la limpieza.
             Pon el perfil en <code>basic</code> o <code>strict</code> y la siguiente pasada de
             auto-envío los libera.</li>
           <li><b>El perfil está activo, pero no se pudo construir ningún anonimizador</b> con los
-            ajustes actuales, así que sigue sin haber con qué limpiar. El fallo que lo impidió está en
-            el registro de Actividad, en el canal de envío: arréglalo ahí. <b>Apagar el perfil no
-            libera esta retención:</b> no libera nada, solo cambia cuál de las dos mitades está
-            impidiendo la limpieza.</li>
+            ajustes actuales, así que sigue sin haber con qué limpiar. El fallo que lo impidió está
+            en la pestaña <em>Registro</em> de <em>Actividad</em>, en el canal de envío: arréglalo
+            ahí. <b>Apagar el perfil no libera esta retención:</b> no libera nada, solo cambia cuál
+            de las dos mitades está impidiendo la limpieza.</li>
         </ul>
+        <p>Las dos ediciones viven en <em>Configuración</em>, una en <em>Ajustes</em> y otra en
+          <em>Rutas</em>, y cada fila retenida lleva un botón hacia cada una: <em>Ajustes de
+          anonimización</em> abre la pestaña <em>Ajustes</em> y <em>La regla que lo pide</em> abre la
+          pestaña <em>Rutas</em>. Los dos abren la pestaña y nada más: ninguno baja hasta la regla
+          concreta ni la señala. Aun así la reparación es más corta que antes: se lee el motivo en la
+          fila y se pulsa el botón, sin ir a buscar la pantalla a mano.</p>
         <p>Quitar la marca <em>anonimizar</em> de la regla libera cualquiera de las dos retenciones, y
           las libera <b>identificadas</b>, que es justo lo que la retención existe para evitar. Haz esa
           edición solo si de verdad ese destino ya no debe recibir datos anonimizados.</p>
         <p>No se pierde nada y nada de esto es silencioso. Los estudios se quedan en la carpeta de
           <strong>salida</strong> —nunca se archivan ni se borran—, el <em>resto</em> de destinos del
-          mismo estudio lo siguen recibiendo, el registro de Actividad lo saca como <em>error</em>
-          nombrando el estudio, el destino retenido y el motivo, el panel de anonimización de Ajustes
-          también lo nombra, y el contador ⚠ <em>Atascados</em> cuenta esos ficheros. Nada libera una
+          mismo estudio lo siguen recibiendo, la pestaña <em>Registro</em> lo saca como <em>error</em>
+          nombrando el estudio, el destino retenido y el motivo, el bloque de anonimización de
+          <em>Ajustes</em> también lo nombra, y el contador ⚠ de la fila <em>Estudios</em> cuenta
+          esos ficheros y abre <em>Atascados</em> al pulsarlo. Nada libera una
           retención por sí solo: ningún temporizador la agota y nada la reintenta.</p>
       </div>
       <div class="danger">
@@ -646,7 +669,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de pendientes: dos elementos en cola, un PDF y un JPEG, cada uno con nombre de paciente, ID, número de accession, fecha y descripción del estudio ya rellenados a partir del estudio junto al que llegaron, un enlace de vista previa y botones de aprobar y enviar o descartar." />
+          alt="La pestaña Pendientes de Estudios: dos elementos en cola, un PDF y un JPEG, cada uno con nombre de paciente, ID, número de accession, fecha y descripción del estudio ya rellenados a partir del estudio junto al que llegaron, un enlace de vista previa y botones de aprobar y enviar o descartar." />
         <figcaption>La placa capturada —y cualquier PDF o imagen encontrado junto a un estudio— espera aquí con los datos del propio estudio ya rellenados, en vez de convertirse a DICOM a ciegas. Usted confirma la identidad y luego aprueba.</figcaption>
       </figure>
     </div>
@@ -656,22 +679,52 @@ openssl rand -base64 32</code></pre>
       <p class="port">Puerto 8042 · HTTP, <code>127.0.0.1</code> por defecto</p>
       <dl>
         <dt>Qué hace</dt>
-        <dd>Estado de cada servicio, destinos, órdenes, registro de actividad en vivo, ajustes y un editor
-          DICOM incluido. Todo lo que hace el panel existe también en la CLI.</dd>
+        <dd>Estado de cada servicio, estudios, órdenes, destinos y reglas, registro de actividad en
+          vivo, ajustes y un editor DICOM incluido. Todo lo que hace el panel existe también en la
+          CLI.</dd>
+        <dt>Cómo se navega</dt>
+        <dd>El menú de la izquierda tiene seis filas: <em>Resumen</em>, <em>Servicios</em>,
+          <em>Estudios</em>, <em>Órdenes</em>, <em>Configuración</em> y <em>Actividad</em>. Las tres
+          preguntas que se hacen sobre el mismo montón de ficheros son las pestañas de
+          <em>Estudios</em> —<em>Historial</em>, <em>Pendientes</em> y <em>Atascados</em>—; lo que se
+          ajusta al poner el equipo en marcha son las pestañas de <em>Configuración</em>
+          —<em>Destinos</em>, <em>Rutas</em>, <em>Ajustes</em> y <em>Personas</em>—, y esa pantalla
+          abre por <em>Destinos</em>, no por <em>Ajustes</em>; y los dos registros son las pestañas
+          de <em>Actividad</em> —<em>Registro</em> y <em>Auditoría</em>—. <em>Órdenes</em> mantiene
+          su propia tira de abiertas y cerradas. La fila de <em>Estudios</em> lleva dos contadores
+          que son botones, 📎 lo que espera aprobación y ⚠ lo que está atascado, y cada uno abre su
+          pestaña directamente; <em>Órdenes</em> lleva el suyo. Un contador se oculta cuando vale
+          cero, porque un número que dice 0 es una alarma encendida siempre, y una alarma que nunca
+          se apaga deja de leerse: por eso llegar a <em>Atascados</em> es un solo clic mientras haya
+          algo atascado, y dos cuando no lo hay —la fila y luego la pestaña—. Cada pantalla y cada
+          pestaña tienen además su dirección —<code>#studies/stuck</code>,
+          <code>#configuration/routing</code>, <code>#activity/logs</code>—, así que se pueden
+          guardar en marcadores o dictar por teléfono, y el botón de atrás del navegador funciona.
+          Los enlaces antiguos del estilo <code>#dlgStuck</code> siguen llevando donde llevaban.
+          <em>Resumen</em> es la única excepción: responde a <code>#overview</code> si usted lo
+          escribe, pero nunca se escribe solo en la barra de direcciones ni deja entrada en el
+          historial. Imprime el nombre de un paciente, y una pantalla desatendida no debe volver ahí
+          al recargarse.</dd>
+        <dt>Los chips de la cabecera</dt>
+        <dd>Los chips de servicio de arriba no cambian para quien puede arrancar y parar
+          servicios. Para un perfil que no puede, siguen visibles como indicadores pero
+          desactivados: que el receptor esté caído no es información reservada y quien está en el
+          mostrador necesita verlo, pero no tiene sentido ofrecerle un interruptor que el servidor
+          va a rechazar.</dd>
         <dt>Cuándo moverlo de loopback</dt>
         <dd>Solo con un motivo concreto — y entonces con token obligatorio y HTTPS delante. Ver la regla
           del token.</dd>
       </dl>
       <figure class="shot">
         <img src="../img/es/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de Ajustes: a la izquierda el AE title del receptor, su dirección de escucha, puerto, carpeta de almacenamiento, mínimo de espacio libre, lista de AE permitidos y campos TLS; a la derecha el AE llamante del auto-envío, la carpeta vigilada, el intervalo de sondeo, qué hacer tras enviar un fichero y sus ajustes de confianza TLS." />
+          alt="La pestaña Ajustes de Configuración, con sus doce bloques en tres columnas en una pantalla ancha: el AE title del receptor, su dirección de escucha, puerto, carpeta de almacenamiento, mínimo de espacio libre, lista de AE permitidos y campos TLS; el AE llamante del auto-envío, la carpeta vigilada, el intervalo de sondeo, qué hacer tras enviar un fichero y sus ajustes de confianza TLS; y al lado los bloques de impresión, conmutación de emergencia, Modality Worklist, RIS de emergencia, Consulta/Recuperación, DICOMweb, índice de instancias, anonimización, acceso a la API e integraciones." />
         <figcaption>Todo lo que hay en <code>config.json</code>, en un formulario. El fichero sigue siendo la fuente de verdad: editar aquí lo escribe, y una configuración que el panel se negaría a guardar se rechaza diciendo por qué, no se reescribe en silencio.</figcaption>
       </figure>
 
       <figure class="shot">
         <img src="../img/es/editor.webp" width="1920" height="1200" loading="lazy" decoding="async"
           alt="El editor DICOM incluido con un estudio de muestra abierto: la imagen a la izquierda con deslizadores de centro y ancho de ventana, un panel clínico a la derecha con paciente, modalidad y descripción del estudio —con el nombre del paciente oculto tras un botón de mostrar— y debajo un panel técnico con el SOP Instance UID, la sintaxis de transferencia, la interpretación fotométrica y el SHA-256 del fichero." />
-        <figcaption>El editor incluido, abierto desde un estudio del historial o por su cuenta. Funciona entero en el navegador —no se sube nada a ninguna parte— y el nombre del paciente empieza oculto, porque la razón más común para abrir una cabecera es leer un UID.</figcaption>
+        <figcaption>El editor incluido, abierto desde un estudio de la pestaña <em>Historial</em> o por su cuenta. Funciona entero en el navegador —no se sube nada a ninguna parte— y el nombre del paciente empieza oculto, porque la razón más común para abrir una cabecera es leer un UID.</figcaption>
       </figure>
 
       <figure class="shot">
