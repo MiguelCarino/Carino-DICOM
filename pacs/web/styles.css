@@ -22,7 +22,12 @@ body {
 /* The dashboard fills the viewport: fixed-height header rows (cards, net-info,
    tab strip) and a flex workspace that takes the rest and scrolls internally —
    so the PAGE itself never scrolls. */
-.wrap { width: min(1180px, 94%); margin: 0 auto; padding: 16px 0 18px; display: flex;
+/* 1400, not 1180: the cap only binds above a 1489px viewport, and every wall
+   screen this runs on is wider than that. The number is chosen, not maximal —
+   .ov-grid takes a fourth column at a 1490px wrap and the per-locale .ov-dest
+   measurements below are written for three, so 1400 is the widest value that
+   leaves the Overview the shape it was tuned in. */
+.wrap { width: min(1400px, 94%); margin: 0 auto; padding: 16px 0 18px; display: flex;
   flex-direction: column; gap: 14px; flex: 1 1 auto; min-height: 0; }
 
 /* ---- status cards ---- */
@@ -31,7 +36,12 @@ body {
    ~112px — exactly 12 monospace characters, i.e. one character short of
    "0.0.0.0:11112". 340px gives two roomier columns instead. The min(…, 100%)
    form also stops the track from overflowing its container on narrow screens,
-   where a bare minmax(340px, 1fr) would refuse to shrink. */
+   where a bare minmax(340px, 1fr) would refuse to shrink.
+   At the 1400px wrap the body is 1132px and this resolves to THREE tracks of
+   ~365px — card content ~323px, so the kv cell is ~145px and the string that
+   forced the floor still fits with room over. Six services now read as two
+   rows of three rather than three rows of two, which is the arrangement a wall
+   screen wants. */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 18px; }
 /* Belt and braces only: auto-fit already falls to one column below ~1022px,
    so this never changes the outcome. It is kept for browsers that do not
@@ -257,7 +267,15 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 .row-actions { white-space: nowrap; display: flex; gap: 6px; }
 
 /* ---- settings ---- */
-.settings { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+/* auto-fit rather than a fixed 1fr 1fr: at the old 932px body this still
+   resolves to the two columns it always had, and at the 1400px wrap's 1132px
+   body it takes a third — which is the point of the wider wrap. Twelve
+   fieldsets and seventy-odd controls in two columns is six screens of scroll;
+   in three it is four, and the fields stop stretching to absurd widths (a
+   567px Port box was what a fixed 1fr 1fr produced here). */
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 18px; }
+/* Belt and braces, like .cards above: auto-fit already collapses to one column
+   long before this fires. Not load-bearing. */
 @media (max-width: 720px) { .settings { grid-template-columns: 1fr; } }
 fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
 legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; padding: 0 6px; }
@@ -771,7 +789,12 @@ button.ov-tile:focus-visible { outline: 2px solid var(--accent); outline-offset:
 /* Label OVER value, never a fixed label column: a two-column grid confines
    every value to whatever the longest label leaves it, and "Configuración" or
    "Конфигурационный файл" leaves a path almost nothing. */
-.ov-list { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 9px 16px; }
+/* 300px floor, not 150px: the .ov-dest stacking below is measured per locale
+   against a one-column list (state 70.9–90.3px, note 147.8–190.1px). A 150px
+   floor took a second column as soon as the wrap widened, and two ~162px
+   tracks cannot hold either string. The floor is what keeps this list one
+   column until the box could genuinely fit two of them. */
+.ov-list { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 9px 16px; }
 .ov-list > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ov-list > div.ov-wide { grid-column: 1 / -1; }
 .ov-list dt { color: var(--muted); font-size: .6rem; line-height: 1.25; text-transform: uppercase; letter-spacing: .06em; }
