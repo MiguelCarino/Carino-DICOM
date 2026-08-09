@@ -186,6 +186,17 @@ DEFAULTS: dict[str, Any] = {
         "fsync": True,
     },
     "destinations": [],
+    # The modalities this department has — the equipment that PULLS a worklist
+    # and PUSHES studies back, as opposed to `destinations`, which is where
+    # studies are forwarded ON to. Each entry is one station:
+    #   {"name": "ER CT", "aet": "CT_ER_01", "modality": "CT",
+    #    "station_name": "", "enabled": true}
+    # An order's station_aet is chosen from this list rather than typed. A
+    # mistyped AE title is not a cosmetic error: the worklist matches it
+    # exactly, so the order appears on NO station for a modality that queries
+    # with its own AE, and on EVERY station for one that queries with the key
+    # empty. Same typo, opposite failures, decided by the vendor.
+    "modalities": [],
     "users": {                  # who may use the dashboard, and what they may do
         # EMPTY = profiles are not in use and web.auth_token alone governs
         # access, which is exactly how every install that predates this feature
@@ -797,6 +808,13 @@ class Config:
         return [d for d in self.destinations if d.get("enabled", True)]
 
     @property
+    def modalities(self) -> list:
+        return self.data.setdefault("modalities", [])
+
+    def enabled_modalities(self) -> list[dict]:
+        return [m for m in self.modalities if m.get("enabled", True)]
+
+    @property
     def logs_dir(self) -> str:
         """Absolute path of the dated-log folder."""
         return self.resolve_path(self.data.get("logs_dir", "./logs"))
@@ -1200,6 +1218,39 @@ def validate(data: dict) -> None:
     # stranger with write access off-box, and only the host knows which of those
     # this appliance is. An empty profile list is legal and means token-only.
     _users.validate_profiles(data.get("users", {}), network_reachable=reachable)
+
+    mods = data.get("modalities", [])
+    if not isinstance(mods, list):
+        raise ValueError("modalities must be a list")
+    seen_mod: dict[str, int] = {}
+    for i, m in enumerate(mods):
+        if not isinstance(m, dict):
+            raise ValueError(f"modality #{i + 1} must be an object")
+        name = str(m.get("name", "")).strip()
+        aet = str(m.get("aet", "")).strip()
+        if not name:
+            raise ValueError(f"modality #{i + 1} has a blank name — it is what the order form shows")
+        if not aet:
+            raise ValueError(f"modality '{name}' has no AE title. It is the whole point of the "
+                             "entry: the worklist matches ScheduledStationAETitle against it.")
+        if len(aet) > 16:
+            raise ValueError(f"modality '{name}' AE title must be 16 characters or fewer (DICOM limit)")
+        # DICOM AE titles are a restricted character set; a space or a backslash
+        # in one produces associations that fail in ways nobody traces back here.
+        if any(c in aet for c in "\\ ") or not aet.isprintable():
+            raise ValueError(f"modality '{name}' AE title '{aet}' contains a space or backslash — "
+                             "a DICOM AE title may not")
+        for flag in ("enabled",):
+            if flag in m and not isinstance(m[flag], bool):
+                raise ValueError(f"modality '{name}' has a non-boolean '{flag}' ({m[flag]!r})")
+        # Two stations sharing an AE title cannot be told apart by the worklist,
+        # so an order aimed at one appears on both.
+        key = aet.upper()
+        if key in seen_mod:
+            raise ValueError(f"modalities #{seen_mod[key] + 1} and #{i + 1} share the AE title "
+                             f"'{aet}'. The worklist matches on it, so an order aimed at one "
+                             "would appear on both.")
+        seen_mod[key] = i
 
     dests = data.get("destinations", [])
     if not isinstance(dests, list):

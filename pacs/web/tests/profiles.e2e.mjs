@@ -435,8 +435,8 @@ async function main() {
   await signInAs("IT");
   const it = await cdp.eval(SNAP);
   check(it.nav.indexOf("dlgConfig") >= 0, "IT has the Configuration row");
-  check(it.tabs.dlgConfig.join() === "destinations,routing,settings",
-        "…with Destinations, Routing and Settings: " + JSON.stringify(it.tabs.dlgConfig));
+  check(it.tabs.dlgConfig.join() === "destinations,routing,settings,modalities",
+        "…with Destinations, Routing, Settings and Modalities: " + JSON.stringify(it.tabs.dlgConfig));
   check(it.tabs.dlgConfig.indexOf("people") < 0, "…and no People tab — IT cannot manage profiles");
   check(!(await reachedByHash("#configuration/people", "dlgPeople")),
         "…which #configuration/people cannot get around either");
@@ -513,6 +513,13 @@ async function main() {
         "the Radiologist does get the Configuration row — they hold routing.read");
   check(rad.tabs.dlgConfig.join() === "destinations,routing",
         "…but only the two tabs routing.read pays for: " + JSON.stringify(rad.tabs.dlgConfig));
+  // The modality registry is config, so it follows config.read like Settings.
+  // A Radiologist reads which nodes exist and which rules run; they do not
+  // decide what a scanner is called.
+  check(rad.tabs.dlgConfig.indexOf("modalities") < 0,
+        "…and no Modalities tab, which is config like Settings");
+  check(!(await reachedByHash("#configuration/modalities", "dlgModalities")),
+        "…which #configuration/modalities cannot get around");
   check(await cdp.eval("!document.getElementById('dlgDests').hidden || document.getElementById('dlgConfig').hidden"),
         "…and opening it lands on Destinations, never on the hidden Settings pane");
   check(!(await reachedByHash("#configuration/settings", "dlgSettings")),

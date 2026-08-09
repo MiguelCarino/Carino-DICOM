@@ -2231,6 +2231,17 @@ class PacsServer:
                 # is built once and survives every save, unlike the receiver.
                 "since": int(self.started_at),
             },
+            # The station list. Deliberately ungated: it is names and AE titles
+            # of this department's own equipment — no address, no PHI — and the
+            # order form needs it to offer a target to whoever keys orders in,
+            # which is the profile with the fewest capabilities of any. They can
+            # already type an AE title today, so publishing the list discloses
+            # nothing they could not already write.
+            "modalities": [
+                {"name": m.get("name", ""), "aet": m.get("aet", ""),
+                 "modality": m.get("modality", ""), "enabled": m.get("enabled", True)}
+                for m in self.cfg.modalities
+            ],
             "ris": {
                 "enabled": bool(rcfg.get("enabled", False)),
                 "running": bool(ris and ris.running),

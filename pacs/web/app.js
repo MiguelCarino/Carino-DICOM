@@ -72,6 +72,9 @@
   // re-asserts the stored one, because config.write must not be a way to grant
   // yourself admin.
   let loadedAudit = {}, loadedNotify = {};
+  // No form field outside its own tab, so a Save from elsewhere must post this
+  // back verbatim or apply_config resets it to []. See collectConfig.
+  let loadedModalities = [];
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
   // carrying it through a Save, apply_config's merge over DEFAULTS would reset it
@@ -1642,6 +1645,9 @@
   /* ── Config load / populate ──────────────────────────────────── */
   async function loadConfig() {
     const c = await api("/api/config");
+    loadedModalities = Array.isArray(c.modalities) ? c.modalities : [];
+    renderMods(loadedModalities);
+    fillStationChoices();
     loadedScp = c.scp || {};
     loadedScu = c.scu || {};
     loadedPrint = c.print || {};
@@ -1809,6 +1815,128 @@
     tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
     $("destBody").appendChild(tr);
   }
+  /* The modality registry. Same shape as the destinations table on purpose —
+     they are both "a list of DICOM peers" and an operator who has edited one
+     should not have to learn the other — but they are different lists: these
+     pull a worklist from us, those receive studies from us. */
+  function renderMods(list) {
+    const body = $("modBody");
+    body.innerHTML = "";
+    (list || []).forEach(addModRow);
+    if (!(list || []).length) addModRow({});
+    const empty = $("modEmpty");
+    if (empty) empty.hidden = (list || []).length > 0;
+  }
+  function addModRow(m) {
+    const tr = I18N_IN($("modRowTpl").content.cloneNode(true)).querySelector("tr");
+    tr.querySelector(".m-en").checked = m.enabled !== false;
+    tr.querySelector(".m-name").value = m.name || "";
+    tr.querySelector(".m-aet").value = m.aet || "";
+    tr.querySelector(".m-mod").value = m.modality || "";
+    tr.querySelector(".m-station").value = m.station_name || "";
+    tr.querySelector(".del").addEventListener("click", () => tr.remove());
+    $("modBody").appendChild(tr);
+  }
+  function collectMods() {
+    return [...$("modBody").querySelectorAll("tr")]
+      .map((tr) => ({
+        enabled: tr.querySelector(".m-en").checked,
+        name: tr.querySelector(".m-name").value.trim(),
+        // Upper-cased here rather than at the server: DICOM AE titles are
+        // compared case-insensitively by the worklist but stored verbatim, and
+        // two rows differing only in case are the duplicate the config
+        // validator refuses. Normalising as it is typed avoids the refusal.
+        aet: tr.querySelector(".m-aet").value.trim().toUpperCase(),
+        modality: tr.querySelector(".m-mod").value.trim().toUpperCase(),
+        station_name: tr.querySelector(".m-station").value.trim(),
+      }))
+      .filter((m) => m.name && m.aet);
+  }
+
+  // Whether the Modalities tab's inputs are the current truth. If the operator
+  // has never opened it this session the rows were still drawn from the loaded
+  // config, so either source is the same — but if the pane is absent entirely
+  // (a profile without config.read) the snapshot is the only one there is.
+  function modsOpen() { return !!document.getElementById("modBody"); }
+
+  /* The order form's target field. With modalities registered it is a list of
+     them; with none it stays the free-text AE title it has always been, because
+     an order that cannot be keyed in is worse than one aimed at a typo. */
+  function fillStationChoices() {
+    const sel = $("ordStationSel"), txt = $("ordStation");
+    if (!sel || !txt) return;
+    const mods = (loadedModalities || []).filter((m) => m && m.enabled !== false && m.aet);
+    if (!mods.length) {
+      sel.hidden = true; txt.hidden = false;
+      return;
+    }
+    const chosen = sel.value || txt.value;
+    sel.textContent = "";
+    // An order with no target appears on EVERY worklist. That is right during
+    // an outage and wrong when testing one room, so it is offered as a named
+    // choice rather than left as the accident of an empty field.
+    const any = document.createElement("option");
+    any.value = ""; any.textContent = T("Any modality — shows on every worklist");
+    sel.appendChild(any);
+    mods.forEach((m) => {
+      const o = document.createElement("option");
+      o.value = m.aet;
+      o.textContent = m.modality ? m.name + " · " + m.modality + " · " + m.aet : m.name + " · " + m.aet;
+      o.dataset.modality = m.modality || "";
+      sel.appendChild(o);
+    });
+    if (chosen && [...sel.options].some((o) => o.value === chosen)) sel.value = chosen;
+    sel.hidden = false; txt.hidden = true;
+  }
+  // The station the operator picked, whichever control is on screen.
+  /* Ticking "Test order" fills the form in and gets out of the way. A test
+     order exists to prove the chain — order out, worklist, study back — so the
+     only two answers that change what is being tested are WHICH modality and
+     WHEN. Everything else is the same invented patient every time, which is
+     also what makes a test order recognisable at a glance in a list of real
+     ones during an outage. */
+  const TEST_PATIENT = {
+    patient: "Carino Test",
+    patient_birthdate: "1994-09-05",
+    patient_sex: "M",
+    study_desc: "Chain check — worklist to study",
+  };
+  function applyTestDefaults(on) {
+    const lock = (id, value) => {
+      const el = $(id);
+      if (!el) return;
+      if (on) { el.dataset.wasValue = el.value; el.value = value; }
+      else if ("wasValue" in el.dataset) { el.value = el.dataset.wasValue; delete el.dataset.wasValue; }
+      el.readOnly = on;
+      el.classList.toggle("autofilled", on);
+    };
+    // A fresh accession each time: two open orders sharing one are the exact
+    // collision the identity work removed, and a test must not manufacture it.
+    const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(2, 12);
+    lock("ordAcc", on ? "TEST-" + stamp : "");
+    lock("ordPid", on ? "CARINO-TEST" : "");
+    lock("ordPatient", TEST_PATIENT.patient);
+    lock("ordDob", TEST_PATIENT.patient_birthdate);
+    lock("ordDesc", TEST_PATIENT.study_desc);
+    lock("ordRef", on ? "Carino PACS" : "");
+    const sex = $("ordSex");
+    if (sex) {
+      if (on) { sex.dataset.wasValue = sex.value; sex.value = TEST_PATIENT.patient_sex; }
+      else if ("wasValue" in sex.dataset) { sex.value = sex.dataset.wasValue; delete sex.dataset.wasValue; }
+      sex.disabled = on;
+      sex.classList.toggle("autofilled", on);
+    }
+    // Modality and scheduled time stay the operator's: they are the two things
+    // a test is actually varying.
+    const note = $("ordTestNote");
+    if (note) note.hidden = !on;
+  }
+
+  function chosenStation() {
+    const sel = $("ordStationSel");
+    return (sel && !sel.hidden) ? sel.value.trim() : $("ordStation").value.trim();
+  }
+
   function collectDests() {
     return [...$("destBody").querySelectorAll("tr")]
       .map((tr) => ({
@@ -1941,6 +2069,11 @@
         prefix: $("deidPrefix").value.trim() || "ANON",
       },
       destinations: collectDests(),
+      // Carried explicitly for the reason CONTRIBUTING spells out: apply_config
+      // merges over DEFAULTS, so a key the dashboard does not post back is
+      // reset. `modalities` has form fields only on its own tab, so a Save from
+      // anywhere else has to send the loaded snapshot rather than nothing.
+      modalities: modsOpen() ? collectMods() : loadedModalities,
       web: webSection(),
       audit: { ...loadedAudit },
       // Posted back with the redacted secrets still redacted — the server
@@ -2776,7 +2909,7 @@
       patient_birthdate: $("ordDob").value.trim(),
       patient_sex: $("ordSex").value,
       modality: $("ordMod").value.trim(),
-      station_aet: $("ordStation").value.trim(),
+      station_aet: chosenStation(),
       study_desc: $("ordDesc").value.trim(),
       scheduled_dt: $("ordWhen").value.trim(),
       referring: $("ordRef").value.trim(),
@@ -3456,7 +3589,8 @@
      every id-scoped rule in styles.css bound to the markup it was written for. */
   const PANEL_TABS = {
     dlgStudies:  { history: "dlgHistory", pending: "dlgPending", stuck: "dlgStuck" },
-    dlgConfig:   { destinations: "dlgDests", routing: "dlgRouting", settings: "dlgSettings", people: "dlgPeople" },
+    dlgConfig:   { destinations: "dlgDests", routing: "dlgRouting", settings: "dlgSettings",
+                   modalities: "dlgModalities", people: "dlgPeople" },
     dlgActivity: { logs: "dlgLogs", audit: "dlgAudit" },
   };
   // Where a bare panel id lands when nothing else says otherwise. Configuration
@@ -3489,6 +3623,9 @@
     },
     dlgPeople: loadPeople,
     dlgAudit: loadAudit,
+    // No fetch: the registry rides in with the config. Redrawn on open so the
+    // table reflects a config another tab's Save just rewrote.
+    dlgModalities: () => renderMods(loadedModalities),
   };
   let activePanel = "dlgServices";
 
@@ -3867,6 +4004,13 @@
         loadOrders();
       }));
     $("ordAdd").addEventListener("click", () => addOrder($("ordAdd")));
+    $("ordTest").addEventListener("change", (e) => applyTestDefaults(e.target.checked));
+    $("addMod").addEventListener("click", () => { addModRow({}); const e = $("modEmpty"); if (e) e.hidden = true; });
+    // Same route as Save destinations: the whole config document, so the
+    // server's own validator is what decides a registry is acceptable.
+    $("saveMods").addEventListener("click", async () => {
+      if (await saveConfig()) { loadedModalities = collectMods(); fillStationChoices(); }
+    });
     $("ordRefresh").addEventListener("click", loadOrders);
     $("ordPurge").addEventListener("click", purgeClosedOrders);
     $("pendRefresh").addEventListener("click", loadPending);

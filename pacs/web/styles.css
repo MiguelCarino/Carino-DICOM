@@ -277,13 +277,26 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 /* Belt and braces, like .cards above: auto-fit already collapses to one column
    long before this fires. Not load-bearing. */
 @media (max-width: 720px) { .settings { grid-template-columns: 1fr; } }
-fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+/* min-width:0 is load-bearing, not tidying. A grid item's automatic minimum is
+   its min-content width, and a <select>'s min-content is its LONGEST OPTION —
+   #deidProfile's is "Off — nothing scrubbed; de-identify routes are held", about
+   454px. At two columns the track was ~457px and it happened to fit; at the
+   three columns the wider wrap allows, the track is ~364px and the fieldset
+   was forced to 488px, overlapping the column beside it by 105px. Letting the
+   controls shrink is what keeps a fieldset inside its track at any width. */
+fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
 legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; padding: 0 6px; }
-.settings label { display: flex; flex-direction: column; gap: 5px; font-size: .74rem; color: var(--muted); margin-bottom: 12px; }
+.settings label { display: flex; flex-direction: column; gap: 5px; font-size: .74rem; color: var(--muted); margin-bottom: 12px; min-width: 0; }
 .settings label.check { flex-direction: row; align-items: center; gap: 8px; }
+/* A tick box must not shrink with the sentence beside it. */
+.settings label.check input[type="checkbox"] { flex: 0 0 auto; }
 .settings input, .settings select {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: .84rem;
+  /* See the fieldset comment above: without these a long <option> sets an
+     unshrinkable floor and the whole fieldset overflows its grid track. The
+     closed select ellipsises; the open list still shows each option in full. */
+  min-width: 0; max-width: 100%; text-overflow: ellipsis;
 }
 .settings input:focus, .settings select:focus { outline: none; border-color: var(--accent); }
 .panel-actions { margin-top: 16px; display: flex; align-items: center; gap: 14px; }
@@ -769,9 +782,15 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 .order-form label { display: flex; flex-direction: column; gap: 3px;
   font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .order-form label.wide { grid-column: 1 / -1; }
-.order-form input { background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
-  padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit; }
-.order-form input:focus { outline: none; border-color: var(--accent); }
+/* `select` alongside `input`: without it a select falls back to the user
+   agent's control, which on this dark panel is a white box with black text.
+   The Sex field has looked like that since it was written; the target-modality
+   field would have made it two. */
+.order-form input, .order-form select { background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit;
+  min-width: 0; max-width: 100%; }
+.order-form select { color-scheme: dark; }     /* dark option list, not white */
+.order-form input:focus, .order-form select:focus { outline: none; border-color: var(--accent); }
 /* Render the native date/time pickers (calendar glyph + popup) dark, so they
    match the panel instead of a dark-on-dark, invisible calendar icon. */
 .order-form input[type="date"], .order-form input[type="datetime-local"] { color-scheme: dark; }
@@ -791,6 +810,10 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
   color: var(--muted); border: 1px solid var(--border);
 }
 .order-origin.test { color: #050505; background: var(--warn); border-color: var(--warn); }
+/* A field the Test-order tick filled in and locked. Visibly not-yours rather
+   than merely read-only: the operator has to be able to tell at a glance which
+   two fields are still theirs to set. */
+.autofilled { opacity: .62; font-style: italic; border-style: dashed !important; }
 .order-origin[hidden] { display: none; }
 html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: none; letter-spacing: 0; }
 .order-patient { font-weight: 700; }

@@ -384,7 +384,15 @@
                 </select>
               </label>
               <label><span data-i18n>Modality</span> <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
-              <label><span data-i18n>Target modality AE</span> <input id="ordStation" data-i18n-placeholder placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
+              <label><span data-i18n>Target modality</span>
+                <!-- A dropdown once modalities are registered, a free-text AE
+                     title until then. Not either-or by preference: refusing to
+                     accept a station that is not yet in the registry would stop
+                     an order during an outage, which is the one thing this
+                     panel exists to prevent. -->
+                <select id="ordStationSel" hidden></select>
+                <input id="ordStation" data-i18n-placeholder placeholder="Scheduled Station AE (worklist filter)" maxlength="16" />
+              </label>
               <label class="wide"><span data-i18n>Study description</span> <input id="ordDesc" data-i18n-placeholder placeholder="e.g. Ultrasound Abdomen" /></label>
               <label><span data-i18n>Scheduled</span> <input id="ordWhen" type="datetime-local" data-i18n-title title="Scheduled exam date &amp; time" /></label>
               <label><span data-i18n>Referring</span> <input id="ordRef" data-i18n-placeholder placeholder="ordering physician" /></label>
@@ -515,6 +523,7 @@
             <button class="hist-tab active" id="tab_destinations" data-tab="destinations" data-cap="routing.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgDests"><span data-i18n>Destinations</span></button>
             <button class="hist-tab" id="tab_routing" data-tab="routing" data-cap="routing.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgRouting"><span data-i18n>Routing</span></button>
             <button class="hist-tab" id="tab_settings" data-tab="settings" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgSettings"><span data-i18n>Settings</span></button>
+            <button class="hist-tab" id="tab_modalities" data-tab="modalities" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgModalities"><span data-i18n>Modalities</span></button>
             <button class="hist-tab" id="tab_people" data-tab="people" data-cap="auth.manage" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgPeople"><span data-i18n>People</span></button>
           </div>
         </div>
@@ -779,6 +788,33 @@
             <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
           </footer>
         </section>
+        <!-- The equipment on this department's side of the wire: what pulls a
+             worklist and pushes studies back. Deliberately not the same list as
+             Destinations, which is where studies are forwarded ON to. An order
+             picks its target from here rather than having an AE title typed
+             into it, because the worklist matches that title exactly and a
+             typo fails two different ways depending on how the modality
+             queries. -->
+        <section class="tabpane" id="dlgModalities" role="tabpanel" aria-labelledby="tab_modalities" hidden>
+          <div class="pane-scroll">
+            <p class="pane-lede" data-i18n>the equipment that pulls a worklist</p>
+            <div class="table-scroll">
+              <table class="grid" id="modTable">
+                <thead>
+                  <tr><th data-i18n>On</th><th data-i18n>Name</th><th data-i18n-title title="Scheduled Station AE Title — the worklist matches this exactly" data-i18n>AE title</th><th data-i18n>Modality</th><th data-i18n-title title="Scheduled Station Name — optional, for display only" data-i18n>Station name</th><th></th></tr>
+                </thead>
+                <tbody id="modBody"></tbody>
+              </table>
+            </div>
+            <p class="hint" data-i18n-html>An order aimed at one of these appears on <em>that</em> station's worklist and no other. An order with no target appears on every one — which is what you want during an outage, and not what you want when you are testing a single room.</p>
+            <p class="hint" id="modEmpty" hidden data-i18n>No modalities registered yet. Until one is, an order's target is typed in by hand and a typo cannot be caught.</p>
+          </div>
+          <footer class="modal-foot">
+            <button class="btn ghost" id="addMod" data-i18n>+ Add modality</button>
+            <button class="btn" id="saveMods" data-i18n>Save modalities</button>
+          </footer>
+        </section>
+
         <section class="tabpane" id="dlgPeople" role="tabpanel" aria-labelledby="tab_people" hidden>
           <div class="pane-scroll">
             <!-- Shown while the appliance is still token-only. -->
@@ -1066,6 +1102,19 @@
   </template>
 
   <!-- Row template for a destination -->
+  <template id="modRowTpl">
+    <tr>
+      <td><input type="checkbox" class="m-en" /></td>
+      <td><input class="m-name" data-i18n-placeholder placeholder="e.g. CT in the ER" /></td>
+      <td><input class="m-aet" maxlength="16" placeholder="CT_ER_01" data-i18n-title title="Scheduled Station AE Title. 16 characters, no spaces — the worklist matches it exactly." /></td>
+      <td><input class="m-mod" maxlength="16" placeholder="CT" data-i18n-title title="CT, MR, US, CR… used to prefill an order aimed at this room" /></td>
+      <td><input class="m-station" data-i18n-placeholder placeholder="optional" /></td>
+      <td class="row-actions">
+        <button class="btn tiny danger del" data-i18n-title title="Remove">✕</button>
+      </td>
+    </tr>
+  </template>
+
   <template id="destRowTpl">
     <tr>
       <td><input type="checkbox" class="d-en" /></td>
