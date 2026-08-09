@@ -74,7 +74,7 @@ a { color: var(--accent); }
    and it still gives ground on a short screen, which is the moment the page
    would rather spend pixels on content than on its own margins. Measured at
    1024×600, where the trim gives back what the animation takes. */
-.hero { padding: clamp(12px, 2.4vh, 46px) 0 clamp(10px, 2vh, 34px); text-align: center;
+.hero { padding: min(72px, calc(clamp(12px, 2.4vh, 46px) + var(--tall) * .07)) 0 clamp(10px, 2vh, 34px); text-align: center;
   background: radial-gradient(1100px 360px at 50% -12%, rgba(234,179,8,.10), transparent 70%); }
 /* The EKG above the headline. Sized off the viewport HEIGHT rather than its
    width — height is the scarce dimension on this page, so the one new block on
@@ -84,15 +84,18 @@ a { color: var(--accent); }
    Motion is decoration here, and a reader who has asked their system for less
    of it gets the static trace: the shape carries the meaning, the sweep only
    carries the mood. */
-/* Mark and trace on one row, so the logo costs no height at all: the row is as
-   tall as the trace already was. The mark is set a shade taller than the trace
-   because a circular form reads smaller than a rectangular one of equal height,
-   and the two would otherwise look mismatched rather than paired. */
-.hero-mark { display: flex; align-items: center; justify-content: center;
-  gap: min(30px, calc(clamp(7px, 1.2vh, 16px) + var(--tall) * .04));
-  margin: 0 auto min(26px, calc(clamp(3px, .7vh, 12px) + var(--tall) * .04)); }
+/* Mark above the trace, the heartbeat reading as its underline. Stacked rather
+   than in a row, so unlike the row version the logo does cost height — the mark
+   plus the gap, which is why the gap is kept tight and only opens up on a screen
+   with height to spare. The trace runs wider than the mark at every size (5:1
+   against a square) and that is the point: a broad line under a compact letter,
+   not two objects the same width. */
+.hero-mark { display: flex; flex-direction: column; align-items: center;
+  justify-content: center;
+  gap: min(34px, calc(9px + var(--tall) * .05));
+  margin: 0 auto min(56px, calc(clamp(3px, .7vh, 12px) + var(--tall) * .11)); }
 .hero-mark .mark { width: auto; display: block;
-  height: min(104px, calc(clamp(19px, 3.5vh, 44px) + var(--tall) * .15)); }
+  height: min(136px, calc(clamp(19px, 3.5vh, 44px) + var(--tall) * .21)); }
 .ekg { display: block; margin: 0; width: auto; aspect-ratio: 5 / 1; overflow: visible;
   height: min(72px, calc(clamp(16px, 3vh, 38px) + var(--tall) * .10)); }
 .ekg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
@@ -101,10 +104,20 @@ a { color: var(--accent); }
   filter: drop-shadow(0 0 6px rgba(234,179,8,.9)); animation: ekg 1.5s linear infinite; }
 @keyframes ekg { from { stroke-dashoffset: 142; } to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) { .ekg .pulse { animation: none; stroke-dasharray: none; } }
+/* No heartbeat on a phone. It is the widest thing in the hero at 5:1, so on a
+   390px screen it is either hairline-thin or it sets the width of everything
+   above the fold, and a phone is the one place this page was already scrolling.
+   The mark takes the space instead and grows into it — a logo reads at a glance
+   where a 25px trace does not. Removed rather than hidden with visibility, so
+   it gives its height back. */
+@media (max-width: 640px) {
+  .ekg { display: none; }
+  .hero-mark .mark { height: clamp(46px, 13vw, 78px); }
+}
 
 .hero h1 { line-height: 1.1; font-weight: 800; letter-spacing: -.01em;
   font-size: min(3.6rem, calc(clamp(1.6rem, 3.6vw + .4vh, 2.7rem) + var(--tall) * .035));
-  margin: 0 0 min(34px, calc(clamp(8px, 1.5vh, 16px) + var(--tall) * .05)); }
+  margin: 0 0 min(64px, calc(clamp(8px, 1.5vh, 16px) + var(--tall) * .11)); }
 .lede { color: #d4d4d4;
   max-width: min(820px, calc(660px + var(--tall) * .35));
   font-size: min(1.32rem, calc(clamp(.92rem, .55rem + .5vh, 1.05rem) + var(--tall) * .012));
