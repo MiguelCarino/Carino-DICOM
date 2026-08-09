@@ -14,6 +14,57 @@ destination. What is no longer true is the "store only" description: this
 release also queries, retrieves, routes and de-identifies.
 
 ### Added
+- **Modality registry** — `modalities` is a config list (name, AE title,
+  modality, optional station name, enabled) with its own Configuration tab
+  beside Destinations. An order's target is picked from it rather than typed.
+  The typo that removes fails two opposite ways, and which one you get is the
+  vendor's choice rather than yours: a modality that queries the worklist with
+  its own AE title in `ScheduledStationAETitle` never sees an order aimed at a
+  typo, while one that queries with the key empty — equally conformant — sees
+  that order on *every* station. The validator refuses a blank name or AE
+  title, an AE title over the DICOM limit of 16 or carrying a space or
+  backslash, a quoted `"false"` for `enabled`, and two stations sharing an AE
+  title case-insensitively, since the worklist compares them that way and
+  those are one station to it and two to the operator. Until a modality is
+  registered the field stays free text: an order that cannot be keyed in
+  during an outage is worse than one aimed at a typo. Registry and
+  destinations stay separate lists — a modality *pulls* a worklist from this
+  appliance, a destination *receives* studies from it, and one AE title may
+  legitimately appear in both. (`pacs/config.py`)
+- **Worklist probe** — asks another RIS what it would hand one of your
+  modalities, using that modality's own AE title, and reports where a broken
+  worklist is broken. Borrowing the AE title is the point: a provider may
+  answer differently depending on who asks, and that is usually the fault
+  being chased. It is also why the scanner must be off the network first,
+  which this code cannot verify and does not pretend to — so it is a button
+  somebody presses, never a timer, it says so in the confirmation, and it is
+  audited under the actor who pressed it. Five questions are asked with **one
+  key relaxed at a time**, because a single answer does not locate a fault and
+  a count lies: an order carrying no `ScheduledStationAETitle` reaches every
+  modality, so a scanner can look scheduled while only ever seeing the orders
+  nobody addressed. Each answer is split into addressed-to-this-station,
+  addressed-to-nobody and addressed-elsewhere, and the verdict never reports
+  "working" on a count alone. Results are a **record, not a queue**, in a
+  store of their own: `pacs/mwl.py` serves every open order in the
+  `OrderStore` as a worklist item, so a caught order filed there would be
+  handed straight back out to this department's modalities — another
+  hospital's orders, on your scanners, with no step in between that anybody
+  chose. `pacs/caught.py` therefore has no status, no UID minting, no
+  reconciliation and no worklist path; a flag on a shared store would only
+  have made that unlikely, and only until the next change to the query reading
+  it. Read-only, bounded, and shown under Activity → Caught behind
+  `config.read` rather than `orders.read`: these are another system's
+  patients, and the people who diagnose infrastructure are not the people who
+  key orders in. The operational log carries accessions and counts, never a
+  name — it is read by more people than that pane and gets pasted into support
+  threads. One worklist address for the whole appliance, in Settings; blank
+  means no probing. (`pacs/caught.py`, `pacs/scu.py`)
+- **Test orders fill themselves in** — ticking *Test order* completes the form
+  and locks what it filled: the same invented patient every time, a fresh
+  `TEST-<stamp>` accession so two test orders can never collide on identity,
+  and a referring of "Carino PACS". Modality, scheduled time and target
+  modality stay the operator's, being the three things a test actually varies.
+  Unticking restores what was there before.
 - **Profiles, capabilities and per-field identifier visibility** — optional and
   **off by default**, so an existing install behaves exactly as it did. Turning
   them on gives each person a sign-in, a set of capabilities and their own name
@@ -219,9 +270,11 @@ release also queries, retrieves, routes and de-identifies.
   [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), issue
   templates and a pull-request template.
 - **Test suites** — `tests/` covering auth, de-identification, DICOMweb, the
-  index, Q/R, routing and delivery, and the web auth layer, alongside the
-  existing end-to-end print suite at the repo root. Every suite runs from its
-  own `__main__` and prints its own totals — `python3 tests/test_auth.py`, and
+  index, Q/R, routing and delivery, the web auth layer, HL7 order intake and
+  identity, the modality registry's validation rules, and the worklist probe,
+  alongside the existing end-to-end print suite at the repo root. Every suite
+  runs from its own `__main__` and prints its own totals —
+  `python3 tests/test_auth.py`, and
   so on — so no counts are quoted here to go stale. The de-identification suite
   re-parses the bundled editor's `deid-profile.js` and fails if the Python and
   JavaScript profiles drift apart. Node checks live beside what they check: the
@@ -232,6 +285,127 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Changed
+- **An order now has an identity, and ORC-1 is read.** Every `ORM` created a
+  new order: nothing read the order control code, and nothing recognised a
+  message as being about an order already here, so a repeat, an amendment and
+  a cancellation all landed as duplicates. Seeding the manual's demo with
+  three orders four times produced twelve open orders, which is how it was
+  found. Untidy on an emergency trickle; on a live feed it is the failure this
+  codebase is written against — two open orders for one accession carry two
+  different Study Instance UIDs, the modality burns whichever the worklist
+  handed it into the exam, and reconciliation then closes one order and
+  orphans the other permanently. An order is identified by placer order number
+  (ORC-2), filler order number (ORC-3) or accession, tried in that order and
+  matched *independently* rather than as one composite key, because the filler
+  number is routinely absent from the first message and present in the second
+  and a composite would make that pair look like two orders. `CA`, `OC`, `CR`,
+  `DC` and `OD` cancel; **everything else, including codes never seen before,
+  upserts** — an unrecognised code treated as an upsert leaves an extra open
+  order, which is visible and can be cancelled by hand, while treated as a
+  cancel it would close a live order silently and the exam would simply never
+  be performed. Four things an amendment must not do, each now a test: re-mint
+  the Study Instance UID, which the modality may already have stamped into an
+  exam; blank a field it does not carry, since a status message is nearly
+  empty and writing its blanks over a full order erases the demographics the
+  technologist is reading (the HL7 path takes non-empty values only; the
+  dashboard's edit still clears, because an operator removing a wrong target
+  modality has to be able to); wipe `station_aet`, which no `ORM` carries and
+  whose loss sends the order back to every station; or reopen a closed order.
+  A cancel for an order this PACS never received creates nothing — a phantom
+  row would be a fact about the feed rather than about this department — but
+  it is logged and counted, so a feed that is all no-ops does not read as
+  silence. `/api/status` gains `orders_amended`, `orders_cancelled` and
+  `orders_noop` beside `orders_in`, which now counts creations only.
+  (`pacs/ris.py`)
+- **Carino ends only the orders it created.** Provenance is the authority
+  boundary: it may complete and withdraw what it created, while an order the
+  real RIS created belongs to the RIS — this appliance serves it on a worklist
+  and notices its study arriving, but does not decide the exam is off, and an
+  order the RIS never completes is the RIS's business rather than a fault
+  here. `origin` is an explicit field (`ris`, `carino-manual`, `carino-test`)
+  instead of a prefix match on the `source` display string, which was doing
+  load-bearing work it was never meant to; orders written before the field
+  existed are stamped from their source on load, once. `close_order()` refuses
+  an order of RIS origin and says where to cancel it instead. Relaying an
+  ORC-1 cancel the RIS itself sent stays allowed — that is repeating the
+  owner's decision rather than making one — and is recorded as
+  `cancelled-by-ris` so the panel never credits it here. The close reasons are
+  now constants (`matched`, `captured`, `cancelled-by-ris`, `cancelled-here`),
+  because a study that arrived and somebody giving up both used to render as
+  "cancelled", and a view that cannot separate those cannot be used to
+  troubleshoot anything. Test orders are their own origin rather than sharing
+  the manual one: a test order behaves identically all the way through, which
+  is the point of testing with it, so the only thing separating it from a real
+  patient's exam is a tag — and during an outage that tag is the most
+  important thing on the row. Delete stays available on a RIS order, being
+  housekeeping on this appliance's copy rather than a claim about the exam;
+  cancelling asserts the exam is not happening, which is the only thing here
+  that was ever the RIS's to say. (`pacs/ris.py`)
+- **The dashboard's twelve sidebar rows are six.** Nine of the twelve were
+  three questions about one pile of files, four things you set at
+  commissioning and two ledgers; they are now Studies (History | Pending |
+  Stuck), Configuration (Destinations | Routing | Settings | Modalities |
+  People) and Activity (Logs | Audit | Caught), with Overview, Services and
+  Orders unchanged. The nav needed 745px of column and got 674px at 1366×768 —
+  an ordinary clinic resolution — so Audit and Sign out sat below a fold
+  nothing announced. `data-cap` became a space-separated OR-list, and both
+  halves are load-bearing: a merged row appears if the profile holds *any*
+  capability its tabs need, and each tab is then gated on its own, because a
+  Radiologist holds `routing.read` and the Settings pane behind that row
+  carries the shutdown control and the API token. The absorbed panels keep
+  their ids on the panes, so `#dlgStuck` still resolves. The URL tracks panel
+  and tab (`#studies/stuck`) with `pushState`, so Back works and old `#dlgXxx`
+  spellings still resolve. Count badges are real buttons beside the row rather
+  than spans inside it, so a keyboard can reach them. Overview tiles leading
+  to a forbidden panel render as plain readouts instead of dead clicks. The
+  `.wrap` cap went 1180px → 1400px, since on the 1920px wall screens this
+  appliance is sold for, 39% of the glass stayed dark. (`pacs/web/`)
+- **The service chips are disabled rather than hidden for a profile without
+  `services.control`.** Service state is not privileged — receiver, watcher,
+  printer, mwl and qr are deliberately absent from `_STATUS_GATES` in
+  `pacs/web.py`, so they reach every profile — and these chips are the only
+  always-on-screen sign that the receiver died, for the two people standing
+  nearest the modality. What was wrong was the click: six unconfirmed service
+  stops in the permanent chrome, which the server then refuses with a 403
+  anyway. Keep the dot, take the switch.
+- **The manuals are re-shot for the six-panel dashboard**, all fifty-one
+  figures captured from a live instance, with every passage that told a reader
+  to click a sidebar row that is now a tab rewritten in three languages at the
+  same anchors. The prose gained a description of the dashboard's actual
+  shape, which the manuals never had. A verification pass found the alt text
+  was describing the *previous* screenshots — the failure mode that directory
+  exists to prevent — and it was corrected against the new images by opening
+  them.
+- **The landing page fits on one screen.** It was 2.5 screens at 1080p and 3.6
+  on a 1366×768 laptop, which is the size the laptop in a reading room
+  actually is. Everything below the fold is a `<dialog>` opened from a row of
+  buttons: nothing was deleted and nothing is fetched, so it is still one
+  Ctrl-F and still indexed. Twenty-four of twenty-five language-and-viewport
+  combinations fit in one screen; Russian at 1280×720 needs 27px more and
+  scrolls. Nothing forbids scrolling — no `overflow:hidden`, no fixed `100vh`,
+  no `justify-content:center` on the hero, each of which would clip content
+  for a reader at 200% zoom. The page is *sized* to fit and degrades into an
+  ordinary scrolling page when it cannot.
+- **The sign-in gate keeps its question when the language changes.**
+  `#authTitle` and `#authLede` carry the token wording in the markup, and
+  `setGateMode()` overwrites them at runtime for whichever shape the gate is
+  in — so the language pass, which rewrites every `data-i18n` node from the
+  markup, put the token question back over a screen showing no token field:
+  "This PACS needs its access token" above four profile buttons. Anyone
+  switching language at the gate saw it, which is the one moment a reader is
+  most likely to.
+- **One mark instead of two.** The favicon was a hand-drawn face and the
+  desktop icon a concentric aperture, so the product shipped two unrelated
+  logos. Both are now the same bold C: legible at 16px, which is the only size
+  the mark is really seen at, and gold rather than black, so it survives a
+  dark tab strip. `make_icon.py` draws it from constants rather than tracing a
+  bitmap and now writes the mac and windows bundles itself — not for tidiness,
+  but because ImageMagick writes a bare PNG under an `.icns` name: it exits
+  clean, `identify` reads it, and macOS loads nothing. The `.icns` written
+  here carries the same eight member types as the one that shipped before,
+  every payload decodes at the size its type code promises, and the `.ico`
+  gained six sizes while losing 11KB, the `auto-resize` path having emitted
+  uncompressed BMP entries. (`desktop/assets/make_icon.py`)
 - **The emergency prompt is acknowledged per person, not globally.** It was one
   flag, so a receptionist clearing a pop-up they could do nothing about took it
   off the radiologist's screen and off IT's at the same time — and the
@@ -326,9 +500,24 @@ release also queries, retrieves, routes and de-identifies.
   SCP on loopback and reads back the instances that landed on its disk. That is
   what settles "the held study did not leave" and "the copy that left was
   scrubbed"; a decision object asserting either proves nothing.
-- The HL7 listener and the Modality Worklist have **no automated suite at all**;
-  the failover monitor has one regression test in the web-auth suite and no
-  suite of its own. That is the part of this release exercised by hand only.
+- HL7 order intake now has a suite of its own, covering identity, the ORC-1
+  control codes, what an amendment must not overwrite, provenance and the
+  cancel authority, the concurrency case a thread-per-connection listener
+  makes real, and one pass through the MLLP handler itself. The Modality
+  Worklist has no suite of its own, but its C-FIND serving is now genuinely
+  exercised: the worklist-probe suite stands up a real `MwlSCP` over a socket
+  and queries it, rather than mocking an answer that would only agree with
+  itself. That coverage is incidental — shaped by what the probe needs to ask,
+  not by what MWL needs proved — so treat it as evidence the wire works and
+  not as a conformance suite. The failover monitor still has one regression
+  test in the web-auth suite and none of its own, and remains the part of this
+  release exercised by hand only.
+- The mac and windows icon bundles are verified **structurally, not by loading
+  them**: the `.icns` carries the same eight member types as the one that
+  shipped in 1.0.0 and every payload decodes at its declared size, but nothing
+  has opened either file on macOS or Windows. Tagging a release runs
+  `desktop-build.yml` on all three runners, which is the first real test of
+  both.
 - **Nothing here has been validated against clinical equipment by anyone.**
   Development and testing use `pynetdicom`'s own SCU/SCP tools and synthetic
   studies, which proves protocol conformance and promises nothing about a
