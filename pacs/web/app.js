@@ -2714,12 +2714,31 @@
         o.study_desc || T("(no study description)"),
         o.scheduled_dt ? "@ " + String(o.scheduled_dt).replace("T", " ") : "",
       ].filter(Boolean).join("  ·  ");
+      // Where the order came from decides what may be done to it, so it is
+      // named on the row rather than left to the `via …` free text.
+      const originTag = row.querySelector(".order-origin");
+      // The span ships hidden so a row with no tag has no empty pill; both
+      // branches below have to un-hide it, not only fill it.
+      originTag.hidden = o.origin !== "carino-test" && o.origin !== "ris";
+      if (o.origin === "carino-test") {
+        originTag.textContent = T("TEST");
+        originTag.title = T("Generated here to exercise the chain — not a patient's exam.");
+        originTag.classList.add("test");
+      } else if (o.origin === "ris") {
+        originTag.textContent = T("from the RIS");
+        originTag.title = T("The RIS owns this order. It can be completed here when the study arrives, but only the RIS can cancel it.");
+      }
       const sub = row.querySelector(".order-sub");
       const bits = [TF("via {src}", { src: o.source || "?" }), TF("queued {ts}", { ts: fmtStamp(o.created) })];
       if (o.status === "closed") {
-        bits.push(o.close_reason === "matched"
-          ? TF("✓ matched {ts}", { ts: fmtStamp(o.closed) })
-          : TF("cancelled {ts}", { ts: fmtStamp(o.closed) }));
+        // Four different endings, and telling them apart is the point: a study
+        // that arrived, film captured against it, the RIS withdrawing it, and
+        // somebody here withdrawing one of ours.
+        bits.push(
+          o.close_reason === "matched" ? TF("✓ matched {ts}", { ts: fmtStamp(o.closed) })
+          : o.close_reason === "captured" ? TF("✓ captured {ts}", { ts: fmtStamp(o.closed) })
+          : o.close_reason === "cancelled-by-ris" ? TF("cancelled by the RIS {ts}", { ts: fmtStamp(o.closed) })
+          : TF("cancelled here {ts}", { ts: fmtStamp(o.closed) }));
       }
       if (o.referring) bits.push(TF("ref: {who}", { who: o.referring }));
       sub.textContent = bits.join("  ·  ");
@@ -2730,7 +2749,13 @@
         cancelBtn.hidden = true;
       } else {
         captureBtn.addEventListener("click", () => captureForOrder(o, captureBtn));
-        cancelBtn.addEventListener("click", () => orderAction("cancel", o, T("Cancel this order? It moves to Closed (kept for the audit trail).")));
+        // An order the RIS created is the RIS's to withdraw. The server refuses
+        // it either way; not offering the button is the honest half of that.
+        if (o.origin === "ris") {
+          cancelBtn.hidden = true;
+        } else {
+          cancelBtn.addEventListener("click", () => orderAction("cancel", o, T("Cancel this order? It moves to Closed (kept for the audit trail).")));
+        }
       }
       row.querySelector(".order-del").addEventListener("click", () =>
         orderAction("delete", o, T("Delete this order permanently? This removes it from the audit trail.")));
@@ -2755,6 +2780,7 @@
       study_desc: $("ordDesc").value.trim(),
       scheduled_dt: $("ordWhen").value.trim(),
       referring: $("ordRef").value.trim(),
+      test: $("ordTest").checked,
     };
     if (!fields.accession && !fields.patient && !fields.patient_id) {
       flashNote(T("An order needs at least an accession, patient name or ID"), false);

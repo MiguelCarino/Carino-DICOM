@@ -391,6 +391,7 @@
             </div>
             <div class="order-form-foot">
               <span class="hint" data-i18n>An order needs at least an accession, patient name or ID. Accession is what matches the study back to this order.</span>
+              <label class="check" data-i18n-title title="A test order behaves exactly like a real one — it reaches the worklist and matches a study back — but it is marked TEST everywhere and is not somebody's exam"><input id="ordTest" type="checkbox" /> <span data-i18n>Test order</span></label>
               <button class="btn" id="ordAdd" data-i18n>Queue order</button>
             </div>
           </details>
@@ -1013,7 +1014,7 @@
   <template id="orderRowTpl">
     <div class="hist-row order-row">
       <div class="hist-main">
-        <div class="hist-patient"><span class="order-acc"></span> <span class="order-patient"></span></div>
+        <div class="hist-patient"><span class="order-acc"></span> <span class="order-patient"></span> <span class="order-origin" hidden></span></div>
         <div class="hist-meta"></div>
         <div class="order-sub"></div>
       </div>

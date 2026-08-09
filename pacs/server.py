@@ -23,6 +23,7 @@ from .mwl import MwlSCP
 from .notify import Notifier
 from .print_scp import PrintSCP
 from .qr import QrSCP
+from . import ris
 from .ris import OrderStore, RisListener, _utc_stamp
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
@@ -693,7 +694,7 @@ class PacsServer:
         if not order:
             return
         if self.cfg.ris.get("auto_close", True):
-            self.orders.close(order["id"], reason="matched", matched_study=study_uid)
+            self.orders.close(order["id"], reason=ris.CLOSE_MATCHED, matched_study=study_uid)
             self.log.info(
                 f"RIS order matched + closed: {order.get('patient') or '?'} "
                 f"[acc {order.get('accession') or '—'}] ← study {os.path.basename(path)}",
@@ -805,8 +806,18 @@ class PacsServer:
     def add_order(self, fields: dict) -> dict:
         if not any(str(fields.get(k, "")).strip() for k in ("accession", "patient", "patient_id")):
             return {"ok": False, "message": "an order needs at least an accession, patient name or patient ID"}
-        order = self.orders.add(fields, source="manual")
-        return {"ok": True, "message": "Order queued", "order": order}
+        # A test order and a real one behave identically all the way through —
+        # that is the point of testing with them — so the only thing separating
+        # them is this flag, and it has to be carried rather than guessed.
+        testing = bool(fields.get("test"))
+        order = self.orders.add(
+            fields,
+            source="test generator" if testing else "manual",
+            origin=ris.ORIGIN_TEST if testing else ris.ORIGIN_MANUAL,
+        )
+        return {"ok": True,
+                "message": "Test order queued" if testing else "Order queued",
+                "order": order}
 
     def update_order(self, oid: str, fields: dict) -> dict:
         o = self.orders.update(oid, fields)
@@ -816,10 +827,27 @@ class PacsServer:
         return {"ok": True, "message": "Order updated", "order": o}
 
     def close_order(self, oid: str) -> dict:
-        o = self.orders.close(oid, reason="cancelled")
-        if not o:
+        """Withdraw an order — but only one this appliance created.
+
+        An order that came from the real RIS belongs to the RIS. Carino serves
+        it on a worklist and notices its study arriving; it does not decide the
+        exam is off. A cancellation the RIS itself sends is relayed by
+        OrderStore.apply and recorded as CLOSE_BY_RIS, which is a different
+        thing and stays allowed."""
+        existing = self.orders.get(oid)
+        if not existing:
             return {"ok": False, "message": "order not found"}
-        self.log.info(f"RIS order cancelled [acc {o.get('accession') or '—'}]", kind="ris")
+        if not ris.may_cancel_here(existing):
+            self.log.warn(
+                f"Refused to cancel order [acc {existing.get('accession') or '—'}] — "
+                f"it came from the RIS, and only the RIS can withdraw it",
+                kind="ris",
+            )
+            return {"ok": False,
+                    "message": "This order came from the RIS. Only the RIS can cancel it — "
+                               "cancel it there, or delete it here if it should never have arrived."}
+        o = self.orders.close(oid, reason=ris.CLOSE_BY_OPERATOR)
+        self.log.info(f"RIS order cancelled here [acc {o.get('accession') or '—'}]", kind="ris")
         return {"ok": True, "message": "Order cancelled"}
 
     def delete_order(self, oid: str) -> dict:
@@ -870,7 +898,7 @@ class PacsServer:
             return {"ok": False, "message": f"could not convert: {exc}"}
         if self.index is not None:
             self.index.enqueue_file(out, "outgoing")
-        self.orders.close(order_id, reason="captured", matched_study=order.get("study_uid", ""))
+        self.orders.close(order_id, reason=ris.CLOSE_CAPTURED, matched_study=order.get("study_uid", ""))
         self.log.info(
             f"Captured study for order [acc {order.get('accession') or '—'}] "
             f"→ {os.path.basename(out)} into outgoing; order closed",

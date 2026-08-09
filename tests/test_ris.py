@@ -26,9 +26,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pacs.ris import (  # noqa: E402
     CANCEL_CONTROLS,
+    CLOSE_BY_RIS,
+    ORIGIN_MANUAL,
+    ORIGIN_RIS,
+    ORIGIN_TEST,
     HL7Message,
     OrderStore,
+    may_cancel_here,
     order_control,
+    origin_of,
     parse_order,
 )
 
@@ -264,6 +270,67 @@ def test_the_listener_counts_what_actually_happened():
     check(lis.noop_count == 1, "…and one message about an order it never had")
     check(lis.error_count == 0, "none of which is an error")
     check(s.counts()["total"] == 1, "one order in the store, not four")
+
+
+# ---- provenance decides authority ----------------------------------------
+def test_origin_is_recorded_at_creation():
+    s, _ = store()
+    from_ris, _ = s.apply_hl7(orm(), source="HL7 10.0.0.5")
+    typed = s.add({"accession": "H-1", "patient": "Typed"}, source="manual", origin=ORIGIN_MANUAL)
+    made = s.add({"accession": "T-1", "patient": "Made"}, source="test generator", origin=ORIGIN_TEST)
+    check(from_ris["origin"] == ORIGIN_RIS, "an HL7 order is the RIS's")
+    check(typed["origin"] == ORIGIN_MANUAL, "a typed order is this appliance's")
+    check(made["origin"] == ORIGIN_TEST, "a generated one is marked as a test")
+
+
+def test_only_carino_orders_may_be_cancelled_here():
+    """The rule, stated once. Carino completes what it observes and withdraws
+    only what it created."""
+    s, _ = store()
+    from_ris, _ = s.apply_hl7(orm(), source="HL7 10.0.0.5")
+    typed = s.add({"accession": "H-1", "patient": "Typed"}, source="manual", origin=ORIGIN_MANUAL)
+    made = s.add({"accession": "T-1"}, source="test generator", origin=ORIGIN_TEST)
+    check(not may_cancel_here(from_ris), "a RIS order may not be cancelled here")
+    check(may_cancel_here(typed), "an order typed here may")
+    check(may_cancel_here(made), "…and so may a test order")
+
+
+def test_relaying_a_ris_cancel_is_not_cancelling_here():
+    """Honouring ORC-1 CA is repeating the owner's decision, not making one, so
+    it stays allowed on a RIS order — and is credited to the RIS."""
+    s, _ = store()
+    s.apply_hl7(orm(), source="HL7 10.0.0.5")
+    o, action = s.apply_hl7(orm(control="CA"), source="HL7 10.0.0.5")
+    check(action == "cancelled", "the relay still happens for a RIS order")
+    check(o["close_reason"] == CLOSE_BY_RIS, "…and the RIS is credited, not this appliance")
+    check(not may_cancel_here(o), "…while the order remains one this appliance could not have withdrawn")
+
+
+def test_origin_is_inferred_for_orders_written_before_the_field_existed():
+    """orders.json survives upgrades. A row with no `origin` carried its
+    provenance only in the `source` display string."""
+    check(origin_of({"source": "HL7 10.0.0.5:2575"}) == ORIGIN_RIS,
+          "an old HL7 row is recognised as the RIS's")
+    check(origin_of({"source": "manual"}) == ORIGIN_MANUAL,
+          "an old hand-keyed row is recognised as this appliance's")
+    check(origin_of({}) == ORIGIN_MANUAL,
+          "a row with nothing at all defaults to this appliance's, never the RIS's")
+    check(origin_of({"origin": ORIGIN_TEST, "source": "HL7 x"}) == ORIGIN_TEST,
+          "an explicit origin wins over the guess")
+
+
+def test_the_store_stamps_origin_on_load():
+    import json
+    s, d = store()
+    s.add({"accession": "OLD-1"}, source="HL7 10.0.0.9", origin=ORIGIN_RIS)
+    path = os.path.join(d, "orders.json")
+    raw = json.load(open(path))
+    for o in raw["orders"]:
+        o.pop("origin", None)          # an orders.json from before the field
+    json.dump(raw, open(path, "w"))
+    reloaded = OrderStore(d)
+    row = reloaded.list()[0]
+    check(row["origin"] == ORIGIN_RIS, "an origin-less row is stamped from its source on load")
 
 
 def test_concurrent_messages_about_one_order_do_not_race():

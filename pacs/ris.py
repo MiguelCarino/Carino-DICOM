@@ -71,6 +71,47 @@ ORDER_FIELDS = (
     "placer_order_number", "filler_order_number",
 )
 
+# Who created an order — and therefore who may end it.
+#
+# This is an authority boundary, not a label. Carino owns what it created: it
+# may complete those orders and it may cancel them. An order the real RIS
+# created belongs to the RIS. Carino will serve it on a worklist and will notice
+# the study arriving, but it will not cancel it on its own initiative, and an
+# order the RIS never completes is the RIS's business rather than a fault here.
+ORIGIN_RIS = "ris"                 # arrived as HL7 from the real RIS
+ORIGIN_MANUAL = "carino-manual"    # typed in here during an outage — a real patient
+ORIGIN_TEST = "carino-test"        # generated here to exercise the chain — nobody's exam
+ORIGINS = (ORIGIN_RIS, ORIGIN_MANUAL, ORIGIN_TEST)
+
+# The reasons an order stops being open. Constants rather than free text,
+# because the difference between them is the whole point: "the study arrived"
+# and "somebody gave up on it" both used to render as `closed`, and a panel that
+# cannot tell them apart cannot be used to troubleshoot anything.
+CLOSE_MATCHED = "matched"            # a study arrived and reconciled to it
+CLOSE_CAPTURED = "captured"          # film captured against it and sent on
+CLOSE_BY_RIS = "cancelled-by-ris"    # ORC-1 cancel, relayed — the RIS's decision
+CLOSE_BY_OPERATOR = "cancelled-here" # somebody here withdrew a Carino order
+
+def may_cancel_here(order: dict) -> bool:
+    """Whether this appliance may withdraw this order.
+
+    Only its own. Relaying a cancellation the RIS itself sent is not covered by
+    this — that is repeating the owner's decision, not making one, and it is
+    recorded as CLOSE_BY_RIS so the panel never credits it to us."""
+    return str((order or {}).get("origin") or "") in (ORIGIN_MANUAL, ORIGIN_TEST)
+
+
+def origin_of(order: dict) -> str:
+    """The origin of a stored order, inferred for rows written before the field
+    existed. `source` was doing this work as a display string ('manual' or
+    'HL7 <peer>'); reading it here keeps old orders.json files loadable."""
+    o = (order or {})
+    known = str(o.get("origin") or "")
+    if known in ORIGINS:
+        return known
+    return ORIGIN_RIS if str(o.get("source") or "").upper().startswith("HL7") else ORIGIN_MANUAL
+
+
 # How two messages are recognised as being about ONE order, strongest first.
 # The accession is last because it is the weakest of the three: it is derived
 # from whichever of four fields the sender populated, and some feeds do not
@@ -270,6 +311,11 @@ class OrderStore:
                 data = json.load(fh)
             for o in data.get("orders", []):
                 if o.get("id"):
+                    # Orders written before `origin` existed carry their
+                    # provenance only in the `source` display string. Stamp it
+                    # now so the cancel rule has something exact to read, and so
+                    # this only ever has to be inferred once.
+                    o["origin"] = origin_of(o)
                     self._orders[o["id"]] = o
         except (OSError, ValueError):
             pass
@@ -282,15 +328,16 @@ class OrderStore:
         os.replace(tmp, self._path)
 
     # ---- CRUD --------------------------------------------------------------
-    def add(self, fields: dict, source: str = "manual") -> dict:
+    def add(self, fields: dict, source: str = "manual",
+            origin: str = ORIGIN_MANUAL) -> dict:
         """Create an order from a partial field dict; returns the stored order."""
         with self._lock:
-            order = self._add_locked(fields, source)
+            order = self._add_locked(fields, source, origin)
             self._save_locked()
         self._log_created(order, source)
         return order
 
-    def _add_locked(self, fields: dict, source: str) -> dict:
+    def _add_locked(self, fields: dict, source: str, origin: str = ORIGIN_MANUAL) -> dict:
         oid = uuid.uuid4().hex[:12]
         order = {k: str(fields.get(k, "") or "").strip() for k in ORDER_FIELDS}
         if not order.get("patient") and order.get("patient_name"):
@@ -304,6 +351,7 @@ class OrderStore:
             "id": oid,
             "status": "open",
             "source": source,
+            "origin": origin if origin in ORIGINS else ORIGIN_MANUAL,
             "created": self._now(),
             "updated": "",
             "revision": 1,
@@ -347,9 +395,11 @@ class OrderStore:
 
     def apply_hl7(self, msg: HL7Message, source: str) -> tuple[Optional[dict], str]:
         """File one HL7 order message. Returns ``(order, action)``."""
-        return self.apply(parse_order(msg), order_control(msg), source=source)
+        return self.apply(parse_order(msg), order_control(msg), source=source,
+                          origin=ORIGIN_RIS)
 
-    def apply(self, fields: dict, control: str = "", source: str = "hl7") -> tuple[Optional[dict], str]:
+    def apply(self, fields: dict, control: str = "", source: str = "hl7",
+              origin: str = ORIGIN_RIS) -> tuple[Optional[dict], str]:
         """Upsert one order message, honouring its ORC-1 order control code.
 
         This is the difference between an emergency trickle and a live feed. A
@@ -374,7 +424,7 @@ class OrderStore:
                     # order to hang the message on: a phantom row in the Orders
                     # panel is a fact about the feed, not about this department.
                     return None, "cancel-unknown"
-                snapshot = self._add_locked(fields, source)
+                snapshot = self._add_locked(fields, source, origin)
                 action = "created"
             elif existing.get("status") == "closed":
                 # Never reopened, never silently rewritten. A status message
@@ -385,7 +435,7 @@ class OrderStore:
                 snapshot = dict(existing)
                 action = "already-closed" if cancelling else "ignored-closed"
             elif cancelling:
-                self._close_locked(existing, reason="cancelled by the RIS")
+                self._close_locked(existing, reason=CLOSE_BY_RIS)
                 snapshot = dict(existing)
                 action = "cancelled"
             else:

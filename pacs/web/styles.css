@@ -780,6 +780,19 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 @media (max-width: 620px) { .order-form { grid-template-columns: 1fr; } }
 .order-acc { font-family: var(--mono); font-size: .78rem; color: var(--accent); }
 .order-acc.order-noacc { color: var(--warn); }
+/* Where the order came from, which is also who may end it. Quiet by default —
+   a RIS order is the ordinary case — and loud for a generated one, because a
+   test order on a screen full of real ones during an outage is the single
+   worst thing this panel could be unclear about. */
+.order-origin {
+  font-family: var(--mono); font-size: .6rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .1em;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  color: var(--muted); border: 1px solid var(--border);
+}
+.order-origin.test { color: #050505; background: var(--warn); border-color: var(--warn); }
+.order-origin[hidden] { display: none; }
+html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: none; letter-spacing: 0; }
 .order-patient { font-weight: 700; }
 .order-sub { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 3px; }
 
