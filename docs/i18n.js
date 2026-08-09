@@ -403,10 +403,10 @@ const RICH = {
     // to a section that no longer exists — visible only to a reader in one of
     // these languages.
     '#dl-release': {
-        es: 'Estos instaladores son <b>v1.0.0</b>: solo reciben y reenvían. Todo lo demás de esta página sale en <b>v1.1.0</b>, que ya funciona hoy con Docker, Podman, systemd o desde el código.',
-        'pt-BR': 'Estes instaladores são <b>v1.0.0</b>: apenas recebem e encaminham. Todo o resto desta página sai na <b>v1.1.0</b>, que já funciona hoje com Docker, Podman, systemd ou a partir do código.',
-        ja: 'ここにあるインストーラーは <b>v1.0.0</b> で、受信と転送だけを行います。このページの他の機能は <b>v1.1.0</b> に入り、Docker・Podman・systemd またはソースからなら今日すでに動きます。',
-        ru: 'Эти установщики — <b>v1.0.0</b>: только приём и пересылка. Всё остальное на этой странице выходит в <b>v1.1.0</b>, которая уже работает сегодня через Docker, Podman, systemd или из исходников.',
+        es: 'Estos instaladores son <b>v1.0.0</b>: solo reciben y reenvían. Todo lo demás de esta página es <b>v1.1.0</b>, que ya funciona hoy con Docker, Podman, systemd o desde el código. Estos botones solo entregan versiones estables; los instaladores preliminares están en <i>Todas las versiones</i>, arriba.',
+        'pt-BR': 'Estes instaladores são <b>v1.0.0</b>: apenas recebem e encaminham. Todo o resto desta página é <b>v1.1.0</b>, que já funciona hoje com Docker, Podman, systemd ou a partir do código. Estes botões só entregam versões estáveis; os instaladores de pré-lançamento ficam em <i>Todas as versões</i>, acima.',
+        ja: 'ここにあるインストーラーは <b>v1.0.0</b> で、受信と転送だけを行います。このページの他の機能は <b>v1.1.0</b> で、Docker・Podman・systemd またはソースからなら今日すでに動きます。このボタンから配布されるのは安定版だけです。プレリリース版のインストーラーは上の<i>全バージョン</i>にあります。',
+        ru: 'Эти установщики — <b>v1.0.0</b>: только приём и пересылка. Всё остальное на этой странице — <b>v1.1.0</b>, которая уже работает сегодня через Docker, Podman, systemd или из исходников. Эти кнопки выдают только стабильные сборки; предварительные установщики — в разделе <i>Все версии</i> выше.',
     },
 };
 
