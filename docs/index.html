@@ -26,10 +26,17 @@
            purpose — a heartbeat, then the sentence about patients waiting.
            Decorative, so aria-hidden: it says nothing a screen reader needs and
            the headline underneath says all of it. -->
-      <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-        <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
-        <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
-      </svg>
+      <!-- The mark rides on the same line as the trace rather than above it,
+           because vertical space is what this page is short of and a row is as
+           tall as its tallest item. Both are aria-hidden: the navbar already
+           says "Carino PACS" in text, and a logo announced twice is noise. -->
+      <div class="hero-mark" aria-hidden="true">
+        <img class="mark" src="logo.svg" alt="" width="100" height="100" decoding="async">
+        <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
+          <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+          <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+        </svg>
+      </div>
       <h1><span data-i18n>Your PACS systems are down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
       <p class="lede">
         <strong>Carino PACS</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>

@@ -66,7 +66,14 @@ a { color: var(--accent); }
    Motion is decoration here, and a reader who has asked their system for less
    of it gets the static trace: the shape carries the meaning, the sweep only
    carries the mood. */
-.ekg { display: block; margin: 0 auto clamp(3px, .7vh, 12px);
+/* Mark and trace on one row, so the logo costs no height at all: the row is as
+   tall as the trace already was. The mark is set a shade taller than the trace
+   because a circular form reads smaller than a rectangular one of equal height,
+   and the two would otherwise look mismatched rather than paired. */
+.hero-mark { display: flex; align-items: center; justify-content: center;
+  gap: clamp(7px, 1.2vh, 16px); margin: 0 auto clamp(3px, .7vh, 12px); }
+.hero-mark .mark { height: clamp(19px, 3.5vh, 44px); width: auto; display: block; }
+.ekg { display: block; margin: 0;
   height: clamp(16px, 3vh, 38px); width: auto; aspect-ratio: 5 / 1; overflow: visible; }
 .ekg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .ekg .trace { stroke: var(--accent); stroke-width: 2; opacity: .12; }
