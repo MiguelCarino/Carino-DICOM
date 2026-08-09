@@ -92,6 +92,10 @@ STUDY_DELETED = "study.deleted"
 STUDY_READ = "study.read"
 ORDER_CHANGED = "order.changed"
 SERVICE_CHANGED = "service.changed"
+# A worklist probe borrows a modality's AE title to ask another RIS a question.
+# Auditable because it is this appliance presenting itself as somebody else's
+# equipment, however briefly and however good the reason.
+WORKLIST_PROBED = "worklist.probed"
 EMERGENCY_CHANGED = "emergency.changed"
 SHUTDOWN = "shutdown"
 DENIED = "denied"

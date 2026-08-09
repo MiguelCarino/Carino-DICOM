@@ -1152,6 +1152,44 @@ def create_app(server: PacsServer) -> Flask:
         res = server.echo(dest)
         return jsonify(ok=res.ok, message=res.message)
 
+    @app.post("/api/worklist/probe")
+    def api_worklist_probe():
+        """Ask the other RIS what it would give one of our modalities.
+
+        Gated on config.read rather than orders.read on purpose: this is
+        infrastructure diagnosis, and the items that come back are another
+        system's patients. The people who run this — IT and administrators —
+        are not the people who key orders in."""
+        denied = guard.deny("config.read")
+        if denied:
+            return denied
+        body = request.get_json(silent=True) or {}
+        station = str(body.get("station_aet", ""))
+        res = server.probe_worklist(station)
+        if res.get("ok") and server.audit:
+            # The AE title borrowed and how much came back — never a patient
+            # name. The audit trail is exported and read far more widely than
+            # the pane the caught items themselves sit behind.
+            server.audit.record(audit.WORKLIST_PROBED, actor=guard.current(), target=station,
+                                detail=f"{res.get('items', 0)} item(s) from the other worklist")
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.get("/api/worklist/caught")
+    def api_worklist_caught():
+        denied = guard.deny("config.read")
+        if denied:
+            return denied
+        return jsonify(rounds=server.caught.rounds(limit=int(request.args.get("limit", 0) or 0)),
+                       counts=server.caught.counts())
+
+    @app.post("/api/worklist/caught/clear")
+    def api_worklist_caught_clear():
+        denied = guard.deny("config.read")
+        if denied:
+            return denied
+        n = server.caught.clear()
+        return jsonify(ok=True, message=f"Cleared {n} probe round(s)")
+
     @app.get("/api/log")
     def api_log():
         denied = guard.deny("logs.read")

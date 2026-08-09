@@ -645,6 +645,17 @@
                 <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
                 <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
               </fieldset>
+              <!-- The other RIS's worklist. Not a service this appliance runs —
+                   an address it asks, on demand, when somebody is diagnosing a
+                   modality that is not seeing its schedule. -->
+              <fieldset>
+                <legend data-i18n>The other RIS's worklist</legend>
+                <p class="hint" style="margin:0 0 10px" data-i18n>Where the hospital's own worklist lives. Only used by <em>Test worklist</em> on a modality — this appliance never queries it on a timer.</p>
+                <label><span data-i18n>Host / IP</span> <input id="wsHost" data-i18n-placeholder placeholder="blank = no probing" /></label>
+                <label><span data-i18n>Port</span> <input id="wsPort" type="number" min="1" max="65535" placeholder="105" /></label>
+                <label><span data-i18n>Its AE title</span> <input id="wsAet" maxlength="16" data-i18n-placeholder placeholder="the called AE" /></label>
+                <label class="check"><input id="wsTls" type="checkbox" /> <span data-i18n>Connect over TLS</span></label>
+              </fieldset>
               <fieldset>
                 <legend data-i18n>Modality Worklist (MWL)</legend>
                 <label class="check"><input id="mwlEnabled" type="checkbox" /> <span data-i18n>Start the worklist SCP on launch</span></label>
@@ -861,11 +872,28 @@
           <div class="hist-tabs" role="tablist">
             <button class="hist-tab active" id="tab_logs" data-tab="logs" data-cap="logs.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgLogs"><span data-i18n>Logs</span></button>
             <button class="hist-tab" id="tab_audit" data-tab="audit" data-cap="audit.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgAudit"><span data-i18n>Audit</span></button>
+            <button class="hist-tab" id="tab_caught" data-tab="caught" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgCaught"><span data-i18n>Caught</span></button>
           </div>
         </div>
         <section class="tabpane" id="dlgLogs" role="tabpanel" aria-labelledby="tab_logs">
           <div class="log" id="log"></div>
         </section>
+        <!-- What another RIS answered when this appliance asked it as one of
+             our modalities. A record, never a queue: these orders are not
+             served on any worklist and this appliance owns none of them. See
+             pacs/caught.py for why they are kept in their own store. -->
+        <section class="tabpane" id="dlgCaught" role="tabpanel" aria-labelledby="tab_caught" hidden>
+          <p class="pane-lede" data-i18n>what another RIS answered</p>
+          <div class="hist-bar">
+            <p class="hint" style="margin:0;max-width:70ch" data-i18n>Take the modality off the network, then use <em>Test worklist</em> on its row under Configuration → Modalities. This asks the other RIS five questions using that modality's own AE title, relaxing one key at a time; the differences between the answers are what locate the fault.</p>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="caughtRefresh" data-i18n>↻ Refresh</button>
+              <button class="btn tiny danger" id="caughtClear" data-i18n>🗑 Clear</button>
+            </div>
+          </div>
+          <div class="hist-list" id="caughtList"></div>
+        </section>
+
         <section class="tabpane" id="dlgAudit" role="tabpanel" aria-labelledby="tab_audit" hidden>
           <p class="audit-state" id="auditState"></p>
           <div class="audit-list" id="auditList"></div>
@@ -1110,6 +1138,7 @@
       <td><input class="m-mod" maxlength="16" placeholder="CT" data-i18n-title title="CT, MR, US, CR… used to prefill an order aimed at this room" /></td>
       <td><input class="m-station" data-i18n-placeholder placeholder="optional" /></td>
       <td class="row-actions">
+        <button class="btn tiny probe" data-i18n-title title="Ask the other RIS what it would give this modality. Take the modality off the network first — this borrows its AE title." data-i18n>Test worklist</button>
         <button class="btn tiny danger del" data-i18n-title title="Remove">✕</button>
       </td>
     </tr>

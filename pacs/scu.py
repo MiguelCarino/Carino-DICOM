@@ -72,6 +72,136 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
         assoc.release()
 
 
+@dataclass
+class WorklistProbe:
+    """One question put to a remote worklist provider, and its answer."""
+    label: str                  # what was asked, in the operator's words
+    ok: bool                    # did the association and the query succeed
+    message: str                # why not, when it did not
+    items: list                 # the worklist items that came back
+    station_key: str            # the ScheduledStationAETitle we asked for ("" = any)
+    date_key: str               # the date we asked for ("" = any)
+
+
+def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
+                    date: str = "", modality: str = "", timeout: int = 20,
+                    tls_context: Optional[ssl.SSLContext] = None) -> WorklistProbe:
+    """Ask a remote Modality Worklist provider what it has, AS a given modality.
+
+    `calling_aet` is the borrowed identity — the AE title of the scanner being
+    diagnosed, not this appliance's. That is the whole point: a worklist
+    provider may answer differently depending on who is asking, and the fault
+    being chased is usually exactly that. It also means the scanner must be off
+    the network first, because two devices answering to one AE title is a
+    conflict this code cannot detect and must not cause quietly.
+
+    An empty `station_aet` is universal matching: "everything you have". An
+    empty `date` likewise. The difference between the answers to those and the
+    answers to the targeted question is the diagnosis — see the note in
+    server.probe_worklist().
+    """
+    from pydicom.dataset import Dataset
+    from pynetdicom.sop_class import ModalityWorklistInformationFind
+
+    ae = AE(ae_title=calling_aet)
+    ae.add_requested_context(ModalityWorklistInformationFind)
+    ae.acse_timeout = timeout
+    ae.dimse_timeout = timeout
+    ae.network_timeout = timeout
+
+    # The label is what the operator reads down the table, so it has to name
+    # every key that varies — including the modality, or the first two questions
+    # print identically and the one difference between them is invisible.
+    label = f"as {calling_aet}" + (f", station {station_aet}" if station_aet else ", any station")
+    label += f", {date}" if date else ", any date"
+    label += f", {modality}" if modality else ", any modality"
+
+    try:
+        assoc = ae.associate(dest.host, dest.port, ae_title=dest.aet,
+                             tls_args=_tls_args(dest, tls_context))
+    except (ssl.SSLError, OSError) as exc:
+        return WorklistProbe(label, False, f"TLS/connection error: {exc}", [], station_aet, date)
+    if not assoc.is_established:
+        scheme = "TLS " if dest.tls else ""
+        return WorklistProbe(label, False,
+                             f"{scheme}association rejected/aborted to {dest.host}:{dest.port}",
+                             [], station_aet, date)
+
+    # The identifier a modality sends: a few match keys filled, the rest present
+    # and empty so the provider returns them. Sending the return keys matters —
+    # a provider is entitled to omit anything not asked for.
+    ds = Dataset()
+    ds.AccessionNumber = ""
+    ds.PatientName = ""
+    ds.PatientID = ""
+    ds.PatientBirthDate = ""
+    ds.PatientSex = ""
+    ds.StudyInstanceUID = ""
+    ds.ReferringPhysicianName = ""
+    ds.RequestedProcedureDescription = ""
+    ds.RequestedProcedureID = ""
+    step = Dataset()
+    step.Modality = modality or ""
+    step.ScheduledStationAETitle = station_aet or ""
+    step.ScheduledStationName = ""
+    step.ScheduledProcedureStepStartDate = date or ""
+    step.ScheduledProcedureStepStartTime = ""
+    step.ScheduledProcedureStepDescription = ""
+    step.ScheduledProcedureStepID = ""
+    step.ScheduledPerformingPhysicianName = ""
+    ds.ScheduledProcedureStepSequence = [step]
+
+    items: list = []
+    try:
+        for status, identifier in assoc.send_c_find(ds, ModalityWorklistInformationFind):
+            if not status:
+                return WorklistProbe(label, False, "connection lost during the query",
+                                     items, station_aet, date)
+            code = status.Status
+            if code in (0xFF00, 0xFF01) and identifier is not None:
+                items.append(_worklist_item(identifier))
+            elif code == 0x0000:
+                break                       # success, no more matches
+            elif code not in (0xFF00, 0xFF01):
+                return WorklistProbe(label, False, f"C-FIND failed (0x{code:04X})",
+                                     items, station_aet, date)
+    except Exception as exc:                # a malformed response must not take the probe down
+        return WorklistProbe(label, False, f"query error: {exc}", items, station_aet, date)
+    finally:
+        assoc.release()
+    return WorklistProbe(label, True, f"{len(items)} item(s)", items, station_aet, date)
+
+
+def _worklist_item(ds) -> dict:
+    """One returned worklist item as a plain dict, in the same field names an
+    order uses, so the two are comparable without a translation layer."""
+    def g(obj, name):
+        return str(getattr(obj, name, "") or "").strip()
+    step = None
+    seq = getattr(ds, "ScheduledProcedureStepSequence", None)
+    if seq:
+        try:
+            step = seq[0]
+        except (IndexError, TypeError):
+            step = None
+    return {
+        "accession": g(ds, "AccessionNumber"),
+        "patient_name": g(ds, "PatientName"),
+        "patient_id": g(ds, "PatientID"),
+        "patient_birthdate": g(ds, "PatientBirthDate"),
+        "patient_sex": g(ds, "PatientSex"),
+        "study_uid": g(ds, "StudyInstanceUID"),
+        "referring": g(ds, "ReferringPhysicianName"),
+        "study_desc": g(ds, "RequestedProcedureDescription") or (g(step, "ScheduledProcedureStepDescription") if step else ""),
+        "modality": g(step, "Modality") if step else "",
+        "station_aet": g(step, "ScheduledStationAETitle") if step else "",
+        "station_name": g(step, "ScheduledStationName") if step else "",
+        "scheduled_date": g(step, "ScheduledProcedureStepStartDate") if step else "",
+        "scheduled_time": g(step, "ScheduledProcedureStepStartTime") if step else "",
+        "sps_id": g(step, "ScheduledProcedureStepID") if step else "",
+    }
+
+
 def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 30,
             tls_context: Optional[ssl.SSLContext] = None) -> SendResult:
     try:

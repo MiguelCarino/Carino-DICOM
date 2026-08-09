@@ -185,6 +185,17 @@ DEFAULTS: dict[str, Any] = {
         # did not happen. It fires on deliberate actions, not per instance.
         "fsync": True,
     },
+    # The OTHER worklist provider — the hospital's real RIS or its broker. Not a
+    # service this appliance runs: an address it asks, on demand, when somebody
+    # is diagnosing a modality that is not seeing its schedule. One for the
+    # whole appliance; a site with two worklist providers is a site with a
+    # bigger problem than this field.
+    "worklist_source": {
+        "host": "",
+        "port": 105,            # the usual MWL port; nothing is assumed about it
+        "aet": "",              # the provider's called AE title
+        "tls": False,
+    },
     "destinations": [],
     # The modalities this department has — the equipment that PULLS a worklist
     # and PUSHES studies back, as opposed to `destinations`, which is where
@@ -808,6 +819,10 @@ class Config:
         return [d for d in self.destinations if d.get("enabled", True)]
 
     @property
+    def worklist_source(self) -> dict:
+        return self.data.setdefault("worklist_source", {})
+
+    @property
     def modalities(self) -> list:
         return self.data.setdefault("modalities", [])
 
@@ -1218,6 +1233,18 @@ def validate(data: dict) -> None:
     # stranger with write access off-box, and only the host knows which of those
     # this appliance is. An empty profile list is legal and means token-only.
     _users.validate_profiles(data.get("users", {}), network_reachable=reachable)
+
+    ws = data.get("worklist_source")
+    if ws is not None:
+        if not isinstance(ws, dict):
+            raise ValueError("'worklist_source' must be an object")
+        wp = ws.get("port", 105)
+        if not (isinstance(wp, int) and 1 <= wp <= 65535):
+            raise ValueError("worklist_source.port must be 1..65535")
+        if len(str(ws.get("aet", ""))) > 16:
+            raise ValueError("worklist_source.aet must be 16 characters or fewer")
+        if ws.get("tls") is not None and not isinstance(ws.get("tls"), bool):
+            raise ValueError("worklist_source.tls must be true or false")
 
     mods = data.get("modalities", [])
     if not isinstance(mods, list):

@@ -75,6 +75,7 @@
   // No form field outside its own tab, so a Save from elsewhere must post this
   // back verbatim or apply_config resets it to []. See collectConfig.
   let loadedModalities = [];
+  let loadedWorklistSource = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
   // carrying it through a Save, apply_config's merge over DEFAULTS would reset it
@@ -1646,6 +1647,11 @@
   async function loadConfig() {
     const c = await api("/api/config");
     loadedModalities = Array.isArray(c.modalities) ? c.modalities : [];
+    loadedWorklistSource = c.worklist_source || {};
+    $("wsHost").value = loadedWorklistSource.host || "";
+    $("wsPort").value = loadedWorklistSource.port || 105;
+    $("wsAet").value = loadedWorklistSource.aet || "";
+    $("wsTls").checked = !!loadedWorklistSource.tls;
     renderMods(loadedModalities);
     fillStationChoices();
     loadedScp = c.scp || {};
@@ -1835,8 +1841,92 @@
     tr.querySelector(".m-mod").value = m.modality || "";
     tr.querySelector(".m-station").value = m.station_name || "";
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
+    const probe = tr.querySelector(".probe");
+    if (probe) probe.addEventListener("click", () => probeModality(tr, probe));
     $("modBody").appendChild(tr);
   }
+  /* Ask the other RIS what it would give one modality. The confirmation is not
+     ceremony: this borrows the scanner's AE title, and two devices answering to
+     one name on a network is a real conflict that nothing here can detect. */
+  async function probeModality(tr, btn) {
+    const aet = tr.querySelector(".m-aet").value.trim().toUpperCase();
+    const name = tr.querySelector(".m-name").value.trim() || aet;
+    if (!aet) { flashNote(T("Give the modality an AE title first"), false); return; }
+    // One literal, not a concatenation: i18n-parity extracts the string inside
+    // TF() and a joined expression reaches it as a fragment.
+    if (!confirm(TF("Ask the other RIS as {aet}? Take {name} off the network first — this borrows its AE title, and two devices answering to one name will confuse the RIS.", { aet: aet, name: name }))) return;
+    const old = btn.textContent; btn.textContent = "…"; btn.disabled = true;
+    try {
+      const r = await post("/api/worklist/probe", { station_aet: aet });
+      flashNote(r.message || (r.ok ? T("Probe done") : T("Probe failed")), r.ok !== false);
+      if (r.ok) loadCaught();
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally {
+      btn.textContent = old; btn.disabled = false;
+    }
+  }
+
+  /* What came back, newest round first. Each round is the four questions; the
+     per-question split into addressed-here / addressed-to-nobody /
+     addressed-elsewhere is the part that carries the diagnosis, so it is on the
+     row rather than behind the item list. */
+  async function loadCaught() {
+    const list = $("caughtList");
+    if (!list) return;
+    let data;
+    try {
+      data = await api("/api/worklist/caught");
+    } catch (e) {
+      list.textContent = ""; list.appendChild(emptyNote(e.message)); return;
+    }
+    list.textContent = "";
+    const rounds = (data && data.rounds) || [];
+    if (!rounds.length) {
+      list.appendChild(emptyNote(T("No probes yet.")));
+      return;
+    }
+    rounds.forEach((rnd) => {
+      const box = document.createElement("div");
+      box.className = "caught-round";
+      const head = document.createElement("div");
+      head.className = "caught-head";
+      head.textContent = TF("asked as {aet} · {host}:{port} ({called}) · {ts}", {
+        aet: rnd.station_aet, host: (rnd.source || {}).host || "?",
+        port: (rnd.source || {}).port || "?", called: (rnd.source || {}).aet || "?",
+        ts: fmtStamp(rnd.at),
+      });
+      box.appendChild(head);
+      (rnd.probes || []).forEach((pr) => {
+        const row = document.createElement("div");
+        row.className = "caught-probe" + (pr.ok ? "" : " bad");
+        const q = document.createElement("span");
+        q.className = "caught-q";
+        q.textContent = pr.label;
+        const a = document.createElement("span");
+        a.className = "caught-a";
+        if (!pr.ok) {
+          a.textContent = pr.message;
+          a.classList.add("bad");
+        } else if (!pr.count) {
+          a.textContent = T("nothing");
+        } else {
+          // Never a bare count: an order addressed to nobody reaches every
+          // modality, so "3 back" can mean "nothing is scheduled here".
+          const bits = [TN(pr.count, "{n} orders")];
+          if (pr.for_this_station) bits.push(TF("{n} for this station", { n: pr.for_this_station }));
+          if (pr.for_nobody) bits.push(TF("{n} for nobody", { n: pr.for_nobody }));
+          if (pr.for_someone_else) bits.push(TF("{n} for another station", { n: pr.for_someone_else }));
+          a.textContent = bits.join(" · ");
+          if (pr.for_this_station) a.classList.add("good");
+        }
+        row.append(q, a);
+        box.appendChild(row);
+      });
+      list.appendChild(box);
+    });
+  }
+
   function collectMods() {
     return [...$("modBody").querySelectorAll("tr")]
       .map((tr) => ({
@@ -2074,6 +2164,13 @@
       // reset. `modalities` has form fields only on its own tab, so a Save from
       // anywhere else has to send the loaded snapshot rather than nothing.
       modalities: modsOpen() ? collectMods() : loadedModalities,
+      worklist_source: {
+        ...loadedWorklistSource,
+        host: $("wsHost").value.trim(),
+        port: parseInt($("wsPort").value, 10) || 105,
+        aet: $("wsAet").value.trim(),
+        tls: $("wsTls").checked,
+      },
       web: webSection(),
       audit: { ...loadedAudit },
       // Posted back with the redacted secrets still redacted — the server
@@ -3591,7 +3688,7 @@
     dlgStudies:  { history: "dlgHistory", pending: "dlgPending", stuck: "dlgStuck" },
     dlgConfig:   { destinations: "dlgDests", routing: "dlgRouting", settings: "dlgSettings",
                    modalities: "dlgModalities", people: "dlgPeople" },
-    dlgActivity: { logs: "dlgLogs", audit: "dlgAudit" },
+    dlgActivity: { logs: "dlgLogs", audit: "dlgAudit", caught: "dlgCaught" },
   };
   // Where a bare panel id lands when nothing else says otherwise. Configuration
   // opens on Destinations rather than Settings: Settings is the densest pane in
@@ -3626,6 +3723,7 @@
     // No fetch: the registry rides in with the config. Redrawn on open so the
     // table reflects a config another tab's Save just rewrote.
     dlgModalities: () => renderMods(loadedModalities),
+    dlgCaught: loadCaught,
   };
   let activePanel = "dlgServices";
 
@@ -4005,6 +4103,13 @@
       }));
     $("ordAdd").addEventListener("click", () => addOrder($("ordAdd")));
     $("ordTest").addEventListener("change", (e) => applyTestDefaults(e.target.checked));
+    $("caughtRefresh").addEventListener("click", loadCaught);
+    $("caughtClear").addEventListener("click", async () => {
+      if (!confirm(T("Clear every probe round? They are a record of what the other RIS said."))) return;
+      const r = await post("/api/worklist/caught/clear", {});
+      flashNote(r.message || "", r.ok !== false);
+      loadCaught();
+    });
     $("addMod").addEventListener("click", () => { addModRow({}); const e = $("modEmpty"); if (e) e.hidden = true; });
     // Same route as Save destinations: the whole config document, so the
     // server's own validator is what decides a registry is acceptable.

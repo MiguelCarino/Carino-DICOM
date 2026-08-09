@@ -471,6 +471,21 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 /* The tabs a profile can actually open, listed under the panel title. Written
    by app.js from the VISIBLE tabs, so it never promises one that is hidden. */
 .tab-sub { color: var(--muted); }
+/* One probe round: the four questions and what each answered. Monospace and
+   tight — read as a table of differences, not as prose. */
+.caught-round { border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+  padding: 12px 14px; margin-bottom: 10px; }
+.caught-head { font-family: var(--mono); font-size: .7rem; color: var(--accent);
+  margin-bottom: 8px; word-break: normal; overflow-wrap: break-word; }
+.caught-probe { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline;
+  font-family: var(--mono); font-size: .74rem; padding: 3px 0; border-top: 1px solid #1a1a1a; }
+.caught-probe:first-of-type { border-top: 0; }
+.caught-q { color: var(--muted); min-width: 26ch; }
+.caught-a { color: var(--text); min-width: 0; }
+/* Only a question that found orders addressed to THIS station is good news. */
+.caught-a.good { color: var(--ok); }
+.caught-a.bad { color: var(--bad); }
+
 /* The two jumps on a held-back row. Small and quiet: the engine's sentence
    above them is the message, these are just the doors it names. */
 .held-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

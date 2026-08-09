@@ -441,7 +441,8 @@ async function main() {
   check(!(await reachedByHash("#configuration/people", "dlgPeople")),
         "…which #configuration/people cannot get around either");
   check(it.nav.indexOf("dlgOrders") < 0, "IT has no Orders panel");
-  check(it.tabs.dlgActivity.join() === "logs,audit", "IT reads both the log and the audit trail");
+  check(it.tabs.dlgActivity.join() === "logs,audit,caught",
+        "IT reads the log, the audit trail and the worklist probes: " + JSON.stringify(it.tabs.dlgActivity));
   const itStatus = await statusFor();
   const itRaw = JSON.stringify(itStatus);
   check(itRaw.indexOf("10.99.0.5") >= 0, "IT does get the destination address — they are not blind");
@@ -529,7 +530,12 @@ async function main() {
   check(await cdp.eval("document.getElementById('killSvc').closest('.tabpane').hidden"),
         "…so the shutdown control is inside a pane that stays shut");
   check(rad.tabs.dlgActivity.join() === "logs",
-        "Activity gives them the log and not the audit trail: " + JSON.stringify(rad.tabs.dlgActivity));
+        "Activity gives them the log only — not the audit trail, not the probes: "
+        + JSON.stringify(rad.tabs.dlgActivity));
+  // A worklist probe borrows a scanner's identity and returns another system's
+  // patients. It follows config.read, like the registry it is run from.
+  check(!(await reachedByHash("#activity/caught", "dlgCaught")),
+        "…and #activity/caught does not open the probe results for them");
   check(!(await reachedByHash("#activity/audit", "dlgAudit")),
         "…and #activity/audit does not open it");
   check(rad.nav.indexOf("dlgServices") < 0, "no Services row without services.control");

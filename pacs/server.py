@@ -24,6 +24,7 @@ from .notify import Notifier
 from .print_scp import PrintSCP
 from .qr import QrSCP
 from . import ris
+from .caught import CaughtStore
 from .ris import OrderStore, RisListener, _utc_stamp
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
@@ -263,6 +264,47 @@ def _order_brief(order: Optional[dict], fields: tuple) -> Optional[dict]:
     return {k: str(order.get(k, "") or "") for k in fields}
 
 
+def _dcm_today() -> str:
+    from datetime import date
+    return date.today().strftime("%Y%m%d")
+
+
+def _probe_verdict(rnd: dict) -> str:
+    """Read the four answers and say, in one sentence, where the fault is.
+
+    The operator can read the table themselves; this is the line that stops them
+    having to. It deliberately never says "working" on a count alone — an order
+    addressed to nobody reaches every modality, so a scanner seeing only those
+    is a scanner that is not being scheduled, however healthy the number looks.
+    """
+    p = rnd.get("probes", [])
+    if len(p) < 5:
+        return "probe incomplete"
+    a, b, c, d, e = p[0], p[1], p[2], p[3], p[4]
+    if not a["ok"]:
+        # The association itself failed: nothing downstream of it means anything.
+        return f"Could not reach the worklist source — {a['message']}. Check the host, port and its called AE title before reading anything else."
+    # Read narrowest first, and relax one key at a time. The first question that
+    # STARTS returning orders addressed to this station is the key that is wrong.
+    if a["for_this_station"] > 0:
+        return f"Working. {a['for_this_station']} order(s) addressed to this modality for today, and it would see them."
+    if a["count"] > 0 and a["for_nobody"] == a["count"]:
+        return f"The {a['count']} order(s) coming back are addressed to NOBODY, so every modality sees them. Nothing is scheduled to this one specifically."
+    if b["ok"] and b["for_this_station"] > 0:
+        return f"The MODALITY key is the problem. Drop it and {b['for_this_station']} order(s) for this station appear; the orders are not tagged with the modality this scanner asks for."
+    if c["ok"] and c["for_this_station"] > 0:
+        return f"Orders exist for this modality but not for today ({c['for_this_station']} on other dates). Check the date the scanner asks for, and the clock on both machines."
+    if d["ok"] and d["count"] > 0:
+        elsewhere = d["for_someone_else"]
+        return (f"The RIS has {d['count']} order(s) for today, but none for this station"
+                + (f" — {elsewhere} addressed to other stations." if elsewhere else
+                   " and none addressed to any station.")
+                + " The order is not being assigned to this AE title.")
+    if e["ok"] and e["count"] > 0:
+        return f"Nothing for today at all; {e['count']} order(s) exist on other dates."
+    return "The worklist source answered, and has nothing at all. The orders are not reaching the RIS."
+
+
 class PacsServer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -345,6 +387,10 @@ class PacsServer:
             log=self.log,
             match_on=cfg.ris.get("match_on", "accession"),
         )
+        # Deliberately NOT the order store. mwl.py serves every open order in
+        # that one, so a caught item filed there would be handed back out to
+        # this department's modalities. See pacs/caught.py.
+        self.caught = CaughtStore(store_dir=cfg.resolved("ris", "store_dir"), log=self.log)
         self.watcher = FolderWatcher(cfg, self.log, index=self.index)
         # The watcher's router outlives every save, and it is the only router in
         # the process built without a Config. Bind it to the live one HERE, next
@@ -933,6 +979,89 @@ class PacsServer:
             f"C-ECHO {d.name}: {res.message}", kind="echo"
         )
         return res
+
+    # ---- worklist probe ----------------------------------------------------
+    def probe_worklist(self, station_aet: str) -> dict:
+        """Ask the other RIS what it would give one of our modalities.
+
+        Several questions rather than one, because a single answer does not
+        locate a fault. A modality that is not seeing its schedule usually fails
+        for one of three reasons, and only the DIFFERENCES between these answers
+        tell them apart:
+
+          A  station + date + modality   the narrowest — closest to what a
+                                          scanner actually asks
+          B  station + date              drops the modality key
+          C  station, any date           drops the date — isolates a date or
+                                          timezone filter
+          D  any station, date           drops the station — orders exist, but
+                                          are not addressed to this scanner
+          E  any station, any date       is there anything there at all
+
+        One variable is relaxed at a time, on purpose. An earlier version folded
+        the modality key into the first question and then blamed the station for
+        its absence, which is a diagnosis that sends somebody to edit the wrong
+        field.
+
+        And a count alone still lies. An order with no ScheduledStationAETitle
+        reaches EVERY modality, so a scanner can look healthy while only ever
+        receiving the unaddressed spillover; CaughtStore splits each answer into
+        addressed-to-this-station, addressed-to-nobody and addressed-elsewhere
+        for exactly that reason.
+
+        The scanner's own AE title is borrowed as the calling AE — that is what
+        makes the answer the scanner's answer rather than ours. It is also why
+        the scanner has to be off the network first, which this code cannot
+        check and does not pretend to.
+        """
+        from .scu import c_find_worklist
+
+        src = self.cfg.worklist_source or {}
+        host, aet = str(src.get("host", "")).strip(), str(src.get("aet", "")).strip()
+        if not host or not aet:
+            return {"ok": False, "message": "No worklist source configured. Set the other RIS's "
+                                            "host, port and AE title in Settings first."}
+        station = str(station_aet or "").strip()
+        if not station:
+            return {"ok": False, "message": "Pick a modality to ask as"}
+        known = [m for m in self.cfg.modalities
+                 if str(m.get("aet", "")).strip().upper() == station.upper()]
+        if not known:
+            return {"ok": False, "message": f"'{station}' is not a registered modality. Add it "
+                                            f"under Configuration → Modalities first, so the "
+                                            f"AE title being borrowed is one somebody chose."}
+        modality = str(known[0].get("modality", "") or "")
+
+        d = Destination(name="worklist source", host=host, port=int(src.get("port", 105) or 105),
+                        aet=aet, tls=bool(src.get("tls", False)))
+        ctx = None
+        if d.tls:
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return {"ok": False, "message": f"TLS config error: {exc}"}
+
+        today = _dcm_today()
+        questions = [
+            (station, today, modality),   # A — narrowest
+            (station, today, ""),         # B — modality dropped
+            (station, "", ""),            # C — date dropped
+            ("", today, ""),              # D — station dropped
+            ("", "", ""),                 # E — everything dropped
+        ]
+        self.log.info(
+            f"Worklist probe: asking {d.host}:{d.port} ({d.aet}) as {station} — "
+            f"the modality must be off the network for this to mean anything",
+            kind="mwl",
+        )
+        probes = [c_find_worklist(d, station, station_aet=sa, date=dt, modality=md, tls_context=ctx)
+                  for sa, dt, md in questions]
+        rnd = self.caught.add_round(station, {"host": d.host, "port": d.port, "aet": d.aet}, probes)
+        # Audited by the web layer, which is where the actor is known — see
+        # api_worklist_probe(). Borrowing somebody else's AE title is worth a
+        # name against it.
+        return {"ok": True, "round": rnd, "message": _probe_verdict(rnd),
+                "items": sum(p.get("count", 0) for p in rnd["probes"])}
 
     # ---- study history / browse -------------------------------------------
     def _group_root(self, group: str) -> Optional[str]:
