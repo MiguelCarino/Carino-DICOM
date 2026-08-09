@@ -135,22 +135,45 @@
 
   /* Nav follows capability. Derived from data-cap on each button rather than a
      table in here, so the markup and the rule cannot drift; a button with no
-     data-cap is common ground and always shown. */
+     data-cap is common ground and always shown.
+
+     data-cap holds a SPACE-SEPARATED OR-LIST since the merge: Configuration
+     answers to config.read, routing.read or auth.manage, because it holds one
+     tab for each. A row appears if the profile holds ANY of them; the tabs
+     inside it are then gated one at a time on their own single capability.
+     Both halves are needed. The row alone would show a Radiologist a
+     Configuration button (they hold routing.read) whose Settings tab carries
+     the shutdown control and the API-token field. */
+  function capAllowed(el) {
+    const cap = (el.dataset.cap || "").trim();
+    if (!cap) return true;                       // common ground
+    return cap.split(/\s+/).some((c) => can(c));
+  }
   function applyCapabilities() {
-    let activeHidden = false;
-    document.querySelectorAll(".navbtn").forEach((b) => {
-      const cap = b.dataset.cap;
-      const allowed = !cap || can(cap);
-      b.hidden = !allowed;
-      if (!allowed && b.classList.contains("active")) activeHidden = true;
+    document.querySelectorAll(".navbtn").forEach((b) => { b.hidden = !capAllowed(b); });
+    // Badges lead to a tab, so they follow the tab's capability, not the row's.
+    document.querySelectorAll(".navrow .badge[data-panel]").forEach((b) => {
+      b.dataset.forbidden = capAllowed(b) ? "" : "1";
     });
+    // Overview is common ground, but two of its tiles and the ticker point at
+    // panels a restricted profile cannot hold. Left as buttons they would be
+    // dead clicks — and a button that does nothing reads as broken software to
+    // somebody working an outage. Demote them to the plain readout the markup
+    // already uses for Free space, which counts something and leads nowhere.
+    document.querySelectorAll("#dlgOverview [data-panel]").forEach((t) => {
+      t.classList.toggle("ov-inert", !capAllowed(t));
+    });
+    // The first-run chooser lives on the ungated Overview, so every profile can
+    // see it; only one that may work the services should be able to open it.
+    const ovSetup = $("ovSetupOpen");
+    if (ovSetup) ovSetup.hidden = !can("services.control");
     // Somebody whose permissions just narrowed — an administrator edited them
     // mid-session — could be left staring at a panel they can no longer load.
-    // Move them somewhere they can actually be.
-    if (activeHidden) {
-      const first = document.querySelector(".navbtn:not([hidden])");
-      if (first) showPanel(first.dataset.panel);
-    }
+    // Repair the tab strips first (silently: see normalizeTabs), then move them
+    // somewhere they can actually be.
+    normalizeTabs();
+    const activeBtn = document.querySelector('.navbtn[data-panel="' + activePanel + '"]');
+    if (activeBtn && activeBtn.hidden) showPanel(firstAllowedPanel());
     const whoEl = $("whoami");
     if (whoEl) {
       whoEl.hidden = !profilesOn || !me;
@@ -166,6 +189,8 @@
     // nothing and then shows a gate you cannot satisfy.
     const out = $("signOut");
     if (out) out.hidden = !authRequired;
+    // The header chips stay visible for everyone and lose only their click.
+    chipAuthority();
   }
 
   function setAuthMsg(msg, isNote) {
@@ -445,10 +470,11 @@
     if (!booted) {
       booted = true;
       openInitialPanel();
-    } else if (loaders[activePanel]) {
+    } else {
       // Coming back from a 401: the operator's place was never lost, so the
-      // panel they were on is what gets refreshed.
-      loaders[activePanel]();
+      // pane they were on is what gets refreshed. runActiveLoader, not a bare
+      // loaders[] lookup — three of the six panels have no entry there.
+      runActiveLoader();
     }
     pollStatus();
     pollLog();
@@ -522,29 +548,17 @@
 
     editorUrl = (s.editor_url || "").trim();
 
-    // Pending-imports badge on the 📎 button.
-    const badge = $("pendingBadge");
-    if (badge) {
-      const n = s.pending || 0;
-      badge.textContent = String(n);
-      badge.hidden = n === 0;
-    }
-
-    // Stuck-sends badge on the ⚠ button.
-    const sBadge = $("stuckBadge");
-    if (sBadge) {
-      const n = s.stuck || 0;
-      sBadge.textContent = String(n);
-      sBadge.hidden = n === 0;
-    }
-
-    // Open-orders badge on the 📋 button.
-    const oBadge = $("ordersBadge");
-    if (oBadge) {
-      const n = (rs.counts && rs.counts.open) || 0;
-      oBadge.textContent = String(n);
-      oBadge.hidden = n === 0;
-    }
+    // The two counts that share the Studies row, and the one on Orders. Each
+    // carries its own glyph and its own spoken name: two bare numbers on one
+    // row cannot say which is which, and when one is hidden at zero the
+    // survivor is ambiguous with nothing but colour to tell them apart.
+    // TN() is called with the literal at each site, not with a key threaded
+    // through setBadge: i18n-parity greps for the literal inside a TN(), and a
+    // key held in a variable is a key it cannot see.
+    const nPend = s.pending || 0, nStuck = s.stuck || 0, nOrd = (rs.counts && rs.counts.open) || 0;
+    setBadge("pendingBadge", nPend, "📎", TN(nPend, "{n} pending imports"));
+    setBadge("stuckBadge", nStuck, "⚠", TN(nStuck, "{n} stuck sends"));
+    setBadge("ordersBadge", nOrd, "", TN(nOrd, "{n} open orders"));
 
     // Low-disk warning banner (only when the storage volume is below the floor).
     const dw = $("diskWarn");
@@ -672,9 +686,14 @@
     if (setupActive) {
       // Entered before the first status landed (boot #setup): seed now.
       if (!setupSeeded) seedSetup(s);
-    } else if (!setupDismissed && s.setup && s.setup.needed) {
-      // Door 1 — nothing has ever been chosen on this machine.
-      showPanel("dlgServices");
+    } else if (!setupDismissed && s.setup && s.setup.needed && can("services.control")) {
+      // Door 1 — nothing has ever been chosen on this machine. Only for
+      // somebody who may actually choose: opening the chooser for a profile
+      // without services.control would set setupActive on a panel their nav row
+      // does not offer, and leave the appliance wedged in a setup state with no
+      // chooser on screen. showPanelInternal because the chooser predates
+      // anything there is to be entitled to.
+      showPanelInternal("dlgServices");
       enterSetup();
     }
 
@@ -1421,7 +1440,13 @@
       chip.id = "nav_" + svc.key;
       chip.dataset.on = "false";
       chip.dataset.svc = svc.label;               // English key, for retranslation
-      chip.title = TF("{svc} — click to start/stop", { svc: T(svc.label) });
+      // Born disabled. This runs at DOMContentLoaded, before boot()'s
+      // GET /api/auth has resolved, and can() answers true for everyone until
+      // profilesOn is known — so starting enabled would arm six service
+      // switches for a receptionist for the length of that round-trip.
+      // applyCapabilities() enables them a moment later if the profile holds
+      // services.control.
+      chip.disabled = true;
       const dot = document.createElement("span"); dot.className = "svc-chip-dot";
       const lab = document.createElement("span"); lab.className = "svc-chip-label"; lab.textContent = T(svc.label);
       chip.append(dot, lab);
@@ -1429,14 +1454,59 @@
       box.appendChild(chip);
     });
     right.insertBefore(box, right.firstChild);
+    chipAuthority();
     return true;
+  }
+  /* Who may WORK the chips — not who may see them.
+     Service state is not privileged: web.py's _STATUS_GATES withholds
+     destinations, routing, disk, pending, stuck, ris, audit and notify from a
+     profile that lacks the capability, and deliberately does not withhold
+     receiver / watcher / printer / mwl / qr. Every profile already gets live
+     service state on the 2s poll, and the ungated Overview prints it as the
+     "Services on" tile. So hiding these chips would take the department's only
+     always-on-screen "the receiver is dead" indicator away from the two people
+     standing nearest the modality while disclosing nothing.
+     The defect is the chip's CLICK — six unconfirmed service stops in the
+     permanent chrome, which the server then refuses with a 403 for anyone
+     without services.control. Disable the button, keep the dot.
+     Re-asserted from applyCapabilities() on every poll rather than at mount,
+     because mountServiceChips() returns early once #svcNav exists and a
+     mount-time assignment would run exactly once. */
+  function chipAuthority() {
+    const allowed = can("services.control");
+    NAV_SERVICES.forEach((svc) => {
+      const chip = document.getElementById("nav_" + svc.key);
+      if (!chip) return;
+      chip.disabled = !allowed;
+      chip.title = chipTitle(svc, chip, allowed);
+    });
+  }
+  /* A count badge beside a nav row. Hidden at zero — a badge that reads "0" is
+     an alarm that is always on — and named for a screen reader, since the glyph
+     and the colour are the only things a sighted reader has to tell two badges
+     on one row apart. */
+  function setBadge(id, n, glyph, label) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = glyph ? glyph + " " + n : String(n);
+    el.hidden = n === 0;
+    el.setAttribute("aria-label", label);
+    el.title = label;
+  }
+  function chipTitle(svc, chip, allowed) {
+    const name = T(svc.label);
+    if (allowed) return TF("{svc} — click to start/stop", { svc: name });
+    // Read-only: say what it IS, since the reader can no longer ask it to change.
+    return chip.dataset.on === "true"
+      ? TF("{svc} — running", { svc: name })
+      : TF("{svc} — stopped", { svc: name });
   }
   // Re-label the already-mounted chips after a language switch.
   function relabelServiceChips() {
     NAV_SERVICES.forEach((svc) => {
       const chip = document.getElementById("nav_" + svc.key);
       if (!chip) return;
-      chip.title = TF("{svc} — click to start/stop", { svc: T(svc.label) });
+      chip.title = chipTitle(svc, chip, can("services.control"));
       const lab = chip.querySelector(".svc-chip-label");
       if (lab) lab.textContent = T(svc.label);
     });
@@ -1446,6 +1516,11 @@
     if (!chip) return;
     chip.dataset.on = String(!!on);
     chip.classList.toggle("on", !!on);
+    // The read-only title names the state, so it has to follow the state.
+    if (chip.disabled) {
+      const svc = NAV_SERVICES.find((s) => s.key === key);
+      if (svc) chip.title = chipTitle(svc, chip, false);
+    }
   }
   function showChip(key, show) {
     const chip = document.getElementById("nav_" + key);
@@ -2482,6 +2557,11 @@
     // here from the two halves would put a second, stale explanation of a
     // withheld study on the one screen the operator trusts.
     row.querySelector(".held-msg").textContent = h.message || "";
+    // Gated at clone time: these rows are built after applyCapabilities has
+    // run, so they never pass under its sweep. A Radiologist holds routing.read
+    // but not config.read and gets one of the two jumps, which is exactly the
+    // half of the remedy they can actually perform.
+    row.querySelectorAll(".held-jump [data-cap]").forEach((b) => { b.hidden = !capAllowed(b); });
     return row;
   }
 
@@ -3342,15 +3422,39 @@
     return d;
   }
 
-  const PANELS = ["dlgOverview", "dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgRouting", "dlgSettings", "dlgLogs", "dlgPeople", "dlgAudit"];
+  const PANELS = ["dlgOverview", "dlgServices", "dlgStudies", "dlgOrders", "dlgConfig", "dlgActivity"];
+  /* Three of the six hold a tab strip, and the absorbed panels survive as the
+     PANE ids inside them. Keeping dlgHistory / dlgStuck / dlgSettings / … as
+     real element ids is not sentiment: it is what lets the old #dlgStuck
+     bookmarks in the manuals resolve to something that exists, and what keeps
+     every id-scoped rule in styles.css bound to the markup it was written for. */
+  const PANEL_TABS = {
+    dlgStudies:  { history: "dlgHistory", pending: "dlgPending", stuck: "dlgStuck" },
+    dlgConfig:   { destinations: "dlgDests", routing: "dlgRouting", settings: "dlgSettings", people: "dlgPeople" },
+    dlgActivity: { logs: "dlgLogs", audit: "dlgAudit" },
+  };
+  // Where a bare panel id lands when nothing else says otherwise. Configuration
+  // opens on Destinations rather than Settings: Settings is the densest pane in
+  // the app and holds the shutdown control, and it should be somewhere you went
+  // deliberately, not somewhere you arrive.
+  const DEFAULT_TAB = { dlgStudies: "history", dlgConfig: "destinations", dlgActivity: "logs" };
+  // Remembered per panel, so coming back to Configuration returns you to the tab
+  // you were working in. Written only by selectTab.
+  const activeTab = Object.assign({}, DEFAULT_TAB);
+
   // Routing needs no fetch — its rules arrive with the config — but the
   // destination table may have gained or lost a node since they were drawn, so
   // opening the panel re-offers the current list without losing a tick.
   const loaders = {
-    dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck,
+    dlgOrders: loadOrders,
+  };
+  // Keyed by PANE id, because that is the granularity that now decides what is
+  // on screen.
+  const tabLoaders = {
+    dlgHistory: loadHistory, dlgPending: loadPending, dlgStuck: loadStuck,
     dlgRouting: refreshRuleDests,
     // No fetch either: the index / DICOMweb / de-identification readouts ride
-    // on the status poll, which skips them while the panel is shut.
+    // on the status poll, which skips them while the pane is shut.
     dlgSettings: () => {
       if (!lastStatus) return;
       renderIndex(lastStatus.index || {});
@@ -3362,15 +3466,169 @@
   };
   let activePanel = "dlgServices";
 
-  function showPanel(id) {
+  /* Which panel a profile lands on. An explicit order, NOT the first visible
+     row in DOM order: that would put Reception — who holds studies.read — on
+     Studies, whose first tab is a list of every stored patient's name, ID and
+     date of birth. Overview is skipped for the same reason it is never
+     persisted in the hash (it prints one patient name), and Orders comes early
+     because order intake is what the front desk is doing during the outage this
+     appliance exists for. */
+  const LANDING_ORDER = ["dlgServices", "dlgOrders", "dlgStudies", "dlgActivity", "dlgConfig", "dlgOverview"];
+  function firstAllowedPanel() {
+    for (const id of LANDING_ORDER) {
+      const b = document.querySelector('.navbtn[data-panel="' + id + '"]');
+      if (b && !b.hidden) return id;
+    }
+    return "dlgOverview";
+  }
+  function tabStrip(panelId) {
+    const p = $(panelId);
+    return p ? p.querySelector(".panel-tabs") : null;
+  }
+  function tabButton(panelId, tabId) {
+    const strip = tabStrip(panelId);
+    return strip ? strip.querySelector('.hist-tab[data-tab="' + tabId + '"]') : null;
+  }
+  function firstAllowedTab(panelId) {
+    const strip = tabStrip(panelId);
+    const b = strip && strip.querySelector(".hist-tab[data-tab]:not([hidden])");
+    return b ? b.dataset.tab : null;
+  }
+
+  /* Selection and loading are separate arguments on purpose.
+
+     applyCapabilities() has to repair every strip in the app on any poll where
+     the profile changed, including strips inside CLOSED panels. If repairing
+     also loaded, narrowing a Radiologist's permissions would fire GET /api/
+     studies, /api/stuck and /api/pending for a Studies panel that is not on
+     screen — five of the seven loaders carry no can() guard of their own. So
+     the repair pass passes load:false and only moves `hidden` and `.active`
+     around; fetching belongs to opening a panel and to clicking a tab. */
+  function selectTab(panelId, tabId, opts) {
+    const tabs = PANEL_TABS[panelId];
+    if (!tabs) return;
+    const load = !opts || opts.load !== false;
+    // Refuse a tab the profile may not hold, exactly as showPanel refuses a
+    // panel. Without this, #configuration/people hands a Radiologist the People
+    // pane and #configuration/settings hands them the shutdown control — the
+    // panel-level gate says nothing about tabs, and every tab is a deep link.
+    const wanted = tabButton(panelId, tabId);
+    if (!wanted || wanted.hidden) tabId = firstAllowedTab(panelId);
+    if (!tabId) return;                       // no tab in this panel is allowed
+    activeTab[panelId] = tabId;
+    const strip = tabStrip(panelId);
+    if (strip) {
+      strip.querySelectorAll(".hist-tab[data-tab]").forEach((b) => {
+        const on = b.dataset.tab === tabId;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;             // roving tabindex: one stop per strip
+      });
+    }
+    Object.entries(tabs).forEach(([tid, paneId]) => {
+      const pane = $(paneId);
+      if (pane) pane.hidden = tid !== tabId;
+    });
+    if (load) runActiveLoader();
+  }
+
+  /* Repair every strip, unconditionally — not "if the active tab is hidden".
+     A strip whose active tab was just forbidden and a strip that never had an
+     active marker are the same problem, and only the unconditional form fixes
+     both. Silent: no loads, no hash write. */
+  function normalizeTabs() {
+    Object.keys(PANEL_TABS).forEach((panelId) => {
+      const strip = tabStrip(panelId);
+      if (!strip) return;
+      strip.querySelectorAll(".hist-tab[data-tab]").forEach((b) => { b.hidden = !capAllowed(b); });
+      const current = tabButton(panelId, activeTab[panelId]);
+      const want = (current && !current.hidden) ? activeTab[panelId] : firstAllowedTab(panelId);
+      if (want) selectTab(panelId, want, { load: false });
+      writeTabSub(panelId);
+    });
+  }
+  /* The line under a merged panel's title, listing what is inside it. Built
+     from the tabs that are actually VISIBLE: a fixed subtitle would promise a
+     Radiologist "settings · destinations · routing · people" above a strip
+     holding two of them. */
+  const TAB_SUB = { dlgStudies: "studiesSub", dlgConfig: "configSub", dlgActivity: "activitySub" };
+  function writeTabSub(panelId) {
+    const el = $(TAB_SUB[panelId]);
+    const strip = tabStrip(panelId);
+    if (!el || !strip) return;
+    const names = [...strip.querySelectorAll(".hist-tab[data-tab]:not([hidden])")]
+      .map((b) => (b.textContent || "").trim().toLowerCase());
+    el.textContent = names.join(" · ");
+  }
+
+  /* The one place that decides what "refresh what is on screen" means. Every
+     caller used to write `loaders[activePanel]` inline; after the merge three of
+     the six panels have no entry there, and those bare lookups would silently
+     become no-ops on the two paths that matter most — coming back from a 401,
+     and repainting after a language switch (i18n.js's static pass runs first and
+     leaves every JS-rendered row in the old language until this runs). */
+  function runActiveLoader() {
+    const tabs = PANEL_TABS[activePanel];
+    if (tabs) {
+      const paneId = tabs[activeTab[activePanel]];
+      if (paneId && tabLoaders[paneId]) tabLoaders[paneId]();
+      return;
+    }
+    if (loaders[activePanel]) loaders[activePanel]();
+  }
+
+  function showPanel(id, opts) {
     if (!PANELS.includes(id)) return;
+    // A panel whose nav row the profile cannot hold is not somewhere to be.
+    // Internal callers (the first-run chooser) pass allowForbidden, because the
+    // setup door opens before there is anything to be entitled to.
+    const btn = document.querySelector('.navbtn[data-panel="' + id + '"]');
+    if (btn && btn.hidden && !(opts && opts.allowForbidden)) id = firstAllowedPanel();
     activePanel = id;
     PANELS.forEach((pid) => { const p = $(pid); if (p) p.hidden = pid !== id; });
     document.querySelectorAll(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
-    if (loaders[id]) loaders[id]();
+    if (PANEL_TABS[id]) {
+      // Reconcile before painting: opening a panel must never show a pane the
+      // strip disagrees with.
+      selectTab(id, (opts && opts.tab) || activeTab[id], { load: false });
+    }
+    runActiveLoader();
     // Overview has no loader — it is drawn by the status poll — so redraw it from
     // the last poll on open instead of showing a blank panel for up to 2s.
     if (id === "dlgOverview" && lastStatus) renderOverview(lastStatus);
+    if (!(opts && opts.silent)) writeHash();
+  }
+  // The first-run chooser reaches Services before capabilities mean anything.
+  function showPanelInternal(id) { showPanel(id, { allowForbidden: true }); }
+
+  /* Every jump goes through here — nav rows, count badges, Overview tiles, the
+     ticker, the inline remedies on a held-back row. One function so a jump can
+     never leave a strip's highlight disagreeing with what is on screen, which
+     is the failure the Received/Sent strip had when a tile set histGroup behind
+     its back and the strip went on saying "Received". */
+  function goTo(panelId, tabId) {
+    if (!PANELS.includes(panelId)) {
+      // A pane id: the caller is naming what it wants to see, not where it
+      // lives. Translate through the same table the legacy hashes use.
+      const legacy = LEGACY_HASH[panelId];
+      if (!legacy) return;
+      panelId = legacy[0];
+      tabId = tabId || legacy[1] || null;
+    }
+    if (tabId === "received" || tabId === "sent") {
+      showPanel(panelId, { tab: "history", silent: true });
+      setHistGroup(tabId);
+      writeHash();
+      return;
+    }
+    showPanel(panelId, { tab: tabId });
+  }
+  // The one writer of histGroup, so the strip and the list cannot disagree.
+  function setHistGroup(group) {
+    histGroup = group;
+    document.querySelectorAll("#dlgHistory .hist-tab[data-group]").forEach((t) =>
+      t.classList.toggle("active", t.dataset.group === group));
+    loadHistory();
   }
   function reflowActive() { /* no-op: panels scroll internally now (kept for callers) */ }
 
@@ -3520,9 +3778,9 @@
     const setupOpen = $("setupOpen");
     if (setupOpen) setupOpen.addEventListener("click", enterSetup);
     const setupFromSettings = $("setupFromSettings");
-    if (setupFromSettings) setupFromSettings.addEventListener("click", () => { showPanel("dlgServices"); enterSetup(); });
+    if (setupFromSettings) setupFromSettings.addEventListener("click", () => { showPanelInternal("dlgServices"); enterSetup(); });
     const ovSetupOpen = $("ovSetupOpen");
-    if (ovSetupOpen) ovSetupOpen.addEventListener("click", () => { showPanel("dlgServices"); enterSetup(); });
+    if (ovSetupOpen) ovSetupOpen.addEventListener("click", () => { showPanelInternal("dlgServices"); enterSetup(); });
     const setupCancel = $("setupCancel");
     if (setupCancel) setupCancel.addEventListener("click", exitSetup);
     const setupApply = $("setupApply");
@@ -3533,27 +3791,49 @@
         if (card) card.classList.toggle("chosen", b.checked);
         updateSetupCount();
       }));
-    // Overview tiles and the ticker each carry data-panel: every figure on the
-    // panel leads to the screen that owns the thing it counts.
-    document.querySelectorAll("#dlgOverview [data-panel]").forEach((b) =>
-      b.addEventListener("click", () => showPanel(b.dataset.panel)));
+    /* One door for everything that jumps somewhere: nav rows, the count badges
+       beside them, the Overview tiles, the ticker, and the inline remedies in a
+       held-back row. They all carry data-panel and may carry data-tab, so one
+       handler covers the lot and a new jump target needs no new wiring. */
+    document.addEventListener("click", (e) => {
+      const j = e.target.closest("[data-panel]");
+      if (!j || !j.dataset.panel) return;
+      if (j.dataset.forbidden === "1" || j.classList.contains("ov-inert")) return;
+      goTo(j.dataset.panel, j.dataset.tab || null);
+    });
 
-    // Sidebar: each button expands its panel in the right-hand pane.
-    document.querySelectorAll(".navbtn").forEach((b) =>
-      b.addEventListener("click", () => showPanel(b.dataset.panel)));
-
-    // History Received/Sent sub-tabs.
-    document.querySelectorAll(".hist-tab").forEach((tab) =>
+    /* Panel-level tab strips (Studies / Configuration / Activity). Scoped to
+       .panel-tabs and to [data-tab]: the Orders strip is keyed on data-ostatus
+       and the History strip on data-group, and neither is a panel tab. */
+    document.querySelectorAll(".panel-tabs .hist-tab[data-tab]").forEach((tab) =>
       tab.addEventListener("click", () => {
-        document.querySelectorAll(".hist-tab").forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
-        histGroup = tab.dataset.group;
-        loadHistory();
+        const panel = tab.closest(".workpanel");
+        if (panel) { selectTab(panel.id, tab.dataset.tab); writeHash(); }
+      }));
+    // Arrow keys along a strip, as a tablist is expected to behave. selectTab
+    // owns the roving tabindex, so the moved-to tab is the one focus lands on.
+    document.querySelectorAll(".panel-tabs .hist-tabs").forEach((strip) =>
+      strip.addEventListener("keydown", (e) => {
+        const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        const tabs = [...strip.querySelectorAll(".hist-tab[data-tab]:not([hidden])")];
+        const i = tabs.indexOf(document.activeElement);
+        if (i < 0) return;
+        e.preventDefault();
+        const next = tabs[(i + step + tabs.length) % tabs.length];
+        const panel = next.closest(".workpanel");
+        if (panel) { selectTab(panel.id, next.dataset.tab); writeHash(); next.focus(); }
+      }));
+
+    // History Received/Sent, inside the Studies History pane.
+    document.querySelectorAll("#dlgHistory .hist-tab[data-group]").forEach((tab) =>
+      tab.addEventListener("click", () => {
+        setHistGroup(tab.dataset.group);
       }));
     $("histRefresh").addEventListener("click", loadHistory);
     $("histDeleteAll").addEventListener("click", histDeleteAll);
     // RIS orders: Open/Closed sub-tabs + form + actions.
-    document.querySelectorAll("#dlgOrders .hist-tab").forEach((tab) =>
+    document.querySelectorAll("#dlgOrders .hist-tab[data-ostatus]").forEach((tab) =>
       tab.addEventListener("click", () => {
         document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.remove("active"));
         tab.classList.add("active");
@@ -3581,6 +3861,9 @@
       retitleWatcherWarn();
       // Rendered by this file, so the language pass does not reach them.
       renderAuthState();
+      // The tab strips DID just get retranslated by the static pass, so the
+      // subtitles built from their labels are now a sentence in two languages.
+      Object.keys(PANEL_TABS).forEach(writeTabSub);
       // The gate's heading and lede are the opposite problem: they DO carry
       // data-i18n, so the language pass writes the token wording back over
       // whichever shape the gate is actually in. Switch language in front of
@@ -3594,21 +3877,22 @@
       }
       if (gateOpen) return;      // behind the prompt there is nothing to refetch
       pollStatus();
-      if (loaders[activePanel]) loaders[activePanel]();
+      // i18n.js's static data-i18n pass has already run (it registers at script
+      // eval, this handler inside DOMContentLoaded), so everything app.js drew
+      // itself — every history, stuck, pending, order, person and audit row —
+      // is still in the old language until this repaints it.
+      runActiveLoader();
     });
 
-    // Persist the panel in the hash so a reload comes back where the operator
-    // was — except Overview. #dlgOverview stays deep-linkable (someone who asks
-    // for it by URL gets it), but it must never become the panel an UNATTENDED
-    // screen restores to: it prints a patient name and an accession, and a
-    // reload, an Electron restart that keeps the fragment or a kiosk recovery
-    // would all land on it after a single visit. Not persisting is the option
-    // that keeps both halves: the deliberate link works, the accident does not.
-    document.querySelectorAll(".navbtn").forEach((b) =>
-      b.addEventListener("click", () => {
-        if (b.dataset.panel === "dlgOverview") return;
-        try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {}
-      }));
+    // Back, and the address bar. popstate is the ONLY resolver: pushState is
+    // silent, so a programmatic panel change cannot re-enter through hashchange.
+    // hashchange exists solely for somebody editing the fragment by hand, and
+    // short-circuits when it already matches what is rendered.
+    window.addEventListener("popstate", () => resolveHash(location.hash));
+    window.addEventListener("hashchange", () => {
+      if (location.hash === currentHash()) return;
+      resolveHash(location.hash);
+    });
     retitleWatcherWarn();
     // Auth before anything else. With a token configured every /api route 401s,
     // so loading the config or starting the pollers first would just knock on a
@@ -3617,18 +3901,72 @@
     boot();
   });
 
-  // Deep-link: #dlgSettings etc. opens that panel; default is the cards. #setup
-  // is not a panel but a state of the cards, so it is branched BEFORE the
-  // fallback — that line would otherwise swallow it as an unknown hash. Run
-  // once, when the dashboard actually starts: behind the token prompt there is
-  // no panel to open yet.
+  /* ── The address bar ─────────────────────────────────────────────
+     One writer, one canonical form. showPanel() and selectTab() go through
+     writeHash(), which pushes with history.pushState — silent, so it fires
+     neither hashchange nor popstate and a transition can never write twice.
+     The form is always #panel or #panel/tab, so there are not two spellings of
+     one state to ping-pong between.
+
+     Names are the words on the buttons, not the element ids: #studies/stuck is
+     something you can read out over a phone during an outage, which is the
+     situation this dashboard is for. The old #dlgXxx spellings still resolve —
+     the manuals and any bookmark made in the last year use them. */
+  const HASH_NAME = {
+    dlgOverview: "overview", dlgServices: "services", dlgStudies: "studies",
+    dlgOrders: "orders", dlgConfig: "configuration", dlgActivity: "activity",
+  };
+  const PANEL_BY_HASH = {};
+  Object.entries(HASH_NAME).forEach(([id, name]) => { PANEL_BY_HASH[name] = id; });
+  // Every absorbed panel id resolves to the panel/tab that swallowed it, so a
+  // bookmarked #dlgStuck still lands on the stuck list.
+  const LEGACY_HASH = { dlgOverview: ["dlgOverview"], dlgServices: ["dlgServices"], dlgOrders: ["dlgOrders"] };
+  Object.entries(PANEL_TABS).forEach(([panelId, tabs]) =>
+    Object.entries(tabs).forEach(([tabId, paneId]) => { LEGACY_HASH[paneId] = [panelId, tabId]; }));
+  LEGACY_HASH.dlgStudies = ["dlgStudies"];
+  LEGACY_HASH.dlgConfig = ["dlgConfig"];
+  LEGACY_HASH.dlgActivity = ["dlgActivity"];
+
+  let routing = false;              // re-entrancy guard for the resolver
+  function currentHash() {
+    if (activePanel === "dlgOverview") return location.hash;   // never persisted, see below
+    const name = HASH_NAME[activePanel];
+    if (!name) return location.hash;
+    const tab = PANEL_TABS[activePanel] ? activeTab[activePanel] : null;
+    return "#" + name + (tab ? "/" + tab : "");
+  }
+  /* Overview is deep-linkable but never persisted. Someone who asks for it by
+     URL gets it; it must never become the panel an UNATTENDED screen restores
+     to, because it prints a patient name and an accession and a reload, an
+     Electron restart that keeps the fragment, or a kiosk recovery would all
+     land there after a single visit. */
+  function writeHash() {
+    if (routing) return;
+    if (activePanel === "dlgOverview") return;
+    const want = currentHash();
+    if (!want || want === location.hash) return;
+    try { history.pushState(null, "", want); } catch (e) { /* file:// and friends */ }
+  }
+  function resolveHash(hash) {
+    const raw = (hash || "").replace(/^#/, "");
+    if (!raw) return false;
+    if (raw === "setup") { showPanelInternal("dlgServices"); enterSetup(); return true; }
+    const [head, tail] = raw.split("/");
+    let panelId = PANEL_BY_HASH[head];
+    let tabId = tail || null;
+    if (!panelId && LEGACY_HASH[head]) { panelId = LEGACY_HASH[head][0]; tabId = LEGACY_HASH[head][1] || null; }
+    if (!panelId) return false;
+    routing = true;                 // the resolver reads the URL; it must not rewrite it
+    try { showPanel(panelId, { tab: tabId, silent: true }); } finally { routing = false; }
+    return true;
+  }
+  /* Run once, when the dashboard actually starts: behind the token prompt there
+     is no panel to open yet. An unrecognised fragment is LEFT ALONE here rather
+     than overwritten — at boot it may belong to something other than this
+     router, and clobbering it would destroy the parameter before its owner
+     could read it. Every later panel change writes normally. */
   function openInitialPanel() {
-    const fromHash = (location.hash || "").replace("#", "");
-    if (fromHash === "setup") {
-      showPanel("dlgServices");
-      enterSetup();
-    } else {
-      showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
-    }
+    if (resolveHash(location.hash)) return;
+    showPanel(firstAllowedPanel(), { silent: !!location.hash });
   }
 })();

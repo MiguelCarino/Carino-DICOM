@@ -30,27 +30,57 @@
     <div class="shell">
       <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
       <nav class="sidebar" id="sidebar">
-        <!-- Overview is first in the list but NOT the landing panel: Services
+        <!-- Six rows, not twelve. Nine of the old twelve were three questions
+             about one pile of files, four things you set at commissioning, and
+             two ledgers — so they are three panels with tab strips, and the
+             nouns that used to be here are the tab labels.
+
+             Overview is first in the list but NOT the landing panel: Services
              keeps `active` because it is what an unattended screen shows all
-             day, and Overview may put a patient name on the wall. -->
-        <button class="navbtn" data-panel="dlgOverview"><span class="nav-ico">📊</span> <span data-i18n>Overview</span></button>
-        <button class="navbtn active" data-panel="dlgServices" data-cap="services.control"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
-        <button class="navbtn" data-panel="dlgHistory" data-cap="studies.read"><span class="nav-ico">🗂</span> <span data-i18n>History</span></button>
-        <button class="navbtn" data-panel="dlgOrders" data-cap="orders.read"><span class="nav-ico">📋</span> <span data-i18n>Orders</span><span class="badge" id="ordersBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgPending" data-cap="studies.read"><span class="nav-ico">📎</span> <span data-i18n>Pending</span><span class="badge" id="pendingBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgStuck" data-cap="studies.read"><span class="nav-ico">⚠</span> <span data-i18n>Stuck</span><span class="badge warn" id="stuckBadge" hidden>0</span></button>
-        <button class="navbtn" data-panel="dlgDests" data-cap="routing.read"><span class="nav-ico">🌐</span> <span data-i18n>Destinations</span></button>
-        <button class="navbtn" data-panel="dlgRouting" data-cap="routing.read"><span class="nav-ico">🔀</span> <span data-i18n>Routing</span></button>
-        <button class="navbtn" data-panel="dlgSettings" data-cap="config.read"><span class="nav-ico">⚙</span> <span data-i18n>Settings</span></button>
-        <button class="navbtn" data-panel="dlgLogs" data-cap="logs.read"><span class="nav-ico">📄</span> <span data-i18n>Logs</span></button>
-        <button class="navbtn" data-panel="dlgPeople" data-cap="auth.manage"><span class="nav-ico">👥</span> <span data-i18n>People</span></button>
-        <button class="navbtn" data-panel="dlgAudit" data-cap="audit.read"><span class="nav-ico">🔒</span> <span data-i18n>Audit</span></button>
+             day, and Overview may put a patient name on the wall.
+
+             data-cap is a space-separated OR-list on the merged rows: the row
+             appears if the profile holds ANY of the capabilities its tabs need,
+             and each tab is then gated on its own. Reception holds none of
+             config.read / routing.read / auth.manage, so Configuration is
+             absent for them entirely.
+
+             The count badges are their own <button>s beside the row rather than
+             <span>s inside it. A span cannot take focus and a nested <button>
+             is invalid HTML, so the old shape made "one click to Stuck" true
+             for a mouse and false for a keyboard. Each carries its own glyph
+             and its own accessible name, because "Studies 2" cannot say whether
+             two studies are waiting or two forwards are dead — and colour alone
+             would be the only other clue. -->
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgOverview"><span class="nav-ico">📊</span> <span data-i18n>Overview</span></button>
+        </div>
+        <div class="navrow">
+          <button class="navbtn active" data-panel="dlgServices" data-cap="services.control"><span class="nav-ico">🖥</span> <span data-i18n>Services</span></button>
+        </div>
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgStudies" data-cap="studies.read"><span class="nav-ico">🗂</span> <span data-i18n>Studies</span></button>
+          <button class="badge" id="pendingBadge" data-panel="dlgStudies" data-tab="pending" data-cap="studies.read" hidden>📎 0</button>
+          <button class="badge warn" id="stuckBadge" data-panel="dlgStudies" data-tab="stuck" data-cap="studies.read" hidden>⚠ 0</button>
+        </div>
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgOrders" data-cap="orders.read"><span class="nav-ico">📋</span> <span data-i18n>Orders</span></button>
+          <button class="badge" id="ordersBadge" data-panel="dlgOrders" data-cap="orders.read" hidden>0</button>
+        </div>
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgConfig" data-cap="config.read routing.read auth.manage"><span class="nav-ico">⚙</span> <span data-i18n>Configuration</span></button>
+        </div>
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgActivity" data-cap="logs.read audit.read"><span class="nav-ico">📄</span> <span data-i18n>Activity</span></button>
+        </div>
         <!-- Who this browser is signed in as. On a shared front-desk machine
              the most expensive mistake is acting under somebody else's name
              without noticing, so it sits in the nav where it is always on
              screen, not behind a menu. -->
         <div class="whoami" id="whoami" hidden></div>
-        <button class="navbtn signout" id="signOut" hidden><span class="nav-ico">⎋</span> <span data-i18n>Sign out</span></button>
+        <div class="navrow">
+          <button class="navbtn signout" id="signOut" hidden><span class="nav-ico">⎋</span> <span data-i18n>Sign out</span></button>
+        </div>
       </nav>
 
       <div id="workspace">
@@ -71,12 +101,12 @@
                  and leads nowhere, so it stays a plain div rather than a button
                  that does not act. -->
             <div class="ov-tiles">
-              <button type="button" class="ov-tile" data-panel="dlgServices"><span class="ov-tile-v" id="ovServices">—</span><span class="ov-tile-k" data-i18n>Services on</span></button>
-              <button type="button" class="ov-tile" data-panel="dlgHistory"><span class="ov-tile-v" id="ovReceived">—</span><span class="ov-tile-k" data-i18n>Received</span></button>
-              <button type="button" class="ov-tile" data-panel="dlgHistory"><span class="ov-tile-v" id="ovSent">—</span><span class="ov-tile-k" data-i18n>Sent</span></button>
-              <button type="button" class="ov-tile" data-panel="dlgStuck"><span class="ov-tile-v" id="ovStuck">—</span><span class="ov-tile-k" data-i18n>Stuck</span></button>
-              <button type="button" class="ov-tile" data-panel="dlgPending"><span class="ov-tile-v" id="ovPending">—</span><span class="ov-tile-k" data-i18n>Pending</span></button>
-              <button type="button" class="ov-tile" data-panel="dlgOrders"><span class="ov-tile-v" id="ovOpenOrders">—</span><span class="ov-tile-k" data-i18n>Open orders</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgServices" data-cap="services.control"><span class="ov-tile-v" id="ovServices">—</span><span class="ov-tile-k" data-i18n>Services on</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgStudies" data-tab="received" data-cap="studies.read"><span class="ov-tile-v" id="ovReceived">—</span><span class="ov-tile-k" data-i18n>Received</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgStudies" data-tab="sent" data-cap="studies.read"><span class="ov-tile-v" id="ovSent">—</span><span class="ov-tile-k" data-i18n>Sent</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgStudies" data-tab="stuck" data-cap="studies.read"><span class="ov-tile-v" id="ovStuck">—</span><span class="ov-tile-k" data-i18n>Stuck</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgStudies" data-tab="pending" data-cap="studies.read"><span class="ov-tile-v" id="ovPending">—</span><span class="ov-tile-k" data-i18n>Pending</span></button>
+              <button type="button" class="ov-tile" data-panel="dlgOrders" data-cap="orders.read"><span class="ov-tile-v" id="ovOpenOrders">—</span><span class="ov-tile-k" data-i18n>Open orders</span></button>
               <div class="ov-tile"><span class="ov-tile-v" id="ovFree">—</span><span class="ov-tile-k" data-i18n>Free space</span></div>
             </div>
             <!-- Scoped to Received and Sent: they are the only windowed
@@ -129,7 +159,7 @@
                 <p class="ov-empty" id="ovOrderEmpty" hidden data-i18n>No orders yet.</p>
               </section>
             </div>
-            <button type="button" class="ov-ticker" id="ovTicker" data-panel="dlgLogs">
+            <button type="button" class="ov-ticker" id="ovTicker" data-panel="dlgActivity" data-tab="logs" data-cap="logs.read">
               <span class="t" id="ovTickerTs"></span>
               <span class="ov-ticker-m" id="ovTickerMsg" data-i18n>Nothing has happened yet.</span>
             </button>
@@ -330,24 +360,6 @@
         </section>
 
         <!-- History -->
-        <section class="panel workpanel" id="dlgHistory" hidden>
-          <header class="modal-head">
-            <h2><span data-i18n>Transaction history</span> <small data-i18n-html>received &amp; sent studies</small></h2>
-          </header>
-        <div class="modal-body">
-          <div class="hist-bar">
-            <div class="hist-tabs">
-              <button class="hist-tab active" data-group="received" data-i18n>📥 Received</button>
-              <button class="hist-tab" data-group="sent" data-i18n>📤 Sent / Archived</button>
-            </div>
-            <div class="hist-tools">
-              <button class="btn ghost tiny" id="histRefresh" data-i18n-title title="Rescan folder" data-i18n>↻ Refresh</button>
-              <button class="btn tiny danger" id="histDeleteAll" data-i18n>🗑 Delete all</button>
-            </div>
-          </div>
-          <div class="hist-list" id="histList"></div>
-        </div>
-      </section>
 
       <!-- RIS orders (emergency RIS: intake + reconciliation) -->
       <section class="panel workpanel" id="dlgOrders" hidden>
@@ -397,12 +409,64 @@
       </section>
 
       <!-- Pending imports -->
-      <section class="panel workpanel" id="dlgPending" hidden>
+
+      <!-- Stuck sends -->
+
+      <!-- Destinations -->
+
+      <!-- Conditional routing — which destinations does a received study go to?
+           The rules live in config (routing.rules), so this panel edits them and
+           saves through the same POST /api/config every other setting uses. The
+           test box is not a nicety: a wrong rule sends images to the wrong
+           hospital, and /api/routing/test is the only way to see the decision
+           before a modality proves it at 3am. -->
+
+      <!-- Settings -->
+
+      <!-- Logs -->
+
+      <!-- People. The administrator's editor for who may use this appliance.
+           Every control here is a rendering of what the server enforces; none
+           of it is the access control itself. -->
+
+      <!-- Audit trail. Deliberately its own panel and not part of Activity:
+           the log answers "what is this box doing", this answers "who did
+           that", and conflating them is how the second question stops being
+           answerable. -->
+
+      <!-- Studies — everything that arrived and what became of it. Three
+           tabs because they are three questions about one pile of files: what
+           is here (History), what is waiting for a human (Pending), and what is
+           not moving (Stuck). The pane ids are the ids the three panels used to
+           carry, so #dlgStuck in a manual or a bookmark still lands here. -->
+      <section class="panel workpanel" id="dlgStudies" hidden>
         <header class="modal-head">
-          <h2><span data-i18n>Pending imports</span> <small data-i18n>non-DICOM awaiting review</small></h2>
-          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+          <h2><span data-i18n>Studies</span> <small class="tab-sub" id="studiesSub"></small></h2>
         </header>
-        <div class="modal-body">
+        <div class="modal-body tabbed">
+        <div class="hist-bar panel-tabs">
+          <div class="hist-tabs" role="tablist">
+            <button class="hist-tab active" id="tab_history" data-tab="history" data-cap="studies.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgHistory"><span data-i18n>History</span></button>
+            <button class="hist-tab" id="tab_pending" data-tab="pending" data-cap="studies.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgPending"><span data-i18n>Pending</span></button>
+            <button class="hist-tab" id="tab_stuck" data-tab="stuck" data-cap="studies.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgStuck"><span data-i18n>Stuck</span></button>
+          </div>
+        </div>
+        <section class="tabpane" id="dlgHistory" role="tabpanel" aria-labelledby="tab_history">
+          <p class="pane-lede" data-i18n-html>received &amp; sent studies</p>
+          <div class="hist-bar">
+            <div class="hist-tabs sub">
+              <button class="hist-tab active" data-group="received" data-i18n>📥 Received</button>
+              <button class="hist-tab" data-group="sent" data-i18n>📤 Sent / Archived</button>
+            </div>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="histRefresh" data-i18n-title title="Rescan folder" data-i18n>↻ Refresh</button>
+              <button class="btn tiny danger" id="histDeleteAll" data-i18n>🗑 Delete all</button>
+            </div>
+          </div>
+          <div class="hist-list" id="histList"></div>
+        </section>
+        <section class="tabpane" id="dlgPending" role="tabpanel" aria-labelledby="tab_pending" hidden>
+          <p class="pane-lede" data-i18n>non-DICOM awaiting review</p>
           <div class="hist-bar">
             <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
             <div class="hist-tools">
@@ -410,16 +474,9 @@
             </div>
           </div>
           <div class="hist-list" id="pendingList"></div>
-        </div>
-      </section>
-
-      <!-- Stuck sends -->
-      <section class="panel workpanel" id="dlgStuck" hidden>
-        <header class="modal-head">
-          <h2><span data-i18n>Stuck sends</span> <small data-i18n>forwards that are not moving</small></h2>
-          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
-        </header>
-        <div class="modal-body">
+        </section>
+        <section class="tabpane" id="dlgStuck" role="tabpanel" aria-labelledby="tab_stuck" hidden>
+          <p class="pane-lede" data-i18n>forwards that are not moving</p>
           <div class="hist-bar">
             <!-- Three sentences because there are three ways a forward stops
                  moving and three different remedies, and the panel used to
@@ -434,345 +491,348 @@
             </div>
           </div>
           <div class="hist-list" id="stuckList"></div>
+        </section>
         </div>
       </section>
 
-      <!-- Destinations -->
-      <section class="panel workpanel" id="dlgDests" hidden>
+      <!-- Configuration — the four things you set when the appliance is
+           commissioned and rarely touch again. One nav row, but each tab keeps
+           its own capability: Destinations and Routing answer to routing.read,
+           Settings to config.read, People to auth.manage. The row appears if a
+           profile holds ANY of them and the tabs it may not hold stay hidden,
+           which is why the tab strip is load-bearing here rather than cosmetic.
+           Destinations is first deliberately: Settings holds the shutdown
+           control and the API token, and should be somewhere you went, not
+           somewhere you arrived. -->
+      <section class="panel workpanel" id="dlgConfig" hidden>
         <header class="modal-head">
-          <h2><span data-i18n>Destinations</span> <small data-i18n>remote DICOM nodes</small></h2>
-          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
+          <h2><span data-i18n>Configuration</span> <small class="tab-sub" id="configSub"></small></h2>
         </header>
-        <div class="modal-body">
-          <div class="table-scroll">
-            <table class="grid" id="destTable">
-              <thead>
-                <tr><th data-i18n>On</th><th data-i18n>Name</th><th data-i18n>Host</th><th data-i18n>Port</th><th data-i18n>AE title</th><th>TLS</th><th data-i18n data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th data-i18n-title title="Watch this node for emergency failover">🚨</th><th></th></tr>
-              </thead>
-              <tbody id="destBody"></tbody>
-            </table>
+        <div class="modal-body tabbed">
+        <div class="hist-bar panel-tabs">
+          <div class="hist-tabs" role="tablist">
+            <button class="hist-tab active" id="tab_destinations" data-tab="destinations" data-cap="routing.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgDests"><span data-i18n>Destinations</span></button>
+            <button class="hist-tab" id="tab_routing" data-tab="routing" data-cap="routing.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgRouting"><span data-i18n>Routing</span></button>
+            <button class="hist-tab" id="tab_settings" data-tab="settings" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgSettings"><span data-i18n>Settings</span></button>
+            <button class="hist-tab" id="tab_people" data-tab="people" data-cap="auth.manage" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgPeople"><span data-i18n>People</span></button>
           </div>
-          <p class="hint" data-i18n-html>New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
         </div>
-        <footer class="modal-foot">
-          <button class="btn ghost" id="addDest" data-i18n>+ Add node</button>
-          <button class="btn" id="saveDests" data-i18n>Save destinations</button>
-        </footer>
-      </section>
-
-      <!-- Conditional routing — which destinations does a received study go to?
-           The rules live in config (routing.rules), so this panel edits them and
-           saves through the same POST /api/config every other setting uses. The
-           test box is not a nicety: a wrong rule sends images to the wrong
-           hospital, and /api/routing/test is the only way to see the decision
-           before a modality proves it at 3am. -->
-      <section class="panel workpanel" id="dlgRouting" hidden>
-        <header class="modal-head">
-          <h2><span data-i18n>Routing</span> <small data-i18n>rules · which node gets what</small></h2>
-          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
-        </header>
-        <div class="modal-body">
-          <label class="check rt-enable"><input id="rtEnabled" type="checkbox" /> <span data-i18n>Route by rule — otherwise every study goes to every enabled destination</span></label>
-          <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
-            <div class="hist-tools">
-              <button class="btn ghost tiny" id="rtAdd" data-i18n>+ Add rule</button>
-              <button class="btn tiny" id="rtSave" data-i18n>Save rules</button>
+        <section class="tabpane" id="dlgDests" role="tabpanel" aria-labelledby="tab_destinations">
+          <div class="pane-scroll">
+            <p class="pane-lede" data-i18n>remote DICOM nodes</p>
+            <div class="table-scroll">
+              <table class="grid" id="destTable">
+                <thead>
+                  <tr><th data-i18n>On</th><th data-i18n>Name</th><th data-i18n>Host</th><th data-i18n>Port</th><th data-i18n>AE title</th><th>TLS</th><th data-i18n data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th data-i18n-title title="Watch this node for emergency failover">🚨</th><th></th></tr>
+                </thead>
+                <tbody id="destBody"></tbody>
+              </table>
             </div>
+            <p class="hint" data-i18n-html>New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
           </div>
-          <div class="rt-rules" id="rtRules"></div>
-          <p class="hist-empty" id="rtEmpty" hidden data-i18n>No rules yet — every study goes to every enabled destination.</p>
+          <footer class="modal-foot">
+            <button class="btn ghost" id="addDest" data-i18n>+ Add node</button>
+            <button class="btn" id="saveDests" data-i18n>Save destinations</button>
+          </footer>
+        </section>
+        <section class="tabpane" id="dlgRouting" role="tabpanel" aria-labelledby="tab_routing" hidden>
+          <div class="pane-scroll">
+            <p class="pane-lede" data-i18n>rules · which node gets what</p>
+            <label class="check rt-enable"><input id="rtEnabled" type="checkbox" /> <span data-i18n>Route by rule — otherwise every study goes to every enabled destination</span></label>
+            <!-- Add rule / Save rules moved to this pane's pinned footer, where
+                 the other three Configuration tabs keep their save. The rules
+                 list has no upper bound, and a Save that scrolls away with it is
+                 the failure the tabs were introduced to prevent. -->
+            <p class="hint" style="margin:0 0 14px;max-width:70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
+            <div class="rt-rules" id="rtRules"></div>
+            <p class="hist-empty" id="rtEmpty" hidden data-i18n>No rules yet — every study goes to every enabled destination.</p>
 
-          <!-- Test: describe a study, get the decision and the per-rule trace. -->
-          <section class="rt-test">
-            <h3 class="rt-test-h" data-i18n>Test a study</h3>
-            <p class="hint" style="margin:0 0 10px;max-width:70ch" data-i18n>Fill in what the study would carry and see which rule wins, and why. Nothing is sent and nothing is written to the log. The SAVED rules are what gets tested, so save an edit before you test it.</p>
-            <div class="rt-test-form">
-              <label><span data-i18n>Modality</span> <input id="rtModality" maxlength="16" placeholder="CT" /></label>
-              <label><span data-i18n>Calling AE</span> <input id="rtCallingAet" maxlength="16" data-i18n-placeholder placeholder="the sending AE title" /></label>
-              <label><span data-i18n>Station</span> <input id="rtStation" data-i18n-placeholder placeholder="Station name" /></label>
-              <label><span data-i18n>Patient ID</span> <input id="rtPatientId" /></label>
-              <label class="wide"><span data-i18n>Study description</span> <input id="rtStudyDesc" /></label>
-            </div>
-            <div class="rt-test-foot">
-              <span class="hint" style="margin:0" data-i18n>Blank fields are treated as empty on the study, not as wildcards.</span>
-              <button class="btn tiny" id="rtTest" data-i18n>Explain route</button>
-            </div>
-            <div class="rt-result" id="rtResult" hidden></div>
-          </section>
-        </div>
-      </section>
-
-      <!-- Settings -->
-      <section class="panel workpanel" id="dlgSettings" hidden>
-        <header class="modal-head"><h2 data-i18n>Settings</h2><button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button></header>
-        <div class="modal-body">
-          <div class="settings">
-            <fieldset>
-              <legend data-i18n>Receiver (SCP)</legend>
-              <label><span data-i18n>AE title</span> <input id="scpAet" maxlength="16" /></label>
-              <label><span data-i18n>Bind address</span> <input id="scpBind" /></label>
-              <label><span data-i18n>Port</span> <input id="scpPort" type="number" min="1" max="65535" /></label>
-              <label><span data-i18n>Storage folder</span> <input id="scpDir" /></label>
-              <label class="check"><input id="scpOrganize" type="checkbox" /> <span data-i18n>Organize by Patient / Study / Series</span></label>
-              <label><span data-i18n>Refuse when free space below (GB)</span> <input id="scpMinFree" type="number" min="0" step="1" data-i18n-placeholder placeholder="0 = off" /></label>
-              <label><span data-i18n>Accept only these AEs</span> <input id="scpAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="scpTls" type="checkbox" /> <span data-i18n>Serve DICOM over TLS</span></label>
-              <label><span data-i18n>TLS certificate (PEM)</span> <input id="scpTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
-              <label><span data-i18n>TLS private key (PEM)</span> <input id="scpTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
-              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="scpTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Auto-send (SCU)</legend>
-              <label><span data-i18n>Calling AE title</span> <input id="scuAet" maxlength="16" /></label>
-              <label><span data-i18n>Watch folder</span> <input id="scuDir" /></label>
-              <label><span data-i18n>Poll interval (s)</span> <input id="scuPoll" type="number" min="1" step="1" /></label>
-              <label><span data-i18n>After a file is sent</span>
-                <select id="scuMode">
-                  <option value="keep" data-i18n>Keep it in place</option>
-                  <option value="move" data-i18n>Move to archive folder</option>
-                  <option value="delete" data-i18n>Delete it</option>
-                </select>
-              </label>
-              <label><span data-i18n>Archive folder</span> <input id="scuSent" /></label>
-              <label class="check"><input id="scuTlsVerify" type="checkbox" /> <span data-i18n>Verify remote TLS certificate</span></label>
-              <label><span data-i18n>Trusted CA bundle</span> <input id="scuTlsCa" data-i18n-placeholder placeholder="blank = system trust store" /></label>
-              <label><span data-i18n>Client certificate (PEM)</span> <input id="scuTlsCert" data-i18n-placeholder placeholder="optional — for mutual TLS" /></label>
-              <label><span data-i18n>Client private key (PEM)</span> <input id="scuTlsKey" data-i18n-placeholder placeholder="optional" /></label>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Print receiver</legend>
-              <label class="check"><input id="prnEnabled" type="checkbox" /> <span data-i18n>Start the print receiver on launch</span></label>
-              <label><span data-i18n>Printer AE title</span> <input id="prnAet" maxlength="16" /></label>
-              <label><span data-i18n>Bind address</span> <input id="prnBind" /></label>
-              <label><span data-i18n>Port</span> <input id="prnPort" type="number" min="1" max="65535" /></label>
-              <label><span data-i18n>Store each captured film as</span>
-                <select id="prnLayout">
-                  <option value="pdf" data-i18n>PDF document (Encapsulated PDF)</option>
-                  <option value="image" data-i18n>Image (Secondary Capture)</option>
-                </select>
-              </label>
-              <label class="check"><input id="prnColor" type="checkbox" /> <span data-i18n>Also accept color print jobs</span></label>
-              <label><span data-i18n>Accept only these AEs</span> <input id="prnAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="prnTls" type="checkbox" /> <span data-i18n>Serve print over TLS</span></label>
-              <label><span data-i18n>TLS certificate (PEM)</span> <input id="prnTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
-              <label><span data-i18n>TLS private key (PEM)</span> <input id="prnTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
-              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="prnTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Emergency failover</legend>
-              <label class="check"><input id="emgArmed" type="checkbox" /> <span data-i18n>Arm failover — monitor the 🚨 destinations and prompt if one goes offline</span></label>
-              <label><span data-i18n>Probe interval (s)</span> <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
-              <label><span data-i18n>Offline after (s)</span> <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
-              <label><span data-i18n>Recovery — good probes to declare back</span> <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
-              <label class="check"><input id="emgAuto" type="checkbox" /> <span data-i18n>Activate automatically (skip the prompt)</span></label>
-              <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
-              <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Modality Worklist (MWL)</legend>
-              <label class="check"><input id="mwlEnabled" type="checkbox" /> <span data-i18n>Start the worklist SCP on launch</span></label>
-              <label><span data-i18n>Worklist AE title</span> <input id="mwlAet" maxlength="16" /></label>
-              <label><span data-i18n>Bind address</span> <input id="mwlBind" /></label>
-              <label><span data-i18n>Port</span> <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
-              <label><span data-i18n>Accept only these AEs</span> <input id="mwlAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="mwlTls" type="checkbox" /> <span data-i18n>Serve worklist over TLS</span></label>
-              <label><span data-i18n>TLS certificate (PEM)</span> <input id="mwlTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
-              <label><span data-i18n>TLS private key (PEM)</span> <input id="mwlTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
-              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="mwlTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Emergency RIS</legend>
-              <label class="check"><input id="risEnabled" type="checkbox" /> <span data-i18n>Start the HL7/MLLP order listener on launch</span></label>
-              <label><span data-i18n>Bind address</span> <input id="risBind" /></label>
-              <label><span data-i18n>Port</span> <input id="risPort" type="number" min="1" max="65535" placeholder="2575" /></label>
-              <label><span data-i18n>Order store folder</span> <input id="risDir" data-i18n-placeholder placeholder="where orders.json is kept" /></label>
-              <label><span data-i18n>Match a study to an order by</span>
-                <select id="risMatch">
-                  <option value="accession" data-i18n>Accession number only (recommended)</option>
-                  <option value="accession_or_patient" data-i18n>Accession, else Patient ID</option>
-                </select>
-              </label>
-              <label class="check"><input id="risAutoClose" type="checkbox" /> <span data-i18n>Auto-close a matched order when its study arrives</span></label>
-              <label><span data-i18n>Accept HL7 only from these hosts</span> <input id="risHosts" data-i18n-placeholder placeholder="comma-separated IPs, blank = any" /></label>
-              <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Query/Retrieve (Q/R SCP)</legend>
-              <label class="check"><input id="qrEnabled" type="checkbox" /> <span data-i18n>Start Query/Retrieve on launch</span></label>
-              <label><span data-i18n>Q/R AE title</span> <input id="qrAetIn" maxlength="16" placeholder="CARINOQR" /></label>
-              <label><span data-i18n>Bind address</span> <input id="qrBind" /></label>
-              <label><span data-i18n>Port</span> <input id="qrPort" type="number" min="1" max="65535" placeholder="11115" /></label>
-              <label><span data-i18n>Accept only these AEs</span> <input id="qrAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
-              <label class="check"><input id="qrTlsIn" type="checkbox" /> <span data-i18n>Serve Query/Retrieve over TLS</span></label>
-              <label><span data-i18n>TLS certificate (PEM)</span> <input id="qrTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
-              <label><span data-i18n>TLS private key (PEM)</span> <input id="qrTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
-              <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="qrTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-              <!-- The C-MOVE destination map has no form control on purpose: it
-                   is AE title -> {host, port, aet} and is carried through a save
-                   untouched. This line is where an operator learns the AE title
-                   a C-MOVE actually calls out with, which is not the one they
-                   configured for auto-send. -->
-              <p class="hint" style="margin:2px 0 0" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
-              <p class="hint" id="qrMoveDests" style="margin:6px 0 0"></p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>DICOMweb</legend>
-              <label class="check"><input id="dwEnabled" type="checkbox" /> <span data-i18n>Serve DICOMweb (QIDO-RS / WADO-RS / STOW-RS)</span></label>
-              <label class="check"><input id="dwStow" type="checkbox" /> <span data-i18n>Accept STOW-RS uploads (off = read-only)</span></label>
-              <label><span data-i18n>Allowed browser origins (CORS)</span> <input id="dwCors" data-i18n-placeholder placeholder="https://viewer.example.org, blank = same-origin only" /></label>
-              <label><span data-i18n>Base URL for a viewer</span> <input id="dwUrl" readonly /></label>
-              <p class="hint" style="margin:2px 0 0" data-i18n>Paste the base URL into a web viewer as its DICOMweb root. It answers out of the instance index, so keep the index on. Every request needs the API token when one is set; a browser viewer on another origin also has to be listed above.</p>
-              <p class="hint" id="dwState" style="margin:6px 0 0"></p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Instance index</legend>
-              <label class="check"><input id="idxEnabled" type="checkbox" /> <span data-i18n>Keep an index of stored instances</span></label>
-              <label><span data-i18n>Index database file</span> <input id="idxPath" placeholder="./index.db" /></label>
-              <label class="check"><input id="idxRescan" type="checkbox" /> <span data-i18n>Re-walk the storage folders at startup</span></label>
-              <dl class="idx-stats">
-                <div><dt data-i18n>Instances</dt><dd id="idxInstances">—</dd></div>
-                <div><dt data-i18n>Studies</dt><dd id="idxStudies">—</dd></div>
-                <div><dt data-i18n>Patients</dt><dd id="idxPatients">—</dd></div>
-                <div><dt data-i18n>Queued</dt><dd id="idxQueued">—</dd></div>
-                <div class="wide"><dt data-i18n>Last write</dt><dd id="idxLast">—</dd></div>
-                <div class="wide"><dt data-i18n>Database</dt><dd id="idxDbPath" class="path">—</dd></div>
-              </dl>
-              <div class="row-actions">
-                <button class="btn ghost tiny" id="idxRescanNow" data-i18n>↻ Rescan now</button>
-                <span class="idx-note" id="idxNote"></span>
+            <!-- Test: describe a study, get the decision and the per-rule trace. -->
+            <section class="rt-test">
+              <h3 class="rt-test-h" data-i18n>Test a study</h3>
+              <p class="hint" style="margin:0 0 10px;max-width:70ch" data-i18n>Fill in what the study would carry and see which rule wins, and why. Nothing is sent and nothing is written to the log. The SAVED rules are what gets tested, so save an edit before you test it.</p>
+              <div class="rt-test-form">
+                <label><span data-i18n>Modality</span> <input id="rtModality" maxlength="16" placeholder="CT" /></label>
+                <label><span data-i18n>Calling AE</span> <input id="rtCallingAet" maxlength="16" data-i18n-placeholder placeholder="the sending AE title" /></label>
+                <label><span data-i18n>Station</span> <input id="rtStation" data-i18n-placeholder placeholder="Station name" /></label>
+                <label><span data-i18n>Patient ID</span> <input id="rtPatientId" /></label>
+                <label class="wide"><span data-i18n>Study description</span> <input id="rtStudyDesc" /></label>
               </div>
-              <p class="hint" style="margin:8px 0 0" data-i18n>Query/Retrieve and DICOMweb answer from this index, never by walking the disk. Rescan after copying studies into the storage folder behind the app's back — the walk runs in the background and reports in the Activity log.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>De-identification</legend>
-              <label><span data-i18n>Profile</span>
-                <!-- "off" is not "forward untouched". With any deidentify rule
-                     in play it means those destinations are HELD, and this is
-                     the control an operator reaches for to stop scrubbing for
-                     an afternoon — a label promising a send is the one thing it
-                     must not say. The hint below carries the rest. -->
-                <select id="deidProfile">
-                  <option value="off" data-i18n>Off — nothing scrubbed; de-identify routes are held</option>
-                  <option value="basic" data-i18n>Basic — remove patient identity</option>
-                  <option value="strict" data-i18n>Strict — also remove device and institution</option>
-                </select>
-              </label>
-              <label class="check"><input id="deidKeepPrivate" type="checkbox" /> <span data-i18n>Keep private tags (they routinely carry identifiers)</span></label>
-              <label class="check"><input id="deidKeepDates" type="checkbox" /> <span data-i18n>Keep study dates unshifted</span></label>
-              <label><span data-i18n>Pseudonym prefix</span> <input id="deidPrefix" maxlength="16" placeholder="ANON" /></label>
-              <!-- Said plainly, because the failure is invisible: a scrubbed
-                   header with the patient's name burned into the pixels looks
-                   anonymous in every viewer until a human reads the image. -->
-              <p class="hint bad-note" style="margin:2px 0 0" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
-              <p class="hint" style="margin:6px 0 0" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
-              <p class="hint" id="deidState" style="margin:6px 0 0"></p>
-            </fieldset>
-            <fieldset id="authFs">
-              <legend data-i18n>API access</legend>
-              <p class="hint" id="authState" style="margin:0 0 10px"></p>
-              <!-- Not a plain field, and not part of a Save: GET /api/config
-                   redacts the token, and POST /api/config refuses one outright.
-                   The token changes only through POST /api/auth/token, which
-                   wants the CURRENT token in a header — a session cookie must
-                   not be enough to replace the secret that issued it, so the
-                   operator types it. This dashboard does not have it to send. -->
-              <div class="auth-rotate" id="authRotate" hidden>
-                <label id="authProofWrap"><span data-i18n>Current token</span> <input id="authCurToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="the token this PACS uses now" /></label>
-                <label><span data-i18n>New API token</span> <input id="authNewToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste or generate a token" /></label>
+              <div class="rt-test-foot">
+                <span class="hint" style="margin:0" data-i18n>Blank fields are treated as empty on the study, not as wildcards.</span>
+                <button class="btn tiny" id="rtTest" data-i18n>Explain route</button>
+              </div>
+              <div class="rt-result" id="rtResult" hidden></div>
+            </section>
+          </div>
+          <footer class="modal-foot">
+            <button class="btn ghost" id="rtAdd" data-i18n>+ Add rule</button>
+            <button class="btn" id="rtSave" data-i18n>Save rules</button>
+          </footer>
+        </section>
+        <section class="tabpane" id="dlgSettings" role="tabpanel" aria-labelledby="tab_settings" hidden>
+          <div class="pane-scroll">
+            <div class="settings">
+              <fieldset>
+                <legend data-i18n>Receiver (SCP)</legend>
+                <label><span data-i18n>AE title</span> <input id="scpAet" maxlength="16" /></label>
+                <label><span data-i18n>Bind address</span> <input id="scpBind" /></label>
+                <label><span data-i18n>Port</span> <input id="scpPort" type="number" min="1" max="65535" /></label>
+                <label><span data-i18n>Storage folder</span> <input id="scpDir" /></label>
+                <label class="check"><input id="scpOrganize" type="checkbox" /> <span data-i18n>Organize by Patient / Study / Series</span></label>
+                <label><span data-i18n>Refuse when free space below (GB)</span> <input id="scpMinFree" type="number" min="0" step="1" data-i18n-placeholder placeholder="0 = off" /></label>
+                <label><span data-i18n>Accept only these AEs</span> <input id="scpAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+                <label class="check"><input id="scpTls" type="checkbox" /> <span data-i18n>Serve DICOM over TLS</span></label>
+                <label><span data-i18n>TLS certificate (PEM)</span> <input id="scpTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+                <label><span data-i18n>TLS private key (PEM)</span> <input id="scpTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+                <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="scpTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Auto-send (SCU)</legend>
+                <label><span data-i18n>Calling AE title</span> <input id="scuAet" maxlength="16" /></label>
+                <label><span data-i18n>Watch folder</span> <input id="scuDir" /></label>
+                <label><span data-i18n>Poll interval (s)</span> <input id="scuPoll" type="number" min="1" step="1" /></label>
+                <label><span data-i18n>After a file is sent</span>
+                  <select id="scuMode">
+                    <option value="keep" data-i18n>Keep it in place</option>
+                    <option value="move" data-i18n>Move to archive folder</option>
+                    <option value="delete" data-i18n>Delete it</option>
+                  </select>
+                </label>
+                <label><span data-i18n>Archive folder</span> <input id="scuSent" /></label>
+                <label class="check"><input id="scuTlsVerify" type="checkbox" /> <span data-i18n>Verify remote TLS certificate</span></label>
+                <label><span data-i18n>Trusted CA bundle</span> <input id="scuTlsCa" data-i18n-placeholder placeholder="blank = system trust store" /></label>
+                <label><span data-i18n>Client certificate (PEM)</span> <input id="scuTlsCert" data-i18n-placeholder placeholder="optional — for mutual TLS" /></label>
+                <label><span data-i18n>Client private key (PEM)</span> <input id="scuTlsKey" data-i18n-placeholder placeholder="optional" /></label>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Print receiver</legend>
+                <label class="check"><input id="prnEnabled" type="checkbox" /> <span data-i18n>Start the print receiver on launch</span></label>
+                <label><span data-i18n>Printer AE title</span> <input id="prnAet" maxlength="16" /></label>
+                <label><span data-i18n>Bind address</span> <input id="prnBind" /></label>
+                <label><span data-i18n>Port</span> <input id="prnPort" type="number" min="1" max="65535" /></label>
+                <label><span data-i18n>Store each captured film as</span>
+                  <select id="prnLayout">
+                    <option value="pdf" data-i18n>PDF document (Encapsulated PDF)</option>
+                    <option value="image" data-i18n>Image (Secondary Capture)</option>
+                  </select>
+                </label>
+                <label class="check"><input id="prnColor" type="checkbox" /> <span data-i18n>Also accept color print jobs</span></label>
+                <label><span data-i18n>Accept only these AEs</span> <input id="prnAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+                <label class="check"><input id="prnTls" type="checkbox" /> <span data-i18n>Serve print over TLS</span></label>
+                <label><span data-i18n>TLS certificate (PEM)</span> <input id="prnTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+                <label><span data-i18n>TLS private key (PEM)</span> <input id="prnTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+                <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="prnTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Emergency failover</legend>
+                <label class="check"><input id="emgArmed" type="checkbox" /> <span data-i18n>Arm failover — monitor the 🚨 destinations and prompt if one goes offline</span></label>
+                <label><span data-i18n>Probe interval (s)</span> <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
+                <label><span data-i18n>Offline after (s)</span> <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
+                <label><span data-i18n>Recovery — good probes to declare back</span> <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
+                <label class="check"><input id="emgAuto" type="checkbox" /> <span data-i18n>Activate automatically (skip the prompt)</span></label>
+                <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Modality Worklist (MWL)</legend>
+                <label class="check"><input id="mwlEnabled" type="checkbox" /> <span data-i18n>Start the worklist SCP on launch</span></label>
+                <label><span data-i18n>Worklist AE title</span> <input id="mwlAet" maxlength="16" /></label>
+                <label><span data-i18n>Bind address</span> <input id="mwlBind" /></label>
+                <label><span data-i18n>Port</span> <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
+                <label><span data-i18n>Accept only these AEs</span> <input id="mwlAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+                <label class="check"><input id="mwlTls" type="checkbox" /> <span data-i18n>Serve worklist over TLS</span></label>
+                <label><span data-i18n>TLS certificate (PEM)</span> <input id="mwlTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+                <label><span data-i18n>TLS private key (PEM)</span> <input id="mwlTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+                <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="mwlTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Emergency RIS</legend>
+                <label class="check"><input id="risEnabled" type="checkbox" /> <span data-i18n>Start the HL7/MLLP order listener on launch</span></label>
+                <label><span data-i18n>Bind address</span> <input id="risBind" /></label>
+                <label><span data-i18n>Port</span> <input id="risPort" type="number" min="1" max="65535" placeholder="2575" /></label>
+                <label><span data-i18n>Order store folder</span> <input id="risDir" data-i18n-placeholder placeholder="where orders.json is kept" /></label>
+                <label><span data-i18n>Match a study to an order by</span>
+                  <select id="risMatch">
+                    <option value="accession" data-i18n>Accession number only (recommended)</option>
+                    <option value="accession_or_patient" data-i18n>Accession, else Patient ID</option>
+                  </select>
+                </label>
+                <label class="check"><input id="risAutoClose" type="checkbox" /> <span data-i18n>Auto-close a matched order when its study arrives</span></label>
+                <label><span data-i18n>Accept HL7 only from these hosts</span> <input id="risHosts" data-i18n-placeholder placeholder="comma-separated IPs, blank = any" /></label>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Query/Retrieve (Q/R SCP)</legend>
+                <label class="check"><input id="qrEnabled" type="checkbox" /> <span data-i18n>Start Query/Retrieve on launch</span></label>
+                <label><span data-i18n>Q/R AE title</span> <input id="qrAetIn" maxlength="16" placeholder="CARINOQR" /></label>
+                <label><span data-i18n>Bind address</span> <input id="qrBind" /></label>
+                <label><span data-i18n>Port</span> <input id="qrPort" type="number" min="1" max="65535" placeholder="11115" /></label>
+                <label><span data-i18n>Accept only these AEs</span> <input id="qrAllowed" data-i18n-placeholder placeholder="comma-separated, blank = any" /></label>
+                <label class="check"><input id="qrTlsIn" type="checkbox" /> <span data-i18n>Serve Query/Retrieve over TLS</span></label>
+                <label><span data-i18n>TLS certificate (PEM)</span> <input id="qrTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
+                <label><span data-i18n>TLS private key (PEM)</span> <input id="qrTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
+                <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="qrTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
+                <!-- The C-MOVE destination map has no form control on purpose: it
+                     is AE title -> {host, port, aet} and is carried through a save
+                     untouched. This line is where an operator learns the AE title
+                     a C-MOVE actually calls out with, which is not the one they
+                     configured for auto-send. -->
+                <p class="hint" style="margin:2px 0 0" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
+                <p class="hint" id="qrMoveDests" style="margin:6px 0 0"></p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>DICOMweb</legend>
+                <label class="check"><input id="dwEnabled" type="checkbox" /> <span data-i18n>Serve DICOMweb (QIDO-RS / WADO-RS / STOW-RS)</span></label>
+                <label class="check"><input id="dwStow" type="checkbox" /> <span data-i18n>Accept STOW-RS uploads (off = read-only)</span></label>
+                <label><span data-i18n>Allowed browser origins (CORS)</span> <input id="dwCors" data-i18n-placeholder placeholder="https://viewer.example.org, blank = same-origin only" /></label>
+                <label><span data-i18n>Base URL for a viewer</span> <input id="dwUrl" readonly /></label>
+                <p class="hint" style="margin:2px 0 0" data-i18n>Paste the base URL into a web viewer as its DICOMweb root. It answers out of the instance index, so keep the index on. Every request needs the API token when one is set; a browser viewer on another origin also has to be listed above.</p>
+                <p class="hint" id="dwState" style="margin:6px 0 0"></p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Instance index</legend>
+                <label class="check"><input id="idxEnabled" type="checkbox" /> <span data-i18n>Keep an index of stored instances</span></label>
+                <label><span data-i18n>Index database file</span> <input id="idxPath" placeholder="./index.db" /></label>
+                <label class="check"><input id="idxRescan" type="checkbox" /> <span data-i18n>Re-walk the storage folders at startup</span></label>
+                <dl class="idx-stats">
+                  <div><dt data-i18n>Instances</dt><dd id="idxInstances">—</dd></div>
+                  <div><dt data-i18n>Studies</dt><dd id="idxStudies">—</dd></div>
+                  <div><dt data-i18n>Patients</dt><dd id="idxPatients">—</dd></div>
+                  <div><dt data-i18n>Queued</dt><dd id="idxQueued">—</dd></div>
+                  <div class="wide"><dt data-i18n>Last write</dt><dd id="idxLast">—</dd></div>
+                  <div class="wide"><dt data-i18n>Database</dt><dd id="idxDbPath" class="path">—</dd></div>
+                </dl>
                 <div class="row-actions">
-                  <button class="btn tiny" id="authApply" data-i18n>Apply</button>
-                  <button class="btn ghost tiny" id="authGen" data-i18n>Generate</button>
-                  <button class="btn ghost tiny" id="authShow" data-i18n>Show</button>
-                  <button class="btn ghost tiny danger" id="authClearBtn" data-i18n>Remove token</button>
-                  <button class="btn ghost tiny" id="authRotateCancel" data-i18n>Cancel</button>
+                  <button class="btn ghost tiny" id="idxRescanNow" data-i18n>↻ Rescan now</button>
+                  <span class="idx-note" id="idxNote"></span>
                 </div>
-                <p class="hint" style="margin:6px 0 0" data-i18n>Copy the new token somewhere safe first. It takes effect the moment you apply it, signs out every browser including this one, and the dashboard can never show it again.</p>
-                <p class="hint" id="authProofNote" style="margin:6px 0 0" data-i18n>Changing the token needs the current one typed in — a session cookie is not enough to replace the secret that issued it.</p>
-              </div>
-              <div class="row-actions">
-                <button class="btn ghost tiny" id="authRotateBtn" data-i18n>Change token</button>
-                <button class="btn ghost tiny" id="authLogout" data-i18n>Log out</button>
-              </div>
-              <p class="hint" style="margin:8px 0 0" data-i18n>A token is mandatory whenever the dashboard is bound to anything other than this machine, so removing it is refused while that is the case. It is stored in web.auth_token in the config file.</p>
-            </fieldset>
-            <fieldset>
-              <legend data-i18n>Integrations</legend>
-              <label><span data-i18n>DICOM-editor URL</span>
-                <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
-              </label>
-              <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
-            </fieldset>
+                <p class="hint" style="margin:8px 0 0" data-i18n>Query/Retrieve and DICOMweb answer from this index, never by walking the disk. Rescan after copying studies into the storage folder behind the app's back — the walk runs in the background and reports in the Activity log.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>De-identification</legend>
+                <label><span data-i18n>Profile</span>
+                  <!-- "off" is not "forward untouched". With any deidentify rule
+                       in play it means those destinations are HELD, and this is
+                       the control an operator reaches for to stop scrubbing for
+                       an afternoon — a label promising a send is the one thing it
+                       must not say. The hint below carries the rest. -->
+                  <select id="deidProfile">
+                    <option value="off" data-i18n>Off — nothing scrubbed; de-identify routes are held</option>
+                    <option value="basic" data-i18n>Basic — remove patient identity</option>
+                    <option value="strict" data-i18n>Strict — also remove device and institution</option>
+                  </select>
+                </label>
+                <label class="check"><input id="deidKeepPrivate" type="checkbox" /> <span data-i18n>Keep private tags (they routinely carry identifiers)</span></label>
+                <label class="check"><input id="deidKeepDates" type="checkbox" /> <span data-i18n>Keep study dates unshifted</span></label>
+                <label><span data-i18n>Pseudonym prefix</span> <input id="deidPrefix" maxlength="16" placeholder="ANON" /></label>
+                <!-- Said plainly, because the failure is invisible: a scrubbed
+                     header with the patient's name burned into the pixels looks
+                     anonymous in every viewer until a human reads the image. -->
+                <p class="hint bad-note" style="margin:2px 0 0" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
+                <p class="hint" style="margin:6px 0 0" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
+                <p class="hint" id="deidState" style="margin:6px 0 0"></p>
+              </fieldset>
+              <fieldset id="authFs">
+                <legend data-i18n>API access</legend>
+                <p class="hint" id="authState" style="margin:0 0 10px"></p>
+                <!-- Not a plain field, and not part of a Save: GET /api/config
+                     redacts the token, and POST /api/config refuses one outright.
+                     The token changes only through POST /api/auth/token, which
+                     wants the CURRENT token in a header — a session cookie must
+                     not be enough to replace the secret that issued it, so the
+                     operator types it. This dashboard does not have it to send. -->
+                <div class="auth-rotate" id="authRotate" hidden>
+                  <label id="authProofWrap"><span data-i18n>Current token</span> <input id="authCurToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="the token this PACS uses now" /></label>
+                  <label><span data-i18n>New API token</span> <input id="authNewToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste or generate a token" /></label>
+                  <div class="row-actions">
+                    <button class="btn tiny" id="authApply" data-i18n>Apply</button>
+                    <button class="btn ghost tiny" id="authGen" data-i18n>Generate</button>
+                    <button class="btn ghost tiny" id="authShow" data-i18n>Show</button>
+                    <button class="btn ghost tiny danger" id="authClearBtn" data-i18n>Remove token</button>
+                    <button class="btn ghost tiny" id="authRotateCancel" data-i18n>Cancel</button>
+                  </div>
+                  <p class="hint" style="margin:6px 0 0" data-i18n>Copy the new token somewhere safe first. It takes effect the moment you apply it, signs out every browser including this one, and the dashboard can never show it again.</p>
+                  <p class="hint" id="authProofNote" style="margin:6px 0 0" data-i18n>Changing the token needs the current one typed in — a session cookie is not enough to replace the secret that issued it.</p>
+                </div>
+                <div class="row-actions">
+                  <button class="btn ghost tiny" id="authRotateBtn" data-i18n>Change token</button>
+                  <button class="btn ghost tiny" id="authLogout" data-i18n>Log out</button>
+                </div>
+                <p class="hint" style="margin:8px 0 0" data-i18n>A token is mandatory whenever the dashboard is bound to anything other than this machine, so removing it is refused while that is the case. It is stored in web.auth_token in the config file.</p>
+              </fieldset>
+              <fieldset>
+                <legend data-i18n>Integrations</legend>
+                <label><span data-i18n>DICOM-editor URL</span>
+                  <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
+                </label>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
+              </fieldset>
+            </div>
           </div>
+          <footer class="modal-foot">
+            <button class="btn kill" id="killSvc" data-i18n-title title="Stop the receiver, watcher and the whole engine process" data-i18n>⏻ Shut down service</button>
+            <button class="btn ghost" id="setupFromSettings" data-i18n>Re-run service setup</button>
+            <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
+          </footer>
+        </section>
+        <section class="tabpane" id="dlgPeople" role="tabpanel" aria-labelledby="tab_people" hidden>
+          <div class="pane-scroll">
+            <!-- Shown while the appliance is still token-only. -->
+            <div class="people-intro" id="peopleOff" hidden>
+              <p data-i18n>Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.</p>
+              <p data-i18n>Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.</p>
+              <p class="hint" data-i18n>You will start with four editable presets: Administrator, IT, Radiologist and Reception. They are ordinary entries — rename them, re-permission them or delete them.</p>
+              <button class="btn" id="peopleSeed" data-i18n>Turn on profiles</button>
+            </div>
+            <div id="peopleOn" hidden>
+              <p class="sub-note" id="peopleCount"></p>
+              <div class="people-list" id="peopleList"></div>
+              <label class="chk people-listing"><input type="checkbox" id="peopleListing" />
+                <span data-i18n>Show the list of names on the sign-in screen</span></label>
+              <p class="hint" data-i18n>With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.</p>
+            </div>
+          </div>
+          <footer class="modal-foot">
+            <button class="btn" id="peopleAdd" data-i18n>Add someone</button>
+          </footer>
+        </section>
         </div>
-        <footer class="modal-foot">
-          <button class="btn kill" id="killSvc" data-i18n-title title="Stop the receiver, watcher and the whole engine process" data-i18n>⏻ Shut down service</button>
-          <button class="btn ghost" id="setupFromSettings" data-i18n>Re-run service setup</button>
-          <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
-        </footer>
       </section>
 
-      <!-- Logs -->
-      <section class="panel workpanel" id="dlgLogs" hidden>
+      <!-- Activity — what this box is doing, and who asked it to.
+           The two remain deliberately separate PANES, not one merged stream:
+           the log answers "what is this box doing", the audit trail answers
+           "who did that", and conflating them is how the second question stops
+           being answerable. A shared nav row costs the distinction nothing —
+           each still has its own name, its own tab and its own capability.
+           Named Activity, not Records: in a hospital "records" means medical
+           records, and this is the one label a clinical user would misread. -->
+      <section class="panel workpanel" id="dlgActivity" hidden>
         <header class="modal-head">
-          <h2 data-i18n>Activity</h2>
+          <h2><span data-i18n>Activity</span> <small class="tab-sub" id="activitySub"></small></h2>
           <div class="head-right">
             <button class="btn ghost tiny" id="clearLog" data-i18n>Clear view</button>
-            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
-          </div>
-        </header>
-        <div class="modal-body">
-          <div class="log" id="log"></div>
-        </div>
-      </section>
-
-      <!-- People. The administrator's editor for who may use this appliance.
-           Every control here is a rendering of what the server enforces; none
-           of it is the access control itself. -->
-      <section class="panel workpanel" id="dlgPeople" hidden>
-        <header class="modal-head">
-          <h2 data-i18n>People</h2>
-          <div class="head-right">
-            <button class="btn ghost tiny" id="peopleAdd" data-i18n>Add someone</button>
-            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
-          </div>
-        </header>
-        <div class="modal-body">
-          <!-- Shown while the appliance is still token-only. -->
-          <div class="people-intro" id="peopleOff" hidden>
-            <p data-i18n>Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.</p>
-            <p data-i18n>Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.</p>
-            <p class="hint" data-i18n>You will start with four editable presets: Administrator, IT, Radiologist and Reception. They are ordinary entries — rename them, re-permission them or delete them.</p>
-            <button class="btn" id="peopleSeed" data-i18n>Turn on profiles</button>
-          </div>
-          <div id="peopleOn" hidden>
-            <p class="sub-note" id="peopleCount"></p>
-            <div class="people-list" id="peopleList"></div>
-            <label class="chk people-listing"><input type="checkbox" id="peopleListing" />
-              <span data-i18n>Show the list of names on the sign-in screen</span></label>
-            <p class="hint" data-i18n>With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Audit trail. Deliberately its own panel and not part of Activity:
-           the log answers "what is this box doing", this answers "who did
-           that", and conflating them is how the second question stops being
-           answerable. -->
-      <section class="panel workpanel" id="dlgAudit" hidden>
-        <header class="modal-head">
-          <h2 data-i18n>Audit trail</h2>
-          <div class="head-right">
             <button class="btn ghost tiny" id="auditVerify" data-i18n>Check integrity</button>
             <button class="btn ghost tiny" id="auditExport" data-i18n>Export</button>
-            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
           </div>
         </header>
-        <div class="modal-body">
+        <div class="modal-body tabbed">
+        <div class="hist-bar panel-tabs">
+          <div class="hist-tabs" role="tablist">
+            <button class="hist-tab active" id="tab_logs" data-tab="logs" data-cap="logs.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgLogs"><span data-i18n>Logs</span></button>
+            <button class="hist-tab" id="tab_audit" data-tab="audit" data-cap="audit.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgAudit"><span data-i18n>Audit</span></button>
+          </div>
+        </div>
+        <section class="tabpane" id="dlgLogs" role="tabpanel" aria-labelledby="tab_logs">
+          <div class="log" id="log"></div>
+        </section>
+        <section class="tabpane" id="dlgAudit" role="tabpanel" aria-labelledby="tab_audit" hidden>
           <p class="audit-state" id="auditState"></p>
           <div class="audit-list" id="auditList"></div>
+        </section>
         </div>
       </section>
 
@@ -936,6 +996,15 @@
         <div class="stuck-meta"></div>
         <div class="held-files"></div>
         <div class="held-msg"></div>
+        <!-- The remedy is one config edit in one of two places, and both used
+             to be sidebar rows a click away. They are tabs now, so the row
+             carries the jumps itself — which makes the repair loop shorter than
+             it was before the merge, not longer. Same data-panel/data-tab the
+             nav badges and Overview tiles use, so one handler serves them all. -->
+        <div class="held-jump">
+          <button class="btn ghost tiny" data-panel="dlgConfig" data-tab="settings" data-cap="config.read" data-i18n>De-identification settings</button>
+          <button class="btn ghost tiny" data-panel="dlgConfig" data-tab="routing" data-cap="routing.read" data-i18n>The rule that asks for it</button>
+        </div>
       </div>
     </div>
   </template>

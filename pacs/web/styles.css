@@ -332,6 +332,16 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .svc-chip:hover { border-color: var(--muted); color: #fff; transform: translateY(-1px); }
 /* `display:inline-flex` above would otherwise beat the UA [hidden] rule. */
 .svc-chip[hidden] { display: none; }
+/* A profile without services.control gets the chip as an INDICATOR: same dot,
+   same gold when running, no pointer, no lift, no hover. Deliberately not
+   dimmed — the state it reports is exactly as true and as worth reading for a
+   receptionist as for an administrator, and greying it out would say the
+   opposite. Only the affordance goes. */
+.svc-chip:disabled { cursor: default; }
+.svc-chip:disabled:hover { border-color: #333; color: #cfcfcf; transform: none; }
+/* Higher specificity than .svc-chip.on:hover below, so a disabled running chip
+   keeps its resting gold instead of the hover's brighter #fbbf24. */
+.svc-chip.on:disabled:hover { color: var(--accent); border-color: var(--accent); }
 .svc-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex-shrink: 0; transition: .18s; }
 /* Active → gold */
 .svc-chip.on {
@@ -367,8 +377,20 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 
 /* ── Sidebar shell: left nav + right content pane ───────────────── */
 .shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
-.sidebar { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px;
+/* 210px, up from 190: six rows can afford it, and the Studies row is the first
+   in this app to carry a label plus two badges. In ru ("Исследования", a single
+   unbreakable Cyrillic word) the old box needed ~209px and .sidebar sets only
+   overflow-y, so the overflow was horizontal and unclipped — badges painted over
+   the workspace. The label also gets min-width:0 below so it can ellipsise
+   rather than push. */
+.sidebar { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto; min-height: 0; }
+/* A row is the panel button plus any count badges, which are their own buttons
+   so a keyboard can reach them. The row owns the gap; the badges do not chain
+   margins off each other, because either one may be hidden at zero and a
+   margin-left:auto on the first would strand the survivor mid-row. */
+.navrow { display: flex; align-items: stretch; gap: 6px; }
+.navrow .navbtn { flex: 1 1 auto; min-width: 0; }
 .navbtn {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   font-family: var(--sans); font-size: .92rem; font-weight: 600; color: var(--text);
@@ -379,17 +401,75 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .navbtn:hover { border-color: var(--accent); color: var(--accent); }
 .navbtn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
 .navbtn .nav-ico { width: 1.15em; text-align: center; flex-shrink: 0; }
-.navbtn .badge {
-  margin-left: auto; min-width: 20px; padding: 0 6px; text-align: center;
-  font-family: var(--mono); font-size: .68rem; font-weight: 700; line-height: 19px;
-  color: #050505; background: var(--accent); border-radius: 10px;
+/* The label is the only thing here allowed to shrink. Without min-width:0 a
+   flex item cannot go below its min-content width, and one long unbreakable
+   word would push the badges out of the box instead of ellipsising. */
+.navbtn > span:not(.nav-ico) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navrow .badge {
+  flex: 0 0 auto; align-self: stretch; display: flex; align-items: center; gap: 3px;
+  padding: 0 8px; text-align: center; cursor: pointer;
+  font-family: var(--mono); font-size: .68rem; font-weight: 700;
+  color: #050505; background: var(--accent); border: 1px solid var(--accent);
+  border-radius: 10px; transition: .15s;
 }
-.navbtn .badge.warn { background: var(--warn); }
+.navrow .badge:hover { filter: brightness(1.15); }
+.navrow .badge.warn { background: var(--warn); border-color: var(--warn); }
+/* `display:flex` above would otherwise beat the UA [hidden] rule — the same
+   trap .navbtn[hidden] and .svc-chip[hidden] exist to close. */
+.navrow .badge[hidden] { display: none; }
+/* A badge whose tab the profile cannot open leads nowhere; it keeps counting
+   (the number is not privileged) and stops pretending to be a control. */
+.navrow .badge[data-forbidden="1"] { cursor: default; }
+.navrow .badge[data-forbidden="1"]:hover { filter: none; }
 @media (max-width: 640px) {
   .shell { flex-direction: column; }
   .sidebar { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; }
+  .navrow { flex: 1 1 auto; }
   .navbtn { width: auto; flex: 1 1 auto; }
 }
+
+/* ── Tab strips inside a merged panel ───────────────────────────── */
+/* .modal-body already owns the fill/scroll chain; .tabbed adds nothing but a
+   name so the strip and panes below can be scoped without leaking into the
+   untabbed panels. */
+.modal-body.tabbed { gap: 0; }
+.panel-tabs { margin-bottom: 14px; flex: 0 0 auto; }
+/* A pane is a flex column for exactly the reason a .workpanel is: .hist-list,
+   .log and .table-scroll below all say `flex:1 1 auto; min-height:0`, and every
+   link in that chain has to be a flex container or the scroll silently becomes
+   auto-height and the tools row is pushed off screen. */
+.tabpane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.tabpane[hidden] { display: none; }
+/* Panes with a pinned footer scroll their body instead of the pane. Also a flex
+   column, so the same descendant fill rules keep working one level deeper. */
+.pane-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+/* Same trap again: a tab given display:flex would outrank the UA [hidden] rule,
+   and capability-hiding a tab would silently stop working. */
+.hist-tab[hidden] { display: none; }
+/* The strip wraps rather than overflows — three uppercase mono tabs in ru or
+   pt-BR are wider than .hist-tabs was ever asked to hold. */
+.panel-tabs .hist-tabs { flex-wrap: wrap; }
+/* Second-level strip (History's Received / Sent). Outlined rather than filled,
+   so it cannot be mistaken for the panel-level strip 14px above it. */
+.hist-tabs.sub .hist-tab.active {
+  background: transparent; color: var(--accent); border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* The tabs a profile can actually open, listed under the panel title. Written
+   by app.js from the VISIBLE tabs, so it never promises one that is hidden. */
+.tab-sub { color: var(--muted); }
+/* The two jumps on a held-back row. Small and quiet: the engine's sentence
+   above them is the message, these are just the doors it names. */
+.held-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.held-jump [hidden] { display: none; }
+/* The descriptive line each absorbed panel used to carry in its header. The tab
+   label says what the pane is; this says what it means. */
+.pane-lede {
+  margin: 0 0 12px; flex: 0 0 auto;
+  font-family: var(--mono); font-size: .72rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; letter-spacing: 0; }
 /* Services panel: let the cards grid flow and scroll normally */
 #dlgServices .modal-body { display: block; overflow-y: auto; }
 
@@ -768,6 +848,14 @@ button.ov-tile { cursor: pointer; transition: .15s; }
 button.ov-tile:hover { border-color: var(--accent); }
 button.ov-tile:hover .ov-tile-k { color: var(--accent); }
 button.ov-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A tile whose panel this profile cannot hold. The number is not privileged and
+   still counts; only the affordance goes, so it reads like Free space — which
+   is already a plain div here for the same reason: it counts something and
+   leads nowhere. A button that silently does nothing reads as broken software
+   to somebody working an outage. */
+button.ov-tile.ov-inert, .ov-ticker.ov-inert { cursor: default; }
+button.ov-tile.ov-inert:hover { border-color: var(--border); }
+button.ov-tile.ov-inert:hover .ov-tile-k { color: var(--muted); }
 .ov-tile-v { min-width: 0; font-family: var(--mono); font-size: 1rem; font-weight: 700; line-height: 1.15;
   font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-tile-k { min-width: 0; color: var(--muted); font-size: .64rem; line-height: 1.3;

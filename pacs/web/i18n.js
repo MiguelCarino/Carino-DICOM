@@ -110,7 +110,6 @@ const I18N = {
         'point a modality here — it pulls open orders by C-FIND': 'apunta un equipo aquí como fuente de worklist (C-FIND)',
 
         // ── History ──
-        'Transaction history': 'Historial de transacciones',
         'received &amp; sent studies': 'estudios recibidos y enviados',
         '📥 Received': '📥 Recibidos',
         '📤 Sent / Archived': '📤 Enviados',
@@ -148,13 +147,11 @@ const I18N = {
         '🗑 Purge closed': '🗑 Purgar',
 
         // ── Pending imports ──
-        'Pending imports': 'Importaciones pendientes',
         'non-DICOM awaiting review': 'no-DICOM en espera de revisión',
         "PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.": 'Los PDF e imágenes encontrados junto a un estudio se encolan aquí con los datos del estudio ya rellenados. Confirma y pulsa <em>Aprobar</em> para convertirlos a DICOM y enviarlos.',
         'Rescan the pending folder': 'Volver a escanear la carpeta de pendientes',
 
         // ── Stuck sends ──
-        'Stuck sends': 'Envíos atascados',
         'forwards that are not moving': 'reenvíos que no avanzan',
         'Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.': 'Los estudios se reintentan con espera progresiva hasta que cada destino habilitado los acepte. Arregla el nodo y pulsa <em>Reintentar ahora</em> para intentarlo de inmediato. Los archivos enviados a un nombre que ya no es un destino habilitado se listan aparte: a esos no los reintenta nada, y cada fila dice qué será de ellos. Los destinos para los que una regla pide desidentificar, cuando no se puede anonimizar ninguna copia, se listan al final: esos se retienen en lugar de enviarse identificados, y una sola edición los libera.',
         'hold-and-forward': 'retención y reenvío',
@@ -254,6 +251,9 @@ const I18N = {
 
         // ── Logs / misc chrome ──
         'Activity': 'Actividad',
+        'Configuration': 'Configuración',
+        'De-identification settings': 'Ajustes de anonimización',
+        'The rule that asks for it': 'La regla que lo pide',
         'Clear view': 'Limpiar vista',
         'Close': 'Cerrar',
 
@@ -321,6 +321,8 @@ const I18N = {
         'Printer': 'Impresora',
         'RIS': 'RIS',
         '{svc} — click to start/stop': '{svc}: haz clic para iniciar/detener',
+        '{svc} — running': '{svc}: en marcha',
+        '{svc} — stopped': '{svc}: detenido',
 
         // ── Dynamic: destinations, config, drops ──
         'Fill host, port and AE first': 'Rellena antes host, puerto y AE',
@@ -641,7 +643,6 @@ const I18N = {
         'Turn on profiles': 'Activar perfiles',
         'Show the list of names on the sign-in screen': 'Mostrar la lista de nombres en la pantalla de inicio de sesión',
         'With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.': 'Con esto desactivado, cada persona escribe su nombre en lugar de elegirlo. Desactívelo si el panel es accesible desde la red y prefiere no publicar quién trabaja aquí.',
-        'Audit trail': 'Registro de auditoría',
         'Check integrity': 'Comprobar integridad',
         'Export': 'Exportar',
         'Signing in as': 'Iniciando sesión como',
@@ -760,7 +761,6 @@ const I18N = {
         'Matches': 'Respostas',
         'point a modality here — it pulls open orders by C-FIND': 'aponte um equipamento para cá como fonte de worklist (C-FIND)',
 
-        'Transaction history': 'Histórico de transações',
         'received &amp; sent studies': 'estudos recebidos e enviados',
         '📥 Received': '📥 Recebidos',
         '📤 Sent / Archived': '📤 Enviados',
@@ -796,12 +796,10 @@ const I18N = {
         'Delete all closed orders': 'Excluir todos os pedidos fechados',
         '🗑 Purge closed': '🗑 Limpar',
 
-        'Pending imports': 'Importações pendentes',
         'non-DICOM awaiting review': 'não-DICOM aguardando revisão',
         "PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.": 'PDFs e imagens encontrados junto a um estudo entram na fila aqui com os dados do estudo já preenchidos. Confirme e clique em <em>Aprovar</em> para convertê-los em DICOM e enviar.',
         'Rescan the pending folder': 'Reescanear a pasta de pendentes',
 
-        'Stuck sends': 'Envios travados',
         'forwards that are not moving': 'encaminhamentos que não avançam',
         'Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.': 'Os estudos continuam tentando, com espera progressiva, até que todo destino habilitado os aceite. Corrija o nó e clique em <em>Tentar agora</em> para tentar imediatamente. Arquivos encaminhados a um nome que não é mais um destino habilitado são listados à parte: nada tenta reenviar esses, e cada linha diz o que será deles. Destinos para os quais uma regra pede desidentificação, quando nenhuma cópia pode ser anonimizada, são listados por último: esses ficam retidos em vez de serem enviados identificados, e uma única edição os libera.',
         'hold-and-forward': 'retenção e encaminhamento',
@@ -898,6 +896,9 @@ const I18N = {
         'Save configuration': 'Salvar configuração',
 
         'Activity': 'Atividade',
+        'Configuration': 'Configuração',
+        'De-identification settings': 'Configurações de anonimização',
+        'The rule that asks for it': 'A regra que pede isso',
         'Clear view': 'Limpar exibição',
         'Close': 'Fechar',
 
@@ -960,6 +961,8 @@ const I18N = {
         'Printer': 'Impressora',
         'RIS': 'RIS',
         '{svc} — click to start/stop': '{svc}: clique para iniciar/parar',
+        '{svc} — running': '{svc}: em execução',
+        '{svc} — stopped': '{svc}: parado',
 
         'Fill host, port and AE first': 'Preencha host, porta e AE primeiro',
         'Saved.': 'Salvo.',
@@ -1272,7 +1275,6 @@ const I18N = {
         'Turn on profiles': 'Ativar perfis',
         'Show the list of names on the sign-in screen': 'Mostrar a lista de nomes na tela de login',
         'With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.': 'Com isto desligado, cada pessoa digita o nome em vez de escolhê-lo. Desligue se o painel estiver acessível pela rede e você preferir não publicar quem trabalha aqui.',
-        'Audit trail': 'Trilha de auditoria',
         'Check integrity': 'Verificar integridade',
         'Export': 'Exportar',
         'Signing in as': 'Entrando como',
@@ -1391,7 +1393,6 @@ const I18N = {
         'Matches': '一致',
         'point a modality here — it pulls open orders by C-FIND': '装置のワークリスト参照先をここに設定すると、C-FINDで未処理オーダを取得します',
 
-        'Transaction history': '送受信履歴',
         'received &amp; sent studies': '受信・送信した検査',
         '📥 Received': '📥 受信',
         '📤 Sent / Archived': '📤 送信済み / アーカイブ',
@@ -1427,12 +1428,10 @@ const I18N = {
         'Delete all closed orders': '完了オーダをすべて削除',
         '🗑 Purge closed': '🗑 完了を削除',
 
-        'Pending imports': '保留中の取り込み',
         'non-DICOM awaiting review': '確認待ちの非DICOMファイル',
         "PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.": '検査の隣で見つかったPDFや画像は、検査情報が入力済みの状態でここに並びます。内容を確認し、<em>承認</em>するとDICOMに変換して送信します。',
         'Rescan the pending folder': '保留フォルダを再スキャン',
 
-        'Stuck sends': '滞留中の送信',
         'forwards that are not moving': '滞留して進まない転送',
         'Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.': '有効な送信先すべてが受け取るまで、間隔を空けて再試行し続けます。ノードを直したら<em>今すぐ再試行</em>で即座に試せます。有効な送信先ではなくなった名前に振り分けられたファイルは別に一覧します。そちらは再試行されず、この後どうなるかは各行に書かれています。規則が匿名化を求めているのに、どのコピーも匿名化できない送信先は最後に一覧します。そちらは識別可能なまま送らずに保留され、設定を一箇所直せば解放されます。',
         'hold-and-forward': '保留転送',
@@ -1529,6 +1528,9 @@ const I18N = {
         'Save configuration': '設定を保存',
 
         'Activity': 'アクティビティ',
+        'Configuration': '設定一式',
+        'De-identification settings': '匿名化の設定',
+        'The rule that asks for it': 'それを要求しているルール',
         'Clear view': '表示をクリア',
         'Close': '閉じる',
 
@@ -1591,6 +1593,8 @@ const I18N = {
         'Printer': 'プリンタ',
         'RIS': 'RIS',
         '{svc} — click to start/stop': '{svc} — クリックで開始／停止',
+        '{svc} — running': '{svc} — 稼働中',
+        '{svc} — stopped': '{svc} — 停止中',
 
         'Fill host, port and AE first': '先にホスト・ポート・AEを入力してください',
         'Saved.': '保存しました。',
@@ -1903,7 +1907,6 @@ const I18N = {
         'Turn on profiles': 'プロファイルを有効にする',
         'Show the list of names on the sign-in screen': 'サインイン画面に名前の一覧を表示する',
         'With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.': 'これをオフにすると、名前を選ぶのではなく入力してもらう形になります。パネルがネットワークから到達できる場合、誰が勤務しているかを公開したくなければオフにしてください。',
-        'Audit trail': '監査証跡',
         'Check integrity': '整合性を検証',
         'Export': 'エクスポート',
         'Signing in as': 'サインイン中：',
@@ -2022,7 +2025,6 @@ const I18N = {
         'Matches': 'Совпадения',
         'point a modality here — it pulls open orders by C-FIND': 'укажите этот адрес аппарату как источник MWL (C-FIND)',
 
-        'Transaction history': 'История передач',
         'received &amp; sent studies': 'приём и отправка',
         '📥 Received': '📥 Принятые',
         '📤 Sent / Archived': '📤 Отправленные',
@@ -2058,12 +2060,10 @@ const I18N = {
         'Delete all closed orders': 'Удалить все закрытые заявки',
         '🗑 Purge closed': '🗑 Очистить',
 
-        'Pending imports': 'Ожидающие импорта',
         'non-DICOM awaiting review': 'не-DICOM, ожидающие проверки',
         "PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.": 'PDF-файлы и изображения, найденные рядом с исследованием, попадают сюда с уже заполненными данными исследования. Проверьте их и нажмите <em>Утвердить</em>, чтобы преобразовать в DICOM и отправить.',
         'Rescan the pending folder': 'Пересканировать папку ожидающих',
 
-        'Stuck sends': 'Застрявшие отправки',
         'forwards that are not moving': 'пересылки, которые не движутся',
         'Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.': 'Исследования повторяются с нарастающей задержкой, пока их не примет каждое включённое назначение. Почините узел и нажмите <em>Повторить сейчас</em> для немедленной попытки. Файлы, направленные на имя, которое больше не является включённым назначением, показаны отдельно: их никто не повторяет, а что будет дальше, сказано в каждой строке. Назначения, для которых правило требует деидентификации, когда ни одну копию обезличить нельзя, показаны последними: их удерживают, а не отправляют с идентификаторами, и освобождает их одна правка.',
         'hold-and-forward': 'удержание и пересылка',
@@ -2160,6 +2160,9 @@ const I18N = {
         'Save configuration': 'Сохранить конфигурацию',
 
         'Activity': 'Активность',
+        'Configuration': 'Конфигурация',
+        'De-identification settings': 'Настройки обезличивания',
+        'The rule that asks for it': 'Правило, которое этого требует',
         'Clear view': 'Очистить вид',
         'Close': 'Закрыть',
 
@@ -2222,6 +2225,8 @@ const I18N = {
         'Printer': 'Принтер',
         'RIS': 'РИС',
         '{svc} — click to start/stop': '{svc} — нажмите, чтобы запустить или остановить',
+        '{svc} — running': '{svc} — работает',
+        '{svc} — stopped': '{svc} — остановлен',
 
         'Fill host, port and AE first': 'Сначала заполните хост, порт и AE',
         'Saved.': 'Сохранено.',
@@ -2534,7 +2539,6 @@ const I18N = {
         'Turn on profiles': 'Включить профили',
         'Show the list of names on the sign-in screen': 'Показывать список имён на экране входа',
         'With this off, people type their name instead of picking it. Turn it off if the dashboard is reachable from the network and you would rather not publish who works here.': 'Когда выключено, имя вводят вручную, а не выбирают. Выключите, если панель доступна из сети и вы не хотите публиковать, кто здесь работает.',
-        'Audit trail': 'Журнал аудита',
         'Check integrity': 'Проверить целостность',
         'Export': 'Экспорт',
         'Signing in as': 'Вход как',
@@ -2607,6 +2611,9 @@ const PLURALS = {
         '{n} selected': ['{n} selected', '{n} selected'],
         '{n} services enabled': ['{n} service enabled', '{n} services enabled'],
         '{n} index errors — see the log': ['{n} index error — see the log', '{n} index errors — see the log'],
+        '{n} pending imports': ['{n} pending import', '{n} pending imports'],
+        '{n} stuck sends': ['{n} stuck send', '{n} stuck sends'],
+        '{n} open orders': ['{n} open order', '{n} open orders'],
     },
     es: {
         '{n} images': ['{n} imagen', '{n} imágenes'],
@@ -2618,6 +2625,9 @@ const PLURALS = {
         '{n} selected': ['{n} marcado', '{n} marcados'],
         '{n} services enabled': ['{n} servicio activado', '{n} servicios activados'],
         '{n} index errors — see the log': ['{n} error de índice — mira el registro', '{n} errores de índice — mira el registro'],
+        '{n} pending imports': ['{n} importación pendiente', '{n} importaciones pendientes'],
+        '{n} stuck sends': ['{n} envío atascado', '{n} envíos atascados'],
+        '{n} open orders': ['{n} orden abierta', '{n} órdenes abiertas'],
     },
     'pt-BR': {
         '{n} images': ['{n} imagem', '{n} imagens'],
@@ -2629,6 +2639,9 @@ const PLURALS = {
         '{n} selected': ['{n} marcado', '{n} marcados'],
         '{n} services enabled': ['{n} serviço ligado', '{n} serviços ligados'],
         '{n} index errors — see the log': ['{n} erro de índice — veja o registro', '{n} erros de índice — veja o registro'],
+        '{n} pending imports': ['{n} importação pendente', '{n} importações pendentes'],
+        '{n} stuck sends': ['{n} envio travado', '{n} envios travados'],
+        '{n} open orders': ['{n} pedido aberto', '{n} pedidos abertos'],
     },
     ja: {
         '{n} images': ['{n}件の画像'],
@@ -2640,6 +2653,9 @@ const PLURALS = {
         '{n} selected': ['{n}件を選択中'],
         '{n} services enabled': ['{n}件のサービスをオンにしました'],
         '{n} index errors — see the log': ['索引エラー{n}件 — ログを確認してください'],
+        '{n} pending imports': ['保留中の取り込み {n} 件'],
+        '{n} stuck sends': ['滞留中の送信 {n} 件'],
+        '{n} open orders': ['未完了のオーダー {n} 件'],
     },
     ru: {
         '{n} images': ['{n} изображение', '{n} изображения', '{n} изображений'],
@@ -2651,6 +2667,9 @@ const PLURALS = {
         '{n} selected': ['Выбрана {n} служба', 'Выбрано {n} службы', 'Выбрано {n} служб'],
         '{n} services enabled': ['Включена {n} служба', 'Включено {n} службы', 'Включено {n} служб'],
         '{n} index errors — see the log': ['{n} ошибка индекса — смотрите журнал', '{n} ошибки индекса — смотрите журнал', '{n} ошибок индекса — смотрите журнал'],
+        '{n} pending imports': ['{n} ожидающий импорт', '{n} ожидающих импорта', '{n} ожидающих импортов'],
+        '{n} stuck sends': ['{n} застрявшая отправка', '{n} застрявшие отправки', '{n} застрявших отправок'],
+        '{n} open orders': ['{n} открытая заявка', '{n} открытые заявки', '{n} открытых заявок'],
     },
 };
 
