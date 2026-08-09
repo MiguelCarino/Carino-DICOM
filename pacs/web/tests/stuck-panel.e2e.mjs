@@ -320,7 +320,9 @@ const SNAP = `(function () {
     pins: all('.orphan-pin').map((e) => !e.hidden),
     chips: all('.orphan-files .hist-chip').map((e) => e.textContent.trim()),
     heldChips: all('.held-files .hist-chip').map((e) => e.textContent.trim()),
-    badge: b.hidden ? null : b.textContent.trim(),
+    // The badge reads "⚠ 1" now — the glyph is what tells it apart from the
+    // pending badge beside it, so the number is read out of it.
+    badge: b.hidden ? null : b.textContent.replace(/[^0-9]/g, ''),
     retryAllDisabled: document.getElementById('stuckRetryAll').disabled,
   };
 })()`;
@@ -349,7 +351,9 @@ async function refreshPanel(want) {
 // badge is given time to catch up with the world before they are compared.
 async function badgeSettled(n) {
   const b = "document.getElementById('stuckBadge')";
-  await cdp.waitFor(n === 0 ? `${b}.hidden` : `!${b}.hidden && ${b}.textContent === '${n}'`,
+  // textContent is "⚠ 1" — the glyph is what distinguishes this badge from the
+  // pending one sharing the Studies row, so match on the number inside it.
+  await cdp.waitFor(n === 0 ? `${b}.hidden` : `!${b}.hidden && ${b}.textContent.replace(/[^0-9]/g, '') === '${n}'`,
                     12000, "the ⚠ badge to read " + n);
 }
 
@@ -473,7 +477,7 @@ async function main() {
 
   present();                                  // 1. nothing in the outgoing folder
   await cdp.goto(BASE + "/#dlgStuck");
-  await cdp.waitFor("!document.getElementById('dlgStuck').hidden", 10000, "the Stuck panel");
+  await cdp.waitFor("!document.getElementById('dlgStudies').hidden && !document.getElementById('dlgStuck').hidden", 10000, "the Stuck panel");
   await state("nothing stuck, nothing orphaned, nothing held",
               { destRows: 0, orphanRows: 0, heldRows: 0, attention: 0 });
 
@@ -613,7 +617,7 @@ async function main() {
   cfgOn.deid = Object.assign({}, cfgOn.deid, { profile: "basic" });
   const applied = await fetch(BASE + "/api/config", { method: "POST", headers: wr, body: JSON.stringify(cfgOn) });
   check(applied.ok, "the held row's remedy applies through POST /api/config (deid.profile → basic)");
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgSettings\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"settings\"]').click()");
   await cdp.waitFor("!!document.querySelector('#deidState .deid-key')", 10000, "the site-key line");
   const noKey = await cdp.eval(`(function () {
     const e = document.querySelector('#deidState .deid-key');
@@ -660,7 +664,7 @@ async function main() {
   // (#dlgSettings, from the site-key step) makes Page.navigate a no-op.
   await cdp.goto("about:blank");
   await cdp.goto(BASE + "/#dlgStuck");
-  await cdp.waitFor("!document.getElementById('dlgStuck').hidden", 10000, "the Stuck panel");
+  await cdp.waitFor("!document.getElementById('dlgStudies').hidden && !document.getElementById('dlgStuck').hidden", 10000, "the Stuck panel");
 
   const st2 = await getJSON("/api/status");
   check(st2.deid.profile === "basic" && st2.deid.hold_cause === "no-deidentifier",
@@ -714,7 +718,7 @@ async function main() {
 
   /* The de-identification panel, which is where an operator goes after reading
      the row. Same branch, same danger if it asserts the wrong half. */
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgSettings\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"settings\"]').click()");
   await cdp.waitFor("(document.getElementById('deidState').textContent || '').indexOf('Research') >= 0",
                     10000, "the de-identification panel to name the held node");
   const panel2 = await cdp.eval("document.getElementById('deidState').textContent");
@@ -746,7 +750,7 @@ async function main() {
      which is the last surface that could still print "De-identified for" over a
      study going nowhere. */
   console.log("\n── Explain route, in the state the endpoint cannot see ──");
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgRouting\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"routing\"]').click()");
   await cdp.eval("document.getElementById('rtTest').click()");
   await cdp.waitFor("!document.getElementById('rtResult').hidden", 10000, "the dry-run result");
   await cdp.waitFor("document.querySelectorAll('#rtResult .rt-held').length === 1", 10000, "the held line");
@@ -777,7 +781,7 @@ async function main() {
   check(st3.deid.hold_cause === "" && JSON.stringify(st3.deid.destinations) === '["Research"]',
         "the node is de-identified-for again, with no hold: " + JSON.stringify(st3.deid));
   check(st3.config_problem === "", "the config would be accepted now");
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgSettings\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"settings\"]').click()");
   await cdp.waitFor("/Rules de-identify for/.test(document.getElementById('deidState').textContent || '')",
                     10000, "the panel to go quiet");
   await cdp.waitFor("document.getElementById('cfgWarn').hidden", 10000, "the banner to go away");
@@ -813,7 +817,7 @@ async function main() {
         "…naming both open doors: " + JSON.stringify(caveat[0] || ""));
   check(/identified originals/.test(caveat[0] || ""),
         "…and what a node that pulls actually receives");
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgStuck\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgStudies\"]').click(); document.querySelector('#dlgStudies .panel-tabs .hist-tab[data-tab=\"stuck\"]').click()");
   const clean = await state("clean: nothing stuck, nothing orphaned, nothing held",
                             { destRows: 0, orphanRows: 0, heldRows: 0, attention: 0 });
   check(clean.heldCauses.length === 0, "and no cause tags left on screen");

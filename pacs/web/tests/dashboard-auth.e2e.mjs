@@ -290,7 +290,7 @@ async function main() {
         "the rule's destination is ticked");
   // The status-fed readouts are only painted while Settings is open (the poll
   // skips shut panels), so open it before reading them.
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgSettings\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"settings\"]').click()");
   check((await cdp.eval("document.getElementById('dwUrl').value")).endsWith("/dicom-web"),
         "the DICOMweb base URL is shown absolute for pasting into a viewer");
   check(await cdp.eval("document.getElementById('deidProfile').value") === "strict",
@@ -322,7 +322,7 @@ async function main() {
      + JSON.stringify(await cdp.eval("document.getElementById('toast').textContent")));
 
   /* (d) the config-wipe regression */
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgSettings\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"settings\"]').click()");
   await cdp.eval("document.getElementById('toast').hidden = true");
   await cdp.eval("document.getElementById('saveCfg').click()");
   await cdp.waitFor("!document.getElementById('toast').hidden", 10000, "the save toast");
@@ -430,7 +430,7 @@ async function main() {
   const restartMsg = await cdp.eval("document.getElementById('authMsg').textContent");
   check(/no longer signed in|restart|sesión|sessão|再起動|перезапущ/i.test(restartMsg),
         "a restarted service says the session ended, not that the token is wrong: " + JSON.stringify(restartMsg));
-  check(await cdp.eval("document.getElementById('dlgSettings').hidden === false"),
+  check(await cdp.eval("document.getElementById('dlgConfig').hidden === false && document.getElementById('dlgSettings').hidden === false"),
         "the operator's place is kept behind the prompt across a restart");
   await cdp.eval(`(() => { document.getElementById('authToken').value = ${JSON.stringify(token)};
                            document.getElementById('authLogin').click(); })()`);
@@ -494,12 +494,13 @@ async function main() {
   await cdp.eval("window.CarinoLang.set('ru')");
   await sleep(400);
   const ru = await cdp.eval(`JSON.stringify({
-    nav: document.querySelector('.navbtn[data-panel="dlgRouting"] span:last-child').textContent,
+    nav: document.querySelector('.navbtn[data-panel="dlgConfig"] span:last-child').textContent,
+    tab: document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab="routing"] span').textContent,
     card: document.querySelector('#qrCard .card-title span:last-child').textContent,
     idx: document.querySelector('#idxRescanNow').textContent,
     deid: document.querySelector('#deidProfile option[value="strict"]').textContent })`);
   const ruv = JSON.parse(ru);
-  check(/[А-Яа-я]/.test(ruv.nav) && /[А-Яа-я]/.test(ruv.card) && /[А-Яа-я]/.test(ruv.idx) && /[А-Яа-я]/.test(ruv.deid),
+  check(/[А-Яа-я]/.test(ruv.nav) && /[А-Яа-я]/.test(ruv.tab) && /[А-Яа-я]/.test(ruv.card) && /[А-Яа-я]/.test(ruv.idx) && /[А-Яа-я]/.test(ruv.deid),
         "the new surfaces translate: " + ru);
   await cdp.eval("window.CarinoLang.set('ja')");
   await sleep(400);

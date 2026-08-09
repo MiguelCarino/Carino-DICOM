@@ -274,13 +274,38 @@ async function signInAs(name, password) {
   await sleep(600);          // one status poll, so `me` and the nav have settled
 }
 
-/* Which nav entries this browser can see, and what the server actually sent. */
+/* Which nav entries this browser can see, and what the server actually sent.
+
+   Since the twelve panels became six, the row is only half the answer: four of
+   the old panels live behind one Configuration row and two behind one Activity
+   row, so a profile can legitimately hold the row and none of the tabs that
+   matter. `tabs` is therefore captured per panel, and the assertions below name
+   both. A row-only check would pass while a Radiologist reads the shutdown
+   control. */
 const SNAP = `(function () {
   const nav = [].slice.call(document.querySelectorAll('.navbtn[data-panel]'))
     .filter((b) => !b.hidden)
     .map((b) => b.dataset.panel);
-  return { nav, who: document.getElementById('whoami').textContent.trim() };
+  const tabs = {};
+  ['dlgStudies', 'dlgConfig', 'dlgActivity'].forEach(function (id) {
+    const p = document.getElementById(id);
+    if (!p) return;
+    tabs[id] = [].slice.call(p.querySelectorAll('.panel-tabs .hist-tab[data-tab]'))
+      .filter((b) => !b.hidden)
+      .map((b) => b.dataset.tab);
+  });
+  return { nav, tabs, who: document.getElementById('whoami').textContent.trim() };
 })()`;
+
+/* Ask for a pane by URL and report what actually came up. The merge turned every
+   tab into a deep link, so this is the shape of the attack the tab gate exists
+   to stop: the panel check passes (the profile legitimately holds the row) and
+   the tab is where the privilege is. */
+async function reachedByHash(hash, paneId) {
+  await cdp.eval("location.hash = " + JSON.stringify(hash) + "; 1");
+  await sleep(700);
+  return cdp.eval("!document.getElementById('" + paneId + "').hidden");
+}
 
 async function statusFor() {
   // Read through the PAGE, so it carries the page's session cookie. This is the
@@ -314,7 +339,7 @@ async function main() {
   await cdp.goto(BASE + "/");
   await cdp.waitFor("document.getElementById('authGate').hidden", 15000, "no gate on a token-less appliance");
   ok("a loopback appliance with no token still opens straight into the dashboard");
-  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgPeople\"]').click()");
+  await cdp.eval("document.querySelector('.navbtn[data-panel=\"dlgConfig\"]').click(); document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab=\"people\"]').click()");
   await sleep(400);
   check(await cdp.eval("!document.getElementById('peopleOff').hidden"),
         "People offers to turn profiles on while the appliance is token-only");
@@ -377,9 +402,23 @@ async function main() {
   const rec = await cdp.eval(SNAP);
   check(rec.who.indexOf("Reception") === 0, "signed in as Reception: " + JSON.stringify(rec.who));
   check(rec.nav.indexOf("dlgOrders") >= 0, "Reception has the Orders panel");
-  for (const gone of ["dlgDests", "dlgRouting", "dlgSettings", "dlgPeople", "dlgAudit"]) {
-    check(rec.nav.indexOf(gone) < 0, "Reception has no " + gone.replace("dlg", "") + " panel");
-  }
+  // Reception holds none of config.read / routing.read / auth.manage, so the
+  // whole Configuration row is absent — the OR-list must not let one of the
+  // four tabs drag the row into view.
+  check(rec.nav.indexOf("dlgConfig") < 0, "Reception has no Configuration row at all");
+  check(rec.nav.indexOf("dlgActivity") < 0, "…and no Activity row (neither logs.read nor audit.read)");
+  check(rec.nav.indexOf("dlgServices") < 0, "…and no Services row");
+  // The landing panel is Orders, not Studies. Studies opens on History, which
+  // is every stored patient's name, ID and date of birth — the wrong thing for
+  // a front-desk screen to sit on between patients, and order intake is what
+  // this profile is actually for.
+  check(await cdp.eval("!document.getElementById('dlgOrders').hidden"),
+        "Reception lands on Orders, not on a list of patient names");
+  // Asking for the forbidden panes by URL must not produce them.
+  check(!(await reachedByHash("#configuration/settings", "dlgSettings")),
+        "…#configuration/settings does not open the Settings pane for Reception");
+  check(!(await reachedByHash("#dlgPeople", "dlgPeople")),
+        "…nor does the legacy #dlgPeople bookmark");
   const recStatus = await statusFor();
   // The load-bearing half. A hidden nav button proves nothing; what matters is
   // that the destination's host never reached this browser.
@@ -395,10 +434,14 @@ async function main() {
   /* ---- 4. IT: the technical surface, without the chart ---------------- */
   await signInAs("IT");
   const it = await cdp.eval(SNAP);
-  check(it.nav.indexOf("dlgDests") >= 0 && it.nav.indexOf("dlgRouting") >= 0,
-        "IT has Destinations and Routing");
+  check(it.nav.indexOf("dlgConfig") >= 0, "IT has the Configuration row");
+  check(it.tabs.dlgConfig.join() === "destinations,routing,settings",
+        "…with Destinations, Routing and Settings: " + JSON.stringify(it.tabs.dlgConfig));
+  check(it.tabs.dlgConfig.indexOf("people") < 0, "…and no People tab — IT cannot manage profiles");
+  check(!(await reachedByHash("#configuration/people", "dlgPeople")),
+        "…which #configuration/people cannot get around either");
   check(it.nav.indexOf("dlgOrders") < 0, "IT has no Orders panel");
-  check(it.nav.indexOf("dlgPeople") < 0, "IT cannot manage profiles");
+  check(it.tabs.dlgActivity.join() === "logs,audit", "IT reads both the log and the audit trail");
   const itStatus = await statusFor();
   const itRaw = JSON.stringify(itStatus);
   check(itRaw.indexOf("10.99.0.5") >= 0, "IT does get the destination address — they are not blind");
@@ -454,6 +497,51 @@ async function main() {
   // reach, so a restricted profile is refused there rather than served.
   const dw = await cdp.eval("fetch('/dicom-web/studies').then(r => r.status + '')");
   check(dw === "403", "…and DICOMweb refuses a profile that may not see every identifier (HTTP " + dw + ")");
+
+  /* ---- 4b. the Radiologist, who holds a row but not its dangerous tab --
+
+     This is the case the twelve-to-six merge invented, and the reason the tab
+     gate exists as well as the row gate. A Radiologist holds routing.read, so
+     the Configuration ROW is legitimately theirs — Destinations and Routing are
+     things they read during a failover. They do NOT hold config.read, and the
+     Settings pane behind that same row carries #killSvc (shut the engine down)
+     and #authFs (rotate the API token). A panel-level check alone would let
+     them straight in. */
+  await signInAs("Radiologist");
+  const rad = await cdp.eval(SNAP);
+  check(rad.nav.indexOf("dlgConfig") >= 0,
+        "the Radiologist does get the Configuration row — they hold routing.read");
+  check(rad.tabs.dlgConfig.join() === "destinations,routing",
+        "…but only the two tabs routing.read pays for: " + JSON.stringify(rad.tabs.dlgConfig));
+  check(await cdp.eval("!document.getElementById('dlgDests').hidden || document.getElementById('dlgConfig').hidden"),
+        "…and opening it lands on Destinations, never on the hidden Settings pane");
+  check(!(await reachedByHash("#configuration/settings", "dlgSettings")),
+        "…#configuration/settings does not open Settings for them");
+  check(!(await reachedByHash("#dlgSettings", "dlgSettings")),
+        "…nor does the legacy #dlgSettings bookmark");
+  check(await cdp.eval("document.getElementById('killSvc').closest('.tabpane').hidden"),
+        "…so the shutdown control is inside a pane that stays shut");
+  check(rad.tabs.dlgActivity.join() === "logs",
+        "Activity gives them the log and not the audit trail: " + JSON.stringify(rad.tabs.dlgActivity));
+  check(!(await reachedByHash("#activity/audit", "dlgAudit")),
+        "…and #activity/audit does not open it");
+  check(rad.nav.indexOf("dlgServices") < 0, "no Services row without services.control");
+  // Requirement B, stated as a test: the chips stay readable and stop being
+  // controls. Service state is not privileged — web.py sends it to everyone —
+  // and the receptionist and the radiologist are the people nearest the
+  // modality when the receiver dies.
+  const chips = await cdp.eval(`(function () {
+    const c = [].slice.call(document.querySelectorAll('.svc-chip'));
+    return { count: c.length, visible: c.filter((x) => !x.hidden).length,
+             disabled: c.filter((x) => x.disabled).length };
+  })()`);
+  check(chips.count === 6, "the six service chips are mounted: " + JSON.stringify(chips));
+  // `hidden` on a chip belongs to showChip()/renderEmergency and tracks which
+  // services are ENABLED, not who is looking — two are off in this fixture. The
+  // invariant capability must not touch is that some are still on screen.
+  check(chips.visible > 0,
+        "…and the running ones stay on screen for a profile that cannot work them");
+  check(chips.disabled === 6, "…with every one of them disabled instead of hidden");
 
   /* ---- 5. a password, and the picker asking for it -------------------- */
   await signInAs("Administrator");
@@ -519,12 +607,19 @@ async function main() {
   await cdp.eval("localStorage.setItem('carino_lang', 'pt-BR')");
   await cdp.goto(BASE + "/");
   await sleep(900);
+  // People is a tab under Configuration now, so the label to read is the tab's.
   const nav = await cdp.eval(`(function () {
-    const b = [].slice.call(document.querySelectorAll('.navbtn[data-panel="dlgPeople"] span'))
+    const b = document.querySelector('#dlgConfig .panel-tabs .hist-tab[data-tab="people"] span');
+    return b ? b.textContent.trim() : "";
+  })()`);
+  check(nav === "Pessoas", "the People tab translates to pt-BR: " + JSON.stringify(nav));
+  // The row above it is the one new noun the merge minted.
+  const row = await cdp.eval(`(function () {
+    const b = [].slice.call(document.querySelectorAll('.navbtn[data-panel="dlgConfig"] span'))
       .filter((e) => !e.classList.contains('nav-ico'))[0];
     return b ? b.textContent.trim() : "";
   })()`);
-  check(nav === "Pessoas", "the People panel translates to pt-BR: " + JSON.stringify(nav));
+  check(row === "Configuração", "the Configuration row translates to pt-BR: " + JSON.stringify(row));
 
   check(cdp.errors.length === 0,
         "no uncaught page exceptions" + (cdp.errors.length ? ": " + cdp.errors[0] : ""));
