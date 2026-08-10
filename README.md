@@ -765,11 +765,15 @@ does ship them, their notices must ship with it.
 ## Configuration
 
 One JSON file drives everything. `pacs init` scaffolds it from
-[config.example.json](config.example.json), which is commented section by
-section and is the reference for every key. The sections are `scp`, `scu`,
-`print`, `mwl`, `ris`, `qr`, `dicomweb`, `index`, `routing`, `deid`,
-`emergency`, `destinations`, `web` and `logs_dir` — plus `setup_completed`,
-which the setup chooser stamps and nobody edits by hand.
+[config.example.json](config.example.json), which is a working starting point
+rather than a manual; [CONFIGURATION.md](CONFIGURATION.md) is the reference for
+every key — what it does, what it defaults to, what validation refuses and what
+goes wrong when it is set badly. One section per listener — `scp`, `scu`,
+`print`, `mwl`, `ris`, `qr`, `dicomweb` — and one per subsystem: `index`,
+`routing`, `deid`, `emergency`, `notify`, `audit`, `users`, `destinations`,
+`modalities`, `worklist_source`, `web` and `logs_dir`. Plus `setup_completed`,
+which the setup chooser stamps and nobody edits by hand. CONFIGURATION.md
+carries the current list; this paragraph is the shape, not the inventory.
 
 By default everything lives in **`~/CarinoPACS/`** — the config, the `received` /
 `outgoing` / `sent` / `pending` folders, the sqlite index and a dated log file
@@ -860,6 +864,8 @@ control.
 
 | Document | What is in it |
 |---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | The four paths through the code: what runs on which thread, what owns what, what happens when it fails |
+| [CONFIGURATION.md](CONFIGURATION.md) | Every key in `config.json`: what it does, its default, what validation refuses |
 | [SECURITY.md](SECURITY.md) | Threat model, what is and is not protected, private disclosure |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev environment, house conventions, the safety rule, how to test |
 | [packaging/README.md](packaging/README.md) | Running it as a systemd service on a headless box |
