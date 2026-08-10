@@ -116,6 +116,12 @@ against the dashboard root, and that is why `pacs/web/` carries its own
 `carino-clock.js` and `favicon.webp`. Do not "fix" a path in `docs/manual/` to
 suit one of the two hosts — `tests/test_manual.py` fails if either breaks.
 
+`docs/manual/tools/` is held back — the screenshot harness, the DICOM forger and
+the traffic seeder are how the figures are *regenerated*, not something an
+operator reads, and a traffic generator inside a medical appliance is a thing
+somebody has to explain in a review. `.dockerignore` holds the same name back
+from the image; if you change one, change the other.
+
 It costs a few megabytes of installer, nearly all of it the figures.
 
 ### Why one OS at a time

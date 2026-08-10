@@ -80,6 +80,13 @@ docs/
 # with only one of them the COPY below fails on an empty or missing path.
 !docs/manual
 !docs/manual/**
+# ...but not the harness that REGENERATES the figures. A screenshot driver, a
+# DICOM forger and a traffic seeder are not documentation an operator reads,
+# and a traffic generator inside a medical appliance image is a thing somebody
+# has to explain in a review. Last match wins, so this comes after the two
+# lines above. packaging/pacs-engine.spec holds the same name back.
+docs/manual/tools
+docs/manual/tools/**
 tests/
 BUILDING.md
 CHANGELOG.md

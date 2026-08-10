@@ -47,7 +47,26 @@ datas += [(os.path.join(ROOT, "pacs", "web"), "pacs/web")]
 # copy that both serve is the only arrangement in which they cannot drift.
 # pacs.web.MANUAL_DIR looks for it here; see the note there for why the pages'
 # relative paths still resolve.
-datas += [(os.path.join(ROOT, "docs", "manual"), "manual")]
+#
+# Everything except tools/, which is how the figures are REGENERATED — a
+# screenshot harness, a DICOM forger and a traffic seeder. None of it is
+# documentation an operator reads, and a traffic generator inside a medical
+# appliance is a thing somebody has to explain in a review. It stays in the
+# repository, where the person re-shooting the manual is.
+#
+# Computed rather than listed so that a directory added to the manual later
+# ships without anyone remembering this file. That fails toward shipping too
+# much documentation, which is the safe direction; only the one name below is
+# ever held back.
+_MANUAL_SRC = os.path.join(ROOT, "docs", "manual")
+_MANUAL_SKIP = {"tools"}
+for _name in sorted(os.listdir(_MANUAL_SRC)):
+    if _name in _MANUAL_SKIP:
+        continue
+    _path = os.path.join(_MANUAL_SRC, _name)
+    # A directory source contributes its CONTENTS to the destination, so each
+    # one needs its own name on the right-hand side; a file just lands in it.
+    datas += [(_path, os.path.join("manual", _name) if os.path.isdir(_path) else "manual")]
 
 a = Analysis(
     [os.path.join(ROOT, "packaging", "engine_entry.py")],
