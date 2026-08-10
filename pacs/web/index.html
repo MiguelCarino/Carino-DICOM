@@ -79,6 +79,15 @@
              screen, not behind a menu. -->
         <div class="whoami" id="whoami" hidden></div>
         <div class="navrow">
+          <!-- Served by this appliance, not fetched from the internet: a box on
+               an isolated clinical VLAN is exactly where somebody needs the page
+               that explains what a held study is. Opens in a new tab so a
+               half-finished configuration is not lost to reading the manual
+               about it. Hidden until app.js confirms this build carries it —
+               the container and the desktop app do, a bare source checkout of
+               only pacs/ would not, and a dead link is worse than no link. -->
+          <a class="navbtn" id="manualLink" href="manual/" target="_blank"
+             rel="noopener" hidden><span class="nav-ico">📖</span> <span data-i18n>Manual</span></a>
           <button class="navbtn signout" id="signOut" hidden><span class="nav-ico">⎋</span> <span data-i18n>Sign out</span></button>
         </div>
       </nav>

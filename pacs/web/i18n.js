@@ -682,6 +682,10 @@ const I18N = {
         'People': 'Personas',
         'Audit': 'Auditoría',
         'Sign out': 'Cerrar sesión',
+        // Identity entries in es and pt-BR: both languages write it
+        // 'Manual', which is what those manuals already title themselves.
+        // Present rather than absent so the parity guard reads a decision.
+        'Manual': 'Manual',
         'Add someone': 'Añadir a alguien',
         'Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.': 'Ahora mismo hay una sola credencial —el token de acceso— y lo puede todo: leer cada estudio, cambiar cada destino y apagar el motor. Quien necesite una parte del panel necesita el panel entero.',
         'Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.': 'Al activar los perfiles, cada persona tiene su propio inicio de sesión, su propio conjunto de permisos y su propio nombre en la auditoría. El token de acceso sigue funcionando como administrador, así que nada de lo que lo usa se rompe.',
@@ -1360,6 +1364,7 @@ const I18N = {
         'People': 'Pessoas',
         'Audit': 'Auditoria',
         'Sign out': 'Sair',
+        'Manual': 'Manual',
         'Add someone': 'Adicionar alguém',
         'Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.': 'No momento existe uma única credencial — o token de acesso — e ela pode tudo: ler cada estudo, alterar cada destino e desligar o motor. Quem precisa de uma parte do painel precisa do painel inteiro.',
         'Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.': 'Ao ativar os perfis, cada pessoa passa a ter o próprio login, o próprio conjunto de permissões e o próprio nome na auditoria. O token de acesso continua funcionando como administrador, então nada que o utilize deixa de funcionar.',
@@ -2038,6 +2043,7 @@ const I18N = {
         'People': 'スタッフ',
         'Audit': '監査',
         'Sign out': 'サインアウト',
+        'Manual': 'マニュアル',
         'Add someone': '追加',
         'Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.': '現在の認証情報はアクセストークン 1 つだけで、すべてを行えます。全ての検査の閲覧、全ての送信先の変更、エンジンの停止。パネルの一部だけが必要な人にも全権限が渡ります。',
         'Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.': 'プロファイルを有効にすると、各自が自分のサインイン、自分の権限、そして監査証跡上の自分の名前を持ちます。アクセストークンは管理者として動作し続けるため、それを使う仕組みは壊れません。',
@@ -2716,6 +2722,7 @@ const I18N = {
         'People': 'Люди',
         'Audit': 'Аудит',
         'Sign out': 'Выйти',
+        'Manual': 'Руководство',
         'Add someone': 'Добавить',
         'Right now there is one credential — the access token — and it can do everything: read every study, change every destination, and shut the engine down. Anyone who needs any part of the dashboard needs all of it.': 'Сейчас есть одна учётная запись — токен доступа — и она может всё: читать любое исследование, менять любое назначение и выключать движок. Кому нужна часть панели, тому достаётся вся.',
         'Turning profiles on gives each person their own sign-in, their own set of permissions, and their own name in the audit trail. The access token keeps working as an administrator, so nothing that uses it breaks.': 'Включение профилей даёт каждому свой вход, свой набор разрешений и своё имя в журнале аудита. Токен доступа продолжает работать как администратор, поэтому ничего использующее его не сломается.',

@@ -106,6 +106,18 @@ app, and its config + received/outgoing/sent folders live in the per-user data
 directory (e.g. `~/.config/Carino PACS` on Linux, `%APPDATA%\Carino PACS` on
 Windows), **not** the install folder.
 
+The spec also freezes **`docs/manual/`** in, which the engine serves at
+`/manual/` so the appliance carries its own documentation — a desktop install is
+the deployment most likely to sit on a segment with no route to the internet,
+and the manual is where the token rule and the two hold causes are explained.
+It is the same directory GitHub Pages publishes, bundled unmodified: the pages
+reach their stylesheet and the fleet scripts by relative path, which resolves
+against the dashboard root, and that is why `pacs/web/` carries its own
+`carino-clock.js` and `favicon.webp`. Do not "fix" a path in `docs/manual/` to
+suit one of the two hosts — `tests/test_manual.py` fails if either breaks.
+
+It costs a few megabytes of installer, nearly all of it the figures.
+
 ### Why one OS at a time
 PyInstaller and electron-builder are **not cross-compilers** — each emits a
 binary for the OS it runs on. To get all three from one place, use the CI

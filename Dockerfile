@@ -79,6 +79,10 @@ COPY docker/ /app/docker/
 # `pacs init` looks for config.example.json one level above the package, and
 # AGPL-3.0-or-later means the licence travels with the distributed program.
 COPY config.example.json LICENSE /app/
+# The manual, served at /manual/. A container is the deployment most likely to
+# be on a segment with no route out, and the manual is where the token rule and
+# the two hold causes are explained. pacs.web.MANUAL_DIR finds it here.
+COPY docs/manual/ /app/manual/
 
 # Numeric on purpose so it still resolves when compose overrides `user:` and
 # /etc/passwd has no matching entry.

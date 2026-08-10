@@ -39,6 +39,16 @@ for pkg in ("pynetdicom", "pydicom", "PIL", "psutil"):
 # Our Flask dashboard assets (served from disk by pacs/web.py).
 datas += [(os.path.join(ROOT, "pacs", "web"), "pacs/web")]
 
+# The manual, so the appliance carries its own documentation. A desktop install
+# is the deployment most likely to be sitting on a clinical VLAN with no route
+# to the internet, which is exactly where somebody needs the page explaining
+# what a held study is. It is bundled at the top level rather than under
+# pacs/web/ because docs/manual/ is also what GitHub Pages publishes, and one
+# copy that both serve is the only arrangement in which they cannot drift.
+# pacs.web.MANUAL_DIR looks for it here; see the note there for why the pages'
+# relative paths still resolve.
+datas += [(os.path.join(ROOT, "docs", "manual"), "manual")]
+
 a = Analysis(
     [os.path.join(ROOT, "packaging", "engine_entry.py")],
     pathex=[ROOT],

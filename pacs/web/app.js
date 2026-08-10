@@ -485,7 +485,30 @@
     startPollers();
   }
 
+  /* Show the Manual link only if this build actually carries the manual.
+     Asked with a HEAD rather than declared in /api/auth, whose docstring says
+     it answers one question — is a token required — and which has no business
+     knowing what documentation was packaged. The probe is same-origin and
+     costs one request at boot; the manual routes are public, so the answer is
+     the same before and after login.
+
+     Failure leaves the link hidden. A source checkout served without docs/, or
+     a future build that drops it, then shows nothing rather than a link that
+     404s — and the 404 body still names the published copy for anyone who
+     reaches it by typing the path. */
+  async function probeManual() {
+    const link = $("manualLink");
+    if (!link) return;
+    try {
+      const res = await fetch("manual/", { method: "HEAD" });
+      link.hidden = !res.ok;
+    } catch (e) {
+      link.hidden = true;
+    }
+  }
+
   async function boot() {
+    probeManual();          // not awaited: the dashboard must not wait on a doc link
     let st;
     try {
       st = await api("/api/auth");

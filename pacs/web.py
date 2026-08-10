@@ -44,6 +44,32 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 if not os.path.isdir(WEB_DIR) and hasattr(sys, "_MEIPASS"):
     WEB_DIR = os.path.join(sys._MEIPASS, "pacs", "web")
 
+# The manual, served from this appliance rather than from the internet. It is
+# the same docs/manual/ that GitHub Pages publishes — one copy, not a fork —
+# which is why the routes below mount it at /manual/ and nothing rewrites its
+# markup. Every relative path in those pages then resolves against the
+# dashboard: ../carino-clock.js, ../carino-lang.js, ../carino-navbar.js and
+# ../favicon.webp land on this server's own copies (that is what the clock and
+# the favicon in pacs/web/ are for), and the "back to Carino PACS" link lands
+# on the dashboard instead of on the marketing page. A page that renders
+# identically in both places can only do so if neither copy is edited for the
+# other, so nothing here may "fix" a path.
+#
+# Frozen and containerised builds unpack it beside the package; from a source
+# checkout it is read out of the repository. A build that ships without it is
+# not an error — the routes report it missing and the dashboard hides the link
+# rather than offering a dead one.
+_MANUAL_CANDIDATES = (
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "manual"),
+    os.path.join(getattr(sys, "_MEIPASS", ""), "manual") if hasattr(sys, "_MEIPASS") else "",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "manual"),
+)
+MANUAL_DIR = next(
+    (p for p in _MANUAL_CANDIDATES
+     if p and os.path.isfile(os.path.join(p, "index.html"))),
+    "",
+)
+
 
 def create_app(server: PacsServer) -> Flask:
     from . import dicomweb          # pulls pydicom in; keep it off the CLI's import path
@@ -172,6 +198,65 @@ def create_app(server: PacsServer) -> Flask:
     def editor_index():
         return send_from_directory(os.path.join(WEB_DIR, "editor"), "index.html")
 
+    # The manual. Public on purpose: it is the document that explains the token
+    # rule, so gating it behind the token it explains would be a locked door
+    # with the key inside. It carries no patient data and no configuration —
+    # only the same pages the project publishes on the web.
+    @app.get("/manual")
+    def manual_redirect():
+        return redirect("/manual/", code=301)
+
+    @app.get("/manual/")
+    def manual_index():
+        if not MANUAL_DIR:
+            return _manual_absent()
+        return send_from_directory(MANUAL_DIR, "index.html")
+
+    # Sub-paths need their own rule rather than the catch-all below, which only
+    # ever looks inside WEB_DIR: the language directories, manual.css and every
+    # figure live outside it. send_from_directory rejects traversal itself, so
+    # a crafted filename cannot climb out of MANUAL_DIR.
+    @app.get("/manual/<path:filename>")
+    def manual_files(filename):
+        if not MANUAL_DIR:
+            return _manual_absent()
+        # The translations are directories — /manual/es/, /manual/ja/ — and
+        # send_from_directory serves files, so each needs its index.html named.
+        # A static file server does this silently and the published site gets it
+        # from GitHub Pages, which is why nothing in the markup asks for it.
+        #
+        # The redirect matters as much as the rewrite: every translated page
+        # reaches its stylesheet as ../manual.css and the fleet scripts as
+        # ../../, and those resolve against the DIRECTORY the browser thinks it
+        # is in. Answering /manual/es without the trailing slash would put it in
+        # /manual/, one level too high, and the page would arrive unstyled with
+        # no navbar. Redirecting first costs one round trip and cannot be got
+        # wrong later.
+        # Containment is checked before the directory question is even asked.
+        # send_from_directory refuses traversal on its own and is what actually
+        # serves the bytes, but the branch below decides between a redirect and
+        # an index.html on the strength of an isdir() — and that must never be
+        # asked about a path that resolved outside the manual.
+        root = os.path.realpath(MANUAL_DIR)
+        target = os.path.realpath(os.path.join(root, filename))
+        if target != root and not target.startswith(root + os.sep):
+            return _manual_absent()
+        if os.path.isdir(target):
+            if not filename.endswith("/"):
+                return redirect("/manual/" + filename + "/", code=301)
+            return send_from_directory(MANUAL_DIR, filename + "index.html")
+        return send_from_directory(MANUAL_DIR, filename)
+
+    def _manual_absent():
+        # A build that did not bundle docs/manual/. Said plainly, with the
+        # address of the published copy, because the reader is looking at this
+        # instead of the page they asked for.
+        return jsonify(
+            ok=False,
+            message="This build does not carry the manual. It is published at "
+                    "https://pacs.carino.systems/manual/",
+        ), 404
+
     # The catch-all matches slashes, so it is the one rule that can shadow an
     # entire API tree. Werkzeug ranks a blueprint's static rules above a
     # converter rule and routes /dicom-web/studies correctly today, but that is
@@ -179,7 +264,11 @@ def create_app(server: PacsServer) -> Flask:
     # endpoint under a reserved prefix would silently fall through to
     # send_from_directory and answer a modality with the dashboard's 404 page.
     # Naming the prefixes here makes the separation the code's, not the router's.
-    _RESERVED = ("api", "dicom-web")
+    # "manual" is listed for the same reason: if the rules above were ever
+    # removed, a request for /manual/ must 404 rather than be answered from
+    # WEB_DIR, where an attacker-supplied path is the only thing that could
+    # match.
+    _RESERVED = ("api", "dicom-web", "manual")
 
     @app.get("/<path:filename>")
     def static_files(filename):

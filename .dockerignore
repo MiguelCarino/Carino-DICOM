@@ -74,6 +74,12 @@ test_print.py
 .gitignore
 .claude/
 docs/
+# ...except the manual, which the image serves at /manual/ so a container on an
+# isolated clinical network still has its documentation. The two lines are not
+# redundant: the first re-admits the directory, the second its contents, and
+# with only one of them the COPY below fails on an empty or missing path.
+!docs/manual
+!docs/manual/**
 tests/
 BUILDING.md
 CHANGELOG.md

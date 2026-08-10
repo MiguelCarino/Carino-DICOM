@@ -404,12 +404,17 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
    margin-left:auto on the first would strand the survivor mid-row. */
 .navrow { display: flex; align-items: stretch; gap: 6px; }
 .navrow .navbtn { flex: 1 1 auto; min-width: 0; }
+/* text-decoration is here for the one nav row that is an <a> rather than a
+   <button>: the Manual opens a real page in a new tab, so it has to be a link
+   for middle-click and "open in new tab" to work, and a button would have to
+   fake both. Everything else about the row is identical, so it wears the same
+   class and only the underline needs turning off. */
 .navbtn {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   font-family: var(--sans); font-size: .92rem; font-weight: 600; color: var(--text);
   background: linear-gradient(180deg, var(--panel), #080808);
   border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px;
-  cursor: pointer; transition: .15s;
+  cursor: pointer; transition: .15s; text-decoration: none;
 }
 .navbtn:hover { border-color: var(--accent); color: var(--accent); }
 .navbtn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
