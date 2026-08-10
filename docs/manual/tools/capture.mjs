@@ -172,8 +172,8 @@ if (MODE === 'setup') {
   await signIn();
   await sleep(2500);
 
-  // Nav row, tab within it, figure name. The names are what the three manuals
-  // reference, so they stay as they are however the dashboard is rearranged —
+  // Nav row, tab within it, figure name. The names are what every manual
+  // references, so they stay as they are however the dashboard is rearranged —
   // only the route to each one moves. Overview, Services and Orders have no tab
   // strip and take null.
   const FIGURES = [
@@ -225,7 +225,7 @@ chrome.kill();
 // sends the signal, and chromium still has files open in there for a moment
 // after. Deleting underneath it throws ENOTEMPTY even with force:true, which
 // exits non-zero AFTER every figure has been written — so a `for L in en es
-// pt-BR` loop under `set -e` stops on a run that in fact succeeded.
+// pt-BR ja ru` loop under `set -e` stops on a run that in fact succeeded.
 await new Promise((r) => { chrome.on('exit', r); setTimeout(r, 3000); });
 try {
   await rm(PROFILE, { recursive: true, force: true });

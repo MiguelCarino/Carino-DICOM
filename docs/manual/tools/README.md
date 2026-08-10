@@ -1,6 +1,6 @@
 # Regenerating the manual's screenshots
 
-The seventeen figures in `docs/manual/img/{en,es,pt-BR}/` are captured from a real
+The figures in `docs/manual/img/{en,es,pt-BR,ja,ru}/` are captured from a real
 instance of this software, with studies invented for the picture. This directory
 is how they were made, and how to make them again when the dashboard changes —
 because a manual whose screenshots are a release behind is a manual that teaches
@@ -13,7 +13,7 @@ Two rules the whole procedure exists to keep:
    by `forge-studies.py` in the test UID arc. Never point this at an instance
    that has seen clinical data — not to "just grab one panel", not with the PHI
    toggles off. A screenshot is the easiest place in a project to publish a
-   patient, and it is published in three languages at once.
+   patient, and it is published in every language at once.
 2. **Nothing about the machine that took them.** The demo runs in containers, so
    the paths in the pictures are `/data/...` and the address is the container's
    own — not somebody's home directory and not their LAN address. That is the
@@ -126,6 +126,27 @@ figures need:
        /tmp/pacsdemo/referral.pdf /tmp/pacsdemo/outside-film.jpg \
        /tmp/pacsdemo/demo/outgoing/MR-BRAIN-DEMO-0004/
 
+    # and the two studies the Stuck figure is of
+    mkdir -p /tmp/pacsdemo/demo/outgoing/CT-CHEST-DEMO-0001 \
+             /tmp/pacsdemo/demo/outgoing/CR-CHEST-DEMO-0003
+    cp /tmp/pacsdemo/forged/DEMO-0001_*.dcm /tmp/pacsdemo/demo/outgoing/CT-CHEST-DEMO-0001/
+    cp /tmp/pacsdemo/forged/DEMO-0003_*.dcm /tmp/pacsdemo/demo/outgoing/CR-CHEST-DEMO-0003/
+
+**Only the outgoing folder is routed.** A study that merely arrived over
+C-STORE sits in `received`, where no rule ever sees it — so seeding traffic and
+staging the MR study is not enough to fill the Stuck tab. The MR study matches a
+rule that sends it to the reading room, which accepts, and it forwards cleanly.
+That leaves *Nothing stuck — every forward is up to date* on screen, which looks
+like a healthy appliance rather than like a figure that failed, and it is
+published in every language at once.
+
+The two studies above are each half of the figure: the **CT** matches the rule
+that asks to de-identify while `deid.profile` is `off`, so its destinations are
+held; the **CR** is routed to the teaching archive on a port nothing listens on,
+so it fails and retries with backoff. Check both arrived before capturing —
+`curl -s -H "Authorization: Bearer $TOKEN" .../api/stuck` should carry a
+non-empty `held` **and** a non-empty `destinations`.
+
 Send the studies **after** the last restart. The Overview's *received* and
 *sent* tiles count from when the service last started, so a restart after this
 step photographs two zeroes and a machine that looks idle. A config save does
@@ -138,7 +159,7 @@ last-minute edit in the dashboard before this step, not after.
 `capture.mjs` needs no npm install — it drives Chromium over CDP with node's own
 `WebSocket`. One run per language per mode:
 
-    for L in en es pt-BR; do
+    for L in en es pt-BR ja ru; do
       node docs/manual/tools/capture.mjs $L /tmp/pacsdemo/shots/$L \
         http://127.0.0.1:18042/ manual-screenshots-token panels
     done
@@ -151,9 +172,9 @@ of the seeded profiles would find some of the strip missing, because a tab a
 profile's capabilities do not pay for is not drawn at all, and those figures
 come out as `! name: tab hidden for this profile` lines — or `! name: nav row
 hidden for this profile`, when the whole row is gone — rather than files. Read
-the run's output either way: `panels` mode prints eleven dashboard names and
-then `editor` and `editor-tags`, and every `!` line in place of one of them is a
-figure that will be missing from all three manuals.
+the run's output either way: `panels` mode prints the dashboard names and then
+`editor` and `editor-tags`, and every `!` line in place of one of them is a
+figure that will be missing from every manual.
 
 **`gate` and `first-run`** come from an instance that has never been set up: the
 container entrypoint marks setup done on first boot, so bring up a third one,
@@ -180,7 +201,7 @@ as the token: that header is the CSRF guard, and every POST wants it).
 the small monospace values legible when a reader zooms in. The two gate figures
 are a card on an empty page, so they are cropped instead of scaled.
 
-    for L in en es pt-BR; do
+    for L in en es pt-BR ja ru; do
       for f in /tmp/pacsdemo/shots/$L/*.png; do
         magick "$f" -resize 1920x -quality 80 -define webp:method=6 \
           "docs/manual/img/$L/$(basename "${f%.png}").webp"
@@ -191,7 +212,7 @@ are a card on an empty page, so they are cropped instead of scaled.
         -crop 1200x1080+0+0 +repage -quality 82 "docs/manual/img/$L/gate-people.webp"
     done
 
-Keep the file names: they are what the three manuals reference, and the
+Keep the file names: they are what the manuals reference, and the
 `width`/`height` on each `<img>` matches the sizes above. If a crop changes,
 change the attributes with it — they are there so a figure does not shove the
 paragraph somebody is reading down the page while it loads.
@@ -211,6 +232,6 @@ the whole page before believing it:
       .filter(i => !i.complete || i.naturalWidth === 0)
       .map(i => i.getAttribute('src'))
 
-An empty array is the pass. The three manuals carry the same seventeen figures
-at the same anchors — if one language gains or loses one, that is a divergence,
-not a translation.
+An empty array is the pass. Every manual carries the same figures at the same
+anchors — if one language gains or loses one, that is a divergence, not a
+translation.
