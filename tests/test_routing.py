@@ -2038,8 +2038,42 @@ def test_no_send_site_outside_routing_may_ask_the_scrub_question_itself():
             if os.path.abspath(path) == os.path.abspath(routing.__file__):
                 continue
             src = open(path, encoding="utf-8").read()
+            # An offending expression must carry a term from BOTH families, so
+            # a module that never mentions one of them cannot hold one. Asked
+            # of the whole file first because the check below is what costs:
+            # ast.get_source_segment re-splits the entire source on every call,
+            # and it would otherwise be called once per expression in the
+            # package — tens of thousands of times, for the sake of the handful
+            # of modules that mention scrubbing at all.
+            #
+            # This is not a sampling shortcut and does not weaken the guard:
+            # the substrings it looks for are the same ones the node test looks
+            # for, so a file it skips could not have produced an offender. It
+            # was costing minutes rather than seconds on the CI matrix's older
+            # interpreters, where the whole suite is then killed by the timeout
+            # and every other test in it goes unreported.
+            if not (any(t in src for t in scrub_terms)
+                    and any(t in src for t in avail_terms)):
+                continue
+            # Which LINES mention each family. An expression can only carry
+            # both terms if the lines it spans include one of each, so this
+            # turns "call get_source_segment on every expression in the module"
+            # into two integer comparisons for all but a handful of them. Still
+            # exact: every node that survives is passed to the same textual
+            # check as before, and a node that cannot span both lines could not
+            # have contained both terms.
+            scrub_lines, avail_lines = set(), set()
+            for n, line in enumerate(src.splitlines(), start=1):
+                if any(t in line for t in scrub_terms):
+                    scrub_lines.add(n)
+                if any(t in line for t in avail_terms):
+                    avail_lines.add(n)
             for node in ast.walk(ast.parse(src, path)):
                 if not isinstance(node, ast.expr):
+                    continue
+                last = getattr(node, "end_lineno", None) or node.lineno
+                span = range(node.lineno, last + 1)
+                if not (scrub_lines.intersection(span) and avail_lines.intersection(span)):
                     continue
                 seg = ast.get_source_segment(src, node) or ""
                 if (any(t in seg for t in scrub_terms)
