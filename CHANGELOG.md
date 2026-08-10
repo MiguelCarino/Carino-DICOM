@@ -284,6 +284,24 @@ release also queries, retrieves, routes and de-identifies.
   settings, index status and rescan, and a token login prompt — all translated
   into the five shipped languages.
 
+### Fixed
+- **C-MOVE and C-GET now check that a file is inside a storage folder before
+  reading it.** Every retrieval answers from a row in the sqlite index, and the
+  index is a cache rather than an authority — a stale or wrong row still names
+  a path this process has the rights to open. DICOMweb had re-checked
+  containment since it was written; the DIMSE side never had, so `_yield_instances`
+  read whatever path the row named while a WADO retrieve of the very same
+  instance refused it. Both paths now share one definition of the check
+  (`dicomfs.within_roots`) over one definition of the folders
+  (`Config.storage_roots`), which is the part that stops the difference coming
+  back. A row pointing elsewhere is refused and reported to the SCU in the
+  Failed SOP Instance UID List rather than skipped, so a short study is never
+  handed back looking complete, and it is logged apart from "cannot read"
+  because a containment refusal is a stale index rather than a disk fault. A
+  Q/R SCP that was never told which folders are its own now serves nothing and
+  says so, where the previous default was to serve any path the index named.
+  Found by reading the code closely enough to document it, not by a report.
+
 ### Changed
 - **An order now has an identity, and ORC-1 is read.** Every `ORM` created a
   new order: nothing read the order control code, and nothing recognised a

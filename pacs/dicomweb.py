@@ -43,7 +43,7 @@ from pydicom import dcmread
 from pydicom.datadict import keyword_for_tag, tag_for_keyword
 from pydicom.dataset import Dataset
 
-from .dicomfs import safe_within
+from .dicomfs import servable as _servable
 from .scp import dest_path
 
 URL_PREFIX = "/dicom-web"
@@ -724,28 +724,20 @@ def create_blueprint(server) -> Blueprint:
         return request.url_root.rstrip("/") + URL_PREFIX
 
     def roots() -> list[str]:
-        """Every folder we are allowed to serve a file from, resolved fresh so a
-        config change takes effect without a restart.
-
-        The outgoing watch folder is deliberately in the set. Files waiting there
-        are indexed, so QIDO already lists them; dropping them from WADO would
-        answer "here is your study" and hand back the copies that happen to have
-        been forwarded already — an under-delivered study, which is the one
-        failure mode this server does not get to have. Nothing extra is exposed
-        either way: servable() only serves paths the index holds, and the index
-        holds parsed DICOM files, not whatever else the folder contains.
+        """Every folder we are allowed to serve a file from — see
+        Config.storage_roots() for which they are and why the outgoing folder
+        is among them. Nothing extra is exposed by including it: servable()
+        only ever serves a path the index holds, and the index holds parsed
+        DICOM files rather than whatever else the folder contains.
         """
-        c = cfg()
-        return [c.resolved("scp", "storage_dir"), c.resolved("scu", "sent_dir"),
-                c.resolved("scu", "watch_dir")]
+        return cfg().storage_roots()
 
     def servable(path: str) -> bool:
         """The index is a cache, not an authority: a poisoned or stale row must
-        never talk us into reading outside the storage roots."""
-        if not path:
-            return False
-        allowed = roots()
-        return any(safe_within(r, path) for r in allowed) and os.path.isfile(path)
+        never talk us into reading outside the storage roots. The check itself
+        is dicomfs.servable(), shared with the Query/Retrieve SCP so the two
+        retrieval paths cannot answer it differently."""
+        return _servable(path, roots())
 
     # ---- gate + CORS ------------------------------------------------------
     @bp.before_request

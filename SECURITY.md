@@ -242,6 +242,16 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   rejected. Treat this as a configuration guard, not a security boundary: an AE
   title is an unauthenticated string that any peer can claim. Only TLS client
   certificates actually authenticate a peer.
+- **Retrieval is confined to the configured storage folders.** Every retrieval
+  — C-MOVE, C-GET and every DICOMweb read — answers from a row in the sqlite
+  index, and the index is a cache rather than an authority. Before any file is
+  opened, its path is re-checked against the storage folders (the receiver's
+  `storage_dir`, and the auto-send `sent_dir` and `watch_dir`), resolved through
+  `realpath` so `..` and symlinks cannot escape. A row that names anything else
+  is refused and reported to the requester as a failed sub-operation rather than
+  read out. A listener that has not been told which folders are its own serves
+  nothing. Both retrieval paths share one definition of the check; until
+  v1.1.0 the DICOMweb side made it and the DIMSE side did not.
 
 ### De-identification, and the hold
 

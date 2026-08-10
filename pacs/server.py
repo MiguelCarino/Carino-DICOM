@@ -688,6 +688,10 @@ class PacsServer:
                 move_destinations=q.get("move_destinations", {}),
                 get_destinations=self.cfg.enabled_destinations,
                 get_tls_context=self._scu_tls_context,
+                # The same folders DICOMweb serves from, from the same place, so
+                # a C-MOVE and a WADO retrieve of one instance can never reach
+                # different verdicts about whether it may be read.
+                get_storage_roots=self.cfg.storage_roots,
                 allowed_aets=q.get("allowed_aets", []),
                 tls=bool(q.get("tls", False)),
                 tls_cert=self.cfg.resolve_path(q.get("tls_cert", "")),

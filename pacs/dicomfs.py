@@ -54,6 +54,41 @@ def safe_within(root: str, path: str) -> bool:
     return path == root or path.startswith(root + os.sep)
 
 
+def within_roots(path: str, roots: list[str]) -> bool:
+    """True if *path* lives inside any of *roots*. The containment question on
+    its own, separate from whether the file is there.
+
+    The index is a cache, not an authority. Every retrieval answers from a row
+    it holds, and a row that is stale or poisoned still names a path this
+    process has the rights to open — so containment has to be asked again at
+    the moment of reading, by whoever is about to read.
+
+    It lives here, taking the roots rather than working them out, because there
+    are two retrieval paths and they must not each own a copy. DICOMweb asked
+    this question and DIMSE Query/Retrieve did not, so C-MOVE and C-GET read
+    whatever path a row named while WADO refused the very same row. One
+    definition, and that difference cannot come back.
+
+    Empty roots deny everything, which is what a caller that was never told
+    which folders are its own should be able to serve.
+    """
+    if not path:
+        return False
+    return any(safe_within(r, path) for r in roots)
+
+
+def servable(path: str, roots: list[str]) -> bool:
+    """``within_roots`` and the file is actually there.
+
+    For a caller that has to tell a requester "no" in one move. A caller that
+    reports a missing file differently from a refused one — the Q/R SCP names
+    both in its log and only one of them is a configuration fault — wants
+    ``within_roots`` and its own open() instead, so that the two answers do not
+    arrive under the same sentence.
+    """
+    return within_roots(path, roots) and os.path.isfile(path)
+
+
 def prune_empty_dirs(start_dir: str, stop_at: str) -> None:
     """Remove *start_dir* and its now-empty parents, walking up until (but not
     including) *stop_at*. Never removes a non-empty directory. This is what keeps

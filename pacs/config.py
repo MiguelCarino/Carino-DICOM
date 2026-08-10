@@ -838,6 +838,28 @@ class Config:
         """Absolute path for a path field, relative to the config file dir."""
         return self.resolve_path(self.data[section][field])
 
+    def storage_roots(self) -> list[str]:
+        """Every folder a retrieval may read a stored instance out of.
+
+        Resolved fresh on each call so a folder the operator repoints takes
+        effect without restarting a listener — and, more importantly, so a
+        folder they repoint AWAY stops being readable at once rather than at
+        the next restart.
+
+        The outgoing watch folder is deliberately in the set. Files waiting
+        there are indexed, so a query already lists them; leaving them out
+        would answer "here is your study" and hand back only the copies that
+        happen to have been forwarded already — an under-delivered study,
+        which is the one failure mode a retrieval does not get to have.
+
+        Both retrieval paths ask this, and both then pass the answer to
+        dicomfs.servable(). Neither may work the list out for itself: the two
+        disagreeing is exactly the bug this replaced.
+        """
+        return [self.resolved("scp", "storage_dir"),
+                self.resolved("scu", "sent_dir"),
+                self.resolved("scu", "watch_dir")]
+
     def resolve_path(self, value: str) -> str:
         """Absolute path for a possibly-relative file path ('~' expanded); '' stays ''."""
         if not value:

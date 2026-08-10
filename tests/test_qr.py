@@ -18,7 +18,10 @@ a real sqlite index and real files on disk. Covers:
  10. C-MOVE refused against a storage-only destination -> 0xA900, not 0xA801
  11. C-GET on the same association (SCP/SCU role negotiation)
  12. allowed_aets rejection, and refusal of a keyless retrieve identifier
- 13. C-CANCEL and stop() mid-query; stop/restart on the same port
+ 13. retrieval containment: a row naming a file outside every configured storage
+     folder is refused and reported, and an SCP told no folders at all serves
+     nothing rather than everything
+ 14. C-CANCEL and stop() mid-query; stop/restart on the same port
 
 Run:  python3 tests/test_qr.py
 """
@@ -153,6 +156,12 @@ class Fixture:
 
 
 def _start_qr(fx: Fixture, **kw) -> QrSCP:
+    # Every retrieval is gated on the instance living inside a configured
+    # storage folder, and the SCP fails closed when it was never told which
+    # those are. The fixture writes its instances under one root, so that is
+    # what the real server would pass; a test that wants the refusal path sets
+    # get_storage_roots itself.
+    kw.setdefault("get_storage_roots", lambda: [fx.root])
     scp = QrSCP(aet=QR_AET, bind="127.0.0.1", port=_next_port(), log=fx.log,
                 index=fx.index, **kw)
     scp.start()
@@ -988,6 +997,83 @@ def test_stop_joins_and_restarts():
         fx.close()
 
 
+
+def test_retrieve_refuses_a_row_pointing_outside_the_storage_folders():
+    """The index is a cache, not an authority. A row naming a file outside every
+    configured storage folder must be refused rather than read out — and refused
+    the way an unreadable file is, so the SCU is told which images it did not get
+    instead of receiving a short study that looks complete.
+
+    This is the check DICOMweb has always made and this side did not."""
+    fx = Fixture()
+    dest = _Receiver(fx.log)
+    scp = _start_qr(fx, move_destinations={
+        DEST_AET: {"host": "127.0.0.1", "port": dest.port, "aet": DEST_AET}})
+    try:
+        # A real DICOM file, indexed under the study, living somewhere the
+        # operator never named. Written outside fx.root deliberately: this is
+        # what a stale row or a hand-edited index looks like from in here.
+        outside = tempfile.mkdtemp()
+        stray = _write_instance(outside, PatientName="DOE^JANE", PatientID="P001",
+                                StudyInstanceUID=fx.study_ct,
+                                SeriesInstanceUID=generate_uid(),
+                                StudyDate="20240110", StudyTime="101500",
+                                Modality="CT", AccessionNumber="ACC1",
+                                StudyDescription="CHEST CT",
+                                SeriesDescription="STRAY", SeriesNumber=9,
+                                InstanceNumber=1)
+        fx.index.add_file(stray, "received")
+        stray_uid = str(pydicom.dcmread(stray).SOPInstanceUID)
+
+        q = Dataset()
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = fx.study_ct
+        code, final, ident = _move(scp.port, q)[-1]
+
+        assert code == 0xB000, f"expected 0xB000 warning, got {code:#06x}"
+        assert int(final.NumberOfCompletedSuboperations) == 4, final
+        assert int(final.NumberOfFailedSuboperations) == 1, final
+        failed = [str(u) for u in (ident.FailedSOPInstanceUIDList
+                                   if isinstance(ident.FailedSOPInstanceUIDList, (list, pydicom.multival.MultiValue))
+                                   else [ident.FailedSOPInstanceUIDList])]
+        assert failed == [stray_uid], f"failed UID list wrong: {failed}"
+        # The file is intact and readable — only its LOCATION disqualified it,
+        # so the log must not blame the disk.
+        assert os.path.isfile(stray), "the test's own fixture vanished"
+        msgs = [e["message"] for e in fx.log.tail(200)]
+        assert any("outside every configured storage folder" in m for m in msgs), \
+            f"the refusal was not logged as a containment refusal: {msgs[-4:]}"
+        assert not any("cannot read" in m for m in msgs), \
+            "a readable file outside the roots was reported as unreadable"
+        print(" [20] retrieval refuses a row outside the storage folders OK")
+    finally:
+        scp.stop(); dest.close(); fx.close()
+
+
+def test_retrieve_fails_closed_when_no_storage_folders_are_known():
+    """An SCP nobody told which folders are its own serves nothing. The opposite
+    default — read any path the index names — is how the gap this test guards
+    existed in the first place."""
+    fx = Fixture()
+    dest = _Receiver(fx.log)
+    scp = _start_qr(fx, get_storage_roots=lambda: [],
+                    move_destinations={
+                        DEST_AET: {"host": "127.0.0.1", "port": dest.port, "aet": DEST_AET}})
+    try:
+        q = Dataset()
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = fx.study_ct
+        code, final, ident = _move(scp.port, q)[-1]
+        assert code == 0xA702, f"expected 0xA702 (all sub-operations failed), got {code:#06x}"
+        assert int(final.NumberOfCompletedSuboperations) == 0, final
+        assert dest.stored() == 0, "an instance was delivered with no storage folder configured"
+        assert any("no storage folders are configured" in e["message"]
+                   for e in fx.log.tail(200)), "the misconfiguration was not logged"
+        print(" [21] retrieval fails closed with no storage folders OK")
+    finally:
+        scp.stop(); dest.close(); fx.close()
+
+
 def main() -> int:
     tests = [test_find_study_wildcard, test_find_date_range,
              test_find_open_ended_time_range,
@@ -1000,6 +1086,8 @@ def main() -> int:
              test_move_destination_fallback, test_move_missing_file_is_reported,
              test_move_refusal_reaches_storage_only_destination,
              test_get_study, test_allowed_aets, test_keyless_retrieve_refused,
+             test_retrieve_refuses_a_row_pointing_outside_the_storage_folders,
+             test_retrieve_fails_closed_when_no_storage_folders_are_known,
              test_find_cancel_and_stop, test_stop_joins_and_restarts]
     failed = 0
     for t in tests:

@@ -51,6 +51,7 @@ from pynetdicom.sop_class import (
     Verification,
 )
 
+from .dicomfs import within_roots
 from .logbuf import LogBuffer
 
 # A C-FIND that would return more than this is a mistake at the other end (an
@@ -286,6 +287,7 @@ class QrSCP:
         move_destinations: Optional[dict] = None,
         get_destinations: Optional[Callable[[], list]] = None,
         get_tls_context: Optional[Callable[[], object]] = None,
+        get_storage_roots: Optional[Callable[[], list[str]]] = None,
         allowed_aets: Optional[list[str]] = None,
         tls: bool = False,
         tls_cert: str = "",
@@ -307,6 +309,13 @@ class QrSCP:
         # outbound C-MOVE uses exactly the same client certificate / verify
         # settings as an outbound auto-forward.
         self.get_tls_context = get_tls_context
+        # Config.storage_roots, called per retrieval rather than read once, so
+        # a folder the operator repoints away stops being readable immediately
+        # instead of at the next restart. Absent (a bare QrSCP in a test, or a
+        # caller that never wired it) means NO root is allowed and every
+        # retrieval fails closed — an SCP that hands out files because nobody
+        # told it which folders are its own is the failure this guards.
+        self.get_storage_roots = get_storage_roots
         self.allowed_aets = [a for a in (allowed_aets or []) if str(a).strip()]
         self.tls = tls
         self.tls_cert = tls_cert
@@ -560,8 +569,31 @@ class QrSCP:
         A row whose file we cannot read is NOT skipped — it is held back and
         reported at the end as a failed sub-operation with its SOP Instance UID
         in the Failed SOP Instance UID List, so the SCU sees a warning and knows
-        exactly which images it did not get."""
+        exactly which images it did not get.
+
+        A row naming a path outside the storage folders is refused the same way,
+        and for a different reason: the index is a cache, not an authority, and
+        the row is the only thing standing between a query and an open(). This
+        used to read whatever path the row named — DICOMweb had asked the
+        question since it was written and this side never had. The two now share
+        one definition of the answer; see dicomfs.within_roots."""
         from pydicom import dcmread
+
+        # Once per retrieval, not once per row: a study is thousands of rows and
+        # every root costs two realpath() calls. Still per RETRIEVAL rather than
+        # cached on the object, so an operator who repoints a storage folder is
+        # not still serving out of the old one until something restarts.
+        roots = list(self.get_storage_roots() or []) if self.get_storage_roots else []
+        if not roots:
+            # Nothing is inside no folders, so every row below is refused and
+            # the SCU is told. Loud, because a Q/R SCP that can retrieve nothing
+            # is a misconfiguration and the alternative reading of the same
+            # symptom — "the archive is empty" — sends somebody hunting in the
+            # wrong place entirely.
+            self.log.error(
+                f"{what}: no storage folders are configured for retrieval, so nothing "
+                f"can be read out. Every instance in this request will be refused.",
+                kind="qr")
 
         broken: list[str] = []
         sent = 0
@@ -573,6 +605,20 @@ class QrSCP:
                 yield 0xFE00, _failed_list(broken)
                 return
             path = row.get("path") or ""
+            if not within_roots(path, roots):
+                # Reported as a failed sub-operation rather than skipped, for
+                # the same reason an unreadable file is: the SCU has to learn
+                # which images it did not get. Logged apart from "cannot read"
+                # because they are different faults — this one says the index
+                # and the configured folders disagree, and no amount of fixing
+                # permissions will address it.
+                broken.append(str(row.get("SOPInstanceUID") or ""))
+                self.log.error(
+                    f"{what}: refusing {os.path.basename(path) or '(no path)'} — the index "
+                    f"names a file outside every configured storage folder. The index is a "
+                    f"cache, so this is a stale or wrong row rather than a missing image; "
+                    f"a rescan is what clears it.", kind="qr", path=path)
+                continue
             try:
                 ds = dcmread(path)
             except Exception as exc:
