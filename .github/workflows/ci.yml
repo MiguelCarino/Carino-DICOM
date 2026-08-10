@@ -72,6 +72,26 @@ jobs:
           fi
           echo "node --check passed on $found file(s)"
 
+      # Both translation layers use the English source string AS the key, so a
+      # missing entry never raises anything: the screen renders English in the
+      # middle of a Japanese page, still looks finished, and only a reader of
+      # that language ever notices. A dictionary that is short a key is still
+      # perfectly valid JavaScript, so the syntax gate above has nothing to say
+      # about it, and there is no build step between these files and the browser
+      # that would. These two guards are the only thing in the repository that
+      # would catch it. Both are plain Node with no dependencies, which is why
+      # they belong in the cheap gate rather than behind the matrix.
+      - name: Check the landing-page translations
+        run: node docs/tests/check-i18n.js
+
+      # The dashboard dictionaries, checked in both directions. Forward alone
+      # would not be enough: edit an English literal in app.js and all four
+      # locales still carry the old key at perfect parity while the new literal
+      # is translated nowhere, so this also reports entries the source can no
+      # longer reach.
+      - name: Check the dashboard translations
+        run: node pacs/web/tests/i18n-parity.mjs
+
   # ------------------------------------------------------------------ tests
   test:
     name: ${{ matrix.os }} / py${{ matrix.python }}
