@@ -69,9 +69,25 @@
   // Shown without the tag's leading v: "Version 1.0.0" is how a person says it,
   // and the v belongs to git rather than to the reader. The links still carry
   // the real tag.
+  // The tag is remembered because this line is the one piece of translated text
+  // on the page that JS writes rather than markup: i18n.js re-applies every
+  // [data-i18n] element on carino:langchange, and this element carries none —
+  // it cannot, the number has to come from the network. Without the listener
+  // below the word 'Version' stayed in whatever language the page loaded in
+  // while everything around it switched, which reads as a missing translation
+  // rather than as the wiring gap it is.
+  var shownTag = null;
   function showVersion(tag) {
-    if (vEl) vEl.innerHTML = tt('Version') + ' <strong>' + String(tag).replace(/^v/, '') + '</strong>';
+    if (tag != null) shownTag = tag;
+    if (vEl && shownTag != null) {
+      vEl.innerHTML = tt('Version') + ' <strong>' + String(shownTag).replace(/^v/, '') + '</strong>';
+    }
   }
+  // Order against i18n.js's own listener does not matter: t() resolves the
+  // locale through window.CarinoLang.current on every call, and carino-lang.js
+  // has already written it by the time the event is dispatched. Whichever
+  // listener runs first reads the new language.
+  window.addEventListener('carino:langchange', function () { showVersion(null); });
 
   fetch("https://api.github.com/repos/" + REPO + "/releases/latest",
     { headers: { Accept: "application/vnd.github+json" } })
@@ -87,23 +103,25 @@
     .catch(function () { showVersion(PINNED_TAG); });
 
   // ---- the manual, in the language on screen -----------------------------
-  // Japanese and Russian are listed but not written yet, so they resolve to the
-  // English manual rather than to a 404. That is the same fallback every manual
-  // page already makes in its own switcher; when a translation ships, add its
-  // directory here and change the href in the manuals strip.
+  // Every fleet language has a manual of its own now, so each entry points at
+  // its own directory and nobody is sent to a translation they cannot read.
+  // The fallback below is still live wiring, for a language that reaches this
+  // page before its manual is written: add the directory here and the borrowed
+  // marking stops on its own.
   var MANUALS = {
     en: "manual/", es: "manual/es/", "pt-BR": "manual/pt-BR/",
-    ja: "manual/", ru: "manual/",
+    ja: "manual/ja/", ru: "manual/ru/",
   };
   var manualLink = document.getElementById("manualLink");
   function pointManual(lang) {
     if (!manualLink) return;
     manualLink.href = MANUALS[lang] || MANUALS.en;
     // Say where it actually goes when that is not the language being read. This
-    // is the only route to the manual on the page, so a Japanese reader pressing
-    // a Japanese label and landing in English has to be told before the click,
-    // not after: `soon` appends "· EN", and hreflang tells a screen reader the
-    // same thing. Both come off by themselves the day MANUALS gains the entry.
+    // is the only route to the manual on the page, so a reader pressing a label
+    // in their own language and landing in English has to be told before the
+    // click, not after: `soon` appends "· EN", and hreflang tells a screen
+    // reader the same thing. Both come off by themselves the day MANUALS gains
+    // the entry — every language in the map today takes the false branch.
     var fallback = !MANUALS[lang] || MANUALS[lang] === MANUALS.en;
     var borrowed = !!lang && lang !== "en" && fallback;
     manualLink.classList.toggle("soon", borrowed);

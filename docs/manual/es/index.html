@@ -10,11 +10,12 @@
   <script>
     /* Este manual está escrito en español; el conmutador de idioma de la barra
        superior es del sitio entero, así que lo usamos para llevar al lector al
-       manual de SU idioma en vez de dejarlo aquí. Solo hay manual en español,
-       portugués e inglés: ja/ru caen al inglés en lugar de fingir. */
+       manual de SU idioma en vez de dejarlo aquí. Ya hay manual en todos los
+       idiomas de la flota, así que cambiar de idioma siempre lleva a una página
+       real; ninguno cae al inglés. */
     (function () {
       var HERE = 'es';
-      var MAP = { 'pt-BR': '../pt-BR/', en: '../', ja: '../', ru: '../' };
+      var MAP = { 'pt-BR': '../pt-BR/', en: '../', ja: '../ja/', ru: '../ru/' };
       // El saludo lo pinta carino-navbar.js con window.t; sin esto saludaría en
       // inglés sobre una página en español.
       var GREET = {
@@ -47,6 +48,8 @@
       <span class="here">Español</span>
       <a href="../pt-BR/" lang="pt-BR">Português (BR)</a>
       <a href="../" lang="en">English</a>
+      <a href="../ja/" lang="ja">日本語</a>
+      <a href="../ru/" lang="ru">Русский</a>
       <a href="../../">← Carino PACS</a>
     </nav>
 

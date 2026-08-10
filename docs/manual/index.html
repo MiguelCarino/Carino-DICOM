@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Manual — Carino PACS</title>
-  <meta name="description" content="The Carino PACS manual: getting started, the security model and why the token rule exists, what each service does and when to turn it on, and the honest statement that this is not a medical device. Also in Spanish and Brazilian Portuguese." />
+  <meta name="description" content="The Carino PACS manual: getting started, the security model and why the token rule exists, what each service does and when to turn it on, and the honest statement that this is not a medical device. Also in Spanish, Brazilian Portuguese, Japanese and Russian." />
   <link rel="icon" href="../favicon.webp" />
   <link rel="stylesheet" href="manual.css" />
   <script>
-    /* This is the English manual and also the fallback for locales that have
-       no manual yet (ja, ru). Switching the fleet language to one that DOES
-       have a manual takes the reader there; anything else stays put rather
-       than bouncing them to a page that does not exist. */
+    /* This is the English manual. Every fleet language now has a manual of its
+       own, so this map covers all of them and a language switch always lands
+       the reader on a real page in the language they just chose. English is
+       not in the map because it is this page. */
     (function () {
-      var MAP = { es: 'es/', 'pt-BR': 'pt-BR/' };
+      var MAP = { es: 'es/', 'pt-BR': 'pt-BR/', ja: 'ja/', ru: 'ru/' };
       window.addEventListener('carino:langchange', function (e) {
         var to = MAP[e.detail.lang];
         if (to) location.href = to;
@@ -37,6 +37,8 @@
       <span class="here">English</span>
       <a href="es/" lang="es">Español</a>
       <a href="pt-BR/" lang="pt-BR">Português (BR)</a>
+      <a href="ja/" lang="ja">日本語</a>
+      <a href="ru/" lang="ru">Русский</a>
       <a href="../">← Carino PACS</a>
     </nav>
 

@@ -10,12 +10,12 @@
   <script>
     /* Este manual é escrito em português do Brasil; o seletor de idioma da
        barra superior vale para o site inteiro, então usamos ele para levar o
-       leitor ao manual DO idioma dele em vez de deixá-lo aqui. Só existe
-       manual em português, espanhol e inglês: ja/ru caem no inglês em vez de
-       fingir que existem. */
+       leitor ao manual DO idioma dele em vez de deixá-lo aqui. Agora existe
+       manual em todos os idiomas da frota, então trocar de idioma sempre cai
+       numa página de verdade; nenhum idioma volta para o inglês. */
     (function () {
       var HERE = 'pt-BR';
-      var MAP = { es: '../es/', en: '../', ja: '../', ru: '../' };
+      var MAP = { es: '../es/', en: '../', ja: '../ja/', ru: '../ru/' };
       // A saudação é escrita por carino-navbar.js via window.t; sem isto ela
       // apareceria em inglês numa página em português.
       var GREET = {
@@ -48,6 +48,8 @@
       <span class="here">Português (BR)</span>
       <a href="../es/" lang="es">Español</a>
       <a href="../" lang="en">English</a>
+      <a href="../ja/" lang="ja">日本語</a>
+      <a href="../ru/" lang="ru">Русский</a>
       <a href="../../">← Carino PACS</a>
     </nav>
 
