@@ -1085,6 +1085,13 @@ class PacsServer:
         root = self._group_root(group)
         if root is None:
             raise ValueError("group must be received|sent")
+        # Walked, never read from the index, even though the index holds a row
+        # per stored file and would answer without touching the disk. The list
+        # is what the delete and send buttons are aimed at, and the index cannot
+        # tell a caller whether it is complete: a first rescan still running
+        # reads like a small archive, and a row outliving the folder it names
+        # turns into a study that is not there. history.py's module docstring
+        # has the full account, so nobody rebuilds it.
         return {"group": group, "root": root, "studies": history.scan_studies(root)}
 
     def delete_study(self, group: str, path: str) -> dict:

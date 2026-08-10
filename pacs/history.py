@@ -1,8 +1,27 @@
 """Study browser for the dashboard's transaction history.
 
 Walks a storage folder (received or the sent/archive folder), reads one header
-per series to group instances into studies, and exposes safe delete helpers.
+per directory to group instances into studies, and exposes safe delete helpers.
 Everything is path-based and gated to the given root via ``safe_within``.
+
+The DIRECTORY is the unit of that grouping, not the SeriesInstanceUID: one
+header is read per folder and stands for the whole folder. That is why a series
+stored in two folders is listed twice and two series sharing a folder are listed
+once — the browser describes the shelf, not the catalogue, and an operator
+hunting for a study on disk needs the shelf.
+
+Serving this from the sqlite index instead of the disk was built and taken back
+out, and the reasons are worth writing down because it is the obvious idea. The
+index normalises what it stores — SeriesNumber into an INTEGER column, StudyDate
+to bare digits, Modality to upper case — so a header carrying ``003`` or
+``2024.01.15`` came back different from the two paths, and because the series
+list is sorted on that string it came back in a different ORDER too. Worse, an
+index cannot say whether it is complete: a first rescan halfway through its
+batches reads exactly like a small archive, and a row left behind by a folder
+removed out of band becomes a study that is not on disk — which widens a
+multi-folder study's ``path`` to a common ancestor, the ancestor the delete
+button is then pointed at. A browser whose job is to hand an operator a path to
+delete has to have looked at the path.
 """
 
 from __future__ import annotations
@@ -48,26 +67,33 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
 
     studies: dict[str, dict] = {}
     for dirpath, _dirnames, filenames in os.walk(root):
-        files = [f for f in filenames if not f.startswith(".")]
-        if not files:
-            continue
+        # One magic-byte test per file. Counting the folder and finding its
+        # header were two loops over the same names, and a count cannot stop
+        # early, so every file the hunt had already tested was tested again.
         hdr = None
-        for f in sorted(files):
+        count = 0
+        for f in sorted(f for f in filenames if not f.startswith(".")):
             p = os.path.join(dirpath, f)
-            if is_dicom(p):
+            if not is_dicom(p):
+                continue
+            count += 1
+            if hdr is None:
                 hdr = _read_header(p)
-                if hdr is not None:
-                    break
         if hdr is None:
-            continue
-        count = sum(1 for f in files if is_dicom(os.path.join(dirpath, f)))
-        if count == 0:
             continue
 
         suid = str(getattr(hdr, "StudyInstanceUID", "") or "")
+        # A study with no StudyInstanceUID is keyed on the directory's PARENT,
+        # so the Patient/Study/Series trees the SCP writes still collapse into
+        # one row when the sender left the UID out.
         key = suid or os.path.dirname(dirpath) or dirpath
         st = studies.get(key)
         if st is None:
+            # The study-level tags are read once, in the first folder of the
+            # study to be reached. Every attribute read off a pydicom Dataset
+            # converts a raw element, so pulling them again in each of a
+            # multi-folder study's folders costs more than fusing the two loops
+            # above ever saved — and the later folders' values are discarded.
             st = {
                 "patient": _fmt_name(getattr(hdr, "PatientName", "")),
                 "patient_id": str(getattr(hdr, "PatientID", "") or ""),
@@ -94,6 +120,10 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
         st["instances"] += count
         st["_dirs"].append(dirpath)
         try:
+            # The DIRECTORY's mtime, never a file's: archiving copies files with
+            # copy2 (which preserves their mtimes) into a freshly created folder,
+            # so only the folder records that the study moved, and the browser's
+            # whole job is to show what moved recently.
             st["mtime"] = max(st["mtime"], os.path.getmtime(dirpath))
         except OSError:
             pass
@@ -108,6 +138,8 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
         st["modality"] = ",".join(sorted(st.pop("_mods"))) or "?"
         st["series"].sort(key=lambda s: (s.get("number") or "", s.get("desc") or ""))
         out.append(st)
+    # Sorted before the cap, so it keeps the newest studies rather than
+    # whichever ones os.walk happened to reach first.
     out.sort(key=lambda s: s.get("mtime", 0), reverse=True)
     return out[:max_studies]
 
