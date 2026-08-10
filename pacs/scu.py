@@ -18,6 +18,10 @@ from pynetdicom import AE
 from pynetdicom.sop_class import Verification
 
 # C-STORE statuses that are "stored, with a caveat" — treat as success.
+# Reading them as failure would cost more than the caveat: the sender never
+# writes the destination down as done, so the watcher offers the same file
+# again on every pass and the study never becomes archivable — a permanent
+# resend loop against a node that already holds the images.
 _WARNING_STATUSES = {0xB000, 0xB006, 0xB007}
 
 
@@ -31,6 +35,13 @@ class Destination:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Destination":
+        """Build from one config entry; KeyError if it has no host/port/aet.
+
+        A node with no ``name`` key is named after its host. The name is what
+        routing rules are written against and what the send log records, so a
+        node that has none still needs something a rule could name and an
+        operator could recognise in a line that says a study was sent.
+        """
         return cls(name=d.get("name", d["host"]), host=d["host"], port=int(d["port"]),
                    aet=d["aet"], tls=bool(d.get("tls", False)))
 
@@ -50,6 +61,15 @@ class SendResult:
 
 def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
            tls_context: Optional[ssl.SSLContext] = None) -> SendResult:
+    """C-ECHO *dest* and report whether it answered, as a SendResult.
+
+    Refusal, timeout, a TLS handshake that fails and a host that is simply off
+    all come back as ``ok=False`` with a message meant to be read by whoever is
+    standing at the machine — a result, never an exception. This runs from a
+    dashboard button and from the emergency health monitor's polling loop
+    alike, and to that loop a node being down is ordinary input rather than an
+    error it should have to survive.
+    """
     ae = AE(ae_title=calling_aet)
     ae.add_requested_context(Verification)
     ae.acse_timeout = timeout
@@ -204,6 +224,28 @@ def _worklist_item(ds) -> dict:
 
 def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 30,
             tls_context: Optional[ssl.SSLContext] = None) -> SendResult:
+    """C-STORE one file to one node over an association of its own.
+
+    ``ok`` is true for 0x0000 and for the warning statuses above — the object
+    is on the far side either way. An unreadable file, a missing SOP
+    Class UID, a refused association and a failure status are all ``ok=False``
+    with a message written to survive being pasted into a support thread.
+
+    One file, one destination, one association, and the payload named by a
+    path rather than handed over as a dataset. That is what lets the same
+    instance leave identified to the archive and de-identified to a research
+    node in a single pass: the two are two calls with two paths, and neither
+    can see the other's dataset. It also means a study costs one association
+    and one full read per instance per node — the price of that isolation,
+    paid on every send.
+    """
+    # The whole file, pixels included, because this dataset IS the payload.
+    # The stop_before_pixels read used everywhere else in the project (routing,
+    # index, history, dicomweb) is the wrong tool here by exactly one attribute
+    # and would put an image-less instance on the wire. Reading before
+    # associate() is also deliberate: an unreadable file is reported without a
+    # socket being opened, and the transfer syntax proposed below is then the
+    # one the file genuinely carries rather than a guess.
     try:
         ds = dcmread(filepath)
     except Exception as exc:

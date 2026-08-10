@@ -25,7 +25,13 @@ def save_dicom(ds, path) -> None:
 
 
 def is_dicom(path: str) -> bool:
-    """True if the file has the DICM magic at offset 128 (extension-agnostic)."""
+    """True if the file has the DICM magic at offset 128 (extension-agnostic).
+
+    Asked of every file the watcher and the browse walk meet, including the ones
+    that turn out not to be DICOM at all, so it reads four bytes and stops. An
+    unreadable path is not DICOM rather than an error: this is the question that
+    decides whether a file is a candidate, and a permission problem on one file
+    must not end the walk over the rest of them."""
     try:
         with open(path, "rb") as fh:
             fh.seek(128)

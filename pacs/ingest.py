@@ -75,7 +75,14 @@ def _norm_date(value) -> str:
 def _resolve_patient_name(meta: dict) -> str:
     """Best PatientName to write: keep the original 'Family^Given' structure when
     the form value is just its display form unchanged, otherwise use what the
-    user typed (verbatim if it already contains a '^')."""
+    user typed (verbatim if it already contains a '^').
+
+    The round-trip comparison is what protects the component structure. The
+    review form is shown a display name, so writing back whatever it holds would
+    flatten 'Doe^Jane' into the single component 'Jane Doe' — a name that no
+    longer matches the one on the rest of the study this file was converted to
+    join. Only a value the operator actually changed is worth that.
+    """
     from .history import _fmt_name
     typed = str(meta.get("patient") or "").strip()
     raw = str(meta.get("patient_name") or "").strip()
@@ -122,6 +129,9 @@ def _base_dataset(sop_class: str, meta: dict):
     ds.PatientID = str(meta.get("patient_id") or "")
     ds.PatientBirthDate = _norm_date(meta.get("patient_birthdate"))
     ds.PatientSex = str(meta.get("patient_sex") or "")
+    # A fresh UID when the identity carried none — never blank and never a
+    # constant. The attribute is Type 1, and any fixed stand-in would collect
+    # every identity-less import on the receiver into one ever-growing study.
     ds.StudyInstanceUID = str(meta.get("study_uid") or "") or generate_uid()
     ds.StudyDate = _norm_date(meta.get("study_date"))
     ds.StudyTime = ""
@@ -165,6 +175,13 @@ def build_secondary_capture(img_bytes: bytes, meta: dict):
 
     with Image.open(io.BytesIO(img_bytes)) as im:
         im.load()
+        # The convert() calls are not cosmetic. tobytes() hands back whatever
+        # the source mode packs — one byte per pixel for a palette image, four
+        # for RGBA — while the header below states SamplesPerPixel and
+        # PhotometricInterpretation as fact. Normalising to L or RGB first is
+        # what keeps that statement and the bytes describing the same picture.
+        # A mismatch is not rejected anywhere: the object is stored, forwarded
+        # and opened, and renders as skewed garbage.
         if im.mode in ("L", "I;16", "1"):
             im = im.convert("L")
             samples, photometric = 1, "MONOCHROME2"
@@ -204,6 +221,12 @@ def build_from_bytes(data: bytes, kind: str, meta: dict):
 
 def save_instance(ds, out_dir: str) -> str:
     """Write *ds* into *out_dir* as ``<SOPInstanceUID>.dcm`` and return the path."""
+    # Written in place rather than to a temp name and renamed. The filename is
+    # the UID _base_dataset generated moments ago, so it cannot collide with a
+    # file already there and cannot overwrite one; and the only consumer that
+    # watches a destination folder — the auto-send watcher on the outgoing
+    # folder — refuses to forward a file until its size has held steady across
+    # two polls, so a half-written instance is skipped rather than sent.
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"{ds.SOPInstanceUID}.dcm")
     save_dicom(ds, out)
@@ -214,6 +237,10 @@ def save_instance(ds, out_dir: str) -> str:
 # Layout:  <pending_dir>/<id>/<original filename>   +   <pending_dir>/<id>/meta.json
 def _safe_entry_dir(pending_dir: str, pid: str) -> str:
     """Resolve a pending id to its folder, refusing anything that escapes root."""
+    # The id arrives from a query string. Rejecting the root itself is the half
+    # that is easy to leave out: an empty id, "." and "anything/.." all resolve
+    # to the pending folder, and discard_pending would then hand the entire
+    # review queue to shutil.rmtree.
     base = os.path.realpath(pending_dir)
     entry = os.path.realpath(os.path.join(pending_dir, pid))
     if entry == base or not entry.startswith(base + os.sep):
@@ -228,6 +255,12 @@ def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
     os.makedirs(entry, exist_ok=True)
     fname = os.path.basename(src)
     dst = os.path.join(entry, fname)
+    # Move first, sidecar second. The move is what takes the file out of the
+    # folder it was found in, so the watcher's next poll cannot queue the same
+    # report into a second entry. A crash in the gap between the two leaves a
+    # folder with no meta.json, which _load_entry refuses — the file is still on
+    # disk and recoverable, and the review queue never lists an item it cannot
+    # then open.
     shutil.move(src, dst)
     try:
         size = os.path.getsize(dst)
@@ -256,6 +289,14 @@ def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
 
 
 def _load_entry(entry: str) -> dict | None:
+    """The entry's metadata plus a '_path' handle, or None if it is not whole.
+
+    An entry is real only when the sidecar parses AND the file it names is
+    there. A half-staged folder, a sidecar caught mid-write and an item whose
+    file was removed underneath us all read as absent rather than as an error,
+    which is what lets list_pending skip one broken entry instead of taking the
+    whole review queue off the dashboard with it.
+    """
     try:
         with open(os.path.join(entry, META_NAME), "r", encoding="utf-8") as fh:
             meta = json.load(fh)
@@ -306,11 +347,19 @@ def approve_pending(pending_dir: str, pid: str, edits: dict, out_dir: str) -> st
     meta = _load_entry(entry)
     if not meta:
         raise ValueError("pending item not found")
+    # Identity the operator corrected wins over the identity that was pre-filled
+    # from a sibling header. The KIND does not: it is the sidecar's, decided when
+    # the item was staged, so nothing coming back from a review form can talk the
+    # converter into handing a PDF to the image path.
     build_meta = {**meta, **(edits or {})}
     with open(meta["_path"], "rb") as fh:
         data = fh.read()
     ds = build_from_bytes(data, meta["kind"], build_meta)
     out = save_instance(ds, out_dir)
+    # The entry is destroyed only once the instance is on disk. Everything that
+    # can fail above — an unreadable file, an image PIL will not decode, a full
+    # volume — fails with the item still queued for review. The other order
+    # trades an operator's only copy of a report for a traceback.
     shutil.rmtree(entry, ignore_errors=True)
     return out
 

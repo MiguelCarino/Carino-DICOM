@@ -14,6 +14,21 @@ import threading
 
 
 class SendState:
+    """The record of what has already been delivered, shared by every thread.
+
+    One instance per process, owned by FolderWatcher. The watcher thread reads
+    and rewrites entries on every pass while the dashboard reaches the same
+    object from Flask's worker threads.
+
+    The lock guards the MAP: which paths are known and which entry object each
+    one holds. It does not guard the entries. get() hands back the live entry
+    rather than a copy, so a caller mutates it in place and put() writes the
+    same object back; all_entries() is the exception and deep-copies, because
+    its caller is somewhere else entirely. Nothing reaches disk until save() is
+    called — the watcher does that once at the end of a pass, so a kill in the
+    middle of one re-sends what that pass had already delivered.
+    """
+
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
@@ -22,6 +37,10 @@ class SendState:
         self._load()
 
     def _load(self) -> None:
+        # A missing or unreadable state file is treated as an empty one. The
+        # cost is that everything still sitting in the outgoing tree is offered
+        # again — duplicate sends, never a lost image — and it is the only
+        # outcome that still lets the watcher start.
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r", encoding="utf-8") as fh:
@@ -115,6 +134,18 @@ class SendState:
         return touched
 
     def save(self) -> None:
+        """Write the map to disk if anything has changed since the last save.
+
+        Temp file plus rename, so a reader — the next `pacs serve` starting up —
+        sees the whole old map or the whole new one, never a half-written
+        document that would read as "nothing has been sent". The temp name is
+        fixed rather than unique because every save holds the lock: two savers
+        in this process cannot be inside it at once.
+
+        A write that fails is swallowed and leaves the map marked dirty, so the
+        next save carries the same change rather than the caller having to
+        notice this one did not.
+        """
         with self._lock:
             if not self._dirty:
                 return

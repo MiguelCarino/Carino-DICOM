@@ -103,6 +103,18 @@ class Notifier:
         self.last_sent = ""
 
     # ---- config views ----------------------------------------------------
+    # Properties, not values captured in __init__, and that is the whole reason
+    # start() can be honest about a Settings save applying without a restart:
+    # every send re-reads the config object it was handed, so turning the
+    # webhook off stops the next delivery rather than the next boot.
+    #
+    # _webhook and _smtp coerce instead of trusting because this config is
+    # hand-editable JSON and the reader is a worker thread: a ``webhook``
+    # somebody wrote as a string has to arrive here as "nothing is configured"
+    # rather than as a TypeError inside the worker, counted and logged as a
+    # delivery failure, which sends whoever reads it hunting the network for a
+    # problem that is in the file. _cfg guards only the LOOKUP — a config object
+    # with no ``notify`` block at all — and not what that block turns out to be.
     @property
     def _cfg(self) -> dict:
         try:
@@ -230,6 +242,9 @@ class Notifier:
 
     def _note_sent(self, what: str) -> None:
         self.sent += 1
+        # A success clears the error. The dashboard reads last_error as the
+        # notifier's state right now, and a scar left by an SMTP server that has
+        # since come back reads there as an outage still in progress.
         self.last_error = ""
         self.last_sent = f"{time.strftime('%H:%M:%S', time.gmtime())} {what}"
 
@@ -254,6 +269,10 @@ class Notifier:
         retries = max(0, int(wh.get("retries", 2) or 0))
         last = ""
         for attempt in range(retries + 1):
+            # Checked per attempt, not once before the loop. stop() waits a few
+            # seconds for this thread, and the backoff below can outlast that on
+            # its own — a shutdown that has to sit out the remaining retries of a
+            # dead endpoint is a shutdown the operator sees as a hang.
             if self._stop.is_set():
                 return
             try:
@@ -312,6 +331,11 @@ class Notifier:
                     server.starttls()
                 user = str(sm.get("username", "") or "")
                 password = str(sm.get("password", "") or "")
+                # Authentication is opt-in by the presence of a username,
+                # because the relay this is usually pointed at is the hospital's
+                # own and takes internal mail without credentials. Calling
+                # login() unconditionally would fail against exactly that
+                # server, and the failure would look like a bad password.
                 if user:
                     server.login(user, password)
                 server.send_message(msg)
@@ -366,6 +390,17 @@ class Notifier:
 
     # ---- status ----------------------------------------------------------
     def stats(self) -> dict:
+        """What the dashboard is told about this notifier. Never a secret.
+
+        The webhook signing key is reported as the one bit an operator needs —
+        whether the POSTs are signed at all — and the SMTP password is not
+        reported in any form. Both are write-only everywhere else in the app:
+        redacted out of GET /api/config, refused if they come back in on a save,
+        settable only through POST /api/notify/secret. This dict rides the
+        status payload, which is polled continuously, so a field here that
+        echoed either value would quietly undo all of that in the least likely
+        place anyone thought to look.
+        """
         wh = self._webhook
         sm = self._smtp
         return {

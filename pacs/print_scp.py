@@ -75,6 +75,12 @@ _ANNOTATION_POOL = 6
 
 
 def _safe(component: str, fallback: str) -> str:
+    """Filename-safe form of *component*, or *fallback* when nothing survives.
+
+    What gets passed in is a remote AE title — whatever the modality on the far
+    end chose to call itself — and it goes straight into a filename, so this is
+    the boundary that keeps a path separator out of one.
+    """
     s = _UNSAFE.sub("_", str(component or "").strip()).strip("._")
     return (s or fallback)[:64]
 
@@ -106,6 +112,9 @@ def _layout_cells(fmt: str) -> list[tuple[float, float, float, float]]:
         return out
 
     cells: list[tuple[float, float, float, float]] = []
+    # STANDARD is columns first, then rows: STANDARD\2,3 is three rows of two.
+    # Reading that pair the other way round transposes every multi-image film
+    # and nothing fails — the sheet just comes out wrong.
     if kind == "STANDARD" and "," in spec:
         nums = _ints(spec)
         if len(nums) == 2:
@@ -114,6 +123,10 @@ def _layout_cells(fmt: str) -> list[tuple[float, float, float, float]]:
                 for c in range(cols):
                     cells.append((c / cols, r / rows, 1 / cols, 1 / rows))
             return cells
+    # ROW and COL are not grids: each number is how many images that one row (or
+    # column) holds, so ROW\2,3 is two rows, the first with two images and the
+    # second with three. Rows may therefore differ in width, which is why the
+    # cell width below divides by that row's own count and not by a global one.
     if kind == "ROW":
         rows_spec = _ints(spec)
         if rows_spec:
@@ -131,6 +144,9 @@ def _layout_cells(fmt: str) -> list[tuple[float, float, float, float]]:
                     cells.append((c / ncols, r / nrows, 1 / ncols, 1 / nrows))
             return cells
     # Unknown / SLIDE / SUPERSLIDE / CUSTOM — one full-page image.
+    # The length of this list is how many Image Boxes the SCU is handed back, so
+    # a format we do not recognise still prints; it just prints one per sheet
+    # rather than refusing the film box and failing the print.
     return [(0.0, 0.0, 1.0, 1.0)]
 
 
@@ -151,6 +167,11 @@ def _image_from_item(item):
         stored = int(getattr(item, "BitsStored", bits) or bits)
         photometric = str(getattr(item, "PhotometricInterpretation", "") or "").upper()
 
+        # Every branch below pads or truncates the buffer to exactly the length
+        # the geometry implies. A short fragment then renders, part of it blank,
+        # instead of making Image.frombytes raise into the catch below and
+        # costing that picture altogether — a truncated image box is still an
+        # image the operator can read most of.
         if samples >= 3:
             need = rows * cols * 3
             pixel = (pixel + b"\x00" * need)[:need]
@@ -187,11 +208,23 @@ def _image_from_item(item):
             im = ImageOps.invert(im)
         return im
     except Exception:
+        # An image box we cannot decode is dropped, never fatal: the caller
+        # stores nothing for that box and the rest of the sheet still prints.
+        # Letting the exception out would fail the N-SET and take a film the
+        # operator can still read down with it.
         return None
 
 
 # ---------------------------------------------------------- association state
 class _FilmBox:
+    """One film sheet being built: the layout the SCU asked for, the Image Box
+    UIDs we minted for it, and whatever it has N-SET into them so far.
+
+    The UIDs are generated in the constructor because the SCU cannot fill a
+    sheet until it has them — they go straight back in the Film Box N-CREATE
+    response, and until that reply lands there is nothing for it to address.
+    """
+
     __slots__ = ("uid", "fmt", "orientation", "cells", "box_uids", "images",
                  "is_color", "anno_uids", "annotations")
 
@@ -262,6 +295,23 @@ def uid_gen() -> str:
 
 
 class PrintSCP:
+    """The listening printer, and the state machine behind it.
+
+    A print conversation is always the same four moves: N-CREATE a Film Session
+    (a label and, on generous modalities, some patient attributes), N-CREATE one
+    Film Box per sheet (which is where the layout is decided and where we hand
+    back the Image Box UIDs), N-SET a bitmap into each of those boxes, then
+    N-ACTION to print. Only the last of those produces anything.
+
+    ``on_output(payload, kind, identity, filename)`` is the sole way a rendered
+    film leaves this class. *kind* is "pdf" or "image"; *identity* is a bag of
+    hints scraped off the print attributes, never trusted facts, which is why
+    the sink is the pending-review queue rather than storage.
+
+    ``layout`` chooses the rendering: "pdf" emits one document with a page per
+    sheet, "image" emits one PNG per sheet. Any other value is read as "pdf".
+    """
+
     def __init__(
         self,
         aet: str,
@@ -297,6 +347,13 @@ class PrintSCP:
 
     # ---- per-association state --------------------------------------------
     def _job(self, event) -> _Job:
+        """State for the calling association, created on first use.
+
+        Nothing a print SCU builds outlives its association: a Film Session, the
+        Film Boxes hanging off it and the bitmaps inside those are only
+        addressable by UIDs handed out in this one conversation, so the whole
+        tree is dropped when it releases or aborts (``_handle_close``).
+        """
         key = id(event.assoc)
         with self._lock:
             job = self._jobs.get(key)
@@ -414,7 +471,9 @@ class PrintSCP:
 
         job = self._job(event)
 
-        # Annotation box — a text string to print on the film.
+        # Annotation box — a text string to print on the film. Matched on the
+        # UID as well as the SOP class, so a box we allocated is recognised
+        # whichever presentation context the SCU chose to N-SET it on.
         if sop_class == BasicAnnotationBox or box_uid in job.anno_to_film:
             film_uid = job.film_of_anno(box_uid)
             if film_uid and film_uid in job.film_boxes:
@@ -429,6 +488,12 @@ class PrintSCP:
         film_uid = job.box_to_film.get(box_uid)
         if film_uid and film_uid in job.film_boxes:
             fb = job.film_boxes[film_uid]
+            # Positions are 1-based in DICOM, so a zero or absent one is
+            # "unstated", not "the first cell". Those are given the next arrival
+            # slot instead, which keeps an unstated box sorting after the boxes
+            # that came before it rather than tying with every other unstated
+            # one — the render orders by this number and then fills the cells in
+            # that order.
             position = int(getattr(mods, "ImageBoxPosition", 0) or 0)
             seq = getattr(mods, _GRAYSCALE_IMAGE_SEQ, None) or getattr(mods, _COLOR_IMAGE_SEQ, None)
             item = seq[0] if seq else None
@@ -440,7 +505,20 @@ class PrintSCP:
         return 0x0000, Dataset()
 
     def _handle_n_action(self, event):
-        """The print trigger — render the referenced film box(es) to a PDF."""
+        """The print trigger — render the referenced film box(es) to a PDF.
+        (Under the "image" layout it is one PNG per sheet instead.)
+
+        Aimed at a Film Box, this prints that one sheet; aimed at anything else
+        — normally the Film Session — it prints every sheet built so far on this
+        association. Sheets with no image data are dropped rather than emitted
+        as blank pages, and a request that leaves nothing at all to print
+        returns 0xB603 instead of an error, because the SCU must be able to
+        carry on and print a real film on the same association afterwards
+        (test_print.py::test_empty_job_survives pins that down).
+
+        What was printed is then forgotten, so a second N-ACTION on the same
+        association starts from empty instead of reprinting the sheet.
+        """
         from pydicom.dataset import Dataset
         req = event.request
         sop_class = str(getattr(req, "RequestedSOPClassUID", "") or "")
@@ -514,6 +592,12 @@ class PrintSCP:
         return 0x0000, reply
 
     def _handle_n_delete(self, event) -> int:
+        """Discard a Film Box the SCU says it is finished with.
+
+        N-DELETE of a Film Session lands here too and is a no-op: a session
+        holds nothing but a label and some identity hints, and both of those die
+        with the association anyway.
+        """
         req = event.request
         target = str(getattr(req, "RequestedSOPInstanceUID", "") or "")
         job = self._job(event)
@@ -599,6 +683,9 @@ def _render_page(fb) -> "object":
     cap_h = min(len(lines) * 34 + 20, ph // 4) if lines else 0
     content_h = ph - cap_h            # reserve the foot for the caption band
 
+    # Cell fractions are applied to content_h rather than the full page height,
+    # so a bottom-row image shrinks to make room for the caption band instead of
+    # being printed over by it. Horizontal fractions still use the full width.
     placed = sorted(fb.images.values(), key=lambda t: t[0])   # by ImageBoxPosition
     cells = fb.cells or [(0.0, 0.0, 1.0, 1.0)]
     for idx, (_pos, img) in enumerate(placed):
@@ -636,7 +723,11 @@ def _draw_caption(canvas, lines: list, top: int, pw: int, ph: int) -> None:
 
 
 def _render_pdf(films: list) -> bytes:
-    """A (possibly multi-page) PDF — one page per film box — as bytes."""
+    """A (possibly multi-page) PDF — one page per film box — as bytes.
+
+    Assumes *films* is non-empty; the caller has already dropped the sheets with
+    no image data and returned a warning if that left nothing.
+    """
     pages = [_render_page(fb) for fb in films]
     buf = io.BytesIO()
     pages[0].save(buf, format="PDF", resolution=200.0, save_all=True, append_images=pages[1:])

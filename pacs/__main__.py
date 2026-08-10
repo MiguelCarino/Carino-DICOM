@@ -9,6 +9,19 @@
     python -m pacs qr         # Query/Retrieve SCP (C-FIND/C-MOVE/C-GET), headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
+
+Every subcommand loads the config named by -c/--config as its first act, and
+only one of them writes it back on its own: `init --token`, which mints
+web.auth_token and saves. (`serve` rewrites it too, but through the dashboard —
+the Settings pages save the same Config object this process is holding.) The
+per-command overrides (--port, --aet, --out, --watch-dir) change the loaded
+document in memory for the life of that process and nothing else — enrolling a
+service permanently is the dashboard's setup chooser, not this file.
+
+The headless commands are an alternative to `serve`, not a companion to it: they
+start the same service objects off the same config sections, so running one
+beside a `serve` that already has that service enabled is two processes fighting
+over one DICOM port — or, for `send`, two watchers forwarding one folder.
 """
 
 from __future__ import annotations
@@ -27,6 +40,9 @@ from .server import PacsServer
 
 
 def _echo_recent_log(server: PacsServer, seen: int) -> int:
+    # The ring buffer is bounded, so a burst between two polls scrolls past
+    # unprinted. The dated file under logs_dir is the complete record; a
+    # headless run's console is only the running commentary.
     for e in server.log.since(seen):
         print(f"  [{e['level'][0].upper()}] {e['message']}")
         seen = e["seq"]
@@ -34,6 +50,15 @@ def _echo_recent_log(server: PacsServer, seen: int) -> int:
 
 
 def _block_until_signal(server: PacsServer) -> None:
+    """Hold a headless command open, echoing the log, until Ctrl+C or SIGTERM.
+
+    The handlers only raise a flag; the shutdown runs back in this loop, in
+    ordinary code, rather than inside a signal handler that can land in the
+    middle of an association or an sqlite write. This deliberately replaces the
+    SIGTERM disposition _install_sigterm() put in place — that one raises
+    KeyboardInterrupt to unwind Werkzeug for `serve`, and there is no Werkzeug
+    here to unwind.
+    """
     stop = {"flag": False}
 
     def handler(signum, frame):
@@ -52,6 +77,19 @@ def _block_until_signal(server: PacsServer) -> None:
 
 
 def cmd_init(args) -> int:
+    """Scaffold the config file and the folders it names.
+
+    Non-destructive and safe to re-run: an existing config is never overwritten
+    (--token is the one thing that may add to one), and the directories are
+    created only if missing. What it writes is a
+    copy of config.example.json when that file can be found — the example is the
+    commented reference for every key, and an operator who has to edit this by
+    hand is far better served by it than by the bare document Config.save()
+    produces from DEFAULTS.
+
+    --token mints web.auth_token only when there is none; it is not a rotate.
+    Scaffolding enables no service — that is the dashboard's setup chooser.
+    """
     cfg_path = os.path.abspath(os.path.expanduser(args.config))
     os.makedirs(os.path.dirname(cfg_path) or ".", exist_ok=True)
     if os.path.exists(cfg_path):
@@ -98,9 +136,21 @@ def cmd_init(args) -> int:
 
 
 def cmd_serve(args) -> int:
+    """Run the dashboard plus whatever the config enables; block until it stops.
+
+    Returns 2 without binding anything when the dashboard would be reachable
+    from the network with no token set. This is the one command whose process
+    can rewrite config.json, because the dashboard's setup chooser and settings
+    pages save through the same Config object it is holding.
+    """
     from .web import create_app  # imported lazily so `receive`/`send` don't need Flask
 
     cfg = Config(args.config)
+    # Locals, never cfg.web[...]: the dashboard hands the browser whatever is in
+    # this Config and saves back what the browser returns, so an override poked
+    # into the document would be displayed as the configured value and made
+    # permanent by the next Save anyone presses. A --host meant for one run is
+    # how the bind address gets changed for good.
     host = args.host or cfg.web.get("host", "127.0.0.1")
     port = args.port or int(cfg.web.get("port", 8042))
     # Checked BEFORE anything binds. config validation already refuses to SAVE a
@@ -227,6 +277,9 @@ def cmd_mwl(args) -> int:
 
 
 def cmd_qr(args) -> int:
+    """Run the Query/Retrieve SCP headless. Returns 2 when the SCP refuses to
+    start — most often because the instance index is disabled, which is the one
+    configuration Q/R cannot answer out of."""
     cfg = Config(args.config)
     if args.port:
         cfg.qr["port"] = args.port
@@ -247,6 +300,13 @@ def cmd_qr(args) -> int:
 
 
 def cmd_echo(args) -> int:
+    """C-ECHO one destination and report the result.
+
+    The exit codes are distinct because this gets used as a health check: 0 the
+    peer answered, 1 it was dialled and did not, 2 nothing was dialled at all —
+    no such destination in the config, or an incomplete --host/--port/--aet
+    triple.
+    """
     cfg = Config(args.config)
     if args.name:
         match = next((d for d in cfg.destinations if d.get("name") == args.name), None)

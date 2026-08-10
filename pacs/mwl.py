@@ -26,6 +26,23 @@ rather over-show an order than hide one a tech needs):
     appears on every modality's worklist.  Set ``station_aet`` on the order to
     target one modality.
 
+Keys we do NOT match on
+----------------------
+Every other key is treated as a return key even when the SCU filled it in —
+RequestedProcedureID, ScheduledProcedureStepID, ScheduledProcedureStepStartTime,
+ScheduledStationName, PatientBirthDate, ReferringPhysicianName — and only the
+first item of the query's Scheduled Procedure Step Sequence is read at all.  An
+unhonoured key can therefore only ever widen the answer: the modality is shown
+items it did not ask for, never deprived of one it did.  That is the right way
+round for an emergency worklist, but it is the first place to look when a
+modality's list is too long, and the reason a "nothing on my worklist" call is
+almost never one of these keys.
+
+Text keys are compared whole and case-insensitively, so a PatientName query of
+``SMITH`` does not match an order for ``SMITH^JOHN``; ``SMITH*`` does.  Case
+insensitivity is also why the modality registry refuses two stations whose AE
+titles differ only in case — to this module they are one station.
+
 The response carries the order's pre-generated **Study Instance UID**, so the
 exam the modality produces is stamped with the same UID and reconciles back to
 the order exactly (see ``OrderStore.match`` / ``_reconcile_study``).
@@ -56,6 +73,13 @@ def _peer_addr(event) -> str:
 
 
 def _digits(value) -> str:
+    """Just the digits of *value*.
+
+    ``scheduled_dt`` reaches an order either as HL7 OBR-7 (``20260809143000``)
+    or from the dashboard's ``datetime-local`` field (``2026-08-09T14:30``).
+    Dropping every non-digit makes those one shape, which the DA and TM slices
+    below can then cut by position without knowing which one they got.
+    """
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
@@ -112,7 +136,13 @@ def _match_date(query_value: str, order_date: str) -> bool:
 
 
 def _query_sps_item(ds):
-    """First item of the query's Scheduled Procedure Step Sequence, or None."""
+    """First item of the query's Scheduled Procedure Step Sequence, or None.
+
+    A worklist query carries exactly one scheduled step, so anything past the
+    first item came from a non-conformant SCU.  It is ignored rather than read
+    as a second alternative: guessing an OR there would put orders on a
+    modality that nothing in the message asked for.
+    """
     seq = getattr(ds, "ScheduledProcedureStepSequence", None)
     try:
         return seq[0] if seq else None
@@ -169,6 +199,12 @@ def build_worklist_item(order: dict):
     step.Modality = order.get("modality", "")
     step.ScheduledStationAETitle = order.get("station_aet", "")
     step.ScheduledStationName = order.get("station_name", "")
+    # SPS Start Date is Type 1: a worklist item that leaves it blank is not one
+    # a modality has to accept, and some drop the whole item rather than the
+    # key. An undated order matches a query for any date (see _match_date), so
+    # it is shown as today rather than withheld — the date the tech reads is a
+    # stand-in, not the order's, and that is the one place this module's
+    # leniency is visible on the scanner.
     step.ScheduledProcedureStepStartDate = _order_date(order) or _today()
     step.ScheduledProcedureStepStartTime = _order_time(order)
     step.ScheduledProcedureStepDescription = order.get("study_desc", "")
@@ -179,6 +215,24 @@ def build_worklist_item(order: dict):
 
 
 class MwlSCP:
+    """The worklist provider: every open order in the store is one C-FIND item.
+
+    ``get_orders`` is called on each query rather than cached, so an order
+    hand-keyed in the middle of an outage is on the next worklist the modality
+    pulls and there is no staleness to invalidate. The list is still a snapshot
+    taken when the query arrived: an order created while a C-FIND is being
+    answered waits for the next pull, which is the right trade when the
+    alternative is a response whose contents change under the SCU.
+
+    Above the transport — a CA on the listener makes it demand a client
+    certificate — the AE-title allowlist is the whole of the access control. A
+    permitted caller sees every open order its query matches, and its query is
+    its own to write: ``station_aet`` on an order is a filter for the operator,
+    never a confidentiality boundary. This is why another hospital's caught orders
+    are kept in a separate store with no worklist path at all (``caught.py``)
+    rather than flagged inside this one.
+    """
+
     def __init__(
         self,
         aet: str,
@@ -230,6 +284,10 @@ class MwlSCP:
         with self._lock:
             self.query_count += 1
         try:
+            # Filtered again here rather than trusted, even though the caller
+            # already asks the store for open orders: what counts as a worklist
+            # item is this module's decision, so a caller that hands over its
+            # whole store cannot put a closed one back on a modality's screen.
             orders = [o for o in (self.get_orders() or []) if o.get("status") == "open"]
         except Exception:
             orders = []

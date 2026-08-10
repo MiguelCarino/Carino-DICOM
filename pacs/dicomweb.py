@@ -11,6 +11,18 @@ Deliberately NOT implemented, because a half-working viewer is worse than an
 absent feature: /rendered (needs a codec + windowing pipeline), /thumbnail,
 bulkdata URIs, and transcoding between transfer syntaxes. Anything we cannot
 produce is answered 406, never faked.
+
+Missing for the same reason but less visibly: the OPTIONS capabilities
+description of PS3.18 8.9, DELETE, patient-level resources, UPS-RS, matching on
+a sequence path, and fuzzy matching. The ones a client can ask for by accident
+say so — fuzzymatching=true is answered with exact matching and a Warning header
+— because a query that silently answers a different question from the one asked
+is how the wrong study reaches a screen.
+
+Access control is not this module's job. pacs.auth gates /dicom-web with the
+same token as /api, and web.py exempts it from the X-Carino header because no
+conforming DICOMweb client can send one. What is here is the CORS allow-list,
+which decides which browser pages get to spend that token.
 """
 
 from __future__ import annotations
@@ -188,6 +200,11 @@ def _split_outside_quotes(value: str, sep: str) -> list[str]:
 
 
 def _params(bits: list[str]) -> dict:
+    """Media-type parameters as {lowercase name: unquoted value}.
+
+    Names are folded because RFC 7231 makes them case-insensitive; values are
+    left alone, because a boundary and a transfer-syntax UID both mean exactly
+    the bytes they were written with."""
     p = {}
     for bit in bits:
         k, _, v = bit.partition("=")
@@ -214,6 +231,14 @@ def _media_ranges(header: str) -> list[tuple[str, dict, float]]:
 
 
 def _accepts_json(header: str) -> bool:
+    """Whether the client will take DICOM JSON, the only representation this
+    server produces for a query or for metadata.
+
+    Plain ``application/json`` is honoured alongside ``application/dicom+json``,
+    which PS3.18 does not require; the response is labelled dicom+json either
+    way, so nothing is misdescribed. There is no q-value arithmetic because
+    there is nothing to choose between: the only question a q asks here is
+    whether JSON was refused outright."""
     ranges = _media_ranges(header)
     if not ranges:
         return True
@@ -246,6 +271,13 @@ def _accepts_dicom_parts(header: str) -> tuple[bool, Optional[str]]:
 
 
 def _accepts_frames(header: str, media: str) -> bool:
+    """Whether the client will take frames as multipart/related of *media*.
+
+    *media* is decided by how the instance was stored, never by preference, so
+    this only asks whether the client will accept what we hold — a client that
+    names a different type gets a 406 instead of frames of one codec wearing
+    another's label. A multipart/related range with no type parameter counts as
+    acceptance: it says "multipart", not "not that one"."""
     ranges = _media_ranges(header)
     if not ranges:
         return True
@@ -303,6 +335,8 @@ def _no_empty_values(obj: dict) -> dict:
 
 
 def _to_json(ds: Dataset) -> dict:
+    """Serialise *ds*, modifying it in place — every caller here builds a Dataset
+    to be turned into JSON once and then drops it."""
     _clean_bulk(ds)
     return _no_empty_values(ds.to_json_dict())
 
@@ -361,6 +395,16 @@ def _to_keyword(name: str) -> Optional[str]:
 
 
 def _parse_filters(args) -> tuple[dict, list[str]]:
+    """Query parameters -> (filters the index can answer, warnings).
+
+    A key we cannot match on is warned about rather than rejected: PS3.18
+    8.3.4.2 lets a server ignore an unsupported matching key, and a viewer that
+    sent one still wants its results. The warning is not politeness — dropping a
+    filter WIDENS the result set, so staying silent would be indistinguishable
+    from a query that worked.
+
+    An empty value is DICOM's universal match and so contributes no filter at
+    all, which is a different thing from matching the empty string."""
     filters: dict = {}
     warns: list[str] = []
     for raw_key in args.keys():
@@ -409,6 +453,13 @@ def _parse_include(args, level: str) -> tuple[list[str], bool]:
 
 
 def _parse_paging(args) -> tuple[int, int, list[str]]:
+    """(limit, offset, warnings), clamped to what this server will serve.
+
+    An absent limit, a zero and a negative all mean _QIDO_MAX: QIDO has no way
+    to spell "no limit", and a client that omitted it wants the list rather than
+    an argument about it. What the client got wrong is warned about — a
+    non-number, or a value past the ceiling — because those change an answer it
+    explicitly asked for."""
     warns: list[str] = []
     try:
         limit = int(args.get("limit", _QIDO_MAX))
@@ -463,6 +514,13 @@ def _stream_parts(parts: list[tuple[str, str]], boundary: str, log, stats) -> It
 
 def _multipart_response(parts: list[tuple[str, str]], part_type: str, status: int,
                         log, stats) -> Response:
+    """Stream *parts* as one multipart/related body.
+
+    The boundary is fresh random hex per response rather than a constant: the
+    parts are whole DICOM files whose bytes are arbitrary, and any delimiter
+    fixed in the source is one that some instance's pixel data eventually
+    contains. The body stays a generator, so a study is never assembled in
+    memory to be measured."""
     boundary = uuid.uuid4().hex
     body = _stream_parts(parts, boundary, log, stats)
     ct = f'multipart/related; type="{part_type}"; boundary={boundary}'
@@ -476,6 +534,10 @@ def _parse_multipart_related(body: bytes, boundary: bytes) -> list[tuple[dict, b
     Werkzeug only parses multipart/form-data, so this is ours. Strictly CRLF, per
     RFC 2046: a lenient parser would have to normalise line endings, and the
     parts here are binary DICOM where a rewritten 0x0A is a corrupted image.
+
+    A trailing part with no boundary after it is dropped, not returned short —
+    a body that was cut off must not parse into a plausible-looking instance.
+    Preamble and epilogue are ignored, as RFC 2046 requires.
     """
     parts: list[tuple[dict, bytes]] = []
     sep = b"\r\n--" + boundary
@@ -588,6 +650,14 @@ def _frame_media(ts: str) -> Optional[str]:
 
 
 def _uncompressed_frames(ds: Dataset, wanted: list[int]) -> list[bytes]:
+    """Slice native pixel data into the requested 1-based frames, in that order.
+
+    The bytes are handed back as stored: no windowing, no rescale, no
+    photometric conversion — this is retrieval, not rendering. Raises IndexError
+    for a frame number the instance does not have and ValueError when the file
+    cannot be sliced at all. A frame the file is too short to hold is one of
+    those: returning the bytes that are present would decode into a picture, and
+    a picture that is wrong is worse than an error."""
     rows = int(getattr(ds, "Rows", 0) or 0)
     cols = int(getattr(ds, "Columns", 0) or 0)
     samples = int(getattr(ds, "SamplesPerPixel", 1) or 1)
@@ -720,6 +790,16 @@ def create_blueprint(server) -> Blueprint:
 
     # ---- QIDO-RS ----------------------------------------------------------
     def _header_extras(ds_out: Dataset, path: str, keywords: list[str]) -> None:
+        """Copy *keywords* off the instance header on disk into *ds_out*.
+
+        This is the only point at which answering a query opens an instance
+        file, which is what _HEADER_READ_MAX is budgeting. Every failure
+        is silent — an unreadable file, a file outside the storage roots, an
+        element the dictionary refuses — because includefield asks for extras
+        and no extra is worth failing a query over. An attribute the file does
+        not carry is skipped rather than blanked, so the placeholder _blank()
+        seeded survives instead of being replaced by something invented.
+        """
         if not keywords or not servable(path):
             return
         try:
@@ -735,6 +815,12 @@ def create_blueprint(server) -> Blueprint:
             except Exception:
                 pass
 
+    # The three builders below share one shape: seed the level's required returns
+    # blank, write whatever the index row can answer over the top, and only then
+    # spend a header read on includefield extras. The order is the contract — a
+    # real value has to be able to overwrite its own placeholder, and the read
+    # comes last because it is the only step that costs a file open. *reads_left*
+    # is the shared budget described in _qido.
     def _study_object(row: dict, extras: list[str], reads_left: list[int]) -> dict:
         ds = Dataset()
         _blank(ds, "study")
@@ -798,6 +884,16 @@ def create_blueprint(server) -> Blueprint:
         return _to_json(ds)
 
     def _qido(level: str, study_uid: Optional[str] = None, series_uid: Optional[str] = None):
+        """All of QIDO-RS: every route below is this function with a level.
+
+        204 with no body when nothing matches, 406 when the client will not take
+        DICOM JSON, 500 only when the index itself failed. Everything softer than
+        that — an ignored matching key, a capped limit — travels in a Warning
+        header on an otherwise normal response, because each of those still
+        describes an answer the client can use. A row that cannot be rendered is
+        the one exception: it is logged and reduced to its Study Instance UID so
+        the study stays retrievable, and the response says nothing about it.
+        """
         if not _accepts_json(request.headers.get("Accept", "")):
             return _error(406, "only application/dicom+json is available for QIDO-RS")
         filters, warns = _parse_filters(request.args)
@@ -820,6 +916,9 @@ def create_blueprint(server) -> Blueprint:
         stats.bump("queries")
         if len(rows) >= limit:
             warns.append(f"result truncated at {limit}; use offset to page")
+        # One mutable budget shared by every row rather than one per row:
+        # includefield is what turns a query into file opens, and the cost that
+        # has to be capped is the whole page's.
         reads_left = [_HEADER_READ_MAX]
         build = {"study": _study_object, "series": _series_object}.get(level, _instance_object)
         objs = []
@@ -866,6 +965,12 @@ def create_blueprint(server) -> Blueprint:
 
     # ---- WADO-RS retrieve -------------------------------------------------
     def _rows_for(study=None, series=None, sop=None) -> list[dict]:
+        """Index rows for a WADO target, ordered the way the study reads.
+
+        limit=0 is the index's "everything". Retrieval is the one place paging
+        must not happen: a page boundary here would hand a viewer a study short
+        by however many instances, with a 200 on it and nothing to notice.
+        """
         rows = index().query_instances(study_uid=study, series_uid=series,
                                        filters={"SOPInstanceUID": sop} if sop else None,
                                        limit=0)
@@ -890,6 +995,15 @@ def create_blueprint(server) -> Blueprint:
         return sorted(rows, key=order)
 
     def _retrieve(rows: list[dict], label: str):
+        """Answer a WADO-RS retrieve for *rows* as one multipart/related body.
+
+        404 when the resource is unknown or nothing under it can be read, 406
+        when the client insists on a media type or a transfer syntax we do not
+        hold, 206 when instances are missing, and 200 only when the response
+        really is everything the resource contains. The transfer-syntax check is
+        per row, so a study stored in mixed syntaxes refuses on the first
+        instance that disagrees rather than sending the matching half.
+        """
         ok, wanted_ts = _accepts_dicom_parts(request.headers.get("Accept", ""))
         if not ok:
             return _error(406, 'only multipart/related; type="application/dicom" is available')
@@ -928,6 +1042,13 @@ def create_blueprint(server) -> Blueprint:
 
     # ---- WADO-RS metadata -------------------------------------------------
     def _metadata(rows: list[dict], label: str):
+        """Instance metadata as DICOM JSON: the whole header of every instance.
+
+        Read from the files, not from the index: metadata means everything the
+        modality sent, and the index holds only the columns queries match on. A file that cannot be read is skipped and logged, and — unlike the
+        retrieve path next door — the response does not say so; only a resource
+        with nothing readable in it becomes a 404.
+        """
         if not _accepts_json(request.headers.get("Accept", "")):
             return _error(406, "only application/dicom+json metadata is available")
         if not rows:
@@ -969,6 +1090,14 @@ def create_blueprint(server) -> Blueprint:
     # ---- WADO-RS frames ---------------------------------------------------
     @bp.get("/studies/<study>/series/<series>/instances/<sop>/frames/<frames>")
     def wado_frames(study, series, sop, frames):
+        """WADO-RS frame retrieval. Frame numbers are 1-based, as in PS3.3.
+
+        The part media type follows the instance's transfer syntax and never the
+        client's preference, so an Accept naming anything else is a 406 rather
+        than a transcode. A frame number the instance does not have is a 404 —
+        the frame genuinely does not exist — while a list that is not numbers is
+        a 400, because that request never parsed.
+        """
         try:
             wanted = [int(n) for n in frames.split(",") if n.strip()]
         except ValueError:
@@ -997,6 +1126,10 @@ def create_blueprint(server) -> Blueprint:
             return _error(500, f"could not extract frames: {exc}")
 
         boundary = uuid.uuid4().hex
+        # Raw octets describe nothing about themselves: the transfer syntax is
+        # what tells the client the byte order and the packing of what it just
+        # received. A compressed part needs no such parameter — image/jpeg
+        # already says how to decode the bytes.
         ct = f'{media}; transfer-syntax={ts}' if media == "application/octet-stream" else media
 
         def gen():
@@ -1012,6 +1145,8 @@ def create_blueprint(server) -> Blueprint:
 
     # ---- STOW-RS ----------------------------------------------------------
     def _sop_ref(ds: Dataset, study_uid: str) -> dict:
+        """One ReferencedSOPSequence item: SOP Class (0008,1150), SOP Instance
+        (0008,1155) and the RetrieveURL (0008,1190) that fetches it back."""
         return {
             "00081150": {"vr": "UI", "Value": [str(getattr(ds, "SOPClassUID", "") or "")]},
             "00081155": {"vr": "UI", "Value": [str(getattr(ds, "SOPInstanceUID", "") or "")]},
@@ -1047,6 +1182,20 @@ def create_blueprint(server) -> Blueprint:
     @bp.post("/studies", strict_slashes=False)
     @bp.post("/studies/<study>")
     def stow(study: Optional[str] = None):
+        """STOW-RS: file the instances carried in a multipart/related body.
+
+        200 when every part landed, 202 when some did, 409 when none did.
+        Instances are filed one at a time and a failure never unwinds what
+        already succeeded: there is no transaction across a multipart body, and
+        most of a study on disk is worth more than none of it. 415 is a body we
+        cannot read as application/dicom parts and 413 one we refuse to read at
+        all; both happen before anything is written.
+
+        With a study in the path, a part belonging to a different one is refused
+        instead of being filed where it truly belongs — the client asserted
+        where it was posting, and that assertion is either true or worth an
+        error.
+        """
         if not cfg().dicomweb.get("allow_stow", True):
             return _error(403, "STOW-RS is disabled (config: dicomweb.allow_stow)")
         boundary, declared = _boundary_of(request.headers.get("Content-Type", ""))

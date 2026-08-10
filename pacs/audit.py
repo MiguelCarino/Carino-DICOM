@@ -193,6 +193,14 @@ class AuditLog:
         return self
 
     def _last_record(self) -> Optional[dict]:
+        """The newest record that still carries a digest, or None on a fresh trail.
+
+        Files are searched newest first, and looking past the live file matters:
+        a restart immediately after a rotation finds no audit.jsonl at all, and
+        chaining from GENESIS there would append a record claiming to be the
+        first one to a directory already full of archives — verify() would then
+        report a break in a trail nobody had touched.
+        """
         files = self.files()
         for path in reversed(files):
             try:
@@ -272,6 +280,9 @@ class AuditLog:
                 if detail is not None:
                     record["detail"] = detail
                 for key, value in fields.items():
+                    # Extra fields fill gaps and never overwrite. A caller that
+                    # passes seq= or prev= as a keyword — by accident or not —
+                    # must not be able to write its own place in the chain.
                     if key not in record:
                         record[key] = value
                 record["hash"] = digest(self._head, record)
@@ -297,6 +308,14 @@ class AuditLog:
             return None
 
     def _rotate_if_needed(self) -> None:
+        """Move the live file aside once it has grown past max_bytes.
+
+        Checked before the append rather than after, so a file overshoots by at
+        most one record. Rotation does not restart the chain: the first record
+        of the new file still carries the last record of the archive as its
+        prev, which is why verify() has to walk every file files() returns and
+        not only the live one.
+        """
         if self.max_bytes <= 0:
             return
         try:
@@ -329,7 +348,18 @@ class AuditLog:
 
     # ---- reading ---------------------------------------------------------
     def read_all(self) -> Iterator[dict]:
-        """Every record across every file, in order, skipping unparseable lines."""
+        """Every record across every file, oldest first, in chain order.
+
+        A line that will not parse is yielded as ``{"_unparseable": ...}``
+        rather than dropped, because a torn or edited line is itself the finding
+        verify() has to report; tail() drops those again for display, where
+        there is nothing useful to show.
+
+        Both injected keys are underscore-prefixed, and verify() removes keys
+        beginning with an underscore before recomputing the digest. Naming one
+        of them plainly — ``file`` — would add it to the hashed body and fail
+        every record in the trail.
+        """
         for path in self.files():
             try:
                 with open(path, "r", encoding="utf-8") as fh:

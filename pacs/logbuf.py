@@ -15,6 +15,23 @@ from datetime import datetime, timezone
 
 
 class LogBuffer:
+    """One buffer per process, written by every thread in it: every listener,
+    the folder watcher and the monitors call add() on the same instance while
+    the dashboard polls since() from Flask's workers.
+
+    The two locks are not the same lock on purpose. ``_lock`` guards the ring
+    and the sequence counter; ``_flock`` serialises the append to the dated
+    file, and add() has let go of ``_lock`` before it takes it — so a log
+    folder that has gone slow, full or missing blocks only the thread doing
+    that write, and the ring stays readable and writable by everyone else. What
+    that costs is file ORDER: two entries can reach the file in the opposite
+    order to the seq they were given, and the stamp on the line is only to the
+    second, so it cannot always sort them back. The dashboard reads the ring
+    instead, where the entries are in the order the seq was handed out because
+    both happen under the one lock. A receiver blocked behind a full disk would
+    have been the worse half of that trade.
+    """
+
     def __init__(self, capacity: int = 500, log_dir: str = ""):
         self._lock = threading.Lock()
         self._flock = threading.Lock()
@@ -23,6 +40,15 @@ class LogBuffer:
         self.log_dir = log_dir
 
     def add(self, level: str, message: str, **fields) -> None:
+        """Record one event. Extra keyword arguments ride along in the entry.
+
+        Those extras are handed to the browser verbatim by the Activity poll,
+        so they are an interface, not scratch space. ``kind`` is the one this
+        module reads itself (it prefixes the line in the dated file), and the
+        dashboard keys off the same values — "store", "send", "print", "ris",
+        "mwl", "qr" — to decide which services it has seen traffic for. A typo
+        in one is a service that looks idle while it works.
+        """
         with self._lock:
             self._seq += 1
             entry = {

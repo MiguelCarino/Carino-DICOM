@@ -45,7 +45,14 @@ MAX_ROUNDS = 40
 
 
 class CaughtStore:
-    """Thread-safe, JSON-file-backed list of probe rounds."""
+    """Thread-safe, JSON-file-backed list of probe rounds, newest first.
+
+    The whole file is rewritten on every change. That is affordable only because
+    MAX_ROUNDS bounds it, and in exchange there is no append path to get wrong
+    and no partial round on disk. Loaded once, at construction, which happens
+    while PacsServer is starting up: a file that is missing or will not parse
+    has to end in an empty history rather than an engine that will not boot.
+    """
 
     def __init__(self, store_dir: str, log: Optional[LogBuffer] = None,
                  now: Optional[callable] = None):
@@ -61,6 +68,15 @@ class CaughtStore:
         return os.path.join(self.store_dir, "caught.json")
 
     def _load(self) -> None:
+        """Read the rounds file, or start empty when it cannot be read.
+
+        A missing or truncated file is not worth a traceback here: refusing to
+        start the appliance because a diagnostic file is malformed would trade a
+        working PACS for a probe history nobody would miss. Only OSError and a
+        JSON parse failure are absorbed, so a file that parses into something
+        other than this store's object still reaches the caller.
+        Entries with no id are dropped as not something this store wrote.
+        """
         try:
             with open(self._path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -82,7 +98,13 @@ class CaughtStore:
         modality — and return it.
 
         `probes` are :class:`pacs.scu.WorklistProbe` results in the order they
-        were asked."""
+        were asked. Order is the whole diagnosis — server._probe_verdict() reads
+        them narrowest-question first and names the key that is wrong — so they
+        are stored as a list and never sorted or keyed by label.
+
+        The items are filed verbatim, patient identifiers and all: they are the
+        other hospital's patients, which is why this panel sits behind
+        config.read and why MAX_ROUNDS throws old rounds away."""
         rows = []
         for pr in probes:
             items = list(getattr(pr, "items", []) or [])
@@ -158,7 +180,13 @@ class CaughtStore:
 
 
 def _same_ae(a, b) -> bool:
-    """DICOM compares AE titles case-insensitively."""
+    """DICOM compares AE titles case-insensitively.
+
+    An empty AE title matches nothing here, not even another empty one. An item
+    with no ScheduledStationAETitle is addressed to nobody and is counted as
+    such; letting it count as this station's would produce exactly the false
+    "working" this panel exists to prevent.
+    """
     return str(a or "").strip().upper() == str(b or "").strip().upper() and bool(str(a or "").strip())
 
 
