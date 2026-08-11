@@ -399,14 +399,49 @@ class AuditLog:
 
     def tail(self, limit: int = 200, *, action: str = "",
              actor_id: str = "") -> list:
-        """The most recent records, newest first, for the dashboard."""
-        rows = [r for r in self.read_all()
-                if "_unparseable" not in r and "_unreadable" not in r]
-        if action:
-            rows = [r for r in rows if r.get("action") == action]
-        if actor_id:
-            rows = [r for r in rows if (r.get("actor") or {}).get("id") == actor_id]
-        return list(reversed(rows[-max(1, int(limit)):]))
+        """The most recent records, newest first, for the dashboard.
+
+        Walks backwards a file at a time and stops as soon as *limit* is filled,
+        rather than materialising every record that ever happened to slice the
+        end off it. That is not a micro-optimisation: rotation caps a file, not
+        the trail, so a couple of years of it is hundreds of megabytes, and
+        building that list to render one screenful cost seconds and gigabytes of
+        peak memory — on an appliance where the largest process is this one, and
+        where the OOM killer taking it also takes the receiver.
+
+        A file that will not read is skipped rather than reported. This is the
+        dashboard's view, and verify() is the function whose job is to say the
+        trail has a hole in it; refusing to show the newest records because an
+        old archive went bad would hide the present to report the past.
+        """
+        want = max(1, int(limit))
+        out: list = []
+        for path in reversed(self.files()):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    lines = fh.read().splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            name = os.path.basename(path)
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue            # a torn line: verify() reports it, not this
+                if not isinstance(rec, dict):
+                    continue
+                if action and rec.get("action") != action:
+                    continue
+                if actor_id and (rec.get("actor") or {}).get("id") != actor_id:
+                    continue
+                rec["_file"] = name
+                out.append(rec)
+                if len(out) >= want:
+                    return out
+        return out
 
     def verify(self) -> dict:
         """Walk the chain and report the first place it breaks.

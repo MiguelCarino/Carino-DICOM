@@ -371,6 +371,37 @@ def test_one_corrupt_byte_does_not_stop_the_engine_starting(tmp_path):
     assert list(reopened.read_all()), "read_all raised instead of reporting"
 
 
+def test_the_dashboard_view_reads_only_as_far_back_as_it_needs(tmp_path, monkeypatch):
+    """tail() built every record that ever happened into one list and sliced the
+    end off it. Rotation caps a file, not the trail, so that cost has no ceiling
+    — on a trail a couple of years old it is seconds and gigabytes of peak
+    memory to render one screenful, and the largest process on this appliance is
+    the one holding the receiver open.
+
+    Asserted by counting the files opened rather than by timing it, which would
+    be a flake waiting to happen."""
+    d = str(tmp_path / "audit")
+    t = A.AuditLog(d, max_bytes=2000, log=FakeLog()).open()
+    for _ in range(400):
+        t.record(A.LOGIN, actor=ANA)
+    total = len(t.files())
+    assert total >= 8, "the trail did not rotate, so this test proves nothing"
+
+    real_open = builtins.open
+    opened = []
+
+    def counting_open(path, *a, **k):
+        if str(path).endswith(".jsonl"):
+            opened.append(str(path))
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", counting_open)
+    rows = t.tail(5)
+    assert len(rows) == 5
+    assert len(opened) <= 2, \
+        f"opened {len(opened)} of {total} trail files to show five records"
+
+
 def test_a_value_nothing_validated_cannot_stop_a_record_being_written(trail):
     """Losing the record is a worse outcome than storing an odd field oddly."""
     class Weird:
