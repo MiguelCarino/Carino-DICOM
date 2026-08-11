@@ -634,10 +634,23 @@ class Config:
             payload = json.dumps(self.data, indent=2)
             self._sweep_temps(directory)
             tmp = self._write_temp(directory, payload)
-            # Atomic because tmp is in the config's own directory: a reader
-            # (another `pacs serve` starting up) sees the whole old file or the
-            # whole new one, never a partial write.
-            os.replace(tmp, self.path)
+            try:
+                # Atomic because tmp is in the config's own directory: a reader
+                # (another `pacs serve` starting up) sees the whole old file or
+                # the whole new one, never a partial write.
+                os.replace(tmp, self.path)
+            except OSError:
+                # tmp is a complete plaintext copy of the config — the dashboard
+                # auth_token, deid.secret, the SMTP password. A replace that
+                # failed (read-only mount, full disk, a sharing violation on
+                # Windows) otherwise leaves it beside the config until
+                # _sweep_temps ages it out, which is a secret on disk nobody
+                # meant to write and nobody is told about.
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
             _fsync_dir(directory)
 
     def _write_temp(self, directory: str, payload: str) -> str:

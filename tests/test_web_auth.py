@@ -1409,12 +1409,21 @@ def test_a_save_that_cannot_be_written_leaves_the_pacs_on_the_air():
     send into a closed port after that, and an image that silently never arrives
     is the one failure this project is written against.
 
-    Exit (a) of the apply invariant: raise having disturbed nothing."""
+    Exit (a) of the apply invariant: raise having disturbed nothing.
+
+    The failure is injected at os.replace rather than built with chmod on the
+    directory. chmod cannot express "unwritable" on Windows — it sets only the
+    read-only flag, and that flag is ignored on directories — nor under root,
+    which is how this repo's own container images run; either way the save
+    succeeded and this test asserted nothing. os.replace is also the precise
+    place the real cases land: a read-only bind mount, a full disk, a sharing
+    violation from a scanner holding config.json open."""
     import copy as _copy
     import json
 
     srv = _pacs()
     cfgdir = os.path.dirname(srv.cfg.path)
+    real_replace = os.replace
     try:
         srv.start_receiver()
         assert srv.scp and srv.scp.running, "receiver never came up"
@@ -1422,22 +1431,34 @@ def test_a_save_that_cannot_be_written_leaves_the_pacs_on_the_air():
             before = json.load(fh)
         new = _copy.deepcopy(srv.cfg.data)
         new["scp"]["aet"] = "REBRANDED"
-        os.chmod(cfgdir, 0o500)          # a read-only mount, the cheap way
+
+        def refuse_to_replace(src, dst, *a, **k):
+            if str(dst) == srv.cfg.path:
+                raise PermissionError(13, "read-only file system")
+            return real_replace(src, dst, *a, **k)
+
+        os.replace = refuse_to_replace
         try:
             srv.apply_config(new)
         except OSError:
-            pass                         # PermissionError: the save legitimately failed
+            pass                         # the save legitimately failed
         else:
-            raise AssertionError("an unwritable config directory reported a save")
+            raise AssertionError("a config that could not be written reported a save")
+        finally:
+            os.replace = real_replace
+
         assert srv.scp is not None and srv.scp.running, \
             "a save that could not be written took the receiver off the air"
         assert srv.cfg.scp["aet"] == before["scp"]["aet"], \
             "config half-applied: memory moved on, the file and the services did not"
-        os.chmod(cfgdir, 0o700)
         with open(srv.cfg.path, encoding="utf-8") as fh:
             assert json.load(fh) == before, "the file changed after all"
+        from pacs.config import _TMP_PREFIX
+        leftovers = [n for n in os.listdir(cfgdir) if _TMP_PREFIX in n]
+        assert not leftovers, \
+            f"a plaintext copy of the config was left behind: {leftovers}"
     finally:
-        os.chmod(cfgdir, 0o700)
+        os.replace = real_replace
         srv.stop_receiver()
 
 
