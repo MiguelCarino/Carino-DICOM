@@ -48,6 +48,7 @@ import uuid
 from typing import Callable, Optional
 
 from .logbuf import LogBuffer
+from .netclaim import claim
 
 # ---- MLLP framing bytes (Minimal Lower Layer Protocol) --------------------
 VT = 0x0B          # <SB> start-block, precedes the message
@@ -683,6 +684,11 @@ class RisListener:
         t = self._thread
         if t and t.is_alive() and t is not threading.current_thread():
             t.join(timeout=2)
+        # Nothing else may already hold this port. SO_REUSEADDR below buys the
+        # rebind this comment is about on POSIX; on Windows the same constant
+        # means "sharing permitted" and would let this listener come up beside
+        # another one. netclaim explains why that costs images.
+        claim(self.bind, self.port)
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((self.bind, self.port))

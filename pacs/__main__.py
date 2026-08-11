@@ -35,6 +35,7 @@ import time
 
 from . import APP_NAME, __version__
 from .config import Config, ConfigError, DEFAULT_CONFIG, auth_token_of, is_loopback_host
+from .netclaim import claim
 from .scu import Destination
 from .server import PacsServer
 
@@ -202,6 +203,19 @@ def cmd_serve(args) -> int:
         server.emergency.start()
     except Exception as exc:
         server.log.error(f"Could not start emergency monitor: {exc}", kind="emergency")
+
+    # A second engine must not come up beside the first. On Windows it would
+    # bind every port alongside it rather than be refused, and then neither
+    # instance owns the archive — see netclaim. The dashboard port is the one an
+    # operator recognises, so this is the place to say so in a sentence they can
+    # act on rather than let it surface as a receiver that never receives.
+    try:
+        claim(host, port)
+    except OSError as exc:
+        print(f"{APP_NAME} cannot start: {host or '0.0.0.0'}:{port} is already in "
+              f"use ({exc}). Another copy is probably already running.")
+        server.shutdown()
+        return 1
 
     app = create_app(server)
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"

@@ -53,6 +53,7 @@ from pynetdicom.sop_class import (
 
 from .dicomfs import within_roots
 from .logbuf import LogBuffer
+from .netclaim import claim
 
 # A C-FIND that would return more than this is a mistake at the other end (an
 # IMAGE-level query with no study key walks the whole archive).  We answer with
@@ -712,6 +713,10 @@ class QrSCP:
             from .tlsutil import server_context
             ssl_context = server_context(self.tls_cert, self.tls_key, self.tls_ca)
         self._stopping = threading.Event()          # fresh per run
+        # Nothing else may already hold this port. On Windows a plain bind
+        # would silently join an existing listener instead of refusing it;
+        # netclaim explains why that costs images.
+        claim(self.bind, self.port)
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )

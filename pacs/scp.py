@@ -20,6 +20,7 @@ from pynetdicom.sop_class import Verification
 
 from .dicomfs import save_dicom
 from .logbuf import LogBuffer
+from .netclaim import claim
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
 
@@ -230,6 +231,10 @@ class StorageSCP:
         if self.tls:
             from .tlsutil import server_context
             ssl_context = server_context(self.tls_cert, self.tls_key, self.tls_ca)
+        # Nothing else may already hold this port. On Windows a plain bind
+        # would silently join an existing listener instead of refusing it;
+        # netclaim explains why that costs images.
+        claim(self.bind, self.port)
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )

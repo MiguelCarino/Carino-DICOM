@@ -1867,6 +1867,11 @@ class PacsServer:
         listener sets SO_REUSEADDR when it really binds and this probe does not,
         so its port can read busy while it is in truth rebindable."""
         import socket
+        # On Windows a plain bind joins an SO_REUSEADDR listener rather than
+        # being refused by it, so without this the chooser reports a port
+        # somebody is listening on as free — the one direction the comment below
+        # says this probe must never be wrong in.
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
         ours = set()
         for obj, sect, default_port in (
             (self.scp, self.cfg.scp, 11112),
@@ -1900,6 +1905,8 @@ class PacsServer:
             # binds cleanly and we would report a port pynetdicom will fight
             # over as free. A stricter probe can only produce a false "in use",
             # never a false "free", and that is the direction to be wrong in.
+            if exclusive is not None:
+                s.setsockopt(socket.SOL_SOCKET, exclusive, 1)
             try:
                 s.bind((bind, port))
                 row["free"] = True

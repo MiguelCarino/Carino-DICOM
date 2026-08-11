@@ -1476,13 +1476,23 @@ def test_a_receiver_that_cannot_rebind_does_not_take_the_rest_down():
     nothing to do with it stays up, and the failure is in the log where the
     dashboard's enabled-but-not-running row sends the operator to read it.
 
-    Exit (b): the config applied, every service given its start."""
+    Exit (b): the config applied, every service given its start.
+
+    The squatter takes the port exclusively where the platform has a word for
+    that. SO_REUSEADDR alone is not "somebody owns this" on Windows — it is the
+    opposite, an invitation, and a second SO_REUSEADDR bind over it succeeds. A
+    squatter holding the port that way was not testing a port conflict there at
+    all; it was demonstrating one."""
     import copy as _copy
     import socket
 
     srv = _pacs(printer=True)
     squatter = socket.socket()
-    squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+    if exclusive is not None:
+        squatter.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+    else:
+        squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     squatter.bind(("127.0.0.1", 0))
     squatter.listen(1)
     try:
