@@ -76,13 +76,18 @@ def test_the_wildcard_address_is_accepted_as_a_bind_string():
 
 
 def test_the_gate_refuses_a_live_listener_and_steps_aside_for_the_rest(monkeypatch):
-    """The branch that does the actual work has no cell in CI, so it is driven
-    here with a stand-in option. SO_REUSEADDR is not SO_EXCLUSIVEADDRUSE, but a
-    second bind under it fails on this platform the way the real one fails on
-    Windows, which is enough to exercise both sides of the decision — and both
-    sides matter: refusing too eagerly costs a service its own restart, and
-    refusing too rarely is the defect."""
-    monkeypatch.setattr(netclaim, "_EXCLUSIVE", socket.SO_REUSEADDR)
+    """Both sides of the decision, because both cost something: refusing too
+    eagerly takes a service's own restart down, and refusing too rarely is the
+    defect this module exists for.
+
+    Windows runs the real option. Everywhere else it is driven with a stand-in,
+    because a second SO_REUSEADDR bind fails on POSIX the way the real one fails
+    there — the substitution that must NOT be made on Windows, where that same
+    constant means the opposite and the bind would succeed. Making it anyway is
+    how this test first failed on Windows and nowhere else, which is a fair
+    summary of the bug."""
+    if not WINDOWS:
+        monkeypatch.setattr(netclaim, "_EXCLUSIVE", socket.SO_REUSEADDR)
 
     live = _listener()
     try:
