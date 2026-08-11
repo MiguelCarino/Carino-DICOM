@@ -252,6 +252,14 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   read out. A listener that has not been told which folders are its own serves
   nothing. Both retrieval paths share one definition of the check; until
   v1.1.0 the DICOMweb side made it and the DIMSE side did not.
+- **A retrieve selects on the Unique Keys of its level, and nothing else.**
+  PS3.4 C.4.2.1.4.1. A C-MOVE or C-GET identifier often carries more than that —
+  an SCU that echoes a C-FIND reply back sends the study-level attributes with
+  it — and until v1.1.0 every one of those was applied as a filter, so a study
+  whose series disagreed on one came back short with a final status of Success.
+  A Unique Key carrying a wildcard is refused outright rather than expanded:
+  the index would otherwise match it as a pattern and retrieve every study it
+  hit, again reporting Success.
 - **Every listener claims its port exclusively before binding it.** This matters
   on Windows and nowhere else. Winsock's `SO_REUSEADDR` means *sharing
   permitted* rather than the POSIX "rebind through TIME_WAIT", and every

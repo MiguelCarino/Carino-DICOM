@@ -285,6 +285,58 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Fixed
+- **One instance that could not be sent stopped all forwarding, permanently and
+  silently.** pynetdicom *raises* rather than answering with a status for an
+  instance it cannot put on the wire — no `(0008,0018)`, file meta carrying no
+  transfer syntax, an element that will not re-encode — and an over-long UI
+  value raises out of `add_requested_context` before that. All of them pass
+  `is_dicom()` and `dcmread()`, and the outgoing folder is the one place third
+  parties are invited to drop files. `c_store` let the exception out, against
+  its own docstring, and it unwound the watcher's entire pass. That is far
+  worse than it sounds: `_note_failure` is never reached, so nothing is recorded
+  as failed, nothing enters backoff, the stuck panel stays empty and the
+  counters stay at zero — while every file queued behind the bad one is never
+  dialled again, on a three-second loop, for as long as it sits there. One
+  malformed instance now costs one instance. The watcher also guards its own
+  send call, so a future raise from that path cannot end a pass either.
+  (`pacs/scu.py`, `pacs/watcher.py`)
+- **A C-MOVE or C-GET was matched on every key the identifier carried.** PS3.4
+  C.4.2.1.4.1 says a retrieve selects on the Unique Keys of its level;
+  `_retrieve_rows` used them only as a presence check and then filtered on the
+  lot. C-FIND answers once per study with one arbitrary value for a study-level
+  attribute, so an SCU that echoes that reply into its C-MOVE sends the
+  attribute back — and a study whose series disagree on it (an amended study,
+  one assembled from two sources, later instances carrying a corrected name;
+  nothing on the receive path normalises them) then matched only some of its own
+  instances. The SCU got part of a study with a final status of Success, and the
+  only log line named the harmless dropped key. The sibling WADO-RS path already
+  selected on UIDs alone. A retrieve now selects on the level's unique keys and
+  logs what it ignored. (`pacs/qr.py`)
+- **A wildcard in a retrieve Unique Key shipped everything it matched.** The
+  index sends a UID holding `*` or `?` to `GLOB`, and nothing checked the value,
+  so a single malformed identifier retrieved every study it matched and reported
+  Success. Refused now through the same path as an identifier with no usable
+  key. Only the level's unique keys are checked — a pattern on a key that is no
+  longer a filter cannot widen anything, and refusing those would reject
+  retrieves that work today. (`pacs/qr.py`)
+- **One non-UTF-8 byte in `audit.jsonl` stopped the engine starting.** The trail
+  is read with strict UTF-8 and a bad byte raises `UnicodeDecodeError` — a
+  `ValueError`, so the `except OSError` guarding the read missed it. It left
+  `open()`, left `PacsServer.__init__` and left `main()`, which catches neither:
+  nothing bound and every modality got connection refused, because one byte in a
+  log file went bad. That is the exact inverse of the invariant stated at the
+  call site — the PACS keeps running and the trail reports that it stopped
+  recording. The same class escaped `read_all()`, so the verify endpoint failed
+  instead of reporting the corruption it exists to report. (`pacs/audit.py`)
+- **The dashboard's audit view read the entire trail to show one screenful.**
+  `tail()` built every record that ever happened into a list and sliced the end
+  off it. Rotation caps a file, not the trail, so the cost had no ceiling: a
+  couple of years of it is hundreds of megabytes, seconds of wall clock and
+  gigabytes of peak memory to render a few hundred rows — and on this appliance
+  the largest process is the one holding the receiver open. It now walks
+  backwards a file at a time and stops when the limit is filled. Output is
+  unchanged, asserted against the previous implementation across a rotated trail
+  and every filter combination. (`pacs/audit.py`)
 - **A rescan that lost its database connection stopped filling the index and
   still reported a clean run.** The set of paths a rescan has walked lives in a
   SQLite temp table, and a temp table belongs to the connection that made it —
