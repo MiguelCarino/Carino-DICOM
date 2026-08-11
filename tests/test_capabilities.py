@@ -290,6 +290,23 @@ def test_an_audit_export_is_refused_to_a_restricted_profile(app_and_ids):
     assert "cannot be checked" in resp.get_json()["detail"]
 
 
+def test_an_audit_export_refuses_rather_than_handing_over_a_short_trail(app_and_ids):
+    """An export is evidence, and a silently short one is indistinguishable from
+    a complete one to the person it is handed to. Refusing is the only answer
+    that leaves them able to tell."""
+    app, ids, srv = app_and_ids
+    srv.audit.record("login", actor=None)
+    live = srv.audit.path
+    os.remove(live)
+    os.makedirs(live)                   # denial that also holds on Windows
+    client = signed_in(app, ids, "Administrator")
+    resp = client.get("/api/audit/export")
+    assert resp.status_code == 503, "a trail with a hole in it was exported as complete"
+    body = resp.get_json()
+    assert body["ok"] is False
+    assert "could not be read" in body["detail"]
+
+
 def test_an_audit_target_carrying_a_patient_id_follows_the_same_policy(app_and_ids):
     """The storage layout puts the PatientID in a study's path, so a target is
     an identifier wearing a different key name. The generic redactor cannot see

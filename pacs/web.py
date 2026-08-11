@@ -1873,6 +1873,16 @@ def create_app(server: PacsServer) -> Flask:
             }), 403
         lines = []
         for record in server.audit.read_all():
+            if "_unreadable" in record:
+                # An export is evidence. A copy that is silently missing whatever
+                # this file held — served with a 200, so it reads as the complete
+                # trail — is worse than refusing: the reader has no way to tell.
+                return jsonify({
+                    "ok": False, "error": "audit trail incomplete",
+                    "detail": f"{record['_file']} could not be read, so this export "
+                              f"would be missing records without saying so: "
+                              f"{record['_unreadable']}",
+                }), 503
             lines.append(json.dumps({k: v for k, v in record.items()
                                      if not k.startswith("_")},
                                     sort_keys=True, separators=(",", ":"),

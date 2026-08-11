@@ -16,10 +16,10 @@ worse than none.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import shutil
-import stat
 import sys
 import tempfile
 
@@ -245,21 +245,104 @@ def test_rotation_does_not_lose_records(tmp_path):
 
 # ---- never in the caller's way ------------------------------------------
 
-def test_an_unwritable_directory_reports_rather_than_raises(tmp_path):
+def test_a_trail_that_cannot_be_written_reports_rather_than_raises(tmp_path):
     """A study delete that half-happened because recording it failed is worse
-    than a gap in the trail. The gap is reported through `broken`."""
+    than a gap in the trail. The gap is reported through `broken`.
+
+    The denial is a directory standing where the record file goes, not a chmod.
+    chmod cannot express "unwritable" on Windows — it sets only the read-only
+    flag, and that flag is ignored on directories — and it cannot express it
+    under root either, which is how this repo's own container images run. Either
+    way the write would have succeeded and this test would have asserted
+    nothing, which is how it went unnoticed that record()'s failure path had
+    never once executed."""
+    log = FakeLog()
     blocked = tmp_path / "nope"
-    blocked.mkdir()
-    os.chmod(blocked, stat.S_IRUSR | stat.S_IXUSR)      # read+execute, no write
-    try:
-        log = FakeLog()
-        t = A.AuditLog(str(blocked / "audit"), log=log).open()
-        assert t.record(A.STUDY_DELETED, actor=ANA) is None
-        assert t.broken
-        assert t.stats()["broken"]
-        assert any(level == "error" for level, _ in log.lines)
-    finally:
-        os.chmod(blocked, stat.S_IRWXU)
+    os.makedirs(str(blocked / A.CURRENT))
+    t = A.AuditLog(str(blocked), log=log).open()
+    assert t.record(A.STUDY_DELETED, actor=ANA) is None
+    assert t.broken
+    assert t.stats()["broken"]
+    assert any(level == "error" for level, _ in log.lines)
+
+
+def _make_unreadable(path: str) -> None:
+    """Put a directory where a trail file was. Portable where chmod is not: this
+    raises on every platform, under root, and inside a container."""
+    os.remove(path)
+    os.makedirs(path)
+
+
+def test_a_trail_file_that_cannot_be_read_is_never_reported_intact(tmp_path):
+    """The one answer verify() must never give about records it did not read.
+
+    Skipping an unreadable file left verify() walking a short chain and calling
+    it ok — so the dashboard's audit banner stayed green while an archive full
+    of records was invisible. On Windows this is not exotic: a backup agent or a
+    virus scanner holding a file open produces exactly the sharing violation
+    that arrives here as OSError."""
+    d = str(tmp_path / "audit")
+    t = A.AuditLog(d, log=FakeLog()).open()
+    for _ in range(3):
+        t.record(A.LOGIN, actor=ANA)
+    assert t.verify()["ok"] is True
+
+    _make_unreadable(t.path)
+    report = t.verify()
+    assert report["ok"] is False, "a trail nobody could read was reported intact"
+    assert A.CURRENT in report["reason"]
+    assert "could not be read" in report["reason"]
+
+
+def test_a_file_that_cannot_be_read_is_reported_by_read_all_not_stepped_over(tmp_path):
+    """Everything downstream — verify(), the export, the dashboard — reads the
+    trail through this one generator, so this is where the finding has to come
+    from. Stepping over the file leaves each of them describing a trail that is
+    missing records, with nothing to say so."""
+    d = str(tmp_path / "audit")
+    t = A.AuditLog(d, log=FakeLog()).open()
+    t.record(A.LOGIN, actor=ANA)
+    _make_unreadable(t.path)
+    assert any("_unreadable" in r for r in t.read_all()), \
+        "read_all stepped over the file instead of reporting it"
+
+
+def test_a_head_that_cannot_be_read_stops_the_trail_instead_of_guessing(tmp_path,
+                                                                       monkeypatch):
+    """Chaining from an older archive — or from GENESIS — appends a record whose
+    prev names the wrong link, and verify() then reports tampering on a trail
+    nobody touched. Refusing to open is the honest failure, and it heals by
+    itself: record() retries open() every time until the file reads again.
+
+    The denial here is reads-refused-appends-fine, because that is the shape the
+    problem actually arrives in — a scanner or backup agent holding the file
+    open on Windows — and because a denial that blocked the append too would
+    make this test pass for the wrong reason."""
+    d = str(tmp_path / "audit")
+    t = A.AuditLog(d, log=FakeLog()).open()
+    for _ in range(3):
+        t.record(A.LOGIN, actor=ANA)
+    assert t.verify()["ok"] is True
+
+    real_open = builtins.open
+    live = t.path
+
+    def refuse_to_read_the_live_file(path, mode="r", *a, **k):
+        if str(path) == live and "r" in mode:
+            raise PermissionError(13, "the file is held by another process")
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", refuse_to_read_the_live_file)
+    log = FakeLog()
+    blind = A.AuditLog(d, log=log).open()
+    assert blind.record(A.LOGIN, actor=ANA) is None, \
+        "a record was appended under a head that could not be established"
+    assert blind.broken
+    assert any(level == "error" for level, _ in log.lines)
+
+    monkeypatch.undo()
+    assert t.verify()["ok"] is True, \
+        "the trail now reports tampering that never happened"
 
 
 def test_a_value_nothing_validated_cannot_stop_a_record_being_written(trail):

@@ -182,7 +182,17 @@ class AuditLog:
             except OSError as exc:
                 self._fail(f"audit directory {self.dir} cannot be created: {exc}")
                 return self
-            last = self._last_record()
+            try:
+                last = self._last_record()
+            except OSError as exc:
+                # The head cannot be guessed. Falling through to an older archive
+                # — or to GENESIS — writes a record whose prev names the wrong
+                # link, and verify() would then report tampering on a trail
+                # nobody had touched. Staying shut is the honest failure: record()
+                # reports the gap and retries open() on the next call, so this
+                # heals by itself once the file can be read again.
+                self._fail(f"audit chain head cannot be read: {exc}")
+                return self
             if last is not None:
                 self._head = str(last.get("hash") or GENESIS)
                 try:
@@ -206,8 +216,10 @@ class AuditLog:
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            except FileNotFoundError:
+                continue                    # rotated away since files() listed it
             except OSError:
-                continue
+                raise                       # open() decides; see the comment there
             for line in reversed(lines):
                 try:
                     rec = json.loads(line)
@@ -350,10 +362,12 @@ class AuditLog:
     def read_all(self) -> Iterator[dict]:
         """Every record across every file, oldest first, in chain order.
 
-        A line that will not parse is yielded as ``{"_unparseable": ...}``
-        rather than dropped, because a torn or edited line is itself the finding
-        verify() has to report; tail() drops those again for display, where
-        there is nothing useful to show.
+        A line that will not parse is yielded as ``{"_unparseable": ...}``, and a
+        whole file that will not open as ``{"_unreadable": ...}``, rather than
+        either being dropped: both are findings verify() has to report, and a
+        file stepped over silently is how a short chain gets called intact and
+        how an export hands an inspector a trail with the middle missing.
+        tail() drops both again for display, where there is nothing to show.
 
         Both injected keys are underscore-prefixed, and verify() removes keys
         beginning with an underscore before recomputing the digest. Naming one
@@ -375,13 +389,14 @@ class AuditLog:
                         if isinstance(rec, dict):
                             rec["_file"] = os.path.basename(path)
                             yield rec
-            except OSError:
-                continue
+            except OSError as exc:
+                yield {"_unreadable": str(exc), "_file": os.path.basename(path)}
 
     def tail(self, limit: int = 200, *, action: str = "",
              actor_id: str = "") -> list:
         """The most recent records, newest first, for the dashboard."""
-        rows = [r for r in self.read_all() if "_unparseable" not in r]
+        rows = [r for r in self.read_all()
+                if "_unparseable" not in r and "_unreadable" not in r]
         if action:
             rows = [r for r in rows if r.get("action") == action]
         if actor_id:
@@ -400,6 +415,15 @@ class AuditLog:
         previous = GENESIS
         count = 0
         for record in self.read_all():
+            if "_unreadable" in record:
+                # Nothing past this point can be checked, and "ok" over the part
+                # that happened to be readable is the one answer this function
+                # must never give.
+                return {"ok": False, "records": count, "broken_at": None,
+                        "reason": f"{record['_file']} could not be read, so the "
+                                  f"chain cannot be checked past it: "
+                                  f"{record['_unreadable']}",
+                        "head": previous}
             if "_unparseable" in record:
                 return {"ok": False, "records": count, "broken_at": count + 1,
                         "reason": f"a line in {record['_file']} is not valid JSON — "
