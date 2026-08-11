@@ -242,5 +242,26 @@ def test_standing_down_clears_who_activated_it(ctl):
     assert status["activated_by"] == ""
 
 
+def test_arming_that_cannot_be_saved_does_not_leave_the_dashboard_lying(ctl):
+    """The config lock stops a concurrent Save from splitting memory and file.
+    It does nothing about a save that raises — a full disk, a read-only mount, a
+    sharing violation — and that reaches the same split: armed in memory, not
+    armed in config.json, and start() re-reads the file. The operator is then
+    told failover is armed while nothing is watching the primary."""
+    cfg = ctl.server.cfg
+    with cfg.mutate():
+        cfg.emergency["armed"] = False
+
+    def refuse_to_save(*a, **k):
+        raise OSError(28, "no space left on device")
+
+    cfg.save = refuse_to_save
+    with pytest.raises(OSError):
+        ctl.arm()
+    assert cfg.emergency["armed"] is False, \
+        "memory says armed while config.json says it is not"
+    assert ctl.armed is False
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

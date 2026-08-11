@@ -207,8 +207,18 @@ class EmergencyController:
         a join is how this would deadlock against a worker that reads config.
         The lock is re-entrant, so save() re-taking it here is free."""
         with self.server.cfg.mutate():
+            previous = self._cfg.get("armed", False)
             self._cfg["armed"] = value
-            self.server.cfg.save()
+            try:
+                self.server.cfg.save()
+            except OSError:
+                # mutate() holds the config still; it does not undo anything. A
+                # save that raised leaves exactly the split this docstring is
+                # about, reached through a door the lock does not cover: memory
+                # armed, the file not, and start() reads the file. Rolled back
+                # for the same reason the token endpoint rolls back.
+                self._cfg["armed"] = previous
+                raise
 
     def arm(self, profile=None) -> dict:
         self._set_armed(True)
