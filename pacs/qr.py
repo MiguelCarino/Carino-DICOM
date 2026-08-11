@@ -375,15 +375,40 @@ class QrSCP:
 
     def _retrieve_rows(self, query, level: str) -> Optional[list[dict]]:
         """Instance rows a C-MOVE/C-GET identifier selects, or None when the
-        identifier carries no key for its level (which would select the whole
-        archive — refused with 'identifier does not match SOP class')."""
+        identifier carries no usable key for its level (which would select the
+        whole archive — refused with 'identifier does not match SOP class').
+
+        PS3.4 C.4.2.1.4.1: a retrieve identifier selects on the Unique Keys of
+        its level, and on nothing else it happens to be carrying. Applying the
+        rest as filters too is how a study comes back short with a final status
+        of Success — the failure this module's docstring calls the worst this
+        software can have. An SCU that echoes a C-FIND response into its C-MOVE
+        sends the study-level attributes back with it, and a study whose series
+        disagree on one of them (an amended study, one assembled from two
+        sources, later instances carrying a corrected name) then matches on only
+        some of its own instances. C-FIND may narrow on those keys. A retrieve
+        may not: the SCU named the study, not a subset of it.
+
+        A Unique Key carrying a wildcard is refused rather than honoured — the
+        same failure from the other side. The index sends a UID holding * or ?
+        to GLOB, so one malformed identifier retrieves the whole archive and
+        calls it Success. Only the keys kept above are checked, because a
+        pattern on a key that is no longer a filter cannot widen anything, and
+        refusing those would reject retrieves that work today.
+        """
         filters, ignored = query_filters(query)
         if not any(k in filters for k in _RETRIEVE_KEYS[level]):
             return None
-        if ignored:
-            self.log.warn(f"QR: ignoring unsupported retrieve key(s) {', '.join(ignored)}",
-                          kind="qr")
-        return self.index.query_instances(filters=filters, limit=0)
+        unique = _UNIQUE_KEYS[level]
+        selected = {k: v for k, v in filters.items() if k in unique}
+        if any("*" in str(v) or "?" in str(v) for v in selected.values()):
+            return None
+        dropped = sorted(k for k in filters if k not in unique)
+        if ignored or dropped:
+            self.log.warn(
+                f"QR: retrieving on the {level} unique key(s) only; ignored "
+                f"{', '.join(ignored + dropped)}", kind="qr")
+        return self.index.query_instances(filters=selected, limit=0)
 
     # ---- DIMSE handlers ----------------------------------------------------
     def _handle_echo(self, event) -> int:
@@ -495,7 +520,8 @@ class QrSCP:
             else:
                 rows = self._retrieve_rows(query, level)
                 if rows is None:
-                    refuse = "identifier has no usable key for its level"
+                    refuse = ("identifier has no usable key for its level, or a "
+                              "unique key carrying a wildcard")
         except Exception as exc:
             with self._lock:
                 self.error_count += 1
@@ -543,7 +569,8 @@ class QrSCP:
             else:
                 rows = self._retrieve_rows(query, level)
                 if rows is None:
-                    refuse = "identifier has no usable key for its level"
+                    refuse = ("identifier has no usable key for its level, or a "
+                              "unique key carrying a wildcard")
         except Exception as exc:
             with self._lock:
                 self.error_count += 1

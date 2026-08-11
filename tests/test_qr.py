@@ -717,6 +717,75 @@ def test_move_study():
         fx.close()
 
 
+def test_a_retrieve_is_not_narrowed_by_the_keys_a_find_reply_carried():
+    """PS3.4 C.4.2.1.4.1: a retrieve selects on the Unique Keys of its level.
+
+    Applying everything else the identifier carries is how a study comes back
+    short with a final status of Success. C-FIND answers once per study with one
+    arbitrary value for a study-level attribute; an SCU that echoes that reply
+    into its C-MOVE sends the attribute back, and a study whose series disagree
+    on it then matches only some of its own instances. Nothing on the receive
+    path normalises those headers, so the disagreement is ordinary: an amended
+    study, one assembled from two sources, later instances carrying a corrected
+    name."""
+    fx = Fixture()
+    fx._add(PatientName="DOE^JANE", PatientID="P001",
+            StudyInstanceUID=fx.study_ct, SeriesInstanceUID=generate_uid(),
+            StudyDate="20240110", StudyTime="101500", Modality="CT",
+            AccessionNumber="ACC1", StudyDescription="CHEST CT W CONTRAST",
+            SeriesDescription="AXIAL 3", SeriesNumber=3, InstanceNumber=1)
+    dest = _Receiver(fx.log)
+    scp = _start_qr(fx, move_destinations={
+        DEST_AET: {"host": "127.0.0.1", "port": dest.port, "aet": DEST_AET}})
+    try:
+        q = Dataset()
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = fx.study_ct
+        q.StudyDescription = "CHEST CT"        # what one C-FIND reply carried
+        code, final, _ = _move(scp.port, q)[-1]
+        assert code == 0x0000, f"C-MOVE final status {code:#06x}"
+        assert int(final.NumberOfCompletedSuboperations) == 5, \
+            f"retrieve narrowed by a non-unique key: {final}"
+        assert int(final.NumberOfFailedSuboperations) == 0, final
+        time.sleep(0.3)
+        assert dest.stored() == 5, f"destination stored {dest.stored()} of 5"
+    finally:
+        scp.stop()
+        dest.close()
+        fx.close()
+
+
+def test_a_wildcard_in_a_unique_key_is_refused_rather_than_expanded():
+    """The index sends a UID holding * or ? to GLOB, so one malformed identifier
+    retrieves everything it matches and reports Success. Refused through the
+    same path as an identifier with no usable key: nothing is sent, and the SCU
+    is told 0xA900 rather than handed an archive it did not ask for."""
+    fx = Fixture()
+    dest = _Receiver(fx.log)
+    scp = _start_qr(fx, move_destinations={
+        DEST_AET: {"host": "127.0.0.1", "port": dest.port, "aet": DEST_AET}})
+    try:
+        q = Dataset()
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = fx.study_ct[:20] + "*"     # matches every study here
+        code, final, _ = _move(scp.port, q)[-1]
+        assert code == 0xA900, f"wildcard identifier answered {code:#06x}"
+        time.sleep(0.3)
+        assert dest.stored() == 0, f"shipped {dest.stored()} instance(s) on a wildcard"
+
+        # The exact UID beside it still retrieves, so the guard is not a blanket
+        # refusal of identifiers that merely look unusual.
+        q = Dataset()
+        q.QueryRetrieveLevel = "STUDY"
+        q.StudyInstanceUID = fx.study_ct
+        code, final, _ = _move(scp.port, q)[-1]
+        assert code == 0x0000 and int(final.NumberOfCompletedSuboperations) == 4, final
+    finally:
+        scp.stop()
+        dest.close()
+        fx.close()
+
+
 def test_move_unknown_destination():
     fx = Fixture()
     scp = _start_qr(fx, move_destinations={})
