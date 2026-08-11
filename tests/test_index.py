@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
 
+from pacs import index as index_mod
 from pacs.index import InstanceIndex
 
 CT_SOP = str(CTImageStorage)
@@ -520,6 +521,67 @@ def test_rescan_incremental():
         env.close()
 
 
+def _lose_the_connection_once(idx):
+    """Make the next write land on a connection that has never seen the scan's
+    temp table — the state _write leaves behind when it retries after an error,
+    and the state _conn() produces when the database file is replaced."""
+    real_write = idx._write
+    done = []
+
+    def dropping_write(fn):
+        if not done:
+            done.append(True)
+            idx._close_local()
+        return real_write(fn)
+
+    idx._write = dropping_write
+    return done
+
+
+def test_a_rescan_keeps_indexing_after_it_loses_its_connection():
+    """One transient sqlite error must cost one batch, not every batch after it.
+
+    The "seen" set lives in a temp table, temp tables belong to their connection,
+    and both _write's retry and _conn()'s replaced-file check hand the next batch
+    a different one. Without the table being re-made, every remaining write fails
+    on it — while "added" keeps climbing, because it is counted during the walk
+    and not by the write that stores it. The rescan then reports a clean run over
+    an index that quietly stopped filling, and C-FIND answers "no such study"
+    about studies sitting on disk."""
+    env = Env()
+    batch = index_mod._BATCH
+    try:
+        index_mod._BATCH = 2                  # several batches over a small archive
+        _lose_the_connection_once(env.idx)
+        counts = env.idx.rescan({"received": env.received})
+        assert counts["files"] == 10
+        assert env.idx.stats()["files"] == 10, "the index stopped filling mid-rescan"
+        assert env.idx.query_studies(), "nothing is findable after the rescan"
+    finally:
+        index_mod._BATCH = batch
+        env.close()
+
+
+def test_a_rescan_that_restarted_its_seen_set_does_not_purge_against_it():
+    """The seen set only holds what was walked after it was re-made, so purging
+    against it would delete rows for files that are still on disk — the same
+    reason a lost batch suppresses the purge, reached without an error."""
+    env = Env()
+    batch = index_mod._BATCH
+    try:
+        env.index_all()
+        ghost = env.info["paths"][0]
+        os.remove(ghost)                      # a row whose file really is gone
+        index_mod._BATCH = 2
+        _lose_the_connection_once(env.idx)
+        counts = env.idx.rescan({"received": env.received}, purge=True)
+        assert counts["removed"] == 0, "purged against a set that had holes in it"
+        assert env.idx.stats()["files"] == 10, "a live row was deleted"
+    finally:
+        index_mod._BATCH = batch
+        env.close()
+
+
 def test_rescan_purges_deleted_files():
     env = Env()
     try:
@@ -593,18 +655,38 @@ def test_rescan_races_live_stores():
         env.close()
 
 
+def _unlink_db(db: str) -> bool:
+    """Delete the database and its WAL sidecars. False if the platform refused,
+    which is not the same as there being nothing to delete."""
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(db + suffix)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+    return not os.path.exists(db)
+
+
 def test_deleted_database_is_survivable():
     env = Env()
     try:
         env.index_all()
         assert env.idx.stats()["files"] == 10
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                os.remove(env.db + suffix)
-            except OSError:
-                pass
-        # Schema is recreated on demand; the index is empty but usable, and a
-        # rescan puts it back.
+
+        # Unlink it under the running index where the platform allows that: on
+        # POSIX the open handle keeps working against the dead inode, which is
+        # the case _conn()'s stat guard exists for. Windows will not unlink an
+        # open sqlite file at all, so there this can only happen between runs —
+        # close first, and the reopen still exercises the part that matters,
+        # which is the schema coming back on demand. Either way the delete is
+        # asserted rather than assumed: a swallowed refusal would leave this
+        # test asserting that an intact index is empty.
+        if not _unlink_db(env.db):
+            env.idx.close()
+            assert _unlink_db(env.db), "the database could not be deleted at all"
+            env.idx = InstanceIndex(env.db)
+
         assert env.idx.query_studies() == []
         assert env.idx.add_file(env.info["paths"][0], "received") is True
         assert env.idx.stats()["files"] == 1

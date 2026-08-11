@@ -882,12 +882,27 @@ class InstanceIndex:
 
         pending: list[tuple] = []
         seen: list[tuple] = []
+        restarted = False           # the seen set was begun again mid-walk
 
         def commit():
+            nonlocal restarted
             if not pending and not seen:
                 return
 
             def work(c):
+                nonlocal restarted
+                # This batch may be running on a connection that has never seen
+                # scan_seen: _write retries on a fresh one after an error, and
+                # _conn() swaps connections when the database file is replaced
+                # underneath it. A temp table belongs to its connection, so on
+                # either path it is gone — and without this every remaining batch
+                # of the rescan would fail on the missing table, turning one
+                # transient error into an index that quietly stops filling while
+                # "added" (counted during the walk) still reports a clean run.
+                if not c.execute("SELECT 1 FROM sqlite_temp_master WHERE type='table' "
+                                 "AND name='scan_seen'").fetchone():
+                    c.execute("CREATE TEMP TABLE scan_seen (path TEXT PRIMARY KEY)")
+                    restarted = True
                 for r in pending:
                     c.execute(_INSERT, r)
                 c.executemany("INSERT OR IGNORE INTO scan_seen (path) VALUES (?)", seen)
@@ -939,7 +954,11 @@ class InstanceIndex:
                 break
         commit()
 
-        if purge and not counts["cancelled"] and not counts["errors"]:
+        # restarted: the seen set was begun again part-way through, so it holds
+        # only what was walked after that point. Purging against it would delete
+        # rows for files still sitting on disk — the same reason a lost batch
+        # suppresses the purge, reached without any error being raised.
+        if purge and not counts["cancelled"] and not counts["errors"] and not restarted:
             marks = ",".join("?" for _ in groups)
 
             def prune(c):
@@ -963,11 +982,15 @@ class InstanceIndex:
             except sqlite3.Error:
                 pass
         counts["seconds"] = round(time.time() - started, 3)
-        level = self.log.warn if counts["cancelled"] else self.log.info
+        # "added" is counted during the walk, before the write that stores it, so
+        # a run that lost batches still reports them as new. Saying so on the one
+        # line an operator reads is what stops a half-filled index looking clean.
+        level = self.log.warn if (counts["cancelled"] or counts["errors"]) else self.log.info
+        lost = f", {counts['errors']} batch(es) not written" if counts["errors"] else ""
         level(
             f"Index rescan: {counts['added']} new, {counts['updated']} updated, "
             f"{counts['skipped']} unchanged, {counts['removed']} gone, "
-            f"{counts['failed']} skipped in {counts['seconds']}s",
+            f"{counts['failed']} skipped{lost} in {counts['seconds']}s",
             kind="index",
         )
         return counts
