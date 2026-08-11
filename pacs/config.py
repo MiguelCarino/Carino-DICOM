@@ -421,6 +421,39 @@ def _whoami() -> str:
         return f"uid {uid()}" if uid else "this account"
 
 
+# How long to keep trying a replace that Windows says is in use. Zero on POSIX,
+# where rename() over an open file is not refused and there is nothing to wait
+# for — so the loop below runs exactly once and this stays a Windows fix.
+_REPLACE_RETRY_SEC = 0.5 if os.name == "nt" else 0.0
+
+
+def _replace(src: str, dst: str) -> None:
+    """os.replace, waited out briefly while the platform says the target is busy.
+
+    POSIX renames over an open file without noticing it is open. Windows refuses:
+    the move fails with a sharing violation for as long as anything holds a
+    handle on the destination, and CPython's open() never asks for
+    FILE_SHARE_DELETE, so an ordinary reader is enough to cause it — another
+    `pacs serve` starting up and reading the config, a backup agent, a virus
+    scanner, the operator's text editor.
+
+    Those readers are gone again microseconds later, so failing the operator's
+    Save on one is the wrong answer: it is a transient condition wearing the
+    costume of a permission error. Bounded, and it never converts a failure into
+    a success — a permission problem that is real rather than transient costs
+    this much delay and then raises exactly as it did before.
+    """
+    deadline = time.monotonic() + _REPLACE_RETRY_SEC
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def _fsync_dir(directory: str) -> None:
     """Make the rename itself survive a power cut, where the platform allows it.
 
@@ -637,8 +670,9 @@ class Config:
             try:
                 # Atomic because tmp is in the config's own directory: a reader
                 # (another `pacs serve` starting up) sees the whole old file or
-                # the whole new one, never a partial write.
-                os.replace(tmp, self.path)
+                # the whole new one, never a partial write. On Windows that same
+                # reader can refuse the move outright; see _replace.
+                _replace(tmp, self.path)
             except OSError:
                 # tmp is a complete plaintext copy of the config — the dashboard
                 # auth_token, deid.secret, the SMTP password. A replace that

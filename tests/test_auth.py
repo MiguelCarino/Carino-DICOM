@@ -762,6 +762,74 @@ def test_concurrent_saves_never_corrupt_the_config():
         assert os.stat(cfg.path).st_mode & 0o777 == 0o600, oct(os.stat(cfg.path).st_mode)
 
 
+def test_a_save_waits_out_a_reader_holding_the_file_rather_than_failing():
+    """The test above is the scenario, and on Windows it is also the problem.
+
+    POSIX renames over an open file without noticing it is open. Windows refuses
+    for as long as anything holds a handle on the destination, and CPython's
+    open() never asks for FILE_SHARE_DELETE — so the reader thread above, or
+    another `pacs serve` starting up, or a backup agent, or a virus scanner, is
+    enough to fail the operator's Save with "Access is denied". It is a
+    transient wearing the costume of a permission error, and it made both
+    Windows cells fail intermittently rather than reproducibly.
+
+    The budget is set here rather than left to the platform, so the behaviour is
+    tested everywhere instead of only where it matters."""
+    from pacs import config as C
+    d = _cfg_dir()
+    cfg = Config(os.path.join(d, "config.json")).load()
+    cfg.save()
+
+    real_replace, real_budget = os.replace, C._REPLACE_RETRY_SEC
+    busy = [3]
+
+    def briefly_busy(src, dst, *a, **k):
+        if busy[0] > 0:
+            busy[0] -= 1
+            raise PermissionError(13, "Access is denied")
+        return real_replace(src, dst, *a, **k)
+
+    C._REPLACE_RETRY_SEC = 1.0
+    os.replace = briefly_busy
+    try:
+        cfg.web["auth_token"] = "written-through-the-transient"
+        cfg.save()                                  # must not raise
+    finally:
+        os.replace, C._REPLACE_RETRY_SEC = real_replace, real_budget
+
+    assert busy[0] == 0, "the save never retried"
+    with open(cfg.path, encoding="utf-8") as fh:
+        assert json.load(fh)["web"]["auth_token"] == "written-through-the-transient"
+    assert _leftovers(d) == [], f"left {_leftovers(d)} behind"
+
+
+def test_a_permission_error_that_is_not_transient_still_raises():
+    """The wait must not turn a real failure into a hang, or into a false
+    success. A read-only mount does not become writable by being asked twice."""
+    from pacs import config as C
+    d = _cfg_dir()
+    cfg = Config(os.path.join(d, "config.json")).load()
+    cfg.save()
+
+    real_replace, real_budget = os.replace, C._REPLACE_RETRY_SEC
+
+    def always_busy(src, dst, *a, **k):
+        raise PermissionError(13, "Access is denied")
+
+    C._REPLACE_RETRY_SEC = 0.2
+    os.replace = always_busy
+    started = time.time()
+    try:
+        cfg.save()
+        raise AssertionError("a permanent permission error reported a save")
+    except PermissionError:
+        pass
+    finally:
+        os.replace, C._REPLACE_RETRY_SEC = real_replace, real_budget
+    assert time.time() - started < 5, "the retry budget was not respected"
+    assert _leftovers(d) == [], f"left {_leftovers(d)} behind"
+
+
 def test_a_save_racing_a_full_config_post_lands_one_whole_document():
     """POST /api/config (cfg.replace) against POST /api/auth/token (cfg.save).
 
