@@ -592,6 +592,80 @@ def test_a_failing_twin_keeps_the_study_out_of_the_archive():
         assert w._fully_sent(p, {"PACS"}, {os.path.abspath(p)}) is False
 
 
+def test_one_instance_that_cannot_be_sent_does_not_stop_the_rest():
+    """pynetdicom RAISES rather than answering with a status for an instance it
+    cannot put on the wire — no (0008,0018), file meta with no transfer syntax,
+    an element that will not re-encode. All of those pass is_dicom() and
+    dcmread(), and the outgoing folder is the one place third parties are
+    invited to drop files.
+
+    Letting that out of c_store unwound the whole scan, which is a far worse
+    failure than it looks: _note_failure is never reached, so nothing is
+    recorded as failed, nothing enters backoff, the stuck panel stays empty and
+    the counters stay at zero — while every file queued behind the bad one is
+    never dialled again, silently, on a three-second loop, for as long as it
+    sits there.
+
+    The failure counter is what this asserts, not the ordering: the walk does
+    not promise which file it reaches first, and the counter is untouched by the
+    raise either way."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = make_config(tmp, [dest("PACS", "10.0.0.1")])
+        out = cfg.resolved("scu", "watch_dir")
+        write_dicom(os.path.join(out, "a-unsendable.dcm"))
+        write_dicom(os.path.join(out, "b-healthy.dcm"))
+
+        class RaisingStore(FakeStore):
+            def __call__(self, dst, filepath, calling_aet, timeout=30, tls_context=None):
+                if os.path.basename(filepath) == "a-unsendable.dcm":
+                    raise AttributeError("'Dataset' object has no attribute 'SOPInstanceUID'")
+                return super().__call__(dst, filepath, calling_aet, timeout, tls_context)
+
+        store = RaisingStore()
+        w = FolderWatcher(cfg, FakeLog())
+        with fake_store(store):
+            scan(w, 2)
+        assert w.stats()["failed"] >= 1, \
+            "the unsendable instance was never recorded as failed"
+        assert store.hosts_for("b-healthy.dcm") == ["10.0.0.1"], \
+            "the healthy study queued beside it was never dialled"
+
+
+def test_an_instance_that_cannot_be_described_is_a_result_not_an_exception():
+    """The real c_store, not the fake one the tests above install.
+
+    Its docstring promises that an unreadable file, a missing SOP Class UID, a
+    refused association and a failure status are all ok=False. An over-long UI
+    value keeps that promise honest at the other end of the function: pydicom
+    writes it and reads it back, and pynetdicom then refuses to propose a
+    presentation context for it — with a ValueError, before any socket opens.
+    Every caller here treats a bad instance as a SendResult, so an exception is
+    not the loud failure it looks like."""
+    from pacs.scu import Destination as _Dest, c_store as _c_store
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "overlong.dcm")
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = CTImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = Dataset()
+        ds.file_meta = meta
+        ds.preamble = b"\0" * 128
+        ds.SOPClassUID = "1." + "9" * 70          # past the 64-character UI limit
+        ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+        ds.PatientID = "P1"
+        try:
+            ds.save_as(p, enforce_file_format=True)
+        except TypeError:
+            ds.save_as(p, write_like_original=False)
+
+        # Port nothing is listening on: this must be refused before the dial,
+        # so the test never depends on a connection failing.
+        res = _c_store(_Dest(name="X", aet="X", host="127.0.0.1", port=11199), p, "CARINO")
+        assert res.ok is False
+        assert "instance" in res.message
+
+
 # ------------------------------------------ duplicate names (send_study, MAJOR)
 def test_manual_send_reaches_every_node_sharing_a_name():
     with tempfile.TemporaryDirectory() as tmp:

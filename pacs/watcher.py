@@ -67,7 +67,7 @@ from .config import Config
 from .dicomfs import is_dicom
 from .logbuf import LogBuffer
 from .routing import Router
-from .scu import Destination, c_store
+from .scu import Destination, SendResult, c_store
 from .state import SendState
 
 
@@ -279,7 +279,15 @@ class FolderWatcher:
         for dest in nodes:
             if self._stop.is_set():
                 return
-            res = c_store(dest, payload, calling_aet, tls_context=tls_ctx)
+            try:
+                res = c_store(dest, payload, calling_aet, tls_context=tls_ctx)
+            except Exception as exc:        # noqa: BLE001 - a pass must survive one file
+                # c_store answers with a SendResult and does not raise, and this
+                # exists so that staying true is not load-bearing. A raise here
+                # unwinds the whole scan: nothing is marked failed, nothing backs
+                # off, the stuck panel stays empty, and every file behind this one
+                # stops being dialled — a silent halt rather than one bad file.
+                res = SendResult(False, f"send raised ({exc})")
             if not res.ok:
                 errors.append(f"{dest.host}:{dest.port} {res.message}"
                               if len(nodes) > 1 else res.message)

@@ -257,7 +257,13 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         return SendResult(False, "no SOPClassUID")
 
     ae = AE(ae_title=calling_aet)
-    ae.add_requested_context(sop_class, ts)
+    try:
+        ae.add_requested_context(sop_class, ts)
+    except ValueError as exc:
+        # An over-long or malformed UI value is refused here, before any socket
+        # is opened. dcmread accepted it and is_dicom accepted it, so a file
+        # that reaches this line can still be one pynetdicom will not describe.
+        return SendResult(False, f"cannot propose a context for this instance ({exc})")
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
@@ -276,5 +282,20 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         if code == 0x0000 or code in _WARNING_STATUSES:
             return SendResult(True, "stored" if code == 0x0000 else f"stored (warning 0x{code:04X})")
         return SendResult(False, f"C-STORE failed (0x{code:04X})")
+    except Exception as exc:                    # noqa: BLE001 - see below
+        # pynetdicom RAISES rather than answering with a status for an instance
+        # it cannot put on the wire: no (0008,0018), file meta carrying no
+        # transfer syntax, an element that will not re-encode. All of those pass
+        # is_dicom() and dcmread(), so they arrive here looking like any other
+        # file, from the one folder third parties are invited to drop into.
+        #
+        # Every caller of this function treats a bad instance as a SendResult,
+        # and an exception out of here is not the loud failure it looks like: it
+        # unwinds the watcher's entire pass, so no destination is recorded as
+        # failed, nothing enters backoff, the stuck panel stays empty, and every
+        # file queued behind this one is never dialled again — silently, on a
+        # three-second loop, for as long as the file sits there. One malformed
+        # instance must cost one instance.
+        return SendResult(False, f"cannot send this instance ({exc})")
     finally:
         assoc.release()
