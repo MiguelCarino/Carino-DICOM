@@ -285,6 +285,17 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Fixed
+- **A config save no longer fails because something was reading the file.**
+  Windows refuses to move a file onto a destination anything else holds open,
+  and CPython's `open()` never asks for `FILE_SHARE_DELETE` — so an ordinary
+  reader was enough to fail the operator's Save with "Access is denied": another
+  `pacs serve` starting up and reading the config, a backup agent, a virus
+  scanner, a text editor. POSIX renames over an open file without noticing, so
+  this was invisible on seven of the nine CI cells and intermittent on the other
+  two. The move is now waited out for a bounded moment, which is nothing on
+  POSIX (there is no transient to wait for) and the difference between a working
+  Save and a failed one on Windows. A permission problem that is real rather
+  than transient still raises, after the same short delay. (`pacs/config.py`)
 - **Downloading a DICOM file no longer answers a profile that may not see the
   identifiers.** `/api/studies/file` and its manifest were gated on
   `studies.read` alone. Everything the dashboard *shows* passes through the
