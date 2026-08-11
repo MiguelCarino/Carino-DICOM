@@ -290,6 +290,39 @@ def test_an_audit_export_is_refused_to_a_restricted_profile(app_and_ids):
     assert "cannot be checked" in resp.get_json()["detail"]
 
 
+def test_a_dicom_download_is_refused_to_a_profile_that_may_not_see_identifiers(app_and_ids):
+    """The one route where withholding an identifier cannot work.
+
+    Everything the dashboard shows goes through _withhold_identifiers first, so
+    a narrowed profile reads "***" where a name would be. These two routes hand
+    over the file itself: the identifiers are inside its own header, nothing on
+    the way out can rewrite them, and a profile that may not read a patient's
+    name on screen could download the file carrying the name, the ID and the
+    birth date. Gated on every identifier field, like the audit export, and for
+    the same structural reason."""
+    app, ids, srv = app_and_ids
+    with srv.cfg.mutate():
+        # Narrow IT to the accession. It keeps studies.read throughout, so the
+        # refusal below can only be about the identifiers.
+        srv.cfg.users["profiles"][1]["phi_visible"] = ["accession"]
+    assert "studies.read" in srv.cfg.users["profiles"][1]["capabilities"]
+    client = signed_in(app, ids, "IT")
+
+    for url in ("/api/studies/file?group=received&path=x&name=y.dcm",
+                "/api/studies/files?group=received&path=x"):
+        resp = client.get(url)
+        assert resp.status_code == 403, f"{url} handed over unredactable bytes"
+        body = resp.get_json()
+        assert body["forbidden"]["capability"] == "phi.all"
+        assert "cannot be redacted" in body["detail"]
+
+    # Somebody who may see every identifier still gets through the gate: a 404
+    # for a study that does not exist is the handler answering, not the guard.
+    full = signed_in(app, ids, "Radiologist")
+    assert full.get("/api/studies/file?group=received&path=x&name=y.dcm"
+                    ).status_code != 403
+
+
 def test_an_audit_export_refuses_rather_than_handing_over_a_short_trail(app_and_ids):
     """An export is evidence, and a silently short one is indistinguishable from
     a complete one to the person it is handed to. Refusing is the only answer

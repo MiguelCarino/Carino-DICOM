@@ -1430,6 +1430,33 @@ def create_app(server: PacsServer) -> Flask:
             _cors(resp)
         return resp
 
+    def _deny_unredactable():
+        """Refuse a raw Part 10 hand-out to a profile that may not see every
+        identifier, or "" when it is allowed.
+
+        studies.read governs what the dashboard SHOWS, and everything it shows
+        goes through _withhold_identifiers first. These two routes are the pair
+        that leave that world: the payload is the file, the identifiers are
+        inside its own header, and nothing on the way out can rewrite them. So a
+        profile that is not permitted to read a patient's name on screen must not
+        be handed the file that carries the name, the ID and the birth date.
+
+        Same reasoning and the same answer as the audit export, which refuses for
+        the same structural reason: what cannot be redacted cannot be narrowed,
+        so the only honest gate is the whole of it.
+        """
+        who = guard.current()
+        if who.phi_visible() >= frozenset(users.PHI_FIELDS):
+            return ""
+        return _cors(jsonify({
+            "ok": False, "error": "not permitted",
+            "forbidden": {"capability": "phi.all", "profile": who.name},
+            "detail": "a DICOM file carries the identifiers in its own header and "
+                      "cannot be redacted on the way out, so reading one needs "
+                      "every identifier field. Open the study in the dashboard "
+                      "instead, or ask an administrator.",
+        })), 403
+
     @app.route("/api/studies/files", methods=["GET", "OPTIONS"])
     def api_studies_files():
         denied = guard.deny("studies.read")
@@ -1437,6 +1464,12 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         if request.method == "OPTIONS":
             return _preflight()
+        # Gated with its sibling below rather than left open: this route exists
+        # only to enumerate URLs for it, so letting it answer would buy nothing
+        # but a hand-off that fails one file at a time.
+        refused = _deny_unredactable()
+        if refused:
+            return refused
         group = request.args.get("group", "received")
         path = request.args.get("path")
         if not path:
@@ -1451,6 +1484,9 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         if request.method == "OPTIONS":
             return _preflight()
+        refused = _deny_unredactable()
+        if refused:
+            return refused
         group = request.args.get("group", "received")
         path = request.args.get("path", "")
         name = request.args.get("name", "")
