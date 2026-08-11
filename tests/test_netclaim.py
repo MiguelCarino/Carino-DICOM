@@ -75,6 +75,30 @@ def test_the_wildcard_address_is_accepted_as_a_bind_string():
         claim(bind, port)
 
 
+def test_an_ipv6_wildcard_bind_is_probed_on_the_ipv6_loopback(monkeypatch):
+    """A wildcard cannot be connected to, so it becomes the loopback — and it has
+    to become the loopback of its own family. Mapping "::" to 127.0.0.1 dialled
+    the wrong stack: an IPv6-bound listener was never found, the probe reported
+    nothing there, and the port was allowed. That is the silent double-bind this
+    module exists to stop, reached through the module itself.
+
+    A dual-stack listener hides the bug, because 127.0.0.1 reaches it anyway.
+    The listener here is IPv6-only, which is the shape that tells them apart."""
+    try:
+        held = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        held.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        held.bind(("::", 0))
+    except OSError as exc:
+        pytest.skip(f"no usable IPv6 on this host: {exc}")
+    held.listen(1)
+    try:
+        assert netclaim._accepting("::", held.getsockname()[1]), \
+            "an IPv6 listener was missed, so its port would have been allowed"
+    finally:
+        held.close()
+
+
 def test_the_gate_refuses_a_live_listener_and_steps_aside_for_the_rest(monkeypatch):
     """Both sides of the decision, because both cost something: refusing too
     eagerly takes a service's own restart down, and refusing too rarely is the

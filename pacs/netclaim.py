@@ -54,7 +54,11 @@ def _accepting(bind: str, port: int) -> bool:
     trading a rare silent split for a common noisy outage, which is a worse
     deal than the bug.
     """
-    host = "127.0.0.1" if bind in ("", "0.0.0.0", "::") else bind
+    # A wildcard cannot be connected to, so it becomes the loopback of its own
+    # family. "::" resolved to 127.0.0.1 dialled the wrong stack: an IPv6-bound
+    # listener was never found, the probe reported nothing there, and the port
+    # was allowed — the exact silent double-bind this module exists to stop.
+    host = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind, bind)
     try:
         family, socktype, proto, addr = _resolve(host, port)
     except OSError:
