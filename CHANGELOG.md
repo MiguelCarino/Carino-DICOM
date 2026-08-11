@@ -285,6 +285,26 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Fixed
+- **Downloading a DICOM file no longer answers a profile that may not see the
+  identifiers.** `/api/studies/file` and its manifest were gated on
+  `studies.read` alone. Everything the dashboard *shows* passes through the
+  identifier withholding first, so a narrowed profile reads `***` where a name
+  would be — but these two routes hand over the file itself, the identifiers are
+  inside its own header, and nothing on the way out can rewrite them. A profile
+  configured to see only the accession number could therefore download a file
+  carrying the patient's name, ID and birth date. Both routes now need every
+  identifier field, refusing with the capability named. Same structural reason
+  as the audit export, which already refused on those grounds: what cannot be
+  redacted cannot be narrowed, so the only honest gate is the whole of it.
+  (`pacs/web.py`)
+- **An IPv6 wildcard bind was probed on the IPv4 loopback.** `netclaim` turns a
+  wildcard into a loopback address to confirm that something is really listening
+  before it refuses a port, and mapped `"::"` to `127.0.0.1` — the wrong stack.
+  An IPv6-bound listener was never found, the probe reported the port empty and
+  the bind was allowed, which is the silent double-bind the module exists to
+  stop, reached through the module itself. A dual-stack listener hid it, because
+  the IPv4 loopback reaches one anyway; an IPv6-only listener is what tells them
+  apart, and is what the test uses. (`pacs/netclaim.py`)
 - **One instance that could not be sent stopped all forwarding, permanently and
   silently.** pynetdicom *raises* rather than answering with a status for an
   instance it cannot put on the wire — no `(0008,0018)`, file meta carrying no

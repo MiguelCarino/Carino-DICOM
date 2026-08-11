@@ -188,7 +188,12 @@ behaves exactly as it did before they existed.
   path at all. Rather than let the policy be true on one surface and false on
   another, a profile that may not see every identifier gets a 403 that says so.
   The same rule applies to the audit export, which has to carry records exactly
-  as written or the chain cannot be checked against it.
+  as written or the chain cannot be checked against it, and — since v1.1.0 — to
+  the dashboard's own study-file download and its manifest. Those hand over a
+  Part 10 file whose identifiers live in its own header, so withholding a field
+  on the way out is not possible there either; before v1.1.0 they were gated on
+  `studies.read` alone, and a profile narrowed to the accession number could
+  download a file carrying the name, ID and date of birth.
 - **Two capabilities are separated because either can grant the rest.**
   `auth.manage` edits profiles; `deid.manage` changes what gets scrubbed.
   Neither is in any preset except Administrator, and `POST /api/config` — which
