@@ -285,6 +285,68 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Fixed
+- **A rescan that lost its database connection stopped filling the index and
+  still reported a clean run.** The set of paths a rescan has walked lives in a
+  SQLite temp table, and a temp table belongs to the connection that made it —
+  while `_write` retries on a fresh connection after an error, and `_conn()`
+  swaps connections when the database file is replaced underneath it. On either
+  path the table was gone, so *every remaining batch* of that rescan failed on
+  it: one transient error (a filling disk, a busy database, any IO fault) cost
+  not one batch but all of them. Nothing said so. `added` is counted during the
+  walk rather than by the write that stores it, and the summary line did not
+  mention errors at all, so the Activity log read "Index rescan: N new" over an
+  index that had quietly stopped filling — and C-FIND then answered with no
+  matches, and C-MOVE Success with zero sub-operations, for studies plainly on
+  disk. The seen set is now re-made on whichever connection the batch lands on,
+  the purge is suppressed when it had to be re-made (it holds only what was
+  walked after that point, so pruning against it would delete rows for files
+  that are still there), and a run that lost batches says so and warns.
+  (`pacs/index.py`)
+- **The audit trail reported "intact" about files it could not read.**
+  `read_all()` and the chain-head lookup both answered an unreadable file with
+  `except OSError: continue`. Three things followed. `verify()` walked the
+  records it could reach and returned `ok` — so the dashboard's audit banner
+  stayed green while an archive full of records was invisible to it. The export
+  endpoint handed an inspector a silently short trail with a 200, which is the
+  one reader who cannot tell. And at startup the head could be taken from an
+  older archive, or from genesis, while the live file was unreadable, so the
+  next record chained to the wrong link and `verify()` afterwards reported
+  tampering on a trail nobody had touched. An unreadable file is now a finding
+  carried through `read_all()` like an unparseable line: `verify()` stops and
+  can never return `ok` past it, the export refuses rather than emitting a hole,
+  and a head that cannot be established leaves the trail shut and saying so
+  instead of guessing — which heals by itself, since `record()` retries the open
+  every time. Rare on Linux; on Windows a scanner or backup agent holding the
+  file open is an ordinary Tuesday. (`pacs/audit.py`, `pacs/web.py`)
+- **Two instances could hold one DICOM port on Windows, silently.** Winsock's
+  `SO_REUSEADDR` does not mean what the POSIX constant of that name means: it
+  means *sharing permitted*, and Microsoft documents a second `SO_REUSEADDR`
+  bind over a first one as succeeding, across user accounts, after which "the
+  behavior for all sockets bound to that port is indeterminate". Every listener
+  here sets it — the four DIMSE SCPs through pynetdicom's `server_bind`, the
+  HL7 listener by hand, the dashboard through Werkzeug — so on Windows all of
+  them opted out of the protection the platform would otherwise have given
+  them. Two engines could therefore bind 11112 together, each reporting a
+  healthy receiver, with each incoming association going to whichever Winsock
+  picked: a study landing in one instance's storage folder, or split across
+  two, with nothing anywhere saying why. Every listener now claims its port
+  exclusively before binding it, and refuses to start if something already
+  holds it (`pacs/netclaim.py`). The service chooser's probe was wrong the same
+  way and reported such a port as free. On POSIX none of this changes anything:
+  `bind()` already refuses an occupied port, and being strict there would refuse
+  a service its own restart through `TIME_WAIT`.
+- **Arming emergency failover had no rollback.** The config lock around it stops
+  a concurrent Save from splitting memory and file; it does nothing about a save
+  that *raises*, which reaches the same split — armed in memory, not armed in
+  `config.json`, and `start()` re-reads the file. The operator was then told
+  failover was armed while nothing was watching the primary, which is the state
+  the function's own docstring names as the thing to prevent. (`pacs/emergency.py`)
+- **A failed config save left a plaintext copy of the config on disk.** The
+  scratch file `save()` writes before `os.replace` carries the dashboard
+  `auth_token`, `deid.secret` and the SMTP password. If the replace failed —
+  read-only mount, full disk, a sharing violation — it stayed beside the config
+  until the age-gated sweep removed it, unmentioned. It is now removed on the
+  way out. (`pacs/config.py`)
 - **C-MOVE and C-GET now check that a file is inside a storage folder before
   reading it.** Every retrieval answers from a row in the sqlite index, and the
   index is a cache rather than an authority — a stale or wrong row still names

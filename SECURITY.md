@@ -252,6 +252,20 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   read out. A listener that has not been told which folders are its own serves
   nothing. Both retrieval paths share one definition of the check; until
   v1.1.0 the DICOMweb side made it and the DIMSE side did not.
+- **Every listener claims its port exclusively before binding it.** This matters
+  on Windows and nowhere else. Winsock's `SO_REUSEADDR` means *sharing
+  permitted* rather than the POSIX "rebind through TIME_WAIT", and every
+  listener here sets it — the DIMSE SCPs through pynetdicom, the HL7 listener
+  directly, the dashboard through Werkzeug. Microsoft
+  [documents](https://learn.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse)
+  that a second such bind succeeds, across user accounts, and that traffic then
+  goes to an undefined one of the sockets — so a second engine, or any other
+  process, could come up on 11112 beside a running receiver and take some of the
+  studies sent to it. Since v1.1.0 the port is claimed with
+  `SO_EXCLUSIVEADDRUSE` first and the service refuses to start if anything
+  already holds it. Treat this as a correctness guard on a single-tenant
+  appliance, not as isolation between mutually untrusted users: a process that
+  wins the race before the real listener starts still wins it.
 
 ### De-identification, and the hold
 
