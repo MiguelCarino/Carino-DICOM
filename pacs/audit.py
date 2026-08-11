@@ -184,7 +184,7 @@ class AuditLog:
                 return self
             try:
                 last = self._last_record()
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 # The head cannot be guessed. Falling through to an older archive
                 # — or to GENESIS — writes a record whose prev names the wrong
                 # link, and verify() would then report tampering on a trail
@@ -389,7 +389,12 @@ class AuditLog:
                         if isinstance(rec, dict):
                             rec["_file"] = os.path.basename(path)
                             yield rec
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
+                # The file is read in chunks, so a bad byte anywhere in a chunk
+                # arrives before the records that shared it. That makes this
+                # marker land EARLIER than the corruption, never later, which is
+                # the conservative direction: verify() stops short of a record it
+                # could have checked rather than past one it could not.
                 yield {"_unreadable": str(exc), "_file": os.path.basename(path)}
 
     def tail(self, limit: int = 200, *, action: str = "",

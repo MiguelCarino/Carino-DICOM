@@ -345,6 +345,32 @@ def test_a_head_that_cannot_be_read_stops_the_trail_instead_of_guessing(tmp_path
         "the trail now reports tampering that never happened"
 
 
+def test_one_corrupt_byte_does_not_stop_the_engine_starting(tmp_path):
+    """A trail is read with strict UTF-8, and a bad byte raises
+    UnicodeDecodeError — a ValueError, so an `except OSError` guarding the read
+    misses it entirely. It then leaves open(), leaves PacsServer.__init__ and
+    leaves main(), which catches neither: nothing binds and every modality gets
+    connection refused, because one byte in a log file went bad.
+
+    The invariant it breaks is written three lines below that call site: the
+    PACS keeps running and the trail reports that it stopped recording. The
+    process only ever writes ASCII, so the byte arrives from outside — a torn
+    write, a restored backup, a hand edit."""
+    d = str(tmp_path / "audit")
+    t = A.AuditLog(d, log=FakeLog()).open()
+    t.record(A.LOGIN, actor=ANA)
+    with open(t.path, "ab") as fh:
+        fh.write(b"\xff\xfe not utf-8\n")
+
+    log = FakeLog()
+    reopened = A.AuditLog(d, log=log)
+    reopened.open()                                   # must not raise
+    assert reopened.broken
+    assert any(level == "error" for level, _ in log.lines)
+    assert reopened.verify()["ok"] is False, "corruption reported as an intact trail"
+    assert list(reopened.read_all()), "read_all raised instead of reporting"
+
+
 def test_a_value_nothing_validated_cannot_stop_a_record_being_written(trail):
     """Losing the record is a worse outcome than storing an odd field oddly."""
     class Weird:
