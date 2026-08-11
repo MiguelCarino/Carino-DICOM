@@ -204,15 +204,22 @@ def test_an_unreachable_receiver_is_a_counter_and_a_log_line_not_an_exception():
     log = FakeLog()
     n = Notifier(Cfg({
         "enabled": True,
-        # Nothing is listening here. The port is closed, so this fails fast
-        # rather than hanging, which is what makes the test bounded.
+        # Nothing is listening here, so the attempt ends by itself and the test
+        # stays bounded. How long that takes is a platform question and not this
+        # test's subject: POSIX answers a closed port with RST and connect()
+        # fails in about a millisecond, while Winsock ignores the reset and
+        # spends its SYN-retransmission budget first. Waiting a fixed 1.5s
+        # asserted the POSIX timing, not the behaviour, and read as "the counter
+        # was never incremented" on Windows.
         "webhook": {"enabled": True, "url": "http://127.0.0.1:9/hook",
                     "timeout_sec": 2, "retries": 0},
         "smtp": {"enabled": False},
     }), log=log)
     try:
         n.emergency("triggered", STATUS, [])       # must not raise
-        time.sleep(1.5)
+        deadline = time.time() + 20
+        while time.time() < deadline and not n.stats()["failed"]:
+            time.sleep(0.02)
         assert n.stats()["failed"] >= 1
         assert n.stats()["last_error"]
     finally:
