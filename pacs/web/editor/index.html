@@ -5149,44 +5149,37 @@ const CULTURES = {
     surnames:   ['DOE','SMITH','JONES','BROWN','TAYLOR','WILSON','DAVIS','MOORE','THOMAS','JACKSON','HARRIS','CLARK'],
     first_m:    ['JOHN','JAMES','WILLIAM','ROBERT','CHARLES','HENRY','GEORGE','MICHAEL','EDWARD','THOMAS','RICHARD','DAVID'],
     first_f:    ['JANE','MARY','ELIZABETH','ALICE','HELEN','MARGARET','SARAH','EMMA','DOROTHY','RUTH','GRACE','FRANCES'],
-    anon_m: 'DOE^JOHN',        anon_f: 'DOE^JANE',
   },
   french: {
     surnames:   ['DUPONT','MARTIN','BERNARD','THOMAS','PETIT','RICHARD','DURAND','MOREAU','LEROY','SIMON','MICHEL','LEFEBVRE'],
     first_m:    ['JEAN','PIERRE','LOUIS','MARC','PAUL','NICOLAS','HENRI','FRANCK','LUC','CLAUDE','RENE','DIDIER'],
     first_f:    ['MARIE','ANNE','CLAIRE','SOPHIE','JULIE','ISABELLE','HELENE','CAMILLE','LUCIE','LAURENCE','EMILIE','CECILE'],
-    anon_m: 'DUPONT^JEAN',     anon_f: 'DUPONT^MARIE',
   },
   russian: {
     surnames_m: ['IVANOV','PETROV','SIDOROV','SMIRNOV','KUZNETSOV','POPOV','NOVIKOV','VOLKOV','SOKOLOV','MOROZOV'],
     surnames_f: ['IVANOVA','PETROVA','SIDOROVA','SMIRNOVA','KUZNETSOVA','POPOVA','NOVIKOVA','VOLKOVA','SOKOLOVA','MOROZOVA'],
     first_m:    ['IVAN','ALEKSANDR','DMITRI','NIKOLAI','SERGEI','MIKHAIL','ANDREI','PAVEL','ALEKSEI','VLADIMIR'],
     first_f:    ['ANNA','NATALIA','IRINA','ELENA','MARINA','OLGA','TATIANA','EKATERINA','SVETLANA','YULIA'],
-    anon_m: 'IVANOV^IVAN',     anon_f: 'IVANOVA^ANNA',
   },
   hispanic: {
     surnames:   ['GARCIA','RODRIGUEZ','MARTINEZ','HERNANDEZ','LOPEZ','GONZALEZ','PEREZ','SANCHEZ','RAMIREZ','TORRES','FLORES','REYES'],
     first_m:    ['JUAN','JOSE','CARLOS','MIGUEL','PEDRO','ANTONIO','FRANCISCO','LUIS','JAVIER','MANUEL','RAFAEL','SERGIO'],
     first_f:    ['MARIA','ANA','ROSA','CARMEN','ELENA','LUCIA','ISABEL','PATRICIA','LAURA','CLAUDIA','ANGELA','MONICA'],
-    anon_m: 'GARCIA^JUAN',     anon_f: 'GARCIA^MARIA',
   },
   chinese: {
     surnames:   ['ZHANG','WANG','LI','ZHAO','CHEN','LIU','YANG','HUANG','ZHOU','WU','XU','SUN'],
     first_m:    ['WEI','LEI','MING','HAO','JUN','YANG','TAO','CHAO','PENG','FENG','GANG','HUI'],
     first_f:    ['FANG','LI','NA','JING','HONG','MEI','YING','XIA','YAN','LAN','PING','HUA'],
-    anon_m: 'ZHANG^WEI',       anon_f: 'LI^FANG',
   },
   japanese: {
     surnames:   ['YAMADA','TANAKA','SUZUKI','ITO','SATO','WATANABE','KOBAYASHI','KATO','YOSHIDA','YAMAMOTO','NAKAMURA','HAYASHI'],
     first_m:    ['TARO','KENJI','HIROSHI','TAKASHI','DAISUKE','NAOKI','RYO','SHOTA','YUTA','KAZUYA','MAKOTO','KENICHI'],
     first_f:    ['HANAKO','YUKI','SAKURA','AKIKO','MICHIKO','KAZUKO','YOKO','HARUKO','MIKI','NANA','AI','EMI'],
-    anon_m: 'YAMADA^TARO',     anon_f: 'YAMADA^HANAKO',
   },
   korean: {
     surnames:   ['KIM','LEE','PARK','CHOI','JUNG','KANG','CHO','YOON','JANG','LIM','OH','SHIN'],
     first_m:    ['GILDONG','MINJUN','JUNHO','HYUNJIN','SEONGMIN','JAEHO','TAEYONG','DONGHYUN','SANGWOO','JIHO','JIHOON','MINHO'],
     first_f:    ['YOUNGHEE','MINJUNG','JIYEON','SOYEON','HYEWON','EUNHEE','SOHEE','JIEUN','YUNA','SEOYEON','CHAEYOUNG','DAYEON'],
-    anon_m: 'HONG^GILDONG',    anon_f: 'KIM^YOUNGHEE',
   },
 };
 const CULTURE_KEYS = Object.keys(CULTURES);
@@ -5201,10 +5194,18 @@ function randName(sex) {
   return `${surname}^${first}`;
 }
 
-function randAnonName() {
-  const culture = CULTURES[randFrom(CULTURE_KEYS)];
-  return culture.anon_f;
-}
+// Anonymize writes this, everywhere and every time. It used to write a
+// placeholder from a randomly chosen culture — DOE^JOHN, DUPONT^MARIE,
+// IVANOV^IVAN — which was wrong twice over. It looked like a person, so nothing
+// in the name distinguished an anonymized file from a randomized one, which is
+// what Randomize is for and the only visible difference between the two
+// buttons. And the culture was drawn inside the per-file loop, so one patient's
+// five slices came out under four different names: a study keyed to one
+// PatientID and naming four people is not a study any reader will reassemble.
+//
+// A DICOM value, not UI text: it is not translated and does not vary. PS3.15
+// Table E.1-1 gives (0010,0010) as Z/D, and a dummy is what this is.
+const ANON_NAME = 'ANONYMOUS';
 // dcmjs dict keys are 8-char UPPERCASE hex with no 'x' prefix (e.g. "00100010",
 // "0008103E"). Tag.fromString does parseInt(key.slice(0,4),16), which yields NaN
 // when an 'x' prefix is present — so an 'x'-prefixed key is silently dropped on
@@ -5985,10 +5986,9 @@ function anonymize(d) {
   // (age, size, weight, ethnic group, pregnancy and smoking status, …) and is
   // the rtnPatCharsOpt checkbox. This is a much smaller, deliberate usability
   // choice that stays on unconditionally: a study whose every patient is
-  // "ANON^ANON", sexless and ageless is miserable to read and to demo, and the
-  // three values it writes are a dummy name, the original sex and a dummy age
-  // — none of which identifies anyone. Making it a toggle would only offer the
-  // user a worse default.
+  // sexless and ageless is miserable to read and to demo, and the two values it
+  // writes here are the original sex and a dummy age — neither identifies
+  // anyone. Making it a toggle would only offer the user a worse default.
   const sex = String(getTag(d, '00100040')?.Value?.[0] || '').toUpperCase();
   const keepChars = deidOptions.has('rtnPatCharsOpt');
 
@@ -5996,8 +5996,7 @@ function anonymize(d) {
   applyProfile(d);     // full PS3.15 Basic Profile, recursively (UIDs remapped by remapUIDs())
 
   // Usability layer, applied on top of the compliant pass:
-  const culture = CULTURES[randFrom(CULTURE_KEYS)];
-  setTag(d, '00100010', 'PN', sex === 'M' ? culture.anon_m : culture.anon_f);
+  setTag(d, '00100010', 'PN', ANON_NAME);
   // Sex and age are both rtnPatCharsOpt 'K' rows. With that option on the
   // profile pass already left the real ones in place, and writing a dummy age
   // over them here would silently defeat the checkbox the user just ticked.
@@ -7467,8 +7466,11 @@ async function buildDicomFromImage(file, meta, instanceNum) {
 }
 
 // Quick-fill helpers for Create DICOM
+// The same split the Edit tab's two buttons have: Anonymize fills in a
+// placeholder, Randomize invents a plausible patient. This one used to fill a
+// plausible name beside an ID of ANON, which said both things at once.
 function fillCreateAnon() {
-  document.getElementById('cdPatientName').value = randAnonName();
+  document.getElementById('cdPatientName').value = ANON_NAME;
   document.getElementById('cdPatientID').value   = 'ANON';
   document.getElementById('cdPatientDOB').value  = '';
   document.getElementById('cdPatientSex').value  = 'O';

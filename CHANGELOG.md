@@ -313,6 +313,21 @@ release also queries, retrieves, routes and de-identifies.
   into the five shipped languages.
 
 ### Fixed
+- **Anonymize no longer scatters a study across four patient names.** The
+  bundled editor wrote Patient's Name from a placeholder drawn at random from
+  one of seven culture tables — `DOE^JOHN`, `DUPONT^MARIE`, `IVANOV^IVAN` — and
+  drew it inside the per-file loop, so one patient's five slices came back named
+  four different people. A set of instances sharing a PatientID and naming
+  several patients is not a study any reader will reassemble, and Patient's Name
+  is the one attribute that has to stay constant across a de-identified study.
+  It also meant the anonymized file looked exactly like a randomized one: the
+  name is the first place a reader looks, and inventing a plausible patient is
+  what the *Randomize* button beside it is for. Anonymize now writes
+  `ANONYMOUS`, the same value in every file and every run — a DICOM value, so it
+  is not translated and does not vary. PS3.15 Table E.1-1 gives (0010,0010) as
+  Z/D and a dummy is what this is. Randomize is unchanged. Patient's Sex and the
+  `000Y` age are unchanged too, and still governed by Retain Patient
+  Characteristics. (`pacs/web/editor/index.html`)
 - **A config save no longer fails because something was reading the file.**
   Windows refuses to move a file onto a destination anything else holds open,
   and CPython's `open()` never asks for `FILE_SHARE_DELETE` — so an ordinary

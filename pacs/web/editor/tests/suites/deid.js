@@ -216,8 +216,8 @@
       // The usability layer, which is NOT the Retain Patient Characteristics
       // option and is documented as staying on: readable dummy name, original
       // sex, dummy age.
-      ok('the readable dummy name is still applied', /\^/.test(String(raw(d, '00100010') || '')) &&
-         String(raw(d, '00100010')) !== 'Forge^Test', String(raw(d, '00100010')));
+      ok('the name is replaced with the ANONYMOUS placeholder',
+         String(raw(d, '00100010')) === 'ANONYMOUS', String(raw(d, '00100010')));
       ok('the original sex is still kept for usability', str(d, '00100040') === 'F', str(d, '00100040'));
       ok('and the age is the 000Y dummy', str(d, '00101010') === '000Y', str(d, '00101010'));
       ok('the birth date is still zeroed', str(d, '00100030') === '', str(d, '00100030'));

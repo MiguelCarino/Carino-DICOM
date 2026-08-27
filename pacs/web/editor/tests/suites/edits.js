@@ -200,6 +200,32 @@
        files.every((f, i) => tag(f.dict, '00100020') !== beforeIds[i]),
        files.map(f => tag(f.dict, '00100020')).join(','));
 
+    // ---- Anonymize places a placeholder; Randomize invents a patient ---------
+    // These are two buttons and they have to differ where a reader looks first.
+    // Anonymize used to write a placeholder drawn from a random culture, so it
+    // produced a plausible person — the same thing Randomize produces — and it
+    // drew that culture inside the per-file loop, so one patient's five slices
+    // came back under four different names. A study keyed to one PatientID and
+    // naming four people is not one any reader will reassemble.
+    {
+      const nameOf = (f) => String(tag(f.dict, '00100010') || '');
+      const names = files.map(nameOf);
+      ok('anonymize writes the ANONYMOUS placeholder, not a person',
+         names.every(n => n === 'ANONYMOUS'), names.join(' | '));
+      ok('and writes the same one to every file of the study',
+         new Set(names).size === 1, `${new Set(names).size} distinct across ${names.length} files`);
+
+      files.forEach(f => randomize(f.dict));
+      const rnd = files.map(nameOf);
+      ok('randomize invents a plausible patient instead',
+         rnd.every(n => /^[A-Z]+\^[A-Z]+$/.test(n)), rnd.join(' | '));
+      ok('so the two buttons do not produce the same thing',
+         rnd.every(n => n !== 'ANONYMOUS'), rnd.join(' | '));
+      // Restore the anonymized state for whatever runs after this.
+      files.forEach(f => anonymize(f.dict));
+      reseedAllPending();
+    }
+
     // ---- the Window/Level sliders write the tag, not a lookalike -------------
     // setWL used to store a hard-coded "x0028105x" key. On a dataset keyed
     // without the prefix that added a second entry the writer then emitted
