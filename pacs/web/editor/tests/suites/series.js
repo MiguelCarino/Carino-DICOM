@@ -125,7 +125,7 @@
 
     // ---- paging the stack ---------------------------------------------------
     await handleFiles(scrambled.map(([n, b]) => new File([b], n)));
-    const V = window.ovRedaction.view;
+    const V = window.ovView.view;
 
     {
       ovStackStep(1);

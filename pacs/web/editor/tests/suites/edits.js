@@ -220,6 +220,58 @@
     ok('the written file has one Window Center, not two',
        Object.keys(back.dict).filter(k => /00281050$/i.test(k)).length === 1,
        Object.keys(back.dict).filter(k => /00281050$/i.test(k)).join(','));
+
+    // ---- and the panel they live in folds away --------------------------------
+    // Expanded it is a preset box and two slider rows, taller than the picture it
+    // adjusts in a column a third of the window wide, and it is reached
+    // occasionally rather than constantly. Collapsed is the default; the header
+    // keeps the reading, so folding it hides the controls and not the numbers.
+    {
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      const sec = document.getElementById('wlSection');
+      const body = document.getElementById('wlBody');
+      const tgl = document.getElementById('wlToggle');
+      const sum = document.getElementById('wlSummary');
+      ok('the Window/Level body is a separate element from its header',
+         !!sec && !!body && !!tgl && sec.contains(body) && sec.contains(tgl));
+      ok('the header reads the current window while the body is folded',
+         sum.textContent === '275 / 850', sum.textContent);
+
+      // This suite otherwise runs on the Overview, where the whole Edit panel is
+      // display:none and every element in it measures zero. Layout questions
+      // have to be asked with the tab it lives on actually open.
+      const wasTab = activeTab;
+      switchTab('editor');
+      for (let i = 0; i < 200 && sec.classList.contains('hidden'); i++) await sleep(25);
+      ok('the section is on screen at all with an image loaded',
+         !sec.classList.contains('hidden'));
+
+      setWLOpen(false);
+      ok('collapsed: the body is not laid out', body.offsetParent === null);
+      ok('collapsed: the header still is', tgl.offsetParent !== null);
+      ok('collapsed: aria-expanded says so', tgl.getAttribute('aria-expanded') === 'false');
+      const foldedH = sec.getBoundingClientRect().height;
+
+      tgl.click();
+      ok('clicking the header opens it', body.offsetParent !== null &&
+         tgl.getAttribute('aria-expanded') === 'true');
+      ok('and opening it costs real height', sec.getBoundingClientRect().height > foldedH + 60,
+         `${foldedH.toFixed(0)}px folded vs ${sec.getBoundingClientRect().height.toFixed(0)}px open`);
+      ok('the sliders are the ones that were there all along',
+         document.getElementById('wcSlider').value === '275' &&
+         document.getElementById('wwSlider').value === '850');
+
+      tgl.click();
+      ok('clicking again folds it', body.offsetParent === null);
+      // Folding must not be a way to lose a window the user set.
+      setWL(300, 900);
+      ok('a window set while folded still reaches the file',
+         files[0].pending.get(wcKey)?.valueString === '300',
+         String(files[0].pending.get(wcKey)?.valueString));
+      ok('and the folded header shows it', sum.textContent === '300 / 900', sum.textContent);
+      setWL(275, 850);
+      switchTab(wasTab);
+    }
     // ---- saving must not destroy an encapsulated image -----------------------
     // The file in front of a user is often one this app wrote. Compressed pixel
     // data lives in fragments rather than one run of bytes, so a writer that

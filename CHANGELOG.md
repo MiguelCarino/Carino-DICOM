@@ -130,6 +130,34 @@ release also queries, retrieves, routes and de-identifies.
   — the old per-file loop was silently losing five files in six past ten,
   because browsers stop honouring automatic downloads.
 
+  A later resync adds **image edits written into the stored pixels** — rotate 90°
+  either way, rotate 180°, flip, and invert `MONOCHROME1` ⇄ `MONOCHROME2` — so a
+  slice a modality stored on its side comes out of Download the right way up for
+  every other reader, with Rows, Columns, Pixel Spacing and the patient geometry
+  following the samples and a one-step undo. It also **moves redaction to the
+  Edit tab**, beside those edits rather than on the Overview: the Overview is
+  the tab that rewrites nothing, and redaction is the most destructive thing the
+  editor does. Redaction now opens a full-screen workspace instead of working in
+  a 280-pixel sidebar preview — the images that carry a burned-in banner are
+  usually 256 square, and a box could not be placed over two lines of text
+  accurately at that size. The Overview's ⟳ ⇋ ⇅ are unchanged and still move
+  only the picture on screen, but they now say so: they sit behind a **View**
+  label, because they are the same glyphs as the ones in the Edit tab that move
+  the file.
+
+  Three fixes an operator would have hit on a smaller screen: below 1000px the
+  editor **dropped a whole sidebar** rather than reflowing it, which on the Edit
+  tab took away Load Files, the preview, Window/Level and the image edits with
+  nothing left on screen to say they existed, on Create took away every field
+  the tab has, and on Extract took away the buttons that write the PNGs. The
+  Edit sidebar also clipped anything below the fold with no scrollbar, so on a
+  1400×900 laptop the image edits were unreachable at full width too.
+  **Window/Level** now folds away and starts folded, with the current window
+  kept on its header, since expanded it was taller than the image it adjusts.
+  And **Download All** appears only when more than one file is loaded; with a
+  single file it was the only download button on screen, named for a batch that
+  did not exist.
+
   Also serves `.wasm` as `application/wasm` explicitly (`pacs/web.py`), because
   Python resolves MIME types from the Windows registry on Windows and `.wasm`
   is frequently absent from it.

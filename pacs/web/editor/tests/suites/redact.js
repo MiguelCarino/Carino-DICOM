@@ -676,160 +676,177 @@
       ok('undo: there is nothing left to undo twice', undoRedaction(entry) === false);
     }
 
-    // ---- screen -> image, through zoom, pan, rotate and flip -----------------
-    // A non-square image, so a transposed axis fails loudly rather than looking
-    // right. The forward map here is built from view state by hand — it does not
-    // ask the DOM for the matrix — so it is an independent check of the app's
-    // inverse, not the same arithmetic run twice.
+    // ---- where the tools live ----------------------------------------------
+    // The split the UI is built on: the Overview shows the file and never
+    // rewrites it, the Edit tab holds everything that does. A redaction control
+    // reappearing on the Overview is the regression this guards.
     {
-      switchTab('overview');
-      const W2 = 64, H2 = 48, n2 = W2 * H2;
-      const s = new Uint16Array(n2);
-      for (let i = 0; i < n2; i++) s[i] = (i * 3) & 0xFFF;
-      const bytes = Forge.build({ rows: H2, cols: W2, pi: 'MONOCHROME2', ba: 16, bs: 12,
-                                  hb: 11, pr: 0, wc: 2048, ww: 4096, pixels: s });
-      await install(bytes, 'geometry.dcm');
-      const canvas = document.getElementById('ovCanvas');
-      for (let i = 0; i < 160 && (canvas.width !== W2 || canvas.height !== H2); i++) await sleep(25);
-
-      const R = window.ovRedaction;
-      // Measured ONCE, with the transform at identity, and never asked of the
-      // app again: a CSS transform does not move the layout box, so this rect is
-      // the frame every orientation is relative to. Reusing the app's own
-      // measurement here would make the round trip self-consistent and let the
-      // classic mistake through — getBoundingClientRect() on a rotated element
-      // reports the bounds of the ROTATED shape, which is wider than the
-      // element and no longer centred on it.
-      Object.assign(R.view, { rotate: 0, flipH: false, flipV: false, zoom: 1, panX: 0, panY: 0 });
-      R.applyTransform();
-      const b0 = canvas.getBoundingClientRect();
-
-      const forward = (v, b, ix, iy) => {
-        let x = ix * b.width / canvas.width - b.width / 2;
-        let y = iy * b.height / canvas.height - b.height / 2;
-        if (v.flipH) x = -x;
-        if (v.flipV) y = -y;
-        const a = v.rotate * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
-        const rx = x * cs - y * sn, ry = x * sn + y * cs;
-        return { x: b.left + b.width / 2 + rx * v.zoom + v.panX,
-                 y: b.top + b.height / 2 + ry * v.zoom + v.panY };
-      };
-      const probes = [[0, 0], [W2, H2], [W2 / 2, H2 / 2], [7, 41], [W2 - 1, 1]];
-
-      ok('geometry: the 64x48 image reached the overview canvas',
-         canvas.width === W2 && canvas.height === H2, `${canvas.width}x${canvas.height}`);
-
-      for (const rotate of [0, 90, 180, 270]) {
-        for (const [flipH, flipV] of [[false, false], [true, false], [false, true], [true, true]]) {
-          Object.assign(R.view, { rotate, flipH, flipV, zoom: 1, panX: 0, panY: 0 });
-          R.applyTransform();
-          let worst = 0;
-          for (const [ix, iy] of probes) {
-            const scr = forward(R.view, b0, ix, iy);
-            const got = R.screenToImage(scr.x, scr.y);
-            if (!got) { worst = Infinity; break; }
-            worst = Math.max(worst, Math.abs(got.x - ix), Math.abs(got.y - iy));
-          }
-          ok(`geometry: rotate ${rotate}, flipH ${flipH}, flipV ${flipV}`, worst < 0.5,
-             `worst error ${worst.toFixed(4)} px`);
-        }
+      const ovTab = document.getElementById('overviewTab');
+      const edTab = document.getElementById('editorTab');
+      for (const id of ['imgRedact', 'imgRedactUndo', 'imgRotCW', 'imgRotCCW', 'imgRot180',
+                        'imgFlipH', 'imgFlipV', 'imgInvert']) {
+        const el = document.getElementById(id);
+        ok(`#${id} is in the Edit tab`, !!el && edTab.contains(el) && !ovTab.contains(el));
       }
-      // Zoom and pan on top of a rotation — the combination that hides an
-      // origin mistake behind a plausible-looking box at rotate 0.
-      Object.assign(R.view, { rotate: 90, flipH: true, flipV: false, zoom: 2.75, panX: 37, panY: -21 });
-      R.applyTransform();
-      {
-        let worst = 0;
-        for (const [ix, iy] of probes) {
-          const scr = forward(R.view, b0, ix, iy);
-          const got = R.screenToImage(scr.x, scr.y);
-          worst = got ? Math.max(worst, Math.abs(got.x - ix), Math.abs(got.y - iy)) : Infinity;
-        }
-        ok('geometry: rotate 90 + flipH + zoom 2.75 + pan', worst < 0.5, `worst error ${worst.toFixed(4)} px`);
+      for (const id of ['ovRedact', 'ovRedactPanel', 'ovRedactUndo', 'ovRedactApply',
+                        'ovRedactTop', 'ovRedactClear', 'ovRedactCancel', 'ovRedactFill',
+                        'ovRedactCount']) {
+        ok(`#${id} is gone from the Overview`, document.getElementById(id) === null);
       }
-      Object.assign(R.view, { rotate: 0, flipH: false, flipV: false, zoom: 1, panX: 0, panY: 0 });
-      R.applyTransform();
+      ok('the Overview keeps its view-only tools',
+         ['ovInvert', 'ovRotate', 'ovFlipH', 'ovFlipV', 'ovResetView']
+           .every(id => ovTab.contains(document.getElementById(id))));
+      ok('and it offers a way across to the ones that write the file',
+         ovTab.contains(document.getElementById('ovActImage')) &&
+         document.getElementById('ovActImage').dataset.tab === 'editor');
+      // The two families are the same glyphs on the same picture. If they ever
+      // share a title string again, nothing on screen tells them apart.
+      const ovTitles = ['ovRotate', 'ovFlipH', 'ovFlipV', 'ovInvert']
+        .map(id => document.getElementById(id).title);
+      const edTitles = ['imgRotCW', 'imgFlipH', 'imgFlipV', 'imgInvert']
+        .map(id => document.getElementById(id).title);
+      ok('the view tools and the pixel tools share no title text',
+         ovTitles.every(t => t && !edTitles.includes(t)),
+         `${ovTitles.join(' | ')} vs ${edTitles.join(' | ')}`);
+      // Through t(), not the English words in it: this suite also runs inside
+      // index.html#selftest, in the visitor's own language.
+      const T = window.t || String;
+      ok('and the view tools name the view rather than the operation',
+         document.getElementById('ovRotate').title === T('Turn the view 90\u00b0 \u2014 the file is not changed') &&
+         document.getElementById('ovFlipH').title === T('Flip the view horizontally \u2014 the file is not changed') &&
+         document.getElementById('ovInvert').title === T('Invert the view \u2014 the file is not changed'),
+         ovTitles.join(' | '));
     }
-    {
-      // A large image is clamped by max-height:460px, so layout pixels and image
-      // pixels are on different scales and the scale is not a whole number.
-      switchTab('overview');
-      const W3 = 1024, H3 = 768, n3 = W3 * H3;
-      const s = new Uint8Array(n3);
-      for (let i = 0; i < n3; i++) s[i] = i & 0xFF;
-      const bytes = Forge.build({ rows: H3, cols: W3, pi: 'MONOCHROME2', ba: 8, bs: 8, hb: 7,
+
+    // ---- screen -> image, on the workspace canvas ---------------------------
+    // The workspace borrows the enlarge overlay: no CSS transform, no
+    // object-fit, so the mapping is one scale factor per axis and there is no
+    // matrix to invert. The two cases that matter are a canvas laid out at its
+    // own size and one the viewport has scaled down to a fractional ratio.
+    // Non-square throughout, so a transposed axis fails loudly.
+    for (const [W2, H2, label] of [[64, 48, 'small'], [1024, 768, 'clamped']]) {
+      switchTab('editor');
+      const n2 = W2 * H2;
+      const s = new Uint8Array(n2);
+      for (let i = 0; i < n2; i++) s[i] = i & 0xFF;
+      const bytes = Forge.build({ rows: H2, cols: W2, pi: 'MONOCHROME2', ba: 8, bs: 8, hb: 7,
                                   pr: 0, wc: 128, ww: 256, pixels: s });
-      await install(bytes, 'clamped.dcm');
-      const canvas = document.getElementById('ovCanvas');
-      for (let i = 0; i < 200 && (canvas.width !== W3 || canvas.height !== H3); i++) await sleep(25);
-      const R = window.ovRedaction;
-      Object.assign(R.view, { rotate: 0, flipH: false, flipV: false, zoom: 1, panX: 0, panY: 0 });
-      R.applyTransform();
+      await install(bytes, `geometry-${label}.dcm`);
+      for (let i = 0; i < 200 && !(previewImageData && previewImageData.width === W2); i++) await sleep(25);
+
+      const R = window.imgRedaction;
+      R.open();
+      const canvas = document.getElementById('fullscreenCanvas');
+      ok(`geometry/${label}: the ${W2}x${H2} image reached the workspace canvas`,
+         canvas.width === W2 && canvas.height === H2, `${canvas.width}x${canvas.height}`);
       const b = canvas.getBoundingClientRect();
-      ok('geometry: a 1024x768 canvas is laid out smaller than its pixels',
-         b.width > 0 && b.width < W3, `${b.width.toFixed(2)}x${b.height.toFixed(2)}`);
+      ok(`geometry/${label}: the workspace canvas has a layout box`,
+         b.width > 0 && b.height > 0, `${b.width.toFixed(2)}x${b.height.toFixed(2)}`);
       let worst = 0;
-      for (const [ix, iy] of [[0, 0], [1024, 768], [512, 384], [900, 60]]) {
-        const got = R.screenToImage(b.left + ix * b.width / W3, b.top + iy * b.height / H3);
+      for (const [ix, iy] of [[0, 0], [W2, H2], [W2 / 2, H2 / 2], [7, 41], [W2 - 1, 1]]) {
+        const got = R.pointToImage(b.left + ix * b.width / W2, b.top + iy * b.height / H2);
         worst = got ? Math.max(worst, Math.abs(got.x - ix), Math.abs(got.y - iy)) : Infinity;
       }
-      ok('geometry: the layout-to-image scale is exact on a clamped canvas', worst < 0.5,
-         `worst error ${worst.toFixed(4)} px`);
+      ok(`geometry/${label}: the layout-to-image scale is exact`, worst < 0.01,
+         `worst error ${worst.toFixed(6)} px`);
+      R.close();
     }
 
     // ---- the overlay must never reach an export -----------------------------
-    // printOverview() ships the live canvas through toDataURL. A preview
-    // rectangle drawn while redaction is off would put red boxes in the PDF.
+    // printOverview() ships the Overview canvas through toDataURL. Boxes are now
+    // drawn on the workspace canvas, which that export never touches — so the
+    // check is that the two canvases stay separate, in both directions.
     {
       const c = byId['mono2-u8'];
       await install(c.bytes, 'overlay.dcm');
-      const canvas = document.getElementById('ovCanvas');
-      for (let i = 0; i < 160 && (canvas.width !== c.w || canvas.height !== c.h); i++) await sleep(25);
-      const R = window.ovRedaction;
+      const ovCanvas = document.getElementById('ovCanvas');
+      const fsCanvas = document.getElementById('fullscreenCanvas');
+      for (let i = 0; i < 200 && !(previewImageData && previewImageData.width === c.w); i++) await sleep(25);
+      switchTab('overview');
+      for (let i = 0; i < 200 && (ovCanvas.width !== c.w || ovCanvas.height !== c.h); i++) await sleep(25);
+      switchTab('editor');
+
+      const reddish = (canvas) => {
+        const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        let n = 0;
+        for (let i = 0; i < px.length; i += 4) if (px[i] > px[i+1] + 30) n++;
+        return n;
+      };
+
+      const R = window.imgRedaction;
+      R.open();
       R.state.boxes = [{ x: 0, y: 0, w: 20, h: 10 }];
       R.redraw();
-      const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let red = 0;
-      for (let i = 0; i < px.length; i += 4) if (px[i] > px[i+1] + 30) red++;
-      ok('no red overlay is drawn while redaction is off', red === 0, `${red} reddish px`);
+      ok('boxes are drawn on the workspace canvas', reddish(fsCanvas) > 0, `${reddish(fsCanvas)} reddish px`);
+      ok('and never on the Overview canvas the print path exports',
+         reddish(ovCanvas) === 0, `${reddish(ovCanvas)} reddish px`);
+      R.close();
+      showFullscreen();          // a plain enlarge repaints from the clean preview data
+      ok('a plain enlarge afterwards shows no boxes',
+         reddish(fsCanvas) === 0, `${reddish(fsCanvas)} reddish px`);
+      hideFullscreen();
+      ok('and the Overview canvas was never touched',
+         reddish(ovCanvas) === 0, `${reddish(ovCanvas)} reddish px`);
+    }
 
-      R.setMode(true);
-      R.redraw();
-      const px2 = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let red2 = 0;
-      for (let i = 0; i < px2.length; i += 4) if (px2[i] > px2[i+1] + 30) red2++;
-      ok('and it is drawn once redaction is on', red2 > 0, `${red2} reddish px`);
-      R.setMode(false);
-      const px3 = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let red3 = 0;
-      for (let i = 0; i < px3.length; i += 4) if (px3[i] > px3[i+1] + 30) red3++;
-      ok('leaving redaction repaints the image clean', red3 === 0, `${red3} reddish px`);
+    // ---- the workspace owns the overlay while it is up ----------------------
+    // A click on the backdrop closes an enlarge. In the workspace it is a box
+    // that missed the text, and closing on it would throw away the boxes drawn
+    // so far without asking. Cancel and Esc are the two ways out.
+    {
+      await install(byId['mono2-u8'].bytes, 'modal.dcm');
+      for (let i = 0; i < 200 && !previewImageData; i++) await sleep(25);
+      const overlay = document.getElementById('fullscreenOverlay');
+      const R = window.imgRedaction;
+
+      R.open();
+      ok('the workspace marks the overlay', overlay.classList.contains('redacting') &&
+                                            overlay.classList.contains('visible'));
+      ok('and hides the click-anywhere hint',
+         document.getElementById('fullscreenHint').classList.contains('hidden'));
+      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      ok('a backdrop click does not close it', overlay.classList.contains('visible'));
+      showFullscreen();
+      ok('and enlarging again does not repaint over the boxes',
+         overlay.classList.contains('redacting'));
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      ok('Esc closes it', !overlay.classList.contains('visible') &&
+                          !overlay.classList.contains('redacting'));
+      ok('and the hint comes back',
+         !document.getElementById('fullscreenHint').classList.contains('hidden'));
+
+      R.open();
+      document.getElementById('redactCancel').click();
+      ok('Cancel closes it too', !overlay.classList.contains('visible') && R.state.active === false);
+      ok('and a plain enlarge works again once it has', (showFullscreen(), overlay.classList.contains('visible')));
+      hideFullscreen();
+      ok('and closes on a click as it always did', !overlay.classList.contains('visible'));
     }
 
     // ---- drawing a box with a pointer, and pressing the button --------------
     // Everything above calls applyRedaction directly. This drives the surface a
-    // user touches: the mode toggle, the drag, the delete, and the click that
-    // writes the pixels.
+    // user touches: the button that opens the workspace, the drag, the delete,
+    // and the click that writes the pixels.
     {
-      switchTab('overview');
+      switchTab('editor');
       const c = byId['mono2-u8'];
       const entry = await install(c.bytes, 'interactive.dcm');
-      const canvas = document.getElementById('ovCanvas');
-      const viewer = document.getElementById('ovViewer');
-      for (let i = 0; i < 160 && (canvas.width !== c.w || canvas.height !== c.h); i++) await sleep(25);
-      const R = window.ovRedaction;
-      Object.assign(R.view, { rotate: 0, flipH: false, flipV: false, zoom: 1, panX: 0, panY: 0 });
-      R.applyTransform();
+      for (let i = 0; i < 200 && !(previewImageData && previewImageData.width === c.w); i++) await sleep(25);
+      const R = window.imgRedaction;
+      const canvas = document.getElementById('fullscreenCanvas');
 
-      document.getElementById('ovRedact').click();
-      ok('clicking Redact opens the panel',
+      document.getElementById('imgRedact').click();
+      ok('clicking Redact opens the workspace',
          R.state.active === true &&
-         !document.getElementById('ovRedactPanel').classList.contains('hidden'));
+         !document.getElementById('redactPanel').classList.contains('hidden'));
+      ok('on the frame the preview is showing',
+         canvas.width === c.w && canvas.height === c.h, `${canvas.width}x${canvas.height}`);
 
-      const b = canvas.getBoundingClientRect();   // identity transform, so this is the layout box
+      const b = canvas.getBoundingClientRect();
       const at = (ix, iy) => ({ x: b.left + ix * b.width / canvas.width,
                                 y: b.top + iy * b.height / canvas.height });
-      const send = (type, p) => viewer.dispatchEvent(new PointerEvent(type, {
+      const send = (type, p) => canvas.dispatchEvent(new PointerEvent(type, {
         clientX: p.x, clientY: p.y, bubbles: true, cancelable: true, pointerId: 1 }));
 
       send('pointerdown', at(4, 2));
@@ -841,9 +858,7 @@
          Math.abs(drawn.x - 4) < 0.5 && Math.abs(drawn.y - 2) < 0.5 &&
          Math.abs(drawn.w - 20) < 0.5 && Math.abs(drawn.h - 10) < 0.5,
          `${drawn.x},${drawn.y} ${drawn.w}x${drawn.h}`);
-      ok('the box counter agrees', document.getElementById('ovRedactCount').textContent === '1');
-      ok('dragging a box does not pan the image', R.view.panX === 0 && R.view.panY === 0,
-         `${R.view.panX},${R.view.panY}`);
+      ok('the box counter agrees', document.getElementById('redactCount').textContent === '1');
 
       // A click with no movement is not a box.
       send('pointerdown', at(30, 30));
@@ -851,25 +866,10 @@
       ok('a click that does not move creates nothing', R.state.boxes.length === 1,
          String(R.state.boxes.length));
 
-      // The pointer handlers listen on the viewer, which is far wider than the
-      // picture, so a drag can happen entirely in the empty margin beside it.
-      // clampBox used to clamp the origin and then re-derive the extent from it,
-      // which slid such a box onto the image and stretched it to the full width:
-      // a gesture that never touched the picture redacted all of it.
-      {
-        const vb = viewer.getBoundingClientRect();
-        const margin = b.left - vb.left;
-        const y = b.top + b.height / 2;
-        send('pointerdown', { x: vb.left + 2, y });
-        send('pointermove', { x: vb.left + margin - 4, y: y + 20 });
-        send('pointerup',   { x: vb.left + margin - 4, y: y + 20 });
-        ok('a drag entirely beside the picture creates no box',
-           margin > 12 && R.state.boxes.length === 1,
-           `${margin.toFixed(0)}px margin, ${R.state.boxes.length} box(es): ${JSON.stringify(R.state.boxes)}`);
-      }
-
-      // Starting inside and dragging off the left edge should keep only the part
-      // that is over the picture.
+      // The pointer is captured by the canvas, so a drag that leaves the picture
+      // keeps reporting. Only the part that was over the image may survive:
+      // clamping the origin and re-deriving the extent from it would slide the
+      // box back on and stretch it to the full width.
       {
         R.state.boxes.length = 0;
         send('pointerdown', at(8, 8));
@@ -879,7 +879,15 @@
         ok('a drag off the edge keeps only the part over the picture',
            R.state.boxes.length === 1 && box.x === 0 && Math.abs(box.w - 8) < 0.5,
            JSON.stringify(box || null));
+      }
+      {
+        // Entirely outside, in both axes: nothing of it was ever on the image.
         R.state.boxes.length = 0;
+        send('pointerdown', { x: b.left - 80, y: b.top - 40 });
+        send('pointermove', { x: b.left - 20, y: b.top - 10 });
+        send('pointerup',   { x: b.left - 20, y: b.top - 10 });
+        ok('a drag entirely off the picture creates no box',
+           R.state.boxes.length === 0, JSON.stringify(R.state.boxes));
         send('pointerdown', at(4, 2));
         send('pointermove', at(24, 12));
         send('pointerup', at(24, 12));
@@ -893,16 +901,16 @@
          R.state.boxes.length === 1 && Math.abs(R.state.boxes[0].x - 10) < 0.5,
          `${R.state.boxes.length} box(es), x=${R.state.boxes[0] && R.state.boxes[0].x}`);
 
-      viewer.dispatchEvent(new MouseEvent('dblclick', {
+      canvas.dispatchEvent(new MouseEvent('dblclick', {
         clientX: at(15, 12).x, clientY: at(15, 12).y, bubbles: true, cancelable: true }));
       ok('double-clicking a box deletes it', R.state.boxes.length === 0, String(R.state.boxes.length));
 
-      document.getElementById('ovRedactTop').click();
+      document.getElementById('redactTop').click();
       ok('"Cover top rows" covers a tenth of the height across the full width',
          R.state.boxes.length === 1 && R.state.boxes[0].w === c.w &&
          R.state.boxes[0].h === Math.round(c.h * 0.10),
          JSON.stringify(R.state.boxes[0] || null));
-      document.getElementById('ovRedactClear').click();
+      document.getElementById('redactClear').click();
       ok('"Clear boxes" empties the list', R.state.boxes.length === 0);
 
       // Draw one more and press Apply. An uncompressed file needs no
@@ -910,7 +918,7 @@
       send('pointerdown', at(4, 0));
       send('pointermove', at(24, 5));
       send('pointerup', at(24, 5));
-      document.getElementById('ovRedactApply').click();
+      document.getElementById('redactApply').click();
       for (let i = 0; i < 200 && String(tagOf(entry.dict, '00280301') || '') !== 'NO'; i++) await sleep(25);
 
       ok('Apply writes the pixels through the button',
@@ -919,39 +927,47 @@
       ok('Apply blanked what was drawn',
          !!after && !boxIs(after.pixels, c.w, c.h, [{ x: 4, y: 0, w: 20, h: 5 }], [0, 0, 0]),
          after ? (boxIs(after.pixels, c.w, c.h, [{ x: 4, y: 0, w: 20, h: 5 }], [0, 0, 0]) || '') : 'null');
-      ok('Apply leaves redaction mode', R.state.active === false);
+      ok('Apply leaves the workspace', R.state.active === false &&
+         !document.getElementById('fullscreenOverlay').classList.contains('visible'));
       ok('Apply offers the session undo',
-         !document.getElementById('ovRedactUndo').classList.contains('hidden'));
+         !document.getElementById('imgRedactUndo').classList.contains('hidden'));
 
-      document.getElementById('ovRedactUndo').click();
+      document.getElementById('imgRedactUndo').click();
       for (let i = 0; i < 200 && tagOf(entry.dict, '00280301') !== undefined; i++) await sleep(25);
       const restored = await decode(entry);
       ok('the Undo button puts the picture back',
          !!restored && !Forge.compare(restored.pixels, Forge.expected(c.ref, c.w, c.h), c.tol),
          restored ? (Forge.compare(restored.pixels, Forge.expected(c.ref, c.w, c.h), c.tol) || '') : 'null');
+      ok('and takes itself away again',
+         document.getElementById('imgRedactUndo').classList.contains('hidden'));
     }
 
     // ---- the controls -------------------------------------------------------
-    for (const id of ['ovRedact', 'ovRedactUndo', 'ovRedactPanel', 'ovRedactFill', 'ovRedactTop',
-                      'ovRedactClear', 'ovRedactApply', 'ovRedactCancel', 'ovRedactCount']) {
+    for (const id of ['imgRedact', 'imgRedactUndo', 'redactPanel', 'redactFill', 'redactTop',
+                      'redactClear', 'redactApply', 'redactCancel', 'redactCount']) {
       ok(`#${id} exists`, !!document.getElementById(id));
     }
     {
       await install(byId['mono2-u8'].bytes, 'btn-ok.dcm');
       ok('the Redact button is enabled on an uncompressed file',
-         document.getElementById('ovRedact').disabled === false);
+         document.getElementById('imgRedact').disabled === false);
       await install(byId['j2k-mono16-b12'].bytes, 'btn-j2k.dcm');
       ok('and enabled on JPEG 2000, now that it decodes',
-         document.getElementById('ovRedact').disabled === false);
+         document.getElementById('imgRedact').disabled === false);
       await install(byId['htj2k-unsupported'].bytes, 'btn-no.dcm');
-      const b = document.getElementById('ovRedact');
+      const b = document.getElementById('imgRedact');
       ok('and disabled on High-Throughput JPEG 2000', b.disabled === true);
       ok('with a title that says why', /High-Throughput/.test(b.title), b.title);
+      // It sits in the card with the rotate/flip buttons, which refuse for the
+      // same reason and through the same support check.
+      ok('and refuses alongside the transforms it shares a decoder with',
+         document.getElementById('imgRotCW').disabled === true &&
+         document.getElementById('imgFlipH').disabled === true);
     }
     {
       // The panel has to say that every frame is covered — a de-identification
       // tool that redacts only the visible frame of a cine is a trap.
-      const panel = document.getElementById('ovRedactPanel');
+      const panel = document.getElementById('redactPanel');
       // The whole sentence through t(), not the English words in it: this suite
       // also runs inside index.html#selftest, in the visitor's own language.
       ok('the panel states that every frame is covered',
@@ -980,7 +996,13 @@
     // ---- i18n ---------------------------------------------------------------
     {
       const NEW_STRINGS = [
-        'Redact', 'Redact burned-in annotation', 'Undo redaction',
+        'Redact burned-in annotation', '▣ Redact burned-in text', '↺ Undo redaction',
+        '▣ Edit image', 'View', 'stored pixels',
+        'Rotate, flip, invert or redact the stored pixels',
+        'Invert the view — the file is not changed',
+        'Turn the view 90° — the file is not changed',
+        'Flip the view horizontally — the file is not changed',
+        'Flip the view vertically — the file is not changed',
         'Drag a box over any burned-in text. Drag a box to move it; double-click to delete it.',
         'Redaction covers every frame of this image.',
         'Redaction cannot be undone once the file is exported.',
@@ -991,7 +1013,7 @@
         'This image cannot be redacted: its pixel data uses a compression this browser cannot decode.',
         'Redacting decompresses this image to uncompressed Explicit VR Little Endian. The file will be larger and its Transfer Syntax will change. Continue?',
         'This image was compressed with lossy JPEG; redacting it will store 8 bits per sample.',
-        'Burned In Annotation = YES — identity may be burned into the pixels. Use Redact on the Overview tab.',
+        'Burned In Annotation = YES — identity may be burned into the pixels. Use Redact in the Edit tab.',
       ];
       for (const loc of ['es', 'pt-BR', 'ja', 'ru']) {
         const missing = NEW_STRINGS.filter(s => !I18N[loc] || !I18N[loc][s]);
@@ -999,7 +1021,16 @@
            missing.join(' | ').slice(0, 160));
       }
       ok('i18n: the Redact button title is in ATTR_I18N',
-         ATTR_I18N.some(([id, attr]) => id === 'ovRedact' && attr === 'title'));
+         ATTR_I18N.some(([id, attr]) => id === 'imgRedact' && attr === 'title'));
+      ok('i18n: the Overview view tools carry their own titles in ATTR_I18N',
+         ['ovRotate', 'ovFlipH', 'ovFlipV', 'ovInvert'].every(id =>
+           ATTR_I18N.some(([i, attr, key]) => i === id && attr === 'title' && /view/i.test(key))));
+      // The Edit tab's own titles come from PIXEL_OPS at sync time. If a view
+      // title were ever set to one of those keys the two rows would read alike
+      // again in every language at once.
+      ok('i18n: no Overview title reuses a PIXEL_OPS label',
+         ATTR_I18N.filter(([id]) => id.startsWith('ov'))
+                  .every(([, , key]) => !Object.values(PIXEL_OPS).some(op => op.label === key)));
     }
   } catch (e) {
     ok('suite ran to completion', false, (e && e.stack ? e.stack.split('\n')[0] : String(e)));
