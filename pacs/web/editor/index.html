@@ -207,6 +207,13 @@
     .ov-samples-note a { color: var(--text-dim); white-space: nowrap; }
     .ov-samples-note a:hover { color: var(--accent); }
 
+    /* The desktop build, offered on the public site and nowhere else. No
+       `display` property here on purpose: the element carries both [hidden] and
+       .hidden, and an authored display rule would beat the UA's [hidden]. */
+    .ov-get { color: var(--text-muted); font-size: 11px; text-align: center; }
+    .ov-get a { color: var(--text-dim); white-space: nowrap; margin-left: 5px; }
+    .ov-get a:hover { color: var(--accent); }
+
     /* Content shell */
     .ov-content { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
     .ov-studybar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; background: #0d0d0d; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
@@ -1720,6 +1727,16 @@
             <span data-i18n>Built in your browser from a synthetic phantom. Nothing is uploaded, and no patient ever existed.</span>
             <a href="tests/gallery.html" data-i18n>More test files →</a>
           </div>
+        </div>
+
+        <!-- The desktop download. Hidden in the markup and revealed only by the
+             script below, which refuses to run anywhere but the public site —
+             this file is also served by a Carino DICOM appliance and packaged
+             inside the desktop app itself, and in neither place is there
+             anything to offer. See the guard for the whole argument. -->
+        <div class="ov-get hidden" id="ovGet" hidden>
+          <span data-i18n>Prefer an app? The editor runs on your desktop too.</span>
+          <a id="ovGetLink" href="https://github.com/MiguelCarino/Carino-DICOM-Editor/releases/latest" target="_blank" rel="noopener"></a>
         </div>
       </div>
 
@@ -10136,6 +10153,74 @@ document.addEventListener('keydown', e => {
 </script>
 
 <script>
+  // The desktop download, on the public site only.
+  //
+  // The guard is a hostname equality test rather than anything cleverer, and it
+  // is the whole security argument for this block. THIS FILE IS SERVED FROM
+  // THREE PLACES: dcm.carino.systems, a Carino DICOM appliance at /editor/, and
+  // inside the desktop app itself over app://. Only the first should see an
+  // offer to download the app — the appliance already ships the editor, the app
+  // IS the download, and, far more importantly, an appliance on a clinical
+  // network must not make a request to api.github.com because somebody visited
+  // its editor. Carino DICOM promises exactly that and the promise is not
+  // negotiable, so the fetch below is unreachable from it by construction.
+  //
+  // The request itself costs a visitor to the public site nothing they have not
+  // already paid: this page is served by GitHub Pages, so GitHub has already
+  // seen the visit and the IP before this line runs. That is what makes it
+  // acceptable here and unacceptable one directory into a hospital.
+  //
+  // It is also why the offer is fetched rather than hardcoded: there is no
+  // release yet, and a link to an empty Releases page is worse than no link.
+  // A 404 leaves the element hidden, so this turns itself on the day a release
+  // is published and needs no edit here.
+  (function () {
+    if (location.hostname !== 'dcm.carino.systems') return;
+
+    const T = window.t || String;
+    const el = document.getElementById('ovGet');
+    const link = document.getElementById('ovGetLink');
+    if (!el || !link) return;
+
+    // Name and matcher together, so a platform cannot be detected under a name
+    // whose assets nothing knows how to find. Order matters: 'linux' appears in
+    // an Android UA string too, so Android is tested first and simply gets the
+    // fallback — there is no build for it.
+    const s = ((navigator.userAgentData && navigator.userAgentData.platform) ||
+               navigator.platform || navigator.userAgent || '').toLowerCase();
+    let os = null;
+    if (s.indexOf('android') >= 0) os = null;
+    else if (s.indexOf('win') >= 0) os = { name: 'Windows', want: (n) => /\.exe$/.test(n) };
+    else if (s.indexOf('mac') >= 0 || s.indexOf('darwin') >= 0) os = { name: 'macOS', want: (n) => /\.dmg$/.test(n) };
+    else if (s.indexOf('linux') >= 0 || s.indexOf('x11') >= 0) os = { name: 'Linux', want: (n) => /\.appimage$/.test(n) };
+
+    fetch('https://api.github.com/repos/MiguelCarino/Carino-DICOM-Editor/releases/latest',
+          { credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((rel) => {
+        if (!rel || !rel.tag_name) return;             // no release yet — stay hidden
+        // The asset is preferred; the release page is the fallback, so a
+        // platform whose installer failed to build still gets somewhere useful
+        // rather than a link that 404s.
+        let href = null;
+        if (os) {
+          const hit = (rel.assets || []).find((a) => a && typeof a.name === 'string' && os.want(a.name.toLowerCase()));
+          if (hit && typeof hit.browser_download_url === 'string') href = hit.browser_download_url;
+        }
+        // textContent, never innerHTML: tag_name and the asset names are values
+        // from a network response and are treated as such even though we own
+        // the repository they come from.
+        link.textContent = (os && href)
+          ? T('Download for {os}').replace('{os}', os.name)
+          : T('All downloads');
+        if (href) link.href = href;
+        link.title = 'Carino DICOM Editor ' + String(rel.tag_name).replace(/^v/, '');
+        el.hidden = false;
+        el.classList.remove('hidden');
+      })
+      .catch(() => { /* offline, rate-limited, blocked — the offer simply is not made */ });
+  })();
+
   // The desktop shell's update notice. window.carinoDesktop is published by the
   // Electron preload and exists nowhere else, so on dcm.carino.systems and in
   // the PACS bundle this block returns on its first line: no fetch, no timer,
