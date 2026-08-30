@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Carino DICOM</title>
+<!-- This host served the tag editor until it moved to dcm.carino.systems, so the
+     paths people already have — /tests/gallery.html above all, which the README
+     and the manual both link — arrive here as 404s. Forward the editor's own
+     paths to where the editor now is, and say plainly what happened for anything
+     else, rather than showing GitHub's default page that explains nothing. -->
+<script>
+  (function () {
+    var p = location.pathname;
+    if (/^\/(tests|vendor|fonts)\//.test(p) || /\.(dcm|js|css)$/.test(p)) {
+      location.replace('https://dcm.carino.systems' + p + location.search + location.hash);
+    }
+  })();
+</script>
+<style>
+  body { background:#050505; color:#e5e5e5; font:16px/1.6 system-ui,sans-serif;
+         display:grid; place-items:center; min-height:100vh; margin:0; padding:24px; }
+  main { max-width:34rem; text-align:center; }
+  a { color:#eab308; }
+  code { font-family:ui-monospace,monospace; color:#a3a3a3; }
+</style>
+<main>
+  <h1>Not found</h1>
+  <p>This address is <strong>Carino DICOM</strong>, the gateway.</p>
+  <p>The browser tag editor that used to live here is now
+     <a href="https://dcm.carino.systems/">dcm.carino.systems</a> — its links
+     still work, they just moved.</p>
+  <p><a href="/">Carino DICOM</a> · <a href="/manual/">the manual</a></p>
+</main>

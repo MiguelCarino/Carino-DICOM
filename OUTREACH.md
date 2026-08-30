@@ -115,7 +115,7 @@ file, `software/carino-dicom.yml`:
 
 ```yaml
 name: Carino DICOM
-website_url: https://pacs.carino.systems/
+website_url: https://dicom.carino.systems/
 description: DICOM gateway and continuity appliance for imaging departments. Receives and forwards studies, captures modalities that can only print film, serves a modality worklist, takes HL7 orders, and keeps scanning when the primary archive is unreachable.
 licenses:
   - AGPL-3.0

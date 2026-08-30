@@ -328,6 +328,19 @@ cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
     </div>
   </dialog>
 
+  <!-- This host used to be the tag editor, which is now dcm.carino.systems.
+       Its reference gallery published one-click links of the form
+       #sample=<id> and #case=<id>, and a fragment is never sent to a server, so
+       nothing but script can rescue one: an old link would otherwise land here
+       and silently do nothing, looking like a broken card rather than a moved
+       site. Forward those two shapes and leave every other fragment alone —
+       this page has its own. -->
+  <script>
+    (function () {
+      var m = /^#(sample|case)=/.test(location.hash || '');
+      if (m) location.replace('https://dcm.carino.systems/' + location.hash);
+    })();
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

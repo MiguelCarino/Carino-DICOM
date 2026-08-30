@@ -873,7 +873,7 @@ control.
 
 | Document | What is in it |
 |---|---|
-| [The manual](https://pacs.carino.systems/manual/) | Deployment, the security model, every service, and the software's real limits — in English, Spanish, Portuguese, Japanese and Russian. Also served by the appliance itself at `/manual/`, so it is there when the box is not on the internet |
+| [The manual](https://dicom.carino.systems/manual/) | Deployment, the security model, every service, and the software's real limits — in English, Spanish, Portuguese, Japanese and Russian. Also served by the appliance itself at `/manual/`, so it is there when the box is not on the internet |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The four paths through the code: what runs on which thread, what owns what, what happens when it fails |
 | [CONFIGURATION.md](CONFIGURATION.md) | Every key in `config.json`: what it does, its default, what validation refuses |
 | [SECURITY.md](SECURITY.md) | Threat model, what is and is not protected, private disclosure |

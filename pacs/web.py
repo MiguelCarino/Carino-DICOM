@@ -254,7 +254,7 @@ def create_app(server: PacsServer) -> Flask:
         return jsonify(
             ok=False,
             message="This build does not carry the manual. It is published at "
-                    "https://pacs.carino.systems/manual/",
+                    "https://dicom.carino.systems/manual/",
         ), 404
 
     # The catch-all matches slashes, so it is the one rule that can shadow an
@@ -1420,7 +1420,7 @@ def create_app(server: PacsServer) -> Flask:
 
     # ---- DICOM-editor deep-link (CORS restricted to the editor, GET-only) --
     # The editor may be a separate origin (a public HTTPS site like
-    # dicom.carino.systems), so these two GET endpoints allow cross-origin
+    # dcm.carino.systems), so these two GET endpoints allow cross-origin
     # reads — but ONLY from the origin configured as web.editor_url. A
     # wildcard here would let any page the operator visits enumerate and
     # download stored studies from their localhost PACS. The bundled
