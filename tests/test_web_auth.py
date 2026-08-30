@@ -61,6 +61,10 @@ class FakeServer:
         # request and reads it back through /api/audit, so a mock would only
         # prove the mock works — and the chain is the part worth exercising.
         self.audit = AuditLog(os.path.join(tmpdir, "audit"), log=self.log).open()
+        # create_app's dev-peer routes read this attribute at request time, and
+        # web.py has no getattr fallback. None is "this engine was started
+        # without --dev-peer", which is what every test here is.
+        self.dev_peer = None
         self.calls = []
         self.qr_running = False
         self.qr_error = None

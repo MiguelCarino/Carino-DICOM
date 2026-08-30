@@ -741,6 +741,23 @@ const I18N = {
         'New profile': 'Perfil nuevo',
         'Intact — {n} records, every one matching its digest.': 'Íntegro: {n} registros, todos coinciden con su resumen.',
         'BROKEN at record {n}: {why}': 'ROTO en el registro {n}: {why}',
+
+        // ── Dev peer ──
+        'Dev peer': 'Nodo de pruebas',
+        'a disposable second archive': 'un segundo archivo desechable',
+        'Receiver port': 'Puerto receptor',
+        'Q/R port': 'Puerto Q/R',
+        'Create peer': 'Crear nodo',
+        '🗑 Discard': '🗑 Descartar',
+        'Stop the peer and delete everything it stored': 'Detener el nodo y borrar todo lo que haya almacenado',
+        'Start a second archive on this machine and point a destination at it': 'Inicia un segundo archivo en esta máquina y apunta un destino hacia él',
+        'A second archive inside this process, on 127.0.0.1 only, for testing forwarding, de-identification and C-MOVE. Everything it stores lives in a temporary folder and is deleted with it.': 'Un segundo archivo dentro de este proceso, solo en 127.0.0.1, para probar el reenvío, la anonimización y C-MOVE. Todo lo que almacena vive en una carpeta temporal y se borra con él.',
+        'A disabled black-hole destination is created beside it — enable it in Destinations to make sends fail and fill the Stuck tab.': 'Junto a él se crea un destino «agujero negro» desactivado: actívalo en Destinos para que los envíos fallen y llenen la pestaña Atascados.',
+        'No peer is running.': 'No hay ningún nodo en marcha.',
+        'Stop the dev peer and delete its archive? Everything it received is deleted with it.': '¿Detener el nodo de pruebas y borrar su archivo? Todo lo que recibió se borra con él.',
+        'Peer created.': 'Nodo creado.',
+        'Peer discarded.': 'Nodo descartado.',
+        'Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.': 'Creado por el nodo de pruebas: esta fila se borra al descartarlo. No la reutilices para un nodo real.',
     },
 
     'pt-BR': {
@@ -1420,6 +1437,23 @@ const I18N = {
         'New profile': 'Novo perfil',
         'Intact — {n} records, every one matching its digest.': 'Íntegra — {n} registros, todos conferindo com seu resumo.',
         'BROKEN at record {n}: {why}': 'QUEBRADA no registro {n}: {why}',
+
+        // ── Dev peer ──
+        'Dev peer': 'Nó de teste',
+        'a disposable second archive': 'um segundo arquivo descartável',
+        'Receiver port': 'Porta do receptor',
+        'Q/R port': 'Porta Q/R',
+        'Create peer': 'Criar nó',
+        '🗑 Discard': '🗑 Descartar',
+        'Stop the peer and delete everything it stored': 'Parar o nó e apagar tudo o que ele armazenou',
+        'Start a second archive on this machine and point a destination at it': 'Inicia um segundo arquivo nesta máquina e aponta um destino para ele',
+        'A second archive inside this process, on 127.0.0.1 only, for testing forwarding, de-identification and C-MOVE. Everything it stores lives in a temporary folder and is deleted with it.': 'Um segundo arquivo dentro deste processo, apenas em 127.0.0.1, para testar encaminhamento, anonimização e C-MOVE. Tudo o que ele armazena fica em uma pasta temporária e é apagado junto com ele.',
+        'A disabled black-hole destination is created beside it — enable it in Destinations to make sends fail and fill the Stuck tab.': 'Um destino "buraco negro" desativado é criado ao lado dele — ative-o em Destinos para os envios falharem e encherem a aba Travados.',
+        'No peer is running.': 'Nenhum nó em execução.',
+        'Stop the dev peer and delete its archive? Everything it received is deleted with it.': 'Parar o nó de teste e apagar seu arquivo? Tudo o que ele recebeu é apagado junto.',
+        'Peer created.': 'Nó criado.',
+        'Peer discarded.': 'Nó descartado.',
+        'Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.': 'Criado pelo nó de teste — esta linha é apagada quando ele é descartado. Não a reutilize para um nó real.',
     },
 
     ja: {
@@ -2099,6 +2133,23 @@ const I18N = {
         'New profile': '新しいプロファイル',
         'Intact — {n} records, every one matching its digest.': '改ざんなし — {n} 件の記録がすべてダイジェストと一致します。',
         'BROKEN at record {n}: {why}': '記録 {n} で破損：{why}',
+
+        // ── Dev peer ──
+        'Dev peer': 'テスト用ノード',
+        'a disposable second archive': '使い捨ての第二アーカイブ',
+        'Receiver port': '受信ポート',
+        'Q/R port': 'Q/R ポート',
+        'Create peer': 'ノードを作成',
+        '🗑 Discard': '🗑 破棄',
+        'Stop the peer and delete everything it stored': 'ノードを停止し、保存された内容をすべて削除します',
+        'Start a second archive on this machine and point a destination at it': 'このマシン上に第二のアーカイブを起動し、送信先として登録します',
+        'A second archive inside this process, on 127.0.0.1 only, for testing forwarding, de-identification and C-MOVE. Everything it stores lives in a temporary folder and is deleted with it.': 'このプロセス内に置かれる第二のアーカイブです。127.0.0.1 のみで待ち受け、転送・匿名化・C-MOVE の確認に使います。保存内容は一時フォルダにあり、破棄と同時に削除されます。',
+        'A disabled black-hole destination is created beside it — enable it in Destinations to make sends fail and fill the Stuck tab.': '併せて、無効状態の「ブラックホール」送信先も作成されます。［送信先］で有効にすると送信が失敗し、［滞留］タブが埋まります。',
+        'No peer is running.': 'ノードは動作していません。',
+        'Stop the dev peer and delete its archive? Everything it received is deleted with it.': 'テスト用ノードを停止してアーカイブを削除しますか？受信した内容もすべて削除されます。',
+        'Peer created.': 'ノードを作成しました。',
+        'Peer discarded.': 'ノードを破棄しました。',
+        'Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.': 'テスト用ノードが作成した行です。ノードを破棄すると削除されます。実運用のノードには流用しないでください。',
     },
 
     ru: {
@@ -2778,6 +2829,23 @@ const I18N = {
         'New profile': 'Новый профиль',
         'Intact — {n} records, every one matching its digest.': 'Цела — {n} записей, каждая совпадает со своим хешем.',
         'BROKEN at record {n}: {why}': 'НАРУШЕНА на записи {n}: {why}',
+
+        // ── Dev peer ──
+        'Dev peer': 'Тестовый узел',
+        'a disposable second archive': 'одноразовый второй архив',
+        'Receiver port': 'Порт приёма',
+        'Q/R port': 'Порт Q/R',
+        'Create peer': 'Создать узел',
+        '🗑 Discard': '🗑 Удалить',
+        'Stop the peer and delete everything it stored': 'Остановить узел и удалить всё, что он сохранил',
+        'Start a second archive on this machine and point a destination at it': 'Запускает второй архив на этой машине и добавляет назначение, указывающее на него',
+        'A second archive inside this process, on 127.0.0.1 only, for testing forwarding, de-identification and C-MOVE. Everything it stores lives in a temporary folder and is deleted with it.': 'Второй архив внутри этого процесса, только на 127.0.0.1 — для проверки пересылки, обезличивания и C-MOVE. Всё сохранённое лежит во временной папке и удаляется вместе с ним.',
+        'A disabled black-hole destination is created beside it — enable it in Destinations to make sends fail and fill the Stuck tab.': 'Рядом создаётся выключенное назначение-«чёрная дыра» — включите его в разделе «Назначения», чтобы отправки падали и заполняли вкладку «Застряли».',
+        'No peer is running.': 'Узел не запущен.',
+        'Stop the dev peer and delete its archive? Everything it received is deleted with it.': 'Остановить тестовый узел и удалить его архив? Всё принятое будет удалено вместе с ним.',
+        'Peer created.': 'Узел создан.',
+        'Peer discarded.': 'Узел удалён.',
+        'Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.': 'Создано тестовым узлом — эта строка удаляется вместе с ним. Не используйте её для реального узла.',
     },
 };
 

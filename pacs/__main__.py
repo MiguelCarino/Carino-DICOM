@@ -166,7 +166,7 @@ def cmd_serve(args) -> int:
               file=sys.stderr)
         return 2
 
-    server = PacsServer(cfg)
+    server = PacsServer(cfg, dev_peer=args.dev_peer)
     # Before the services: the receiver hands every stored instance to the index
     # writer, and a cold boot answers its first query out of whatever the rescan
     # has reached by then rather than out of an empty database.
@@ -217,10 +217,32 @@ def cmd_serve(args) -> int:
         server.shutdown()
         return 1
 
+    # AFTER claim(), and NOT gated on --dev-peer. Both halves of that are the
+    # answer to a bug:
+    #
+    #   * It writes to config.json, so it must not run on a launch that is about
+    #     to be refused. Above the claim it fired on the ordinary "I started it
+    #     twice" mistake and rewrote the destinations of the copy that IS
+    #     running, which then disagreed with its own file.
+    #   * The restart that follows a crash is the NORMAL one — the developer
+    #     finished testing, and Dockerfile's CMD and the desktop launcher never
+    #     pass the flag at all. Gating the cleanup on the flag left an enabled
+    #     destination aimed at a released loopback port that any local process
+    #     can bind, plus a temp archive of real studies, for as long as nobody
+    #     happened to run with --dev-peer again.
+    #
+    # Still the only automatic delete in the feature, and still only at startup:
+    # never on a timer, never on a browser closing. A peer whose owner process
+    # is alive is left strictly alone, directory and rows both.
+    from .devpeer import sweep_stale
+    sweep_stale(log=server.log, cfg=cfg)
+
     app = create_app(server)
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
     print(f"{APP_NAME} {__version__} dashboard → {url}")
     print(f"Config: {cfg.path}")
+    if args.dev_peer:
+        print("Dev peer enabled — the dashboard may create a second, disposable archive.")
     try:
         app.run(host=host, port=port, threaded=True, use_reloader=False)
     finally:
@@ -372,6 +394,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="start the Modality Worklist SCP for this run even if config has it off")
     s.add_argument("--qr", action="store_true", dest="qr",
                    help="start the Query/Retrieve SCP for this run even if config has it off")
+    # Not one of the run-once service overrides above, and not a config key —
+    # which is the whole argument for the feature. A key would be editable
+    # through POST /api/config, so an admin token on a deployed appliance could
+    # switch on "spawn a second archive"; a launch flag cannot be reached over
+    # HTTP at all. The shipped container CMD and the desktop launcher never
+    # pass it.
+    s.add_argument("--dev-peer", action="store_true", dest="dev_peer",
+                   help="allow the dashboard to create a disposable second archive for testing "
+                        "(loopback only, deleted when it is discarded or when this process stops)")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")

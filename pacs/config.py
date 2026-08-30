@@ -1368,8 +1368,12 @@ def validate(data: dict) -> None:
             raise ValueError(f"destination '{d.get('name')}' AE title too long")
         # destinations is a list, so _check_bools cannot reach these. Same
         # hazard, higher stakes: enabled: "false" is a node the operator
-        # switched off that keeps receiving studies.
-        for flag in ("enabled", "tls", "no_ris", "emergency_trigger"):
+        # switched off that keeps receiving studies. `ephemeral` marks a row
+        # `pacs serve --dev-peer` wrote and will remove again, and a quoted
+        # "false" there reads as TRUE — so a Save would strip the operator's own
+        # destination on the next discard, and leave the peer's aimed at an
+        # archive that no longer exists.
+        for flag in ("enabled", "tls", "no_ris", "emergency_trigger", "ephemeral"):
             if flag in d and not isinstance(d[flag], bool):
                 raise ValueError(
                     f"destination '{d.get('name')}' has a non-boolean '{flag}' ({d[flag]!r}) — "

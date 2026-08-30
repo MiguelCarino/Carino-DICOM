@@ -73,6 +73,16 @@
         <div class="navrow">
           <button class="navbtn" data-panel="dlgActivity" data-cap="logs.read audit.read"><span class="nav-ico">📄</span> <span data-i18n>Activity</span></button>
         </div>
+        <!-- A seventh row, and deliberately not an operational one: it exists
+             only in a process started with --dev-peer, so on every shipped
+             build this row is not there at all. The six-row argument above
+             still holds — this is a bench tool borrowing the nav, not a new
+             area of the appliance. Hidden by BOTH the capability and the launch
+             flag; see applyCapabilities() in app.js. `hidden` in the markup so
+             the row cannot flash before the first status poll answers. -->
+        <div class="navrow">
+          <button class="navbtn" data-panel="dlgDevPeer" data-cap="devpeer.manage" hidden><span class="nav-ico">🧪</span> <span data-i18n>Dev peer</span></button>
+        </div>
         <!-- Who this browser is signed in as. On a shared front-desk machine
              the most expensive mistake is acting under somebody else's name
              without noticing, so it sits in the nav where it is always on
@@ -907,6 +917,36 @@
           <p class="audit-state" id="auditState"></p>
           <div class="audit-list" id="auditList"></div>
         </section>
+        </div>
+      </section>
+
+      <!-- The disposable second archive. Reachable only in a process started
+           with --dev-peer: the engine drops the whole dev_peer status block
+           otherwise, and app.js keeps the nav row hidden while it is absent. No
+           ✕/data-demote button — the merged panels dropped it. -->
+      <section class="panel workpanel" id="dlgDevPeer" hidden>
+        <header class="modal-head">
+          <h2><span data-i18n>Dev peer</span> <small data-i18n>a disposable second archive</small></h2>
+        </header>
+        <div class="modal-body">
+          <p class="hint" data-i18n>A second archive inside this process, on 127.0.0.1 only, for testing forwarding, de-identification and C-MOVE. Everything it stores lives in a temporary folder and is deleted with it.</p>
+          <p class="hint" data-i18n>A disabled black-hole destination is created beside it — enable it in Destinations to make sends fail and fill the Stuck tab.</p>
+          <dl class="kv">
+            <div><dt data-i18n>AE title</dt><dd id="dpAet" class="atomic">—</dd></div>
+            <div><dt data-i18n>Receiver port</dt><dd id="dpScpPort" class="atomic">—</dd></div>
+            <div><dt data-i18n>Q/R port</dt><dd id="dpQrPort" class="atomic">—</dd></div>
+            <div><dt data-i18n>Received</dt><dd id="dpReceived" class="atomic">—</dd></div>
+            <div class="wide"><dt data-i18n>Storage folder</dt><dd id="dpDir" class="path">—</dd></div>
+          </dl>
+          <div class="hist-bar">
+            <div class="hist-tools">
+              <button class="btn tiny" id="dpCreate" data-i18n-title title="Start a second archive on this machine and point a destination at it" data-i18n>Create peer</button>
+              <!-- hidden until the first render says a peer exists, for the same reason
+                   the nav row is: an offer that does nothing reads as broken software. -->
+              <button class="btn tiny danger" id="dpDiscard" hidden data-i18n-title title="Stop the peer and delete everything it stored" data-i18n>🗑 Discard</button>
+            </div>
+          </div>
+          <div class="hist-list" id="dpState"></div>
         </div>
       </section>
 

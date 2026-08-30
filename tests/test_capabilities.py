@@ -72,6 +72,11 @@ DENIED = [
     ("Reception", "get", "/api/routing", None),
     ("Reception", "get", "/api/audit", None),
     ("Reception", "get", "/api/profiles/manage", None),
+    # Standing up a second archive is bench work, not front-desk work, and the
+    # GET is listed beside the POST because the readout carries the peer's
+    # ports and its temp path.
+    ("Reception", "post", "/api/dev-peer", {"action": "create"}),
+    ("Reception", "get", "/api/dev-peer", None),
     ("IT", "post", "/api/shutdown", None),
     ("IT", "post", "/api/studies/delete", {"path": "x"}),
     ("IT", "get", "/api/ris/orders", None),
@@ -81,6 +86,8 @@ DENIED = [
     ("Radiologist", "post", "/api/receiver", {"action": "stop"}),
     ("Radiologist", "post", "/api/studies/delete", {"path": "x"}),
     ("Radiologist", "get", "/api/profiles/manage", None),
+    ("Radiologist", "post", "/api/dev-peer", {"action": "create"}),
+    ("Radiologist", "get", "/api/dev-peer", None),
 ]
 
 

@@ -93,7 +93,7 @@ def test_the_iteration_count_is_read_from_the_record_not_the_constant():
 # ---- capabilities -------------------------------------------------------
 
 def test_admin_holds_everything_including_a_capability_added_later():
-    """Why `admin` is a flag and not a stored list of all seventeen names.
+    """Why `admin` is a flag and not a stored list of every name.
 
     An upgrade that invents a capability must not leave the administrator
     unable to reach the screen it belongs to — an appliance that comes back

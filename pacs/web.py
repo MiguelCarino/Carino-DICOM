@@ -330,6 +330,10 @@ def create_app(server: PacsServer) -> Flask:
         # but infrastructure, and it belongs with the rest of the configuration
         # rather than on a receptionist's screen.
         "notify":         "config.read",
+        # The disposable test archive: its AE title, its loopback ports and the
+        # temp path it lives in. Only present at all when the process was
+        # started with --dev-peer, and only for somebody who may work it.
+        "dev_peer":       "devpeer.manage",
     }
 
     # Sections that survive the gate but still carry an identifier inside them:
@@ -1044,6 +1048,65 @@ def create_app(server: PacsServer) -> Flask:
         if not isinstance(items, list):
             return jsonify(error="expected a 'ports' array"), 400
         return jsonify(server.check_ports(items))
+
+    # Registered unconditionally and answering 404 when the flag was not given,
+    # rather than registered conditionally. Two reasons. An unregistered POST
+    # falls through to the GET catch-all at the bottom of this file and comes
+    # back 405, which reads as "you used the wrong method" rather than "this
+    # build has no such thing". And the capability gate has to run FIRST, so a
+    # profile that may not do this is never told whether the feature exists.
+    #
+    # There is no later Settings checkbox for this to grow into either:
+    # --dev-peer is process-lifetime by design, and a restart is the only way to
+    # change it.
+    def _peer_or_404():
+        if server.dev_peer is None:
+            return jsonify(ok=False,
+                           error="this engine was not started with --dev-peer"), 404
+        return None
+
+    @app.get("/api/dev-peer")
+    def api_dev_peer_get():
+        denied = guard.deny("devpeer.manage")
+        if denied:
+            return denied
+        missing = _peer_or_404()
+        if missing:
+            return missing
+        return jsonify(ok=True, dev_peer=server.dev_peer.status())
+
+    @app.post("/api/dev-peer")
+    def api_dev_peer():
+        """Create or discard the disposable second archive.
+
+        No explicit audit.record() call: the after_request recorder below
+        already records every mutating /api/* call with the real outcome, and
+        _TARGET_FIELDS includes "action", so the record reads `action=create`
+        for free. A second record here would double every line.
+        """
+        denied = guard.deny("devpeer.manage")
+        if denied:
+            return denied
+        missing = _peer_or_404()
+        if missing:
+            return missing
+        action = (request.get_json(silent=True) or {}).get("action")
+        if action not in ("create", "discard"):
+            return jsonify(ok=False, error="action must be create|discard"), 400
+        if action == "discard":
+            block = server.dev_peer.discard()
+            return jsonify(ok=True, dev_peer=block,
+                           message="Dev peer discarded. Any sends still stuck against it now "
+                                   "have nowhere to retry — clear them in Studies → Stuck.")
+        try:
+            block = server.dev_peer.create()
+        except ValueError as exc:      # one already running, a duplicate name, bad wiring
+            return jsonify(ok=False, error=str(exc)), 400
+        except OSError as exc:         # a port lost the race, or the temp folder is unwritable
+            return jsonify(ok=False, error=f"could not start the dev peer: {exc}"), 400
+        return jsonify(ok=True, dev_peer=block,
+                       message=f"Dev peer {block['aet']} listening on "
+                               f"127.0.0.1:{block['scp_port']}.")
 
     @app.post("/api/receiver")
     def api_receiver():
@@ -1977,6 +2040,7 @@ def create_app(server: PacsServer) -> Flask:
         "/api/qr":                  audit.SERVICE_CHANGED,
         "/api/watcher":             audit.SERVICE_CHANGED,
         "/api/emergency":           audit.EMERGENCY_CHANGED,
+        "/api/dev-peer":            audit.DEV_PEER_CHANGED,
         "/api/shutdown":            audit.SHUTDOWN,
     }
 

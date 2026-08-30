@@ -163,7 +163,9 @@
       "enabled": false,
       "tls": false,
       "no_ris": false,
-      "emergency_trigger": false
+      "emergency_trigger": false,
+      "_comment_ephemeral": "written by `pacs serve --dev-peer` on the rows that point at the disposable test archive; they are removed when it is discarded. Do not set it by hand.",
+      "ephemeral": false
     }
   ],
   "web": {

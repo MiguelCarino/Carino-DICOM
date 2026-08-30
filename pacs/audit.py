@@ -92,6 +92,11 @@ STUDY_DELETED = "study.deleted"
 STUDY_READ = "study.read"
 ORDER_CHANGED = "order.changed"
 SERVICE_CHANGED = "service.changed"
+# A second archive coming into existence, or going away with everything it
+# stored. Not SERVICE_CHANGED: that is a listener this appliance already owns
+# being started or stopped, and an auditor reading the trail has to be able to
+# tell the two apart.
+DEV_PEER_CHANGED = "devpeer.changed"
 # A worklist probe borrows a modality's AE title to ask another RIS a question.
 # Auditable because it is this appliance presenting itself as somebody else's
 # equipment, however briefly and however good the reason.

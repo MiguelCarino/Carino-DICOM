@@ -306,7 +306,10 @@ def _probe_verdict(rnd: dict) -> str:
 
 
 class PacsServer:
-    def __init__(self, cfg: Config):
+    # dev_peer is keyword-only and defaulted so every other command
+    # (receive/send/print/ris/mwl/qr) and every existing caller is untouched:
+    # only `pacs serve --dev-peer` passes it.
+    def __init__(self, cfg: Config, *, dev_peer: bool = False):
         self.cfg = cfg
         # When this process started: the origin for uptime and for the counters
         # of objects that outlive a save (the watcher is built once, here).
@@ -380,6 +383,18 @@ class PacsServer:
         # Set by the web layer when it registers the DICOMweb blueprint; status()
         # reports its counters when it is there and zeroes when it is not.
         self.dicomweb = None
+        # The disposable second archive, or None. Only `pacs serve --dev-peer`
+        # passes the flag, and it cannot be reached over HTTP: a config key
+        # would be editable through POST /api/config, so an admin token on a
+        # deployed appliance could switch on "spawn a second archive".
+        # Immutable for the life of the process on purpose — a restart is the
+        # only way to change it, and that is the property the whole feature
+        # rests on. Constructing it allocates nothing: no temp directory, no
+        # thread, no disk walk, so the flag costs nothing until it is used.
+        self.dev_peer = None
+        if dev_peer:
+            from .devpeer import DevPeer      # kept off the import path of every other command
+            self.dev_peer = DevPeer(self, self.log)
         # The order store is always live (manual entry works even with the HL7
         # listener stopped); the listener is an optional front door onto it.
         self.orders = OrderStore(
@@ -2519,6 +2534,12 @@ class PacsServer:
                 "superseded_sends": self.stale_sends(),
             },
             "emergency": self.emergency.status(),
+            # Present ONLY when this process was started with --dev-peer, so a
+            # dashboard that never sees this key hides the panel entirely.
+            # Here rather than in web.py's _status_for because that function
+            # only re-composes what status() returned — a block added there
+            # would be invisible to every consumer that is not the dashboard.
+            **({"dev_peer": self.dev_peer.status()} if self.dev_peer is not None else {}),
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             # "" when the stored config would validate. Non-empty means it was
@@ -2558,6 +2579,18 @@ class PacsServer:
         }
 
     def shutdown(self) -> None:
+        # First, and inside shutdown() rather than in an atexit handler: POST
+        # /api/shutdown calls this and then os._exit(0), which runs no atexit
+        # handler and no finally block. The dashboard's own Stop button is the
+        # most common shutdown on an appliance, so an atexit-only discard would
+        # leak a carino-peer-* tree — index, test studies and all — every single
+        # session. Before the services come down because discard() also rewrites
+        # this config's destinations and wants the primary intact while it does.
+        # discard() is idempotent and never raises: shutdown() runs twice on the
+        # /api/shutdown path, and an exception here would skip stop_index() and
+        # drop the index writer's backlog.
+        if self.dev_peer is not None:
+            self.dev_peer.discard()
         self.emergency.stop()
         self.stop_watcher()
         self.stop_receiver()

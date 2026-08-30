@@ -265,6 +265,15 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 }
 .grid input:focus { outline: none; border-color: var(--accent); }
 .row-actions { white-space: nowrap; display: flex; gap: 6px; }
+/* A destination the dev peer wrote. Marked, not disabled: enabling the black
+   hole here is what the manual's own demo recipe asks for, so the row has to
+   stay editable — but the `ephemeral` flag is a DELETE marker that survives a
+   Save, and an operator who edited this row into a real node would lose it at
+   the next discard with nothing on screen having said so. The title attribute
+   (set in app.js, translated) carries the sentence; this is what makes them
+   look at it. */
+.grid tr.dest-ephemeral td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.grid tr.dest-ephemeral .d-name { border-color: var(--warn); }
 
 /* ---- settings ---- */
 /* auto-fit rather than a fixed 1fr 1fr: at the old 932px body this still

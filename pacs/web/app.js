@@ -84,6 +84,7 @@
   let loadedLogsDir = "";   // no form field; cfg.replace merges over DEFAULTS, so a Save would reset it
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
+  let devPeerAvailable = false;                      // --dev-peer was given AND we may see it (the status block is gated)
   let lastStatus = null;                             // newest /api/status, for the panels that render on demand
 
   /* ── Authentication ──────────────────────────────────────────────
@@ -155,6 +156,14 @@
   }
   function applyCapabilities() {
     document.querySelectorAll(".navbtn").forEach((b) => { b.hidden = !capAllowed(b); });
+    // The Dev peer row answers to a launch argument as well as a capability,
+    // and a capability check cannot express one. This must live INSIDE
+    // applyCapabilities: the loop above re-asserts `hidden` on every .navbtn
+    // from data-cap alone, so a flag applied anywhere else would be undone the
+    // next time somebody's permissions changed — and the row would reappear on
+    // an appliance that never passed the flag.
+    const dp = document.querySelector('.navbtn[data-panel="dlgDevPeer"]');
+    if (dp) dp.hidden = dp.hidden || !devPeerAvailable;
     // Badges lead to a tab, so they follow the tab's capability, not the row's.
     document.querySelectorAll(".navrow .badge[data-panel]").forEach((b) => {
       b.dataset.forbidden = capAllowed(b) ? "" : "1";
@@ -574,6 +583,15 @@
     }
 
     editorUrl = (s.editor_url || "").trim();
+
+    // A gated section is DROPPED, not blanked, for a profile without the
+    // capability (see _STATUS_GATES), so "absent" covers both "the flag was
+    // never given" and "not yours to see" — and the panel is hidden either way.
+    // applyCapabilities runs only when `me` changes, so a flag that turned out
+    // to be there has to ask for the redraw itself.
+    const nextPeer = !!(s.dev_peer && s.dev_peer.available);
+    if (nextPeer !== devPeerAvailable) { devPeerAvailable = nextPeer; applyCapabilities(); }
+    if (activePanel === "dlgDevPeer") renderDevPeer(s.dev_peer || null);
 
     // The two counts that share the Studies row, and the one on Orders. Each
     // carries its own glyph and its own spoken name: two bare numbers on one
@@ -1840,6 +1858,23 @@
     tr.querySelector(".d-tls").checked = !!d.tls;
     tr.querySelector(".d-noris").checked = !!d.no_ris;
     tr.querySelector(".d-emg").checked = !!d.emergency_trigger;
+    // Not an input: the dev peer writes this flag and removes it again. A Save
+    // has to hand it back exactly as it arrived, or discarding the peer would
+    // leave two destinations aimed at an archive that no longer exists — the
+    // whole-document-save hazard CONTRIBUTING.md describes, one level down
+    // inside a list where the loadedX snapshots cannot reach.
+    tr.dataset.ephemeral = d.ephemeral ? "1" : "";
+    if (d.ephemeral) {
+      // ...but handing it back INVISIBLY is how an operator ends up editing
+      // this row into a real destination and losing it at the next discard.
+      // The flag means "the dev peer wrote this and will delete it again", so
+      // the row says so. Still fully editable: enabling the black hole is
+      // exactly what the demo recipe asks for.
+      const why = T("Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.");
+      tr.classList.add("dest-ephemeral");
+      tr.querySelector(".d-name").title = why;
+      tr.querySelector(".d-host").title = why;
+    }
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
     $("destBody").appendChild(tr);
@@ -2061,6 +2096,7 @@
         tls: tr.querySelector(".d-tls").checked,
         no_ris: tr.querySelector(".d-noris").checked,
         emergency_trigger: tr.querySelector(".d-emg").checked,
+        ephemeral: tr.dataset.ephemeral === "1",
       }))
       .filter((d) => d.host && d.aet && d.port);
   }
@@ -2615,6 +2651,47 @@
       } catch (e) { flashNote(e.message, false); }
     });
     input.click();
+  }
+
+  /* ── Dev peer (the disposable second archive) ─────────────────
+     Only reachable in a process started with --dev-peer: the engine omits the
+     whole dev_peer status block otherwise, and the nav row stays hidden. */
+  async function loadDevPeer() {
+    try { renderDevPeer((await api("/api/dev-peer")).dev_peer || null); }
+    catch (e) { $("dpState").textContent = e.message; }
+  }
+
+  function renderDevPeer(p) {
+    const running = !!(p && p.running);
+    setAtomic("dpAet", running ? p.aet : "");
+    setAtomic("dpScpPort", running ? p.scp_port : "");
+    setAtomic("dpQrPort", running ? p.qr_port : "");
+    // Counts, never identities: the engine sends no patient data in this block
+    // and this panel must not invent a place to put any.
+    setAtomic("dpReceived", running ? p.received : "");
+    setPath("dpDir", running ? p.storage_dir : "");
+    $("dpState").textContent = running ? "" : T("No peer is running.");
+    $("dpCreate").disabled = running;
+    $("dpDiscard").hidden = !running;
+  }
+
+  async function devPeerAction(action, btn) {
+    if (action === "discard" &&
+        !confirm(T("Stop the dev peer and delete its archive? Everything it received is deleted with it."))) return;
+    const old = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "…"; }
+    try {
+      const r = await post("/api/dev-peer", { action: action });
+      flashNote(r.message || (action === "create" ? T("Peer created.") : T("Peer discarded.")), r.ok !== false);
+      renderDevPeer(r.dev_peer || null);
+      pollStatus();
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally {
+      // Restored here, not only on the error path: a successful click that
+      // leaves "…" on the button is a bug this file has shipped once already.
+      if (btn) { btn.textContent = old; btn.disabled = false; }
+    }
   }
 
   /* ── Pending imports (non-DICOM review queue) ────────────────── */
@@ -3492,7 +3569,7 @@
     card.appendChild(flags);
 
     // Capabilities. Hidden behind the admin flag, because an administrator
-    // holds everything by definition and showing seventeen ticked, disabled
+    // holds everything by definition, and a full column of ticked, disabled
     // boxes reads as a list somebody could edit.
     const caps = document.createElement("div");
     caps.className = "person-caps";
@@ -3701,7 +3778,12 @@
     return d;
   }
 
-  const PANELS = ["dlgOverview", "dlgServices", "dlgStudies", "dlgOrders", "dlgConfig", "dlgActivity"];
+  // dlgDevPeer is a PANEL but deliberately NOT in LANDING_ORDER below: a bench
+  // tool must never be somebody's landing panel, and showPanel's hidden-nav
+  // refusal then also blocks a #devpeer deep link on a build that never passed
+  // the flag.
+  const PANELS = ["dlgOverview", "dlgServices", "dlgStudies", "dlgOrders", "dlgConfig", "dlgActivity",
+                  "dlgDevPeer"];
   /* Three of the six hold a tab strip, and the absorbed panels survive as the
      PANE ids inside them. Keeping dlgHistory / dlgStuck / dlgSettings / … as
      real element ids is not sentiment: it is what lets the old #dlgStuck
@@ -3727,6 +3809,7 @@
   // opening the panel re-offers the current list without losing a tick.
   const loaders = {
     dlgOrders: loadOrders,
+    dlgDevPeer: loadDevPeer,
   };
   // Keyed by PANE id, because that is the granularity that now decides what is
   // on screen.
@@ -4144,6 +4227,11 @@
     $("pendRefresh").addEventListener("click", loadPending);
     $("stuckRefresh").addEventListener("click", loadStuck);
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
+    // The nav row itself needs no wiring — the delegated [data-panel] handler
+    // covers it, and carino:langchange re-runs loadDevPeer through
+    // runActiveLoader().
+    $("dpCreate").addEventListener("click", () => devPeerAction("create", $("dpCreate")));
+    $("dpDiscard").addEventListener("click", () => devPeerAction("discard", $("dpDiscard")));
 
     // Language switch: i18n.js retranslates the static markup; everything this
     // file rendered (status cards, list rows, navbar chips) is redrawn here.
@@ -4213,6 +4301,7 @@
   const HASH_NAME = {
     dlgOverview: "overview", dlgServices: "services", dlgStudies: "studies",
     dlgOrders: "orders", dlgConfig: "configuration", dlgActivity: "activity",
+    dlgDevPeer: "devpeer",
   };
   const PANEL_BY_HASH = {};
   Object.entries(HASH_NAME).forEach(([id, name]) => { PANEL_BY_HASH[name] = id; });

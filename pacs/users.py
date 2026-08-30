@@ -61,6 +61,11 @@ CAPABILITIES: dict[str, str] = {
     "routing.write":      "Edit the routing rules",
     "destinations.write": "Add, edit and remove destinations",
     "services.control":   "Start and stop the receiver, printer, worklist and Q/R",
+    # Creating an archive is a different act from starting a listener, and the
+    # audit line has to say so: services.control turns this appliance's own
+    # receiver on and off, this one brings a SECOND archive into existence and
+    # points a destination at it.
+    "devpeer.manage":     "Create and discard the disposable test archive",
     "emergency.activate": "Activate or stand down emergency failover",
     "logs.read":          "Read the operational log",
     "audit.read":         "Read and export the audit trail",
@@ -252,7 +257,7 @@ class Profile:
     def admin(self) -> bool:
         """Holds every capability, including ones a later version invents.
 
-        This is why it is a flag and not a saved list of all seventeen names. An
+        This is why it is a flag and not a saved list of every capability name. An
         upgrade that adds a capability must not silently withhold it from the
         administrator — an appliance that comes back from an update with nobody
         able to reach the new screen is an outage, and the administrator is the
@@ -624,11 +629,16 @@ def preset_profiles() -> list:
             "admin": False,
             # Everything technical, and nothing clinical. Notably absent:
             # studies.delete (a routing problem is never fixed by deleting the
-            # evidence), deid.manage and auth.manage.
+            # evidence), deid.manage, auth.manage and system.shutdown.
+            # devpeer.manage IS here — standing up a throwaway archive to prove
+            # where a forward is dying is bench work, and this is the bench.
+            # Reception and the radiologist do not get it: a second archive is a
+            # bench tool, not a clinical one.
             "capabilities": [
                 "studies.read", "studies.send",
                 "routing.read", "routing.write",
                 "destinations.write", "services.control",
+                "devpeer.manage",
                 "logs.read", "audit.read",
                 "config.read", "config.write",
                 "emergency.activate",

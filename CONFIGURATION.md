@@ -1890,7 +1890,7 @@ Row keys:
 - `capabilities` — list of capability names, ignored while `admin` is true. Valid
   names: `studies.read`, `studies.send`, `studies.delete`, `orders.read`,
   `orders.write`, `routing.read`, `routing.write`, `destinations.write`,
-  `services.control`, `emergency.activate`, `logs.read`, `audit.read`, `config.read`,
+  `services.control`, `devpeer.manage`, `emergency.activate`, `logs.read`, `audit.read`, `config.read`,
   `config.write`, `system.shutdown`, `auth.manage`, `deid.manage`. Anything else in the
   list is dropped at read time and refused at save time. `auth.manage` and
   `deid.manage` are the two that can be used to grant everything else — the first by
