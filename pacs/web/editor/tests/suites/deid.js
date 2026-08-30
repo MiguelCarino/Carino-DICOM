@@ -194,7 +194,7 @@
          String(seq[0]?.['00080104']?.Value?.[0]) === 'Basic Application Confidentiality Profile',
          JSON.stringify(seq[0] || null).slice(0, 120));
       ok('(0012,0063) carries the single method value it always did',
-         vals(d, '00120063').length === 1 && vals(d, '00120063')[0] === 'Carino DICOM-editor — DICOM PS3.15 Basic Profile',
+         vals(d, '00120063').length === 1 && vals(d, '00120063')[0] === 'Carino DICOM Editor — DICOM PS3.15 Basic Profile',
          vals(d, '00120063').join(' | '));
       ok('UIDs are remapped by default', raw(d, '0020000D') !== STUDY && raw(d, '0020000E') !== SERIES &&
          raw(d, '00080018') !== SOP && raw(d, '00200052') !== FOR,

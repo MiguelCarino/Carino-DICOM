@@ -2,11 +2,13 @@
 
 Every setting the appliance has lives in one JSON file. `pacs init` scaffolds it
 from [config.example.json](config.example.json); by default it is
-**`~/CarinoPACS/config.json`**, and under Docker it is `/data/config.json`.
+**`~/CarinoDICOM/config.json`**, and under Docker it is `/data/config.json`. An
+install made before the rename keeps its existing `~/CarinoPACS/config.json`,
+which is still found automatically; nothing has to be moved.
 
 Relative paths inside it resolve against **the directory holding `config.json`**,
 never against the working directory, and `~` is expanded. So `./received` under
-`~/CarinoPACS/config.json` is `~/CarinoPACS/received` whether the process was
+`~/CarinoDICOM/config.json` is `~/CarinoDICOM/received` whether the process was
 started by systemd from `/`, by a tray app from the desktop, or by hand from
 anywhere else. Absolute paths are taken as written.
 
@@ -226,7 +228,7 @@ Enrolment, not a run switch; see [above](#enabled-is-enrolment-not-a-run-switch)
 
 ### `scp.aet`
 
-`string` · default `"CARINOPACS"`
+`string` · default `"CARINODICOM"`
 
 The AE title this receiver answers to — what modalities configure as the called
 AE. Validation refuses it blank (`scp.aet is required`) and refuses anything over
@@ -2272,8 +2274,8 @@ raises out of the command rather than being reported as a config problem.
 
 Where the ✎ Edit button sends a study. Three meanings:
 
-- `"/editor/"` (or any other relative path) — the bundled, same-origin copy of the DICOM
-  editor. No CORS headers are emitted at all, because none are needed.
+- `"/editor/"` (or any other relative path) — the bundled, same-origin copy of Carino
+  DICOM Editor. No CORS headers are emitted at all, because none are needed.
 - a full `http://` or `https://` URL — a separate origin, e.g. a hosted editor. Its scheme
   and host are echoed as `Access-Control-Allow-Origin` (never `*`) on the two GET endpoints
   the deep link uses, `/api/studies/files` and `/api/studies/file`, along with

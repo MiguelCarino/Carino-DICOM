@@ -1,6 +1,6 @@
-# Carino PACS
+# Carino DICOM
 
-Carino PACS is a **DICOM gateway and continuity appliance**: one box, in one
+Carino DICOM is a **DICOM gateway and continuity appliance**: one box, in one
 department, that keeps imaging moving when something upstream breaks — and that
 talks to the equipment nothing else will talk to.
 
@@ -107,13 +107,14 @@ Podman — on a stock install it fails before it reads the compose file. The
 native path has fewer moving parts:
 
 ```bash
-mkdir -p ~/CarinoPACS
-podman build --format docker -t carino-pacs:local .
-install -Dm644 packaging/podman/carino-pacs.container \
-        ~/.config/containers/systemd/carino-pacs.container
+[ -d ~/CarinoPACS ] && [ ! -d ~/CarinoDICOM ] && mv ~/CarinoPACS ~/CarinoDICOM
+mkdir -p ~/CarinoDICOM
+podman build --format docker -t carino-dicom:local .
+install -Dm644 packaging/podman/carino-dicom.container \
+        ~/.config/containers/systemd/carino-dicom.container
 systemctl --user daemon-reload
-systemctl --user start carino-pacs
-journalctl --user -u carino-pacs -f      # the token prints on first boot
+systemctl --user start carino-dicom
+journalctl --user -u carino-dicom -f     # the token prints on first boot
 ```
 
 That is a Quadlet unit: systemd generates a real service from it and manages the
@@ -122,7 +123,7 @@ you rather than by a subordinate uid, and `systemctl start` returns only once th
 DICOM port is genuinely accepting associations rather than once the process
 exists. See [`packaging/README.md`](packaging/README.md#linux-podman-rootless)
 for what differs from Docker, and
-[`packaging/podman/carino-pacs.container`](packaging/podman/carino-pacs.container),
+[`packaging/podman/carino-dicom.container`](packaging/podman/carino-dicom.container),
 which is written to be read.
 
 If you prefer compose, `docker-compose.yml` does work under Podman once a
@@ -134,7 +135,7 @@ image-level healthcheck as well, and uncomment `userns_mode: keep-id`.
 
 ```bash
 ./setup.sh          # creates .venv and installs dependencies
-./run.sh init       # writes ~/CarinoPACS/config.json and creates the folders
+./run.sh init       # writes ~/CarinoDICOM/config.json and creates the folders
 ./run.sh serve      # dashboard at http://127.0.0.1:8042
 ```
 
@@ -188,7 +189,7 @@ On disk it lands under the storage directory, organised by patient / study /
 series:
 
 ```
-~/CarinoPACS/received/1CT1/1.3.6.1.4.1.5962.1.2.1.20040119072730.12322/…/….dcm
+~/CarinoDICOM/received/1CT1/1.3.6.1.4.1.5962.1.2.1.20040119072730.12322/…/….dcm
 ```
 
 Running under Docker, aim the same commands at the published port, or run them
@@ -218,7 +219,7 @@ it is a local sqlite cache and it binds nothing.
 | Service | Default port | Default AE | Config section |
 |---|---|---|---|
 | Dashboard + DICOMweb | 8042 (loopback) | — | `web`, `dicomweb` |
-| Storage SCP (C-STORE / C-ECHO) | 11112 | `CARINOPACS` | `scp` |
+| Storage SCP (C-STORE / C-ECHO) | 11112 | `CARINODICOM` | `scp` |
 | Virtual print receiver | 11113 | `CARINOPRINT` | `print` |
 | Modality Worklist SCP | 11114 | `CARINOMWL` | `mwl` |
 | Query/Retrieve SCP | 11115 | `CARINOQR` | `qr` |
@@ -685,7 +686,7 @@ before anything binds:
 ```
 Refusing to serve the dashboard on '0.0.0.0': it is reachable from the network
 and web.auth_token is empty.
-  Set a token:  python -m pacs -c ~/CarinoPACS/config.json init --token
+  Set a token:  python -m pacs -c ~/CarinoDICOM/config.json init --token
   Or keep it on this machine only:  --host 127.0.0.1
 ```
 
@@ -713,7 +714,7 @@ TLS, with client certificates for mutual authentication, and `allowed_aets` /
 
 ## No telemetry, and the licence
 
-**Carino PACS collects nothing and sends nothing.** No analytics, no crash
+**Carino DICOM collects nothing and sends nothing.** No analytics, no crash
 reporting, no update checks, no usage counters, no remote logging, no license
 server, and no third-party script fetched at runtime — everything the dashboard
 needs, fonts included, is vendored in this repository. The only outbound
@@ -775,11 +776,19 @@ goes wrong when it is set badly. One section per listener — `scp`, `scu`,
 which the setup chooser stamps and nobody edits by hand. CONFIGURATION.md
 carries the current list; this paragraph is the shape, not the inventory.
 
-By default everything lives in **`~/CarinoPACS/`** — the config, the `received` /
+By default everything lives in **`~/CarinoDICOM/`** — the config, the `received` /
 `outgoing` / `sent` / `pending` folders, the sqlite index and a dated log file
 per day. Relative paths resolve against the config file's own directory and `~`
 is expanded, so a fresh install keeps itself in one visible place; set absolute
 paths to put them elsewhere. Under Docker that directory is `/data`.
+
+An install made before the rename keeps using **`~/CarinoPACS/`** and does not
+have to be moved: the directory is chosen by looking for `~/CarinoDICOM` first,
+falling back to `~/CarinoPACS` if that is what is already there, and creating
+`~/CarinoDICOM` only when neither exists. The new name is preferred rather than
+the old one so that a stale `~/CarinoPACS` left behind after a move can never
+pull a migrated install backwards into an archive it had already left. To adopt
+the new name, stop the service and `mv ~/CarinoPACS ~/CarinoDICOM`.
 
 Anything you change in the dashboard is written back to the same file, and
 anything you write into the file by hand shows up in the dashboard. Invalid
@@ -796,7 +805,7 @@ The dashboard is optional — every function has a head-less command:
 ./run.sh serve [--receive] [--watch] [--print] [--ris] [--mwl] [--qr] [--host H] [--port P]
                      # web dashboard; the flags start a service for THIS run only,
                      # without enrolling it in the config
-./run.sh receive [--port 11112] [--aet CARINOPACS] [--out ./received]
+./run.sh receive [--port 11112] [--aet CARINODICOM] [--out ./received]
 ./run.sh send [--watch-dir ./outgoing]
 ./run.sh print [--port 11113] [--aet CARINOPRINT]
 ./run.sh ris [--port 2575]
@@ -807,7 +816,7 @@ The dashboard is optional — every function has a head-less command:
 ./run.sh init [--token]        # scaffold config + folders; --token mints the API token
 ```
 
-All commands accept `-c / --config <path>` (default `~/CarinoPACS/config.json`),
+All commands accept `-c / --config <path>` (default `~/CarinoDICOM/config.json`),
 which is a *global* option and goes **before** the subcommand —
 `python -m pacs -c /path/config.json serve`. They all
 stop cleanly on both Ctrl+C and SIGTERM, so `systemctl stop` and

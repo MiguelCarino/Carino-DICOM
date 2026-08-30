@@ -1,4 +1,4 @@
-# PyInstaller spec for the Carino PACS engine (onedir).
+# PyInstaller spec for the Carino DICOM engine (onedir).
 # Build from the repo root:
 #     pyinstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi
 # Produces:  desktop/engine/pacs-engine/pacs-engine[.exe]  (+ _internal/)
@@ -18,7 +18,7 @@ _REQUIRED = ("pydicom", "pynetdicom", "flask", "PIL", "psutil")
 _missing = [m for m in _REQUIRED if importlib.util.find_spec(m) is None]
 if _missing:
     raise SystemExit(
-        "\n\nCannot freeze Carino PACS: missing dependencies in this Python: "
+        "\n\nCannot freeze Carino DICOM: missing dependencies in this Python: "
         + ", ".join(_missing)
         + "\nFreeze with the project venv instead:\n"
         "  rm -rf .venv && ./setup.sh\n"

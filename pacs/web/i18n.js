@@ -1,4 +1,4 @@
-// i18n — Carino PACS dashboard. Fleet convention (see Topo/js/i18n.js and the
+// i18n — Carino DICOM dashboard. Fleet convention (see Topo/js/i18n.js and the
 // bundled editor/i18n.js): English source strings ARE the keys, so a missing
 // entry falls back to English and nothing ever renders blank. carino-lang.js
 // (deferred, loaded just before this script) resolves the locale and fires
@@ -242,9 +242,9 @@ const I18N = {
         'comma-separated IPs, blank = any': 'IP separadas por comas, vacío = cualquiera',
         "Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.": 'Apunta un RIS (o un emisor HL7 de pruebas) a este host:puerto por MLLP para alimentar órdenes <code>ORM^O01</code>, o tecléalas a mano en <em>📋 Órdenes</em>. Dile al técnico que teclee el <em>Nº de acceso</em> en el equipo: eso es lo que empareja el estudio con su orden. La entrega de imágenes nunca se bloquea por falta de emparejamiento.',
         'Integrations': 'Integraciones',
-        'DICOM-editor URL': 'URL de DICOM-editor',
+        'Carino DICOM Editor URL': 'URL de Carino DICOM Editor',
         'e.g. http://localhost:8080/  (blank = hide ✎ Edit)': 'p. ej. http://localhost:8080/  (vacío = ocultar ✎ Editar)',
-        'Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Indica dónde sirves <em>DICOM-editor</em>. Si lo rellenas, cada estudio del Historial tendrá un botón <em>✎ Editar tags</em> que lo abre directamente en el editor. Un editor servido desde otra dirección te pedirá aprobar este servidor la primera vez.',
+        'Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Indica dónde sirves <em>Carino DICOM Editor</em>. Si lo rellenas, cada estudio del Historial tendrá un botón <em>✎ Editar tags</em> que lo abre directamente en el editor. Un editor servido desde otra dirección te pedirá aprobar este servidor la primera vez.',
         '⏻ Shut down service': '⏻ Apagar el servicio',
         'Stop the receiver, watcher and the whole engine process': 'Detener el receptor, la vigilancia y todo el proceso del motor',
         'Save configuration': 'Guardar configuración',
@@ -314,7 +314,7 @@ const I18N = {
         '📎 Attach': '📎 Adjuntar',
         'Attach a PDF/image as a new series': 'Adjuntar un PDF o imagen como serie nueva',
         '✎ Edit tags': '✎ Editar tags',
-        'Open this study in DICOM-editor': 'Abrir este estudio en DICOM-editor',
+        'Open this study in Carino DICOM Editor': 'Abrir este estudio en Carino DICOM Editor',
         'Go to file': 'Ver carpeta',
         'Open the folder on disk': 'Abrir la carpeta en disco',
         'Delete': 'Borrar',
@@ -381,8 +381,8 @@ const I18N = {
         'Watched': 'vigilancia',
 
         // ── Dynamic: shutdown ──
-        'Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.': '¿Apagar Carino PACS?\n\nEl receptor y el envío automático se detienen y el proceso del motor termina.',
-        'Carino PACS has shut down': 'Carino PACS se ha apagado',
+        'Shut down Carino DICOM?\n\nThe receiver and auto-send stop and the engine process exits.': '¿Apagar Carino DICOM?\n\nEl receptor y el envío automático se detienen y el proceso del motor termina.',
+        'Carino DICOM has shut down': 'Carino DICOM se ha apagado',
         'The service stopped. You can close this window, or restart it from your terminal / the desktop app.': 'El servicio se detuvo. Puedes cerrar esta ventana o reiniciarlo desde la terminal o la app de escritorio.',
 
         // ── Dynamic: lists ──
@@ -955,9 +955,9 @@ const I18N = {
         'comma-separated IPs, blank = any': 'IPs separados por vírgula, vazio = qualquer',
         "Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.": 'Aponte um RIS (ou um emissor HL7 de teste) para este host:porta via MLLP para alimentar pedidos <code>ORM^O01</code>, ou digite-os à mão em <em>📋 Pedidos</em>. Diga ao técnico para digitar o <em>Nº de acesso</em> no equipamento: é isso que casa o estudo com o pedido. A entrega das imagens nunca é bloqueada por falta de correspondência.',
         'Integrations': 'Integrações',
-        'DICOM-editor URL': 'URL do DICOM-editor',
+        'Carino DICOM Editor URL': 'URL do Carino DICOM Editor',
         'e.g. http://localhost:8080/  (blank = hide ✎ Edit)': 'ex.: http://localhost:8080/  (vazio = ocultar ✎ Editar)',
-        'Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Defina aqui onde você serve o <em>DICOM-editor</em>. Preenchido, cada estudo no Histórico ganha um botão <em>✎ Editar tags</em> que abre o estudo direto no editor. Um editor servido de outro endereço pede para você aprovar este servidor na primeira vez.',
+        'Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Defina aqui onde você serve o <em>Carino DICOM Editor</em>. Preenchido, cada estudo no Histórico ganha um botão <em>✎ Editar tags</em> que abre o estudo direto no editor. Um editor servido de outro endereço pede para você aprovar este servidor na primeira vez.',
         '⏻ Shut down service': '⏻ Desligar o serviço',
         'Stop the receiver, watcher and the whole engine process': 'Parar o receptor, o monitor e todo o processo do motor',
         'Save configuration': 'Salvar configuração',
@@ -1024,7 +1024,7 @@ const I18N = {
         '📎 Attach': '📎 Anexar',
         'Attach a PDF/image as a new series': 'Anexar um PDF/imagem como nova série',
         '✎ Edit tags': '✎ Editar tags',
-        'Open this study in DICOM-editor': 'Abrir este estudo no DICOM-editor',
+        'Open this study in Carino DICOM Editor': 'Abrir este estudo no Carino DICOM Editor',
         'Go to file': 'Ver pasta',
         'Open the folder on disk': 'Abrir a pasta no disco',
         'Delete': 'Excluir',
@@ -1086,8 +1086,8 @@ const I18N = {
         'Storage': 'armazenamento',
         'Watched': 'monitoramento',
 
-        'Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.': 'Desligar o Carino PACS?\n\nO receptor e o envio automático param e o processo do motor encerra.',
-        'Carino PACS has shut down': 'O Carino PACS foi desligado',
+        'Shut down Carino DICOM?\n\nThe receiver and auto-send stop and the engine process exits.': 'Desligar o Carino DICOM?\n\nO receptor e o envio automático param e o processo do motor encerra.',
+        'Carino DICOM has shut down': 'O Carino DICOM foi desligado',
         'The service stopped. You can close this window, or restart it from your terminal / the desktop app.': 'O serviço parou. Você pode fechar esta janela ou reiniciá-lo pelo terminal ou pelo app de desktop.',
 
         'Loading…': 'Carregando…',
@@ -1651,9 +1651,9 @@ const I18N = {
         'comma-separated IPs, blank = any': 'カンマ区切りのIP、空欄 = すべて',
         "Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.": 'RIS（またはHL7のテスト送信ツール）をMLLPでこのホスト:ポートに向けると<code>ORM^O01</code>オーダを取り込めます。<em>📋オーダ</em>で手入力もできます。技師には装置へ<em>アクセッション番号</em>を入力するよう伝えてください。それが検査とオーダを結び付けます。照合できなくても画像の配信が止まることはありません。',
         'Integrations': '連携',
-        'DICOM-editor URL': 'DICOM-editor のURL',
+        'Carino DICOM Editor URL': 'Carino DICOM Editor のURL',
         'e.g. http://localhost:8080/  (blank = hide ✎ Edit)': '例: http://localhost:8080/（空欄 = ✎編集を非表示）',
-        'Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': '<em>DICOM-editor</em>を配信しているURLを指定します。設定すると、履歴の各検査に<em>✎ タグ編集</em>ボタンが表示され、その検査を直接エディタで開けます。別アドレスから配信されているエディタの場合、初回にこのサーバーの許可を求められます。',
+        'Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': '<em>Carino DICOM Editor</em>を配信しているURLを指定します。設定すると、履歴の各検査に<em>✎ タグ編集</em>ボタンが表示され、その検査を直接エディタで開けます。別アドレスから配信されているエディタの場合、初回にこのサーバーの許可を求められます。',
         '⏻ Shut down service': '⏻ サービスを停止',
         'Stop the receiver, watcher and the whole engine process': '受信・監視とエンジンのプロセス全体を停止します',
         'Save configuration': '設定を保存',
@@ -1720,7 +1720,7 @@ const I18N = {
         '📎 Attach': '📎 添付',
         'Attach a PDF/image as a new series': 'PDF／画像を新しいシリーズとして添付',
         '✎ Edit tags': '✎ タグ編集',
-        'Open this study in DICOM-editor': 'この検査をDICOM-editorで開く',
+        'Open this study in Carino DICOM Editor': 'この検査をCarino DICOM Editorで開く',
         'Go to file': 'フォルダを開く',
         'Open the folder on disk': 'ディスク上のフォルダを開く',
         'Delete': '削除',
@@ -1782,8 +1782,8 @@ const I18N = {
         'Storage': '保存',
         'Watched': '監視',
 
-        'Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.': 'Carino PACS を停止しますか？\n\n受信と自動送信が止まり、エンジンのプロセスが終了します。',
-        'Carino PACS has shut down': 'Carino PACS を停止しました',
+        'Shut down Carino DICOM?\n\nThe receiver and auto-send stop and the engine process exits.': 'Carino DICOM を停止しますか？\n\n受信と自動送信が止まり、エンジンのプロセスが終了します。',
+        'Carino DICOM has shut down': 'Carino DICOM を停止しました',
         'The service stopped. You can close this window, or restart it from your terminal / the desktop app.': 'サービスが停止しました。このウィンドウを閉じるか、ターミナルまたはデスクトップアプリから再起動してください。',
 
         'Loading…': '読み込み中…',
@@ -2347,9 +2347,9 @@ const I18N = {
         'comma-separated IPs, blank = any': 'IP через запятую, пусто = любые',
         "Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.": 'Направьте РИС (или тестовый отправитель HL7) по MLLP на этот хост:порт, чтобы подавать заявки <code>ORM^O01</code>, либо вводите их вручную в <em>📋 Заявки</em>. Скажите лаборанту вводить <em>Номер исследования</em> на аппарате — именно он связывает исследование с заявкой. Доставка изображений никогда не блокируется из-за отсутствия совпадения.',
         'Integrations': 'Интеграции',
-        'DICOM-editor URL': 'URL DICOM-editor',
+        'Carino DICOM Editor URL': 'URL Carino DICOM Editor',
         'e.g. http://localhost:8080/  (blank = hide ✎ Edit)': 'например, http://localhost:8080/  (пусто = скрыть ✎ Правку)',
-        'Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Укажите адрес, по которому вы раздаёте <em>DICOM-editor</em>. Если поле заполнено, у каждого исследования в Истории появится кнопка <em>✎ Правка тегов</em>, открывающая исследование прямо в редакторе. Редактор с другого адреса при первом обращении попросит подтвердить этот сервер.',
+        'Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.': 'Укажите адрес, по которому вы раздаёте <em>Carino DICOM Editor</em>. Если поле заполнено, у каждого исследования в Истории появится кнопка <em>✎ Правка тегов</em>, открывающая исследование прямо в редакторе. Редактор с другого адреса при первом обращении попросит подтвердить этот сервер.',
         '⏻ Shut down service': '⏻ Остановить службу',
         'Stop the receiver, watcher and the whole engine process': 'Остановить приём, наблюдение и весь процесс движка',
         'Save configuration': 'Сохранить конфигурацию',
@@ -2416,7 +2416,7 @@ const I18N = {
         '📎 Attach': '📎 Прикрепить',
         'Attach a PDF/image as a new series': 'Прикрепить PDF или изображение как новую серию',
         '✎ Edit tags': '✎ Теги',
-        'Open this study in DICOM-editor': 'Открыть это исследование в DICOM-editor',
+        'Open this study in Carino DICOM Editor': 'Открыть это исследование в Carino DICOM Editor',
         'Go to file': 'В папке',
         'Open the folder on disk': 'Открыть папку на диске',
         'Delete': 'Удалить',
@@ -2478,8 +2478,8 @@ const I18N = {
         'Storage': 'хранение',
         'Watched': 'наблюдение',
 
-        'Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.': 'Остановить Carino PACS?\n\nПриём и автоотправка остановятся, процесс движка завершится.',
-        'Carino PACS has shut down': 'Carino PACS остановлен',
+        'Shut down Carino DICOM?\n\nThe receiver and auto-send stop and the engine process exits.': 'Остановить Carino DICOM?\n\nПриём и автоотправка остановятся, процесс движка завершится.',
+        'Carino DICOM has shut down': 'Carino DICOM остановлен',
         'The service stopped. You can close this window, or restart it from your terminal / the desktop app.': 'Служба остановлена. Можно закрыть это окно или перезапустить её из терминала либо настольного приложения.',
 
         'Loading…': 'Загрузка…',

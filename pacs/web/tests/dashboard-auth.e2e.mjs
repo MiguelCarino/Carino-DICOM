@@ -148,7 +148,7 @@ class CDP {
 }
 
 /* ---- fixture: a real engine, a real token, a distinctive config ------ */
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-pacs-e2e-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-dicom-e2e-"));
 const cfgPath = path.join(tmp, "config.json");
 const [webPort, scpPort, qrPort, devPort, openPort] = await freePorts(5);
 

@@ -1,4 +1,4 @@
-"""PyInstaller entry point — runs the Carino PACS CLI as a frozen binary.
+"""PyInstaller entry point — runs the Carino DICOM CLI as a frozen binary.
 
     pacs-engine serve --host H --port P
 

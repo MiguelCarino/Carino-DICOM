@@ -4,14 +4,14 @@
   <link rel="icon" type="image/webp" href="logo.webp">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carino PACS — DICOM store server</title>
+  <title>Carino DICOM — DICOM store server</title>
   <!-- Self-hosted fleet fonts (shared with the bundled editor — no CDN) -->
   <link rel="stylesheet" href="editor/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
-  <script src="carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
   <!-- Fleet language preference + switcher, then this app's dictionary. Both
        deferred and in this order: i18n.js reads window.CarinoLang. -->
   <script src="carino-lang.js" defer></script>
@@ -805,10 +805,10 @@
               </fieldset>
               <fieldset>
                 <legend data-i18n>Integrations</legend>
-                <label><span data-i18n>DICOM-editor URL</span>
+                <label><span data-i18n>Carino DICOM Editor URL</span>
                   <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
                 </label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
+                <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
               </fieldset>
             </div>
           </div>
@@ -1051,7 +1051,7 @@
       <div class="hist-actions">
         <button class="btn tiny hist-send" data-i18n-title title="Forward to enabled destinations">Send</button>
         <button class="btn tiny ghost hist-attach" data-i18n-title title="Attach a PDF/image as a new series" data-i18n>📎 Attach</button>
-        <button class="btn tiny ghost hist-edit" data-i18n-title title="Open this study in DICOM-editor" hidden data-i18n>✎ Edit tags</button>
+        <button class="btn tiny ghost hist-edit" data-i18n-title title="Open this study in Carino DICOM Editor" hidden data-i18n>✎ Edit tags</button>
         <button class="btn tiny ghost hist-open" data-i18n-title title="Open the folder on disk" data-i18n>Go to file</button>
         <button class="btn tiny danger hist-del" data-i18n-title title="Delete from disk" data-i18n>Delete</button>
       </div>

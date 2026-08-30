@@ -1,5 +1,5 @@
 /* ============================================================
-   Carino PACS desktop — Electron tray agent.
+   Carino DICOM desktop — Electron tray agent.
    ------------------------------------------------------------
    Runs the Python DICOM engine (`pacs serve`) as a background child
    process and shows a tray icon. Which DICOM services come up is the
@@ -7,9 +7,10 @@
    flags, and the shell must not override them from here. The window shows a
    loading screen immediately, then the dashboard once the engine is up
    (or an error page pointing at the engine log). On first run it asks
-   where to store data (default ~/CarinoPACS), creates the folders, and
-   starts the service. Closing the window hides it to the tray; Quit (or
-   the dashboard "Shut down service") stops the engine and exits.
+   where to store data (~/CarinoDICOM, or an existing ~/CarinoPACS), creates
+   the folders, and starts the service. Closing the window hides it to the
+   tray; Quit (or the dashboard "Shut down service") stops the engine and
+   exits.
 
    Dev run:   cd desktop && npm install && npm start
    ============================================================ */
@@ -41,15 +42,57 @@ const ASSETS = path.join(__dirname, "assets");
 let tray = null;
 let win = null;
 let py = null;
-let dataDir = path.join(os.homedir(), "CarinoPACS");   // resolved at startup
+let dataDir = defaultDataDir();   // resolved at startup
 let serverUrl = "http://127.0.0.1:8042/";
 
 // ---- data folder / first run -------------------------------------------
-function defaultDataDir() { return path.join(os.homedir(), "CarinoPACS"); }
+// The same three-branch order as pacs/config.py's default_dir(), for the same
+// reason: a stale ~/CarinoPACS beside a migrated ~/CarinoDICOM must not win, or
+// the shell offers the user an archive they already left. The two copies have
+// no shared source of truth — change one and you must change the other.
+function defaultDataDir() {
+  const home = os.homedir();
+  const current = path.join(home, "CarinoDICOM");
+  const legacy = path.join(home, "CarinoPACS");
+  try { if (fs.statSync(current).isDirectory()) return current; } catch (e) {}
+  try { if (fs.statSync(legacy).isDirectory()) return legacy; } catch (e) {}
+  return current;
+}
+// The rename moved Electron's userData, so the folder an upgrading user chose
+// is recorded in a directory this build never looks at. Read it anyway, from
+// the sibling the old name would have produced. defaultDataDir()'s fallback
+// only rescues someone who kept the default: a user who picked a folder of
+// their own has neither ~/CarinoDICOM nor ~/CarinoPACS, so first run would
+// offer them an empty new default and "Use default" is the one click that
+// starts the engine on an empty archive with the real one still on disk and
+// nothing pointing at it. It matters more here than for the CLI because
+// engineCommand() passes --config explicitly, so pacs/config.py's resolver
+// never runs for a desktop install and this is the only guard. The three
+// spellings are what Electron derives from package.json across the
+// generations of this build — the same list reset.sh sweeps.
+const LEGACY_USERDATA = ["Carino PACS", "Carino-PACS", "carino-pacs-desktop"];
+
 function locationFile() { return path.join(app.getPath("userData"), "location.json"); }
 
+function readLocation(file) {
+  try { const j = JSON.parse(fs.readFileSync(file, "utf8")); if (j && j.dir) return j.dir; } catch (e) {}
+  return null;
+}
+
 function loadSavedDataDir() {
-  try { const j = JSON.parse(fs.readFileSync(locationFile(), "utf8")); if (j && j.dir) return j.dir; } catch (e) {}
+  const own = readLocation(locationFile());
+  if (own) return own;
+  const siblings = path.dirname(app.getPath("userData"));
+  for (const name of LEGACY_USERDATA) {
+    const dir = readLocation(path.join(siblings, name, "location.json"));
+    // A folder an uninstalled build recorded may be gone, or on a volume that
+    // is not mounted; adopting it would start the engine on a path that has to
+    // be created from nothing, which is the failure this is here to avoid.
+    if (dir && fs.existsSync(dir)) {
+      saveDataDir(dir);   // written forward, so the old directory is read once
+      return dir;
+    }
+  }
   return null;   // null → never configured (first run)
 }
 function saveDataDir(dir) {
@@ -69,8 +112,8 @@ async function firstRunSetup() {
   const def = defaultDataDir();
   const r = await dialog.showMessageBox({
     type: "question",
-    title: t("Carino PACS — choose data folder"),
-    message: t("Where should Carino PACS store its data?"),
+    title: t("Carino DICOM — choose data folder"),
+    message: t("Where should Carino DICOM store its data?"),
     detail: t("Received images, the outgoing queue and logs are saved here:\n\n{dir}\n\nUse this default, or choose another folder.", { dir: def }),
     buttons: [t("Use default"), t("Choose another…"), t("Quit")],
     defaultId: 0, cancelId: 2, noLink: true,
@@ -79,7 +122,7 @@ async function firstRunSetup() {
   let base = def;
   if (r.response === 1) {
     const pick = await dialog.showOpenDialog({
-      title: t("Choose the Carino PACS data folder"),
+      title: t("Choose the Carino DICOM data folder"),
       defaultPath: os.homedir(),
       properties: ["openDirectory", "createDirectory"],
       buttonLabel: t("Use this folder"),
@@ -172,13 +215,13 @@ function waitForServer(timeoutMs = 40000) {
 function createWindow() {
   win = new BrowserWindow({
     width: 1150, height: 820, show: false,
-    title: "Carino PACS", icon: path.join(ASSETS, "icon.png"),
+    title: "Carino DICOM", icon: path.join(ASSETS, "icon.png"),
     backgroundColor: "#050505", autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, "loading.html"));   // never a blank/black window
   win.webContents.setWindowOpenHandler(({ url }) => {
-    // The bundled DICOM-editor opens in its OWN Electron window (not the system
+    // The bundled editor opens in its OWN Electron window (not the system
     // browser). action:"allow" keeps window.opener wired, so the PACS→editor
     // postMessage bridge still delivers the study. Everything else (GitHub,
     // LinkedIn, …) opens in the user's browser.
@@ -190,7 +233,7 @@ function createWindow() {
           action: "allow",
           overrideBrowserWindowOptions: {
             width: 1200, height: 860,
-            title: "DICOM Editor — Carino", icon: path.join(ASSETS, "icon.png"),
+            title: "Carino DICOM Editor", icon: path.join(ASSETS, "icon.png"),
             backgroundColor: "#000000", autoHideMenuBar: true,
             webPreferences: { contextIsolation: true, nodeIntegration: false },
           },
@@ -211,7 +254,7 @@ function showError(msg) {
     "color:#f5f5f5;font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:24px}" +
     ".b{max-width:560px}h2{color:#ef4444;margin:0 0 12px}p{color:#8a8a8a;line-height:1.55}" +
     "code{color:#f5f5f5;background:#111;padding:2px 6px;border-radius:4px;font-size:.85em;word-break:break-all}</style>" +
-    "<div class=b><h2>" + esc(t("Carino PACS couldn't start")) + "</h2><p>" + esc(msg).replace(/\n/g, "<br>") + "</p>" +
+    "<div class=b><h2>" + esc(t("Carino DICOM couldn't start")) + "</h2><p>" + esc(msg).replace(/\n/g, "<br>") + "</p>" +
     "<p>" + esc(t("Details were written to:")) + "<br><code>" + esc(logPath) + "</code></p></div>";
   if (win && !win.isDestroyed()) {
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
@@ -223,7 +266,7 @@ function showWindow() { if (!win) createWindow(); win.show(); win.focus(); }
 
 function buildMenu() {
   return Menu.buildFromTemplate([
-    { label: t("Open Carino PACS"), click: showWindow },
+    { label: t("Open Carino DICOM"), click: showWindow },
     { type: "separator" },
     {
       label: t("Start at login"), type: "checkbox",
@@ -231,13 +274,13 @@ function buildMenu() {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: "separator" },
-    { label: t("Quit Carino PACS"), click: quitApp },
+    { label: t("Quit Carino DICOM"), click: quitApp },
   ]);
 }
 
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, "tray.png")));
-  tray.setToolTip(t("Carino PACS — DICOM store"));
+  tray.setToolTip(t("Carino DICOM — DICOM store"));
   tray.setContextMenu(buildMenu());
   tray.on("click", showWindow);
   tray.on("double-click", showWindow);

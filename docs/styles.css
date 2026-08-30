@@ -1,4 +1,4 @@
-/* Carino PACS landing page — Carino workshop dark theme (gold on near-black).
+/* Carino DICOM landing page — Carino workshop dark theme (gold on near-black).
    Tuned to be compact: downloads sit in the hero, tech details collapse.
 
    Same value-rendering policy as the dashboard (see the top of
@@ -288,7 +288,7 @@ a { color: var(--accent); }
 .firstrun p { color: var(--muted); font-size: .82rem; margin: 4px 0 0; }
 /* Inline code in prose is an identifier or a path — the one value class allowed
    to break mid-token, because `pacs serve|receive|send|…` and
-   `/Applications/Carino-PACS.app` carry no spaces to break at and would
+   `/Applications/Carino-DICOM.app` carry no spaces to break at and would
    otherwise push the whole page sideways on a phone. Block code inside <pre>
    is exempt below: it scrolls in its own box instead. */
 .firstrun code, .techbox code, .tech-body code { font-family: var(--mono); background: #000; padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }

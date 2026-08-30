@@ -1,23 +1,35 @@
 #!/usr/bin/env bash
-# Reset Carino PACS to a clean slate for testing: delete ALL runtime config/data
+# Reset Carino DICOM to a clean slate for testing: delete ALL runtime config/data
 # and local build artifacts. Source files are left untouched. Pass -y to skip
 # the confirmation prompt.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-DATA="$HOME/CarinoPACS"
+DATA="$HOME/CarinoDICOM"
+LEGACY_DATA="$HOME/CarinoPACS"            # an install from before the rename; config.py still uses it
 targets=(
   "$DATA"                                 # config.json + received/outgoing/sent/logs + .carinopacs_state.json
+  "$LEGACY_DATA"
   ".venv"                                 # Python virtualenv
   "build"                                 # PyInstaller workpath (repo root)
   "desktop/node_modules"
   "desktop/dist"                          # built installers
   "desktop/engine"                        # frozen engine
   "pacs/__pycache__" "packaging/__pycache__"
-  "$HOME/.config/Carino PACS"             # stray Electron userData from older builds
-  "$HOME/.config/Carino-PACS"
-  "$HOME/.config/carino-pacs-desktop"
 )
+
+# Stray Electron userData — both generations of the name, in every spelling
+# electron-builder derives from desktop/package.json. Under two roots because
+# Electron puts it in ~/.config on Linux and ~/Library/Application Support on
+# macOS, and this repo is developed on the Mac: a sweep that misses
+# location.json leaves the desktop app coming back up on its previously chosen
+# data folder with no first-run prompt, which is the exact state these entries
+# exist to clear and the one you need cleared to test the ~/CarinoDICOM
+# fallback through the desktop path. A root that does not exist costs nothing.
+for name in "Carino DICOM" "Carino-DICOM" "carino-dicom-desktop" \
+            "Carino PACS" "Carino-PACS" "carino-pacs-desktop"; do
+  targets+=("$HOME/.config/$name" "$HOME/Library/Application Support/$name")
+done
 
 echo "This will DELETE (source is NOT touched):"
 found=0

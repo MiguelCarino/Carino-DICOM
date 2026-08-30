@@ -54,7 +54,7 @@ QUEUE_MAX = 256
 ROLE_GUIDANCE = {
     "receptionist": (
         "Orders cannot reach the modalities from the RIS while this lasts. "
-        "Key new orders into Carino PACS by hand (Orders → New order) and give "
+        "Key new orders into Carino DICOM by hand (Orders → New order) and give "
         "the technologist the accession number to type into the modality — that "
         "is what lets the study be matched back to the order afterwards."),
     "radiologist": (
@@ -75,13 +75,13 @@ ROLE_GUIDANCE = {
 }
 
 GENERIC_GUIDANCE = (
-    "Carino PACS is still receiving and is queueing studies for the primary. "
+    "Carino DICOM is still receiving and is queueing studies for the primary. "
     "Nothing is lost while this lasts.")
 
 SUBJECTS = {
-    "triggered": "Carino PACS: primary '{dest}' is unreachable",
-    "activated": "Carino PACS: emergency failover ACTIVE ({dest})",
-    "resolved":  "Carino PACS: back to normal ({dest})",
+    "triggered": "Carino DICOM: primary '{dest}' is unreachable",
+    "activated": "Carino DICOM: emergency failover ACTIVE ({dest})",
+    "resolved":  "Carino DICOM: back to normal ({dest})",
 }
 
 
@@ -256,6 +256,8 @@ class Notifier:
             return
         body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json",
+                   # Receivers allow-list this token, so it keeps the
+                   # pre-rename spelling until they have been told otherwise.
                    "User-Agent": "Carino-PACS"}
         secret = str(wh.get("secret", "") or "")
         if secret:
@@ -308,11 +310,14 @@ class Notifier:
         to = getattr(profile, "email", "")
         if not to:
             return
+        # The fallback sender keeps the pre-rename spelling: a site that has
+        # allow-listed this address would silently drop the failover alert —
+        # the one message that must arrive — if it changed under them.
         sender = str(sm.get("from", "") or "").strip() or f"carino-pacs@{host}"
         msg = EmailMessage()
         msg["Subject"] = SUBJECTS.get(
             payload.get("event", "").split(".")[-1],
-            "Carino PACS: emergency failover").format(
+            "Carino DICOM: emergency failover").format(
                 dest=payload.get("destination", "") or "the primary")
         msg["From"] = sender
         msg["To"] = to
@@ -361,16 +366,16 @@ class Notifier:
         event = payload.get("event", "")
 
         if event.endswith("resolved"):
-            headline = (f"{dest} is reachable again and Carino PACS has returned to "
+            headline = (f"{dest} is reachable again and Carino DICOM has returned to "
                         f"normal operation. Studies held during the outage have been "
                         f"forwarded.")
         elif event.endswith("activated"):
             by = payload.get("activated_by") or "the system"
             headline = (f"Emergency failover is ACTIVE, activated by {by}. "
-                        f"Carino PACS is serving the modality worklist locally and "
+                        f"Carino DICOM is serving the modality worklist locally and "
                         f"holding received studies for {dest}.")
         else:
-            headline = (f"{dest} has stopped answering and Carino PACS has raised an "
+            headline = (f"{dest} has stopped answering and Carino DICOM has raised an "
                         f"emergency. Failover has NOT been activated — it is waiting "
                         f"for someone to decide.")
 
@@ -382,9 +387,9 @@ class Notifier:
             lines += [f"Destination: {dest}",
                       f"State: {payload.get('state', '')}",
                       f"Since: {payload.get('since', '') or 'just now'}", ""]
-        lines += ["Open the Carino PACS dashboard to act on this.",
+        lines += ["Open the Carino DICOM dashboard to act on this.",
                   "",
-                  "— Carino PACS. This message was sent because your profile is named "
+                  "— Carino DICOM. This message was sent because your profile is named "
                   "in this appliance's emergency notification list."]
         return "\n".join(lines)
 

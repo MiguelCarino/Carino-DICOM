@@ -1,4 +1,4 @@
-# Running, building & releasing Carino PACS
+# Running, building & releasing Carino DICOM
 
 Three things, in order of commitment:
 
@@ -103,8 +103,18 @@ fail to start.
 
 In a packaged build the engine is the frozen `pacs-engine` binary inside the
 app, and its config + received/outgoing/sent folders live in the per-user data
-directory (e.g. `~/.config/Carino PACS` on Linux, `%APPDATA%\Carino PACS` on
+directory (e.g. `~/.config/Carino DICOM` on Linux, `%APPDATA%\Carino DICOM` on
 Windows), **not** the install folder.
+
+Electron derives that path from `productName`, which the rename changed, so an
+upgraded machine ends up with two of them: the one above, and the old
+`Carino PACS` one still sitting beside it. The answer the user gave the old
+application is in that second directory, so `loadSavedDataDir()` reads it there
+when the new one has none — the app comes back up on the archive already in use,
+custom folder included, and writes the choice forward so the old directory is
+consulted once. The first-run prompt appears only if that folder has gone (an
+unmounted volume, a deleted directory), and it offers `~/CarinoDICOM` or an
+existing `~/CarinoPACS`. See the rename entry in `CHANGELOG.md` before upgrading.
 
 The spec also freezes **`docs/manual/`** in, which the engine serves at
 `/manual/` so the appliance carries its own documentation — a desktop install is
@@ -142,7 +152,7 @@ OSes** and uploads the installers. But it only runs once the code is on GitHub.
 cd Carino-PACS
 git init
 git add -A
-git commit -m "Carino PACS initial commit"
+git commit -m "Carino DICOM initial commit"
 git branch -M main
 ```
 
@@ -174,9 +184,9 @@ The workflow watches for tags matching `v*`, so pushing one starts a build.
 Open **Actions → the run that just started**. When the three jobs finish, the
 **Artifacts** panel at the bottom holds:
 
-- `carinopacs-ubuntu-latest`  → the `.AppImage`
-- `carinopacs-macos-latest`   → the `.dmg` / `.zip`
-- `carinopacs-windows-latest` → the `.exe`
+- `carino-dicom-ubuntu-latest`  → the `.AppImage`
+- `carino-dicom-macos-latest`   → the `.dmg` / `.zip`
+- `carino-dicom-windows-latest` → the `.exe`
 
 Download and distribute them. (Artifacts live on the run for ~90 days; see
 [Attach to a Release](#3e-optional-attach-installers-to-a-github-release) to
@@ -211,11 +221,15 @@ and rebuild from zero:
 ./reset.sh            # prompts first; ./reset.sh -y to skip
 ```
 
-It deletes (source is **not** touched): `~/CarinoPACS/` (config + received/outgoing/
-sent/logs + state), `.venv/`, repo-root `build/` (PyInstaller workpath),
-`desktop/{node_modules,dist,engine}`, `__pycache__/`, and any stray Electron
-`userData` from older builds (`~/.config/Carino*PACS*`). Then it prints the
-rebuild commands. In the dashboard, hard-refresh (**Ctrl+Shift+R**) to drop cached JS/CSS.
+It deletes (source is **not** touched): `~/CarinoDICOM/` **and** the pre-rename
+`~/CarinoPACS/` (config + received/outgoing/sent/logs + state), `.venv/`,
+repo-root `build/` (PyInstaller workpath), `desktop/{node_modules,dist,engine}`,
+`__pycache__/`, and any stray Electron `userData` from either generation of the
+app, under both roots Electron uses (`~/.config/` on Linux, `~/Library/Application
+Support/` on macOS). Both names of each are swept because an upgraded machine has
+both, and leaving one behind would give the next run a "fresh install" that still
+remembered the previous one — including the data folder it was pointed at. Then
+it prints the rebuild commands. In the dashboard, hard-refresh (**Ctrl+Shift+R**) to drop cached JS/CSS.
 
 ## Stopping / killing the service
 
@@ -247,7 +261,7 @@ This is Gatekeeper on an **unsigned** app that was downloaded (a quarantine
 attribute), not a real corruption. Clear it (recursive, on the installed `.app`):
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Carino-PACS.app
+xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app
 ```
 
 Right-click → **Open** → **Open** also works when macOS offers it. The permanent

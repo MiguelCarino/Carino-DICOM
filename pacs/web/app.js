@@ -1,4 +1,4 @@
-/* Carino PACS dashboard front-end — vanilla JS over the REST API. */
+/* Carino DICOM dashboard front-end — vanilla JS over the REST API. */
 (function () {
   "use strict";
 
@@ -2066,7 +2066,7 @@
     lock("ordPatient", TEST_PATIENT.patient);
     lock("ordDob", TEST_PATIENT.patient_birthdate);
     lock("ordDesc", TEST_PATIENT.study_desc);
-    lock("ordRef", on ? "Carino PACS" : "");
+    lock("ordRef", on ? "Carino DICOM" : "");
     const sex = $("ordSex");
     if (sex) {
       if (on) { sex.dataset.wasValue = sex.value; sex.value = TEST_PATIENT.patient_sex; }
@@ -2471,7 +2471,7 @@
 
   /* ── Kill the whole service ──────────────────────────────────── */
   async function killService() {
-    if (!confirm(T("Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits."))) return;
+    if (!confirm(T("Shut down Carino DICOM?\n\nThe receiver and auto-send stop and the engine process exits."))) return;
     $("killSvc").disabled = true;
     post("/api/shutdown", {}).catch(() => {});   // process may exit before responding
     stopPollers();
@@ -2481,7 +2481,7 @@
     ov.className = "stopped-overlay";
     const box = document.createElement("div");
     const h = document.createElement("h2");
-    h.textContent = T("Carino PACS has shut down");
+    h.textContent = T("Carino DICOM has shut down");
     const p = document.createElement("p");
     p.textContent = T("The service stopped. You can close this window, or restart it from your terminal / the desktop app.");
     box.append(h, p);

@@ -13,7 +13,7 @@ exports.default = async function beforeBuild() {
     fs.existsSync(path.join(dir, "pacs-engine.exe"));
   if (!ok) {
     throw new Error(
-      "\n\nCarino PACS engine not found at desktop/engine/pacs-engine.\n" +
+      "\n\nCarino DICOM engine not found at desktop/engine/pacs-engine.\n" +
       "Freeze it first (from the repo root) — the venv needs the runtime deps AND PyInstaller:\n\n" +
       "  rm -rf .venv && ./setup.sh\n" +
       "  ./.venv/bin/pip install pyinstaller\n" +

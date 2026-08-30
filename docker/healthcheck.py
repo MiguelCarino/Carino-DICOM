@@ -1,4 +1,4 @@
-"""Container healthcheck for Carino PACS.
+"""Container healthcheck for Carino DICOM.
 
 "The process is alive" is not health for a gateway whose whole job is to answer
 on sockets, so this proves service, not liveness:

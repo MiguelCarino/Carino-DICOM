@@ -379,12 +379,12 @@
          /rotat/i.test(String(tagOf(rt.dict, '00082111') || '')) &&
          tagOf(rt.dict, '00080018') === tagOf(entry.dict, '00080018'));
       ok('exporting does not re-tag the dataset a second time',
-         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM-editor').length === 2,
+         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM Editor').length === 2,
          String(tagOf(entry.dict, '00082111')));
       // Two edits, two lines: the description is an audit trail, not a label.
       await applyPixelTransform(entry, 'flipV');
       ok('a second edit is appended rather than replacing the first',
-         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM-editor').length === 3,
+         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM Editor').length === 3,
          String(tagOf(entry.dict, '00082111')));
     }
 

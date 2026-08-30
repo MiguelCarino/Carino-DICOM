@@ -36,7 +36,11 @@ for pid, paths in by_patient.items():
     ae = AE(ae_title=CALLING.get(pid, "MODALITY"))
     ds0 = dcmread(paths[0])
     ae.add_requested_context(ds0.SOPClassUID, "1.2.840.10008.1.2.1")
-    assoc = ae.associate("127.0.0.1", SCP_PORT, ae_title="CARINOPACS")
+    # The called AE must match the target's scp.aet. This is only ever pointed
+    # at the two containers the README brings up, and those are built from this
+    # repository, so they answer to the current default; an instance installed
+    # before the rename still answers to CARINOPACS.
+    assoc = ae.associate("127.0.0.1", SCP_PORT, ae_title="CARINODICOM")
     if not assoc.is_established:
         print(f"  ! {pid}: association rejected")
         continue
@@ -58,7 +62,7 @@ ORDERS = [
 ]
 for i, (acc, pid, name, modality, desc) in enumerate(ORDERS):
     msg = "\r".join([
-        f"MSH|^~\\&|EXAMPLERIS|EXAMPLE|CARINOPACS|EXAMPLE|20260808093000||ORM^O01|MSG{i:05d}|P|2.3",
+        f"MSH|^~\\&|EXAMPLERIS|EXAMPLE|CARINODICOM|EXAMPLE|20260808093000||ORM^O01|MSG{i:05d}|P|2.3",
         f"PID|||{pid}||{name}||19700101|O",
         f"ORC|NW|{acc}||||||||||REF^EXAMPLE^REFERRER",
         f"OBR|1|{acc}||{desc}|||20260808093000|||||||||REF^EXAMPLE^REFERRER||||||||{modality}",

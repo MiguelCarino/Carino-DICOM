@@ -4,7 +4,7 @@
     <link rel="icon" type="image/webp" href="logo.webp">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DICOM Tag Editor — Carino Systems</title>
+  <title>Carino DICOM Editor — browser DICOM tag editor</title>
   <script src="carino-bridge.js" defer></script>
   <script src="carino-clock.js" defer></script>
   <script src="carino-lang.js" defer></script>
@@ -1618,7 +1618,7 @@
       <div class="header-left">
         <span class="cn-brand">
           <a class="brand-name" href="https://carino.systems/" title="Carino Systems — back to hub">Carino</a>
-          <a class="app-tag" href="./" title="DICOM — reload">DICOM</a>
+          <a class="app-tag" href="./" title="DCM — reload">DCM</a>
         </span>
         <div class="header-clock" aria-hidden="true">
           <span class="clock-time" id="clockLocal">00:00:00</span>
@@ -4290,7 +4290,7 @@ function readPaletteLut(d, descTag, dataTag, bigEndian) {
 
 // Lazy-load the JPEG Lossless decoder (ES module — must use dynamic import).
 // MODULE, not CDN: this path is relative and always has been, but the old name
-// was enough for a security review of the Carino PACS build to conclude the
+// was enough for a security review of the Carino DICOM build to conclude the
 // editor fetches a decoder from the internet. It does not, and there it would
 // contradict a documented guarantee — that build ships to air-gapped hospital
 // networks and promises no outbound connection but the ones the operator
@@ -5355,7 +5355,7 @@ function addDeidMeta(d) {
   for (const opt of DEID_OPTION_ORDER) if (deidOptions.has(opt)) codes.push(DEID_OPTION_CODES[opt]);
 
   setTag(d, '00120063', 'LO',
-    ['Carino DICOM-editor — DICOM PS3.15 Basic Profile'].concat(codes.slice(1).map(c => c[1])));
+    ['Carino DICOM Editor — DICOM PS3.15 Basic Profile'].concat(codes.slice(1).map(c => c[1])));
   delTag(d, '00120064');
   d['00120064'] = { vr: 'SQ', Value: codes.map(([value, meaning]) => ({
     '00080100': { vr: 'SH', Value: [value] },              // Code Value
@@ -5471,7 +5471,7 @@ function retagRedacted(d, nBoxes, nFrames) {
   // three things any rewrite of the stored pixels owes the instance, shared with
   // the rotate/flip edits below. ensureMeta mirrors (0008,0018) into (0002,0003)
   // on the way out.
-  retagDerived(d, `Burned-in annotation redacted (${nBoxes} region(s), ${nFrames} frame(s)) — Carino DICOM-editor`);
+  retagDerived(d, `Burned-in annotation redacted (${nBoxes} region(s), ${nFrames} frame(s)) — Carino DICOM Editor`);
 
   // Deliberately NOT touched: (0028,2110) Lossy Image Compression and its
   // ratio/method. Per PS3.3 C.7.6.1.1.5 they record that the pixel data HAS
@@ -5897,7 +5897,7 @@ async function applyPixelTransform(entry, opKey) {
   }
   if (!src.raw || src.swapped) meta['00020010'] = { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] };
 
-  retagDerived(d, `${PIXEL_OPS[opKey].label} — Carino DICOM-editor`);
+  retagDerived(d, `${PIXEL_OPS[opKey].label} — Carino DICOM Editor`);
 
   entry.pending = seedPending(entry.dict);
   if (files[currentFileIdx] === entry) usePendingOf(entry);
@@ -8893,7 +8893,7 @@ function selftestEnv() {
 // Plain text, because the destination is a GitHub issue. Everything a reader
 // needs to tell one browser's failure from another's is in the header block.
 function selftestReportText(sum) {
-  const L = ['DICOM editor — browser self-test', ...selftestEnv(), ''];
+  const L = ['Carino DICOM Editor — browser self-test', ...selftestEnv(), ''];
   L.push(`Encodings decoded correctly: ${sum.good.length} of ${sum.decodable.length}`);
   if (sum.refused.length) L.push(`Encodings correctly refused:  ${sum.refusedOk.length} of ${sum.refused.length}`);
   L.push(`Assertions passed:           ${sum.assertions - sum.failures.length} of ${sum.assertions} (${sum.ms} ms)`, '');
@@ -9123,7 +9123,7 @@ window.__selftest = {
 };
 
 // ================================================================
-// DEEP-LINK LOADER  —  open a study straight from Carino PACS.
+// DEEP-LINK LOADER  —  open a study straight from Carino DICOM.
 // Two modes:
 //  (A) CARINO BRIDGE  (#carino-bridge, carino-bridge.js) — used when this
 //      editor is a remote HTTPS page and the PACS is http://localhost. The
@@ -9134,7 +9134,7 @@ window.__selftest = {
 //  (B) direct fetch  (#load=<manifestUrl>) — used for a same-origin / localhost
 //      editor, where fetching the PACS manifest+files directly is allowed.
 //
-// Who may deliver: the copy of this editor bundled inside Carino PACS is
+// Who may deliver: the copy of this editor bundled inside Carino DICOM is
 // served from the PACS's own origin, so same-origin is the ordinary case and
 // goes through unasked. A separately hosted editor (dicom.carino.systems) is
 // reached from whatever host the operator configured, and there is no list of
@@ -9149,7 +9149,7 @@ window.addEventListener('load', () => {
   let giveUp = null;
   const armed = window.CarinoBridge && CarinoBridge.receive({
     legacy: true,                 // PACS builds older than the bridge still speak carino-pacs-*
-    allow: ['same-origin',        // the editor Carino PACS serves itself
+    allow: ['same-origin',        // the editor Carino DICOM serves itself
             'https://media.carino.systems'],   // and the fleet's file screen
     otherwise: 'ask',             // anyone else: shown to the user, by origin
     remember: true,               // and only asked about once per browser
@@ -9162,12 +9162,12 @@ window.addEventListener('load', () => {
     }),
     onFiles: async (incoming, info) => {
       clearTimeout(giveUp);
-      showLoading?.(true, 'Copying study from Carino PACS…');
+      showLoading?.(true, 'Copying study from Carino DICOM…');
       try {
         await handleFiles(incoming);        // shows its own per-image progress
         // Named by where it actually came from, not by whether we trust it:
         // an origin the user approved once is still not the bundled PACS.
-        const from = info.origin === location.origin ? 'Carino PACS' : new URL(info.origin).host;
+        const from = info.origin === location.origin ? 'Carino DICOM' : new URL(info.origin).host;
         // Counted from what parsed, not from what arrived — a hand-off of files
         // dcmjs cannot read must not report itself as a study loaded. Whatever
         // failed is already itemised in the banner handleFiles raises.
@@ -9178,8 +9178,8 @@ window.addEventListener('load', () => {
     },
   });
   if (armed) {
-    showLoading?.(true, 'Copying study from Carino PACS…');       // spinner until the bytes arrive
-    giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino PACS'); }, 60000);
+    showLoading?.(true, 'Copying study from Carino DICOM…');       // spinner until the bytes arrive
+    giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino DICOM'); }, 60000);
     return;
   }
 
@@ -9220,7 +9220,7 @@ window.addEventListener('load', () => {
   try { manifestUrl = decodeURIComponent(m[1]); } catch { return; }
   (async () => {
     try {
-      showLoading?.(true, 'Copying study from Carino PACS…');
+      showLoading?.(true, 'Copying study from Carino DICOM…');
       const res = await fetch(manifestUrl, { credentials: 'omit' });
       if (!res.ok) throw new Error('manifest HTTP ' + res.status);
       const data = await res.json();
@@ -9229,7 +9229,7 @@ window.addEventListener('load', () => {
       const loaded = [];
       for (let n = 0; n < entries.length; n++) {
         const e = entries[n];
-        showLoading?.(true, 'Copying study from Carino PACS…', n / entries.length, `${n + 1} / ${entries.length}`);
+        showLoading?.(true, 'Copying study from Carino DICOM…', n / entries.length, `${n + 1} / ${entries.length}`);
         try {
           const r = await fetch(new URL(e.url, manifestUrl).href, { credentials: 'omit' });
           if (!r.ok) continue;
@@ -9239,7 +9239,7 @@ window.addEventListener('load', () => {
       if (!loaded.length) throw new Error('could not fetch any DICOM file');
       await handleFiles(loaded);
       switchTab('editor');
-      toast?.(`Loaded ${loaded.length} image(s) from Carino PACS`);
+      toast?.(`Loaded ${loaded.length} image(s) from Carino DICOM`);
     } catch (err) {
       showLoading?.(false);
       toast?.('PACS deep-link failed: ' + (err.message || err));

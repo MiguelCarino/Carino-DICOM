@@ -117,7 +117,7 @@ already local there, so nothing has to move to make this copy offline-clean.
 both:
 
 1. **The licensing and provenance in this directory** — this README and the nine
-   `LICENSE-*.txt` files here, plus the two in `../fonts/`. Carino PACS
+   `LICENSE-*.txt` files here, plus the two in `../fonts/`. Carino DICOM
    redistributes these bundles inside a shipped binary and a container image,
    which upstream (a static site users visit) does not; that is why the
    obligation lands here, and why this file is not upstream's with the paths

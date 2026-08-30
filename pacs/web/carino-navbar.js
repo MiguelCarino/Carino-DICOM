@@ -1,7 +1,7 @@
 /* ============================================================
-   carino-navbar.js — SELF-CONTAINED build for Carino PACS.
+   carino-navbar.js — SELF-CONTAINED build for Carino DICOM.
    ------------------------------------------------------------
-   Carino PACS is a local tool that often runs offline, so unlike the
+   Carino DICOM is a local tool that often runs offline, so unlike the
    hosted Carino sites this copy does NOT load the shared
    https://carino.systems/carino-clock.js module — the clock logic
    (Local/UTC/Epoch/TAI/.beats + click-to-cycle) is inlined here so
@@ -9,7 +9,7 @@
    in sync with carino-clock.js if you change one.
 
    Include it:
-     <script src="carino-navbar.js" data-app="PACS" defer></script>
+     <script src="carino-navbar.js" data-app="DICOM" defer></script>
    ============================================================ */
 (function () {
   'use strict';

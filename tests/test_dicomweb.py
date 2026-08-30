@@ -940,7 +940,7 @@ def test_warning_header_cannot_be_forged():
         _seed(env)
         r = env.client.get('/dicom-web/studies?ev"il%0d%0aX-Injected:%201=x')
         assert "X-Injected" not in r.headers
-        assert '"' not in r.headers.get("Warning", "").split("carino-pacs ")[-1][1:-1]
+        assert '"' not in r.headers.get("Warning", "").split("carino-dicom ")[-1][1:-1]
     finally:
         env.close()
 

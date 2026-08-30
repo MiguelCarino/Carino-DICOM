@@ -32,21 +32,21 @@ The peer exists so that forwarding has somewhere to succeed; the demo needs at
 least one destination that accepts and one that refuses, or the Stuck tab of
 Studies has nothing in it.
 
-    podman build --format docker -t carino-pacs:local .
+    podman build --format docker -t carino-dicom:local .
     podman network create pacsdemo
 
     mkdir -p /tmp/pacsdemo/peer /tmp/pacsdemo/demo
     podman run -d --name pacs-peer --network pacsdemo \
       --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/peer:/data:z \
       -e PACS_SERVICES=scp -e PACS_AUTH_TOKEN=peer-token \
-      localhost/carino-pacs:local
+      localhost/carino-dicom:local
 
     podman run -d --name pacs-demo --network pacsdemo \
       --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/demo:/data:z \
       -p 127.0.0.1:18042:8042 -p 127.0.0.1:11512:11112 -p 127.0.0.1:12575:2575 \
       -e PACS_SERVICES=scp,scu,print,mwl,qr,ris,dicomweb \
       -e PACS_AUTH_TOKEN=manual-screenshots-token \
-      localhost/carino-pacs:local
+      localhost/carino-dicom:local
 
 Those published ports are deliberately not the obvious ones. The suites take
 DICOM ports in two arcs, a fresh number per test and never one twice:

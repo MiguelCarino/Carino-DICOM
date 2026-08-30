@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Carino PACS. Versions follow [Semantic Versioning](https://semver.org/).
+All notable changes to Carino DICOM. Versions follow [Semantic Versioning](https://semver.org/).
 Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [1.1.0] — unreleased
@@ -62,7 +62,7 @@ release also queries, retrieves, routes and de-identifies.
 - **Test orders fill themselves in** — ticking *Test order* completes the form
   and locks what it filled: the same invented patient every time, a fresh
   `TEST-<stamp>` accession so two test orders can never collide on identity,
-  and a referring of "Carino PACS". Modality, scheduled time and target
+  and a referring of "Carino DICOM". Modality, scheduled time and target
   modality stay the operator's, being the three things a test actually varies.
   Unticking restores what was there before.
 - **Profiles, capabilities and per-field identifier visibility** — optional and
@@ -170,7 +170,7 @@ release also queries, retrieves, routes and de-identifies.
   identifiers, thirty-five of them marked *remove*. The copy bundled here was
   the correct one and is what upstream was repaired from, so no Carino PACS
   release ever shipped the short table. (`pacs/web/editor/deid-profile.js`)
-- **Podman, natively** — `packaging/podman/carino-pacs.container`, a Quadlet
+- **Podman, natively** — `packaging/podman/carino-dicom.container`, a Quadlet
   unit that runs the same image rootless under systemd, with no compose provider
   involved. `podman compose` is a shim over `podman-compose` or Docker's own
   `docker-compose` and neither ships with Podman, so on a stock Fedora, RHEL or
@@ -491,6 +491,54 @@ release also queries, retrieves, routes and de-identifies.
   Found by reading the code closely enough to document it, not by a report.
 
 ### Changed
+- **Renamed: Carino PACS is now Carino DICOM, and the bundled browser tool is Carino DICOM
+  Editor.** The old name described the smallest thing the appliance does, and named the very system
+  most of its users already have and are not replacing — so the product introduced itself by
+  claiming to be the thing it sits beside. Nothing about the DICOM services, the config format or
+  the wire behaviour changed with the name. **Read the rest of this entry before upgrading.**
+  - **Data directory.** A fresh install keeps config, studies and logs in `~/CarinoDICOM`. An
+    existing `~/CarinoPACS` keeps being used automatically for as long as it is there: the new name
+    is preferred only when it exists, so nothing has to be moved, and a stale old directory can
+    never pull a migrated install backwards into an archive it had left. To adopt the new name,
+    stop the service and `mv ~/CarinoPACS ~/CarinoDICOM`.
+  - **Desktop app.** The application is now `Carino DICOM.app` / `carino-dicom`, with a new bundle
+    id, and it installs *beside* the old one rather than over it — delete `Carino-PACS.app` once
+    the new one is running. Because the application name changed, Electron's per-app data directory
+    changed with it, and the folder you chose was recorded in the old one; the new app reads it
+    there and carries it forward, so it comes up on the archive you already have, a custom folder
+    included. It only asks again if that folder has gone — and then the default it offers is the
+    `~/CarinoDICOM`-or-existing-`~/CarinoPACS` resolution above.
+  - **Podman / Docker.** The image is `carino-dicom:local`, the container and the quadlet unit are
+    `carino-dicom`, and the unit file is `packaging/podman/carino-dicom.container`. systemd will not
+    rename a unit for you: stop and disable `carino-pacs`, remove the old unit file, install the new
+    one, `daemon-reload`, then start `carino-dicom`. The unit mounts `~/CarinoDICOM`, so move the
+    directory first — a container is the one deployment the fallback above cannot help, because all
+    it ever sees is `/data`.
+  - **The system-wide systemd service did not change.** The unit is still `carino-pacs.service`, the
+    service account `carino-pacs`, the data `/var/lib/carino-pacs`. Renaming those would have left
+    an installed service pointed at a `StateDirectory` systemd had just created empty, with the
+    archive stranded under an account the sysusers run had removed — the outcome the data-directory
+    fallback above exists to prevent, arriving through the one door it cannot guard. Those names
+    belong to a machine, not to a brand.
+  - **AE titles.** The storage SCP's *default* AE title is now `CARINODICOM`. A saved config keeps
+    whatever it already has, so no peer's allow-list changes; only a brand-new install answers to
+    the new title.
+  - **What emitted objects say.** De-identified studies now record `Carino DICOM <profile> profile`
+    in Deidentification Method (0012,0063) and `CARINO-DICOM` in Implementation Version Name
+    (0002,0013) — the de-identifier overwrites that tag because its value names the software that
+    wrote the object, so leaving it would have made every scrubbed object contradict itself. The
+    print SCP reports its model as `Carino DICOM Print`, and the editor writes `Carino DICOM
+    Editor` in the same places it used to write its old name.
+  - **Failover alert subjects changed.** The emergency-failover mail now has a `Carino DICOM:`
+    subject prefix instead of `Carino PACS:`. The sender address did *not* change (below), but if
+    you route these to an on-call queue with a rule matching the subject, update the rule — this is
+    the one message that must arrive.
+  - **Deliberately not renamed:** the `PACS_*` environment variables, the `.carinopacs_state.json`
+    auto-send ledger (renaming it would re-send the whole outgoing tree), the de-identification
+    pseudonym salt (renaming it would give one patient two pseudonyms and break longitudinal
+    linkage), the `carino-pacs-ready` / `carino-pacs-files` hand-off messages the editor still
+    accepts from builds already in the field, the outbound webhook `User-Agent` and the failover
+    mail sender that receiving systems allow-list, and every domain — the DNS cutover is separate.
 - **An order now has an identity, and ORC-1 is read.** Every `ORM` created a
   new order: nothing read the order control code, and nothing recognised a
   message as being about an order already here, so a repeat, an amendment and
@@ -635,7 +683,7 @@ release also queries, retrieves, routes and de-identifies.
   rest. SECURITY.md gained *Why encryption at rest is deferred*, which argues
   for full-disk encryption underneath rather than an application-level scheme
   whose key would sit on the same disk as the data.
-- **Carino Bridge** — the ✎ *Edit tags* hand-off to DICOM-editor now goes
+- **Carino Bridge** — the ✎ *Edit tags* hand-off to Carino DICOM Editor now goes
   through the shared `carino-bridge.js` used across the fleet, instead of a
   hand-rolled exchange on each side. The bundled same-origin editor behaves as
   before; an editor on another origin (`web.editor_url` pointing at a public

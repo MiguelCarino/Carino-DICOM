@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carino PACS</title>
+  <title>Carino DICOM</title>
   <meta name="description" content="A self-hosted DICOM gateway and continuity appliance: receives, routes, forwards and de-identifies studies, answers Query/Retrieve and DICOMweb, and serves an emergency worklist when the PACS is down. Not a medical device, not for primary diagnosis." />
   <link rel="icon" href="favicon.webp" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- Carino navbar self-injects at the top of <body> (loads carino-clock.js locally) -->
-  <script src="carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
 
@@ -27,7 +27,7 @@
            Decorative, so aria-hidden: it says nothing a screen reader needs and
            the headline underneath says all of it. -->
       <!-- The mark sits above the trace, which reads as its underline. Both are
-           aria-hidden: the navbar already says "Carino PACS" in text, and a logo
+           aria-hidden: the navbar already says "Carino DICOM" in text, and a logo
            announced twice is noise. -->
       <div class="hero-mark" aria-hidden="true">
         <img class="mark" src="logo.svg" alt="" width="100" height="100" decoding="async">
@@ -38,7 +38,7 @@
       </div>
       <h1><span data-i18n>Your PACS systems are down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
       <p class="lede">
-        <strong>Carino PACS</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
+        <strong>Carino DICOM</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
         gateway and continuity appliance. It receives studies, routes and forwards them by
         rules you write, answers <em>Query/Retrieve</em> and <em>DICOMweb</em>, and serves the
         worklist itself while your PACS is unreachable — holding everything that arrives and
@@ -95,7 +95,7 @@
            Two chips open the same dialog: "what it is" and "what it is not" are
            one thought, and separating them is how the honest half ended up being
            the half nobody read. data-focus scrolls the second one into view. -->
-      <nav class="chips" aria-label="More about Carino PACS">
+      <nav class="chips" aria-label="More about Carino DICOM">
         <button class="btn sm" type="button" data-sheet="whatDialog" data-i18n>What it is (and is not)</button>
         <button class="btn sm" type="button" data-sheet="doesDialog" data-i18n>Features</button>
         <button class="btn sm" type="button" data-sheet="firstrunDialog" data-i18n>First launch</button>
@@ -141,14 +141,15 @@ docker compose logs -f pacs</code></pre>
         <p data-i18n>Rootless, and systemd owns it. Needs no compose provider, and the token prints to the journal on first boot.</p>
 <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
 cd Carino-PACS
-mkdir -p ~/CarinoPACS
-podman build --format docker -t carino-pacs:local .
-install -Dm644 packaging/podman/carino-pacs.container \
-        ~/.config/containers/systemd/carino-pacs.container
+[ -d ~/CarinoPACS ] &amp;&amp; [ ! -d ~/CarinoDICOM ] &amp;&amp; mv ~/CarinoPACS ~/CarinoDICOM
+mkdir -p ~/CarinoDICOM
+podman build --format docker -t carino-dicom:local .
+install -Dm644 packaging/podman/carino-dicom.container \
+        ~/.config/containers/systemd/carino-dicom.container
 systemctl --user daemon-reload
-systemctl --user start carino-pacs
-journalctl --user -u carino-pacs -f</code></pre>
-        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/podman/carino-pacs.container" target="_blank" rel="noopener" data-i18n>Details →</a>
+systemctl --user start carino-dicom
+journalctl --user -u carino-dicom -f</code></pre>
+        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/podman/carino-dicom.container" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
       <article>
@@ -271,7 +272,7 @@ sudo systemctl start carino-pacs</code></pre>
           <li id="fr-win"><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
           <li id="fr-mac"><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>. If it says
             <em>"damaged and can't be opened"</em>, clear the download quarantine:
-            <code>xattr -dr com.apple.quarantine /Applications/Carino-PACS.app</code></li>
+            <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code></li>
           <li id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
             <code>.deb</code> (Debian/Ubuntu) from the
             <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.

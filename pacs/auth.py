@@ -773,7 +773,7 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
         resp = jsonify(verdict.body())
         resp.status_code = verdict.status
         if verdict.status == 401:
-            resp.headers["WWW-Authenticate"] = 'Bearer realm="Carino PACS"'
+            resp.headers["WWW-Authenticate"] = 'Bearer realm="Carino DICOM"'
         if verdict.retry_after:
             resp.headers["Retry-After"] = str(verdict.retry_after)
         return resp

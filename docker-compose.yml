@@ -1,4 +1,4 @@
-# Carino PACS — self-hosted DICOM gateway and continuity appliance.
+# Carino DICOM — self-hosted DICOM gateway and continuity appliance.
 # AGPL-3.0-or-later. No telemetry: this software does not phone home, check for
 # updates or report crashes, and nothing in this file makes it start.
 #
@@ -22,8 +22,8 @@ services:
         #   echo "PACS_GID=$(id -g)" >> .env
         PUID: ${PACS_UID:-1000}
         PGID: ${PACS_GID:-1000}
-    image: carino-pacs:local
-    container_name: carino-pacs
+    image: carino-dicom:local
+    container_name: carino-dicom
     restart: unless-stopped
 
     # ---- uid / gid ------------------------------------------------------
@@ -47,7 +47,7 @@ services:
     #
     # Note that `podman compose` is a shim over podman-compose or Docker's own
     # docker-compose and neither ships with Podman; on a stock install it fails
-    # before reading this file. packaging/podman/carino-pacs.container is the
+    # before reading this file. packaging/podman/carino-dicom.container is the
     # native path — a Quadlet unit, no compose provider, and systemd waits for
     # the DICOM port to answer before calling the service started.
     # userns_mode: keep-id

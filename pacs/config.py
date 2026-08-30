@@ -1,11 +1,13 @@
 """Config load/save + defaults + light validation.
 
 The whole app is configured by one JSON file. By default it lives in
-``~/CarinoPACS/config.json`` and the relative folder defaults (``./received``,
+``~/CarinoDICOM/config.json`` and the relative folder defaults (``./received``,
 ``./outgoing``, ``./sent``, ``./logs``) therefore resolve to subfolders of
-``~/CarinoPACS`` — so a fresh install keeps everything together in one visible
-place in the user's home. Paths are resolved relative to the config file's own
-directory (with ``~`` expansion) so they behave predictably no matter the CWD.
+``~/CarinoDICOM`` — so a fresh install keeps everything together in one visible
+place in the user's home. An install made before the rename keeps its
+``~/CarinoPACS`` (see ``default_dir``). Paths are resolved relative to the
+config file's own directory (with ``~`` expansion) so they behave predictably
+no matter the CWD.
 """
 
 from __future__ import annotations
@@ -27,14 +29,41 @@ from typing import Any
 # validate() both call into it, and a cycle here would break `import pacs`.
 from . import users as _users
 
-# Default home for config + data + logs: ~/CarinoPACS
-DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "CarinoPACS")
+# Default home for config + data + logs. The product was renamed after 1.0.0
+# shipped, so two names are in circulation and the resolution order decides
+# which install keeps its studies.
+def default_dir() -> str:
+    """Where config + data + logs live when nobody has said otherwise.
+
+    The order below is load-bearing and must not be flipped. A user who has
+    already moved to ~/CarinoDICOM can still have a stale ~/CarinoPACS sitting
+    in their home — looking there first would hand them back an archive they
+    thought they had left, with everything filed since the move invisible and
+    no error to explain it. So the new name wins whenever it is there, the old
+    name is honoured only when it is the only one there (an install made before
+    the rename, which must keep working untouched), and a machine with neither
+    gets the new name. Nothing is created here: the directory is made lazily by
+    Config.save(), and a mkdir at import time would fire on `--help`.
+    """
+    home = os.path.expanduser("~")
+    current = os.path.join(home, "CarinoDICOM")
+    legacy = os.path.join(home, "CarinoPACS")
+    # isdir, not exists: a plain file of that name is not a data directory, and
+    # treating it as one would only move the failure further from its cause.
+    if os.path.isdir(current):
+        return current
+    if os.path.isdir(legacy):
+        return legacy
+    return current
+
+
+DEFAULT_DIR = default_dir()
 DEFAULT_CONFIG = os.path.join(DEFAULT_DIR, "config.json")
 
 DEFAULTS: dict[str, Any] = {
     "scp": {
         "enabled": False,       # opt-in — off by default; the setup chooser enrolls it
-        "aet": "CARINOPACS",
+        "aet": "CARINODICOM",
         "bind": "0.0.0.0",
         "port": 11112,
         "storage_dir": "./received",

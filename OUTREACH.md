@@ -1,6 +1,6 @@
 # Outreach
 
-Copy-paste material for listing and announcing Carino PACS. The listings
+Copy-paste material for listing and announcing Carino DICOM. The listings
 themselves need a human to post, so everything below is written to be used as-is
 rather than as notes to rewrite.
 
@@ -66,7 +66,7 @@ Shorter variant, where a single clause is all that fits:
 
 ### Three sentences
 
-> Carino PACS is a DICOM gateway and continuity appliance: one box in one
+> Carino DICOM is a DICOM gateway and continuity appliance: one box in one
 > department that receives and forwards studies, serves a worklist, takes HL7
 > orders, and answers Query/Retrieve and DICOMweb. What it is actually for is
 > the unglamorous case — the modality that can only print film, the department
@@ -80,7 +80,7 @@ Shorter variant, where a single clause is all that fits:
 
 > Most imaging problems that stop a department are not storage problems. They
 > are operational: a link is down, an order never arrived, a modality is twenty
-> years old and its only output is film. Carino PACS is a DICOM gateway and
+> years old and its only output is film. Carino DICOM is a DICOM gateway and
 > continuity appliance built for exactly those hours. It receives and forwards
 > studies with conditional routing and optional de-identification, pretends to
 > be a laser imager so a print-only modality's film can be captured as a PDF or
@@ -111,10 +111,10 @@ Shorter variant, where a single clause is all that fits:
 
 Contributions go to the **`awesome-selfhosted-data`** repository, not to the
 rendered `awesome-selfhosted` list — the README there is generated. Add one new
-file, `software/carino-pacs.yml`:
+file, `software/carino-dicom.yml`:
 
 ```yaml
-name: Carino PACS
+name: Carino DICOM
 website_url: https://pacs.carino.systems/
 description: DICOM gateway and continuity appliance for imaging departments. Receives and forwards studies, captures modalities that can only print film, serves a modality worklist, takes HL7 orders, and keeps scanning when the primary archive is unreachable.
 licenses:
@@ -178,14 +178,14 @@ a maintainer who answers comments.
 
 **Title:**
 
-> Software Offering: Carino PACS — a DICOM gateway for the hour your imaging
+> Software Offering: Carino DICOM — a DICOM gateway for the hour your imaging
 > archive is down (AGPL, Python, Docker)
 
 **Body:**
 
 > I wrote this and I maintain it, so treat this as self-promotion.
 >
-> Carino PACS is a DICOM gateway and continuity appliance. It is **not** an
+> Carino DICOM is a DICOM gateway and continuity appliance. It is **not** an
 > archive and it is not trying to replace Orthanc or dcm4chee — both are more
 > mature, better supported, and the right answer if you want storage. This sits
 > *in front* of one of them and handles the operational failures instead.
@@ -335,7 +335,7 @@ handling.
 
 > This is a thank-you and a report from the field rather than a pitch.
 >
-> I've been building Carino PACS, a DICOM gateway and continuity appliance, on
+> I've been building Carino DICOM, a DICOM gateway and continuity appliance, on
 > top of pydicom and pynetdicom. It is AGPL and non-commercial. The whole DICOM
 > layer is pynetdicom: Storage SCP, a virtual print SCP, Modality Worklist,
 > C-FIND/C-MOVE/C-GET, plus the SCU side for forwarding.

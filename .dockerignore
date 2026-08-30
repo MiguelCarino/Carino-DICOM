@@ -8,8 +8,9 @@
 # Real studies. A developer machine that has run the app has DICOM in these.
 #
 # Two layouts, and both need naming. The root-anchored paths are the desktop
-# layout (~/CarinoPACS or a checkout that has been run in place). /data/ is the
-# layout docker-compose.yml itself tells operators to create — and a pattern
+# layout (~/CarinoDICOM, or ~/CarinoPACS on an install from before the rename,
+# or a checkout that has been run in place). /data/ is the layout
+# docker-compose.yml itself tells operators to create — and a pattern
 # anchored at the root never matches below it, so without this entry the whole
 # of ./data ships to the daemon and sits in its build cache.
 /received/

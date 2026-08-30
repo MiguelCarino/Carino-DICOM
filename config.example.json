@@ -1,7 +1,7 @@
 {
   "scp": {
     "enabled": false,
-    "aet": "CARINOPACS",
+    "aet": "CARINODICOM",
     "bind": "0.0.0.0",
     "port": 11112,
     "storage_dir": "./received",

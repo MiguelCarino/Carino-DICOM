@@ -612,6 +612,9 @@ class Deidentifier:
         self.keep_private = bool(keep_private) and profile != "strict"
         self._private_overridden = bool(keep_private) and profile == "strict"
 
+        # The salt keeps the pre-rename spelling on purpose: it is mixed into
+        # every pseudonym, so changing it hands the same patient a second
+        # identity and severs the longitudinal linkage the profile exists for.
         self._key = hashlib.sha256(b"carino-pacs/deid/v1\x00" + secret.encode("utf-8")).digest()
         self._lock = threading.Lock()
         self._warned: set = set()
@@ -856,7 +859,7 @@ class Deidentifier:
             item.CodeMeaning = meaning
             seq.append(item)
 
-        method = ["Carino PACS %s profile" % self.profile] + [m for _, m in codes]
+        method = ["Carino DICOM %s profile" % self.profile] + [m for _, m in codes]
         if self.keep_private:
             method.append("PRIVATE ATTRIBUTES RETAINED UNVETTED")
         if not self.keep_dates:
@@ -893,7 +896,7 @@ class Deidentifier:
             fm.MediaStorageSOPClassUID = sop_class
         if sop_inst:
             fm.MediaStorageSOPInstanceUID = sop_inst
-        fm.ImplementationVersionName = "CARINO-PACS"
+        fm.ImplementationVersionName = "CARINO-DICOM"
         if self.profile == "strict" and _SOURCE_AE in fm:
             del fm[_SOURCE_AE]  # the sending AE title names the originating site
         if not self.keep_private:

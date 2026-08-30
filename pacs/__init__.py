@@ -1,4 +1,4 @@
-"""Carino PACS — a small, cross-platform DICOM store-and-reconcile PACS.
+"""Carino DICOM — a small, cross-platform DICOM store-and-reconcile PACS.
 
 Core (v1.0.0):
   * receive  — a Storage SCP that accepts C-STORE (and C-ECHO) and files
@@ -24,4 +24,4 @@ Licensed under the GNU Affero General Public License v3.0 or later; see LICENSE.
 """
 
 __version__ = "1.1.0"
-APP_NAME = "Carino PACS"
+APP_NAME = "Carino DICOM"

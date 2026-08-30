@@ -660,7 +660,7 @@
          tagOf(savedOnce.dict, '00280301') === 'NO', String(tagOf(savedOnce.dict, '00280301')));
       ok('undo: saving does not consume the backup', !!entry.redactBackup);
       ok('undo: saving does not re-tag the dataset a second time',
-         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM-editor').length === 2,
+         String(tagOf(entry.dict, '00082111') || '').split('Carino DICOM Editor').length === 2,
          String(tagOf(entry.dict, '00082111')));
 
       ok('undo: restores the file', undoRedaction(entry) === true);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Remove the Carino PACS systemd service.
+# Remove the Carino DICOM systemd service.
 #
 #   sudo packaging/systemd/uninstall.sh                 # remove the software
 #   sudo packaging/systemd/uninstall.sh --purge-data    # and the patient data

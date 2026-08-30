@@ -50,7 +50,7 @@ if not os.path.isdir(WEB_DIR) and hasattr(sys, "_MEIPASS"):
 # markup. Every relative path in those pages then resolves against the
 # dashboard: ../carino-clock.js, ../carino-lang.js, ../carino-navbar.js and
 # ../favicon.webp land on this server's own copies (that is what the clock and
-# the favicon in pacs/web/ are for), and the "back to Carino PACS" link lands
+# the favicon in pacs/web/ are for), and the "back to Carino DICOM" link lands
 # on the dashboard instead of on the marketing page. A page that renders
 # identically in both places can only do so if neither copy is edited for the
 # other, so nothing here may "fix" a path.
@@ -1709,7 +1709,7 @@ def create_app(server: PacsServer) -> Flask:
             os._exit(0)
 
         threading.Thread(target=_exit, daemon=True).start()
-        return jsonify(ok=True, message="Carino PACS is shutting down")
+        return jsonify(ok=True, message="Carino DICOM is shutting down")
 
     # ---- profiles ----------------------------------------------------------
     # Their own endpoints rather than a section of POST /api/config, for two
@@ -1988,7 +1988,7 @@ def create_app(server: PacsServer) -> Flask:
                                     default=str))
         body = "\n".join(lines) + ("\n" if lines else "")
         resp = app.response_class(body, mimetype="application/x-ndjson")
-        resp.headers["Content-Disposition"] = 'attachment; filename="carino-pacs-audit.jsonl"'
+        resp.headers["Content-Disposition"] = 'attachment; filename="carino-dicom-audit.jsonl"'
         return resp
 
     def _audit_rows_for(rows: list) -> list:

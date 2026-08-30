@@ -390,7 +390,7 @@ class PrintSCP:
             ds.PrinterStatusInfo = "NORMAL"
             ds.PrinterName = self.aet
             ds.Manufacturer = "Carino"
-            ds.ManufacturerModelName = "Carino PACS Print"
+            ds.ManufacturerModelName = "Carino DICOM Print"
         return 0x0000, ds
 
     def _handle_n_create(self, event):

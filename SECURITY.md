@@ -1,6 +1,6 @@
 # Security Policy
 
-Carino PACS handles patient data. This document describes what it actually
+Carino DICOM handles patient data. This document describes what it actually
 protects and what it does not, so you can decide where it is safe to deploy it —
 and how to report a problem privately if you find one.
 
@@ -35,7 +35,7 @@ Report privately by either route:
    choose *Report a vulnerability*. This is the preferred route: it creates a
    private thread, keeps the history with the project, and needs no key
    exchange.
-2. **Email** — `miguel.carino1994@outlook.com`, with `Carino PACS security` in
+2. **Email** — `miguel.carino1994@outlook.com`, with `Carino DICOM security` in
    the subject line.
 
 Useful things to include, roughly in order of value:
@@ -444,7 +444,7 @@ and it should be built against a real requirement rather than against the phrase
 
 ## No telemetry
 
-Carino PACS collects nothing and sends nothing. No analytics, no crash
+Carino DICOM collects nothing and sends nothing. No analytics, no crash
 reporting, no update checks, no usage counters, no remote logging, no bundled
 third-party scripts fetched at runtime. The only outbound network connections it
 ever makes are the DICOM associations and HL7 acknowledgements the operator

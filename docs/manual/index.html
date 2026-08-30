@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manual — Carino PACS</title>
-  <meta name="description" content="The Carino PACS manual: getting started, the security model and why the token rule exists, what each service does and when to turn it on, and the honest statement that this is not a medical device. Also in Spanish, Brazilian Portuguese, Japanese and Russian." />
+  <title>Manual — Carino DICOM</title>
+  <meta name="description" content="The Carino DICOM manual: getting started, the security model and why the token rule exists, what each service does and when to turn it on, and the honest statement that this is not a medical device. Also in Spanish, Brazilian Portuguese, Japanese and Russian." />
   <link rel="icon" href="../favicon.webp" />
   <link rel="stylesheet" href="manual.css" />
   <script>
@@ -28,7 +28,7 @@
   <!-- The clock is loaded here with the path that is correct at this depth;
        carino-navbar.js sees [data-carino-clock] and does not load it again. -->
   <script src="../carino-clock.js" data-carino-clock async></script>
-  <script src="../carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="../carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
   <script src="../carino-lang.js" defer></script>
 </head>
 <body>
@@ -39,11 +39,11 @@
       <a href="pt-BR/" lang="pt-BR">Português (BR)</a>
       <a href="ja/" lang="ja">日本語</a>
       <a href="ru/" lang="ru">Русский</a>
-      <a href="../">← Carino PACS</a>
+      <a href="../">← Carino DICOM</a>
     </nav>
 
-    <h1>The Carino PACS manual</h1>
-    <p class="standfirst">Carino PACS is a <strong>DICOM gateway</strong> and a <strong>continuity
+    <h1>The Carino DICOM manual</h1>
+    <p class="standfirst">Carino DICOM is a <strong>DICOM gateway</strong> and a <strong>continuity
       appliance</strong>: it receives studies, routes and forwards them, publishes what it holds over
       Query/Retrieve and DICOMweb, and keeps an imaging department working when the PACS or the RIS stops
       answering. This manual covers deployment, the security model, every service, and the software's
@@ -66,7 +66,7 @@
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="what">1. What it is and what role it plays</h2>
 
-    <p>Carino PACS sits <em>between</em> the equipment that produces images and the systems that store or
+    <p>Carino DICOM sits <em>between</em> the equipment that produces images and the systems that store or
       read them. It is not trying to replace your archive; it is trying to be the piece that connects
       them, and the piece still standing when one of the others falls over.</p>
 
@@ -169,7 +169,7 @@ journalctl -u carino-pacs -f</code></pre>
       <table>
         <thead><tr><th>Shape</th><th>Directory</th></tr></thead>
         <tbody>
-          <tr><td>Desktop / CLI</td><td><code>~/CarinoPACS/</code></td></tr>
+          <tr><td>Desktop / CLI</td><td><code>~/CarinoDICOM/</code> (existing installs keep <code>~/CarinoPACS</code>)</td></tr>
           <tr><td>Docker</td><td><code>/data</code> in the container → <code>./data</code> on the host</td></tr>
           <tr><td>systemd</td><td><code>/var/lib/carino-pacs/</code> (mode 0750)</td></tr>
         </tbody>
@@ -344,7 +344,7 @@ openssl rand -base64 32</code></pre>
     <div class="note">
       <p><b>Backups.</b> The sqlite index is a cache and rebuilds itself; the images do not. Back up the
         storage directories — and test a restore at least once.</p>
-      <p><b>No telemetry.</b> Carino PACS sends nothing anywhere: no analytics, no crash reporting, no
+      <p><b>No telemetry.</b> Carino DICOM sends nothing anywhere: no analytics, no crash reporting, no
         update checks, no third-party scripts fetched at runtime. The only outbound connections are the
         DICOM associations and HL7 acknowledgements you configured, to the peers you named. A change that
         broke that would be treated as a vulnerability.</p>
@@ -708,7 +708,7 @@ openssl rand -base64 32</code></pre>
     <h2 id="not">5. This is not a medical device</h2>
 
     <div class="danger">
-      <p><b>Carino PACS is not a medical device.</b> It is not certified, cleared or registered with any
+      <p><b>Carino DICOM is not a medical device.</b> It is not certified, cleared or registered with any
         regulator, in any country. It carries no CE marking as a medical device, no FDA clearance, and no
         registration with ANVISA, COFEPRIS or any equivalent body. Nobody has run a clinical-use
         validation against it.</p>
@@ -743,7 +743,7 @@ openssl rand -base64 32</code></pre>
 
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="help">6. Licence and where to get help</h2>
-    <p>Carino PACS is released under <strong>AGPL-3.0-or-later</strong>. Because it is a network server,
+    <p>Carino DICOM is released under <strong>AGPL-3.0-or-later</strong>. Because it is a network server,
       §13 applies: if you run a modified version as a service, you must offer its source to the people
       who use it. Keep the <code>LICENSE</code> file and a pointer to the source with any modified
       deployment.</p>
@@ -758,7 +758,7 @@ openssl rand -base64 32</code></pre>
     <p>Found an error in this manual — or a translation a radiologist would never say? Open an issue. The
       Spanish and Portuguese documentation is part of the project, not an extra.</p>
 
-    <p class="foot">Carino PACS · <a href="../">landing page</a> · part of the
+    <p class="foot">Carino DICOM · <a href="../">landing page</a> · part of the
       <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a> workshop ·
       AGPL-3.0-or-later.</p>
   </main>

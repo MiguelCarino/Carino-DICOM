@@ -1,4 +1,4 @@
-"""Carino PACS command line.
+"""Carino DICOM command line.
 
     python -m pacs serve      # web dashboard + whatever services the config enables
     python -m pacs receive    # Storage SCP only, headless

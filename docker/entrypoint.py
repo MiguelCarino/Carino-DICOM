@@ -1,4 +1,4 @@
-"""Container entry point for Carino PACS.
+"""Container entry point for Carino DICOM.
 
 Three jobs, in this order:
 
@@ -9,7 +9,7 @@ Three jobs, in this order:
      network without an auth token.
   3. Hand over to the normal CLI (`python -m pacs ...`) in this same process.
 
-Nothing here phones home. Carino PACS has no telemetry, no update check and no
+Nothing here phones home. Carino DICOM has no telemetry, no update check and no
 crash reporting, and this file must not become the place someone adds one.
 
 Environment (all optional):
@@ -172,7 +172,7 @@ def require_writable(directory: str) -> None:
         f"  running as: uid {os.getuid()}, gid {os.getgid()}",
         f"  directory:  {owner}",
         "",
-        "Carino PACS stores config.json, received studies, logs and its index",
+        "Carino DICOM stores config.json, received studies, logs and its index",
         "there, so it cannot start read-only. On the host:",
         "",
         *hints,
@@ -303,7 +303,7 @@ def prepare_config(cfg_path: str) -> None:
         if "auth_token" in str(exc):
             hint = (f"Edit {cfg_path}, or set PACS_AUTH_TOKEN_FILE "
                     "(preferred) / PACS_AUTH_TOKEN.")
-        die(["Carino PACS refused to start — the configuration is not safe to serve.",
+        die(["Carino DICOM refused to start — the configuration is not safe to serve.",
              "", str(exc), "", hint])
 
     if json.dumps(data, sort_keys=True) != before:

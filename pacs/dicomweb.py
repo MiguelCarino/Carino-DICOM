@@ -346,7 +346,7 @@ def _warning_header(warnings: list[str]) -> str:
     parameters the client chose, and a quote or a newline in one of those would
     forge a header."""
     safe = ("".join(ch for ch in w if ch.isprintable() and ch != '"')[:120] for w in warnings)
-    return ", ".join(f'299 carino-pacs "{w}"' for w in safe)
+    return ", ".join(f'299 carino-dicom "{w}"' for w in safe)
 
 
 def _json_response(payload: Any, status: int = 200, warnings: Optional[list[str]] = None) -> Response:

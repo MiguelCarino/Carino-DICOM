@@ -1,5 +1,12 @@
+# The product is called Carino DICOM. Every identifier in this stack — this
+# file's own name, the carino-pacs account, /opt/carino-pacs, /var/lib/carino-pacs,
+# StateDirectory= and SyslogIdentifier= below — deliberately keeps the older
+# spelling. systemd creates a renamed StateDirectory EMPTY on first start and
+# there is no fallback anywhere in this stack, so renaming them would leave an
+# installed service's whole archive sitting under an account the new sysusers
+# run had already removed, with a clean empty directory in front of it.
 [Unit]
-Description=Carino PACS — DICOM gateway and continuity appliance
+Description=Carino DICOM — DICOM gateway and continuity appliance
 Documentation=https://github.com/MiguelCarino/Carino-PACS
 Documentation=file:/opt/carino-pacs/packaging/README.md
 
@@ -35,7 +42,7 @@ StateDirectoryMode=0750
 
 WorkingDirectory=/opt/carino-pacs
 Environment=PYTHONPATH=/opt/carino-pacs
-# Carino PACS ships no pyproject.toml and is not pip-installable, so the package
+# Carino DICOM ships no pyproject.toml and is not pip-installable, so the package
 # is found by path. WorkingDirectory alone would do it, but PYTHONPATH survives
 # anyone adding a drop-in that changes the working directory.
 

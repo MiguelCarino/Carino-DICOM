@@ -116,6 +116,9 @@ class FolderWatcher:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._sizes: dict[str, int] = {}          # path -> last-seen size (stability check)
+        # The ledger filename keeps the pre-rename spelling: it is the record of
+        # what has already gone out, and a rename would read as an empty ledger
+        # and re-send the whole outgoing tree to every destination.
         self.state = SendState(os.path.join(os.path.dirname(cfg.path), ".carinopacs_state.json"))
         # One long-lived router: it owns the parsed-header cache and the
         # warn-once memo, both of which a per-pass instance would throw away —

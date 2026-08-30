@@ -1,4 +1,4 @@
-# Contributing to Carino PACS
+# Contributing to Carino DICOM
 
 Thanks for looking. This is a single-maintainer project (Miguel Carino) of about
 13,000 lines of Python (plus roughly 9,000 more of tests), a vanilla-JS
@@ -13,7 +13,7 @@ nothing else.
 
 ## What this is, and what it is not
 
-Carino PACS is a **DICOM gateway and continuity appliance**. It receives studies,
+Carino DICOM is a **DICOM gateway and continuity appliance**. It receives studies,
 forwards them, captures print-only modalities, serves a worklist, takes HL7
 orders, and keeps a department imaging when the upstream PACS or RIS is down. It
 is meant to run on one machine in one department, configured by one JSON file, by
@@ -120,7 +120,7 @@ compiled.
 git clone https://github.com/MiguelCarino/Carino-PACS
 cd Carino-PACS
 ./setup.sh                 # Windows: .\setup.ps1
-./run.sh init              # creates ~/CarinoPACS/config.json and its folders
+./run.sh init              # creates ~/CarinoDICOM/config.json and its folders
 ./run.sh serve             # dashboard at http://127.0.0.1:8042
 ```
 
@@ -173,9 +173,13 @@ In dev it drives the `.venv` you already created, so there is no build step.
 
 ### Resetting to a clean slate
 
-`./reset.sh` deletes all runtime state — `~/CarinoPACS`, `.venv`,
-`desktop/node_modules`, `desktop/dist`, `desktop/engine`, build artifacts and
-stray Electron userData — and leaves source untouched. It prompts before doing
+`./reset.sh` deletes all runtime state — both `~/CarinoDICOM` and the
+pre-rename `~/CarinoPACS`, `.venv`, `desktop/node_modules`, `desktop/dist`,
+`desktop/engine`, build artifacts and both generations of Electron userData
+(`~/.config/Carino*DICOM*` and the legacy `~/.config/Carino*PACS*`) — and leaves
+source untouched. It sweeps both names of each because a machine that has been
+upgraded has both, and a reset that left one behind would hand the next run a
+"fresh install" that still remembered the last one. It prompts before doing
 it; `-y` skips the prompt. Use it before reproducing an onboarding or first-run
 bug, because a lot of those only reproduce on a truly fresh install.
 
@@ -196,9 +200,11 @@ start a service for that run only and deliberately never write the config's
 `enabled` flags — enrolment belongs to the dashboard's setup chooser.
 
 **`pacs/config.py`** — the whole app is configured by one JSON file, by default
-`~/CarinoPACS/config.json`. Holds `DEFAULTS`, load/save, and validation. Relative
-paths in the config resolve against the config file's own directory, so
-`./received` means `~/CarinoPACS/received` regardless of the working directory.
+`~/CarinoDICOM/config.json` — or `~/CarinoPACS/config.json` if that is what an
+install made before the rename already has. Holds `DEFAULTS`, load/save, and
+validation. Relative paths in the config resolve against the config file's own
+directory, so `./received` means `~/CarinoDICOM/received` regardless of the
+working directory.
 `validate()` is also where the security gate lives (see below).
 
 **`pacs/server.py`** — the orchestrator. Owns the shared `Config` and
@@ -335,8 +341,9 @@ DICOM-TLS on both the server and client sides.
 **`pacs/web/`** — the dashboard front end. Vanilla JS, no build step, no bundler,
 no framework, nothing from a CDN. `index.html`, `app.js`, `styles.css`,
 `i18n.js`, plus the shared fleet scripts (`carino-navbar.js`, `carino-lang.js`,
-`carino-bridge.js`) and the bundled DICOM editor under `web/editor/`. That
-editor is a vendored copy of upstream DICOM-editor and is meant to stay
+`carino-bridge.js`) and the bundled Carino DICOM Editor under `web/editor/`. That
+editor is a vendored copy of the upstream `DICOM-editor` repository — the
+directory and the git remote still carry the old name — and is meant to stay
 byte-identical to it — including `web/editor/tests/`, which is not development
 scaffolding here: `dicom-forge.js` builds the sample studies the empty state
 offers, and `tests/suites/*.js` are what `/editor/#selftest` runs to report
@@ -658,7 +665,7 @@ Found an actual vulnerability? Do not open a pull request. See
 
 ## Licensing
 
-Carino PACS is licensed **GNU Affero General Public License v3.0 or later**
+Carino DICOM is licensed **GNU Affero General Public License v3.0 or later**
 (AGPL-3.0-or-later). In plain terms, and stated for contributors specifically:
 
 - **Your contribution is licensed under the same terms.** By opening a pull

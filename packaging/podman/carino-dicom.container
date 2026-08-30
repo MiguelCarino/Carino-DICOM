@@ -1,16 +1,18 @@
-# Carino PACS — Podman Quadlet unit (rootless)
+# Carino DICOM — Podman Quadlet unit (rootless)
 #
 # Quadlet is Podman's native systemd integration: drop this file in, reload, and
 # systemd owns the container the way it owns any other service. It replaces both
 # `docker compose up -d` and the deprecated `podman generate systemd`.
 #
-#   mkdir -p ~/CarinoPACS
-#   podman build --format docker -t carino-pacs:local .
-#   install -Dm644 packaging/podman/carino-pacs.container \
-#           ~/.config/containers/systemd/carino-pacs.container
+#   # an install from before the rename: move the archive to the new name first
+#   [ -d ~/CarinoPACS ] && [ ! -d ~/CarinoDICOM ] && mv ~/CarinoPACS ~/CarinoDICOM
+#   mkdir -p ~/CarinoDICOM
+#   podman build --format docker -t carino-dicom:local .
+#   install -Dm644 packaging/podman/carino-dicom.container \
+#           ~/.config/containers/systemd/carino-dicom.container
 #   systemctl --user daemon-reload
-#   systemctl --user start carino-pacs
-#   journalctl --user -u carino-pacs -f      # the access token prints on first boot
+#   systemctl --user start carino-dicom
+#   journalctl --user -u carino-dicom -f     # the access token prints on first boot
 #
 # Then open http://127.0.0.1:8042/ and paste the token when the dashboard asks.
 #
@@ -29,9 +31,9 @@
 # about Podman.
 
 [Unit]
-Description=Carino PACS — DICOM gateway and continuity appliance
+Description=Carino DICOM — DICOM gateway and continuity appliance
 Documentation=https://github.com/MiguelCarino/Carino-PACS
-Documentation=file:%h/.config/containers/systemd/carino-pacs.container
+Documentation=file:%h/.config/containers/systemd/carino-dicom.container
 
 # The DICOM listeners bind a concrete address from config.json — often a LAN IP
 # rather than 0.0.0.0 — and a bind to an address the kernel does not have yet
@@ -41,14 +43,14 @@ Wants=network-online.target
 After=network-online.target
 
 [Container]
-ContainerName=carino-pacs
+ContainerName=carino-dicom
 
 # Built locally: this project publishes no image, and an appliance that pulls a
 # floating tag from a registry is an appliance whose version changed without
 # anyone deciding. Build it, tag it, keep the tag. If you do host it somewhere,
 # put the digest here rather than a tag, and add AutoUpdate=registry only if you
 # actively want unattended updates to a medical device.
-Image=localhost/carino-pacs:local
+Image=localhost/carino-dicom:local
 
 # ---- uid mapping, and why this is not the compose file's problem ----------
 # Rootless Podman maps container uids into a subordinate range on the host, so a
@@ -73,15 +75,18 @@ UserNS=keep-id:uid=1000,gid=1000
 # unwritable while the ownership looks perfectly correct. Use `:Z` if this
 # directory is never shared with another container.
 #
-# %h is your home directory. ~/CarinoPACS is also where a from-source run puts
-# its data, so the two deployments read the same archive.
-Volume=%h/CarinoPACS:/data:z
+# %h is your home directory. ~/CarinoDICOM is also where a from-source run puts
+# its data, so the two deployments read the same archive. A container never runs
+# the resolver in pacs/config.py — it only ever sees the fixed /data — so an
+# install from before the rename is moved by hand, once, by the guarded `mv` in
+# the recipe at the top of this file.
+Volume=%h/CarinoDICOM:/data:z
 
 # Supply the token as a file rather than an environment variable — a variable is
 # visible in `podman inspect` and in the environment of every process in the
 # container. Leave both unset and the entrypoint generates one on first boot and
 # prints it once to the journal.
-# Volume=%h/CarinoPACS/secrets/auth_token:/run/secrets/pacs_auth_token:ro
+# Volume=%h/CarinoDICOM/secrets/auth_token:/run/secrets/pacs_auth_token:ro
 # Environment=PACS_AUTH_TOKEN_FILE=/run/secrets/pacs_auth_token
 
 # ---- published ports ----------------------------------------------------
@@ -158,7 +163,7 @@ HealthStartPeriod=60s
 HealthRetries=3
 
 # The one thing compose cannot do. systemd holds the unit in "activating" until
-# the healthcheck passes, so `systemctl --user start carino-pacs` returns only
+# the healthcheck passes, so `systemctl --user start carino-dicom` returns only
 # once the DICOM port is genuinely accepting associations — and anything ordered
 # After= this unit waits for that too, rather than for a process that has begun
 # to exist. Raise HealthStartPeriod above if a start-up index rescan on a large
@@ -167,7 +172,7 @@ Notify=healthy
 
 # journald rather than a json file: it is where the rest of this machine's logs
 # already are, it rotates by the journal's own limits, and `journalctl --user -u
-# carino-pacs` is then the single place to look. The application keeps its own
+# carino-dicom` is then the single place to look. The application keeps its own
 # dated logs under /data/logs regardless.
 LogDriver=journald
 

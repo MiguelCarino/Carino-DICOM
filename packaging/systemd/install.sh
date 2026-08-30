@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Install Carino PACS as a systemd system service.
+# Install Carino DICOM as a systemd system service.
 #
 #   sudo packaging/systemd/install.sh
 #
@@ -11,8 +11,15 @@
 # config.json first, then start it yourself. The last thing this script prints is
 # how.
 #
-# Carino PACS is free software under the AGPL-3.0-or-later. It contains no
+# Carino DICOM is free software under the AGPL-3.0-or-later. It contains no
 # telemetry: nothing here, and nothing it installs, reports anything anywhere.
+#
+# The names below stay carino-pacs even though the product does not: the service
+# account, /opt/carino-pacs, /var/lib/carino-pacs and the unit file are what an
+# already-installed machine is built around. systemd creates a renamed
+# StateDirectory EMPTY on first start, and nothing in this stack falls back to
+# the old path, so renaming them here would strand an existing archive under an
+# account this script's sysusers run had just removed.
 #
 set -euo pipefail
 
@@ -53,7 +60,7 @@ else
         # --shell nologin  the account owns patient data and never needs a shell
         useradd --system --home-dir "$DATA_DIR" --no-create-home \
                 --shell /usr/sbin/nologin \
-                --comment "Carino PACS DICOM gateway" "$APP_USER"
+                --comment "Carino DICOM gateway" "$APP_USER"
         note "created $APP_USER via useradd"
     fi
 fi

@@ -60,7 +60,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Carino PACS version
+      label: Carino DICOM version
       description: >
         Shown in the dashboard, or run `python -m pacs --version`
         (`./run.sh --version`). If you built from source, the commit hash is
@@ -145,8 +145,8 @@ body:
       placeholder: |
         Peer: GE Revolution CT, software 16MW32.5
         Peer AE title: CT_ER1
-        Calling: CARINOPACS on 10.20.1.14:11112
-        Direction: peer -> Carino PACS (C-STORE)
+        Calling: CARINODICOM on 10.20.1.14:11112
+        Direction: peer -> Carino DICOM (C-STORE)
         TLS: no
     validations:
       required: true
@@ -157,7 +157,8 @@ body:
       label: Log excerpt
       description: >
         From the dated log file in your logs directory —
-        `~/CarinoPACS/logs/YYYY-MM-DD.log` on a source install, or the logs
+        `~/CarinoDICOM/logs/YYYY-MM-DD.log` on a source install (or
+        `~/CarinoPACS/...` on an install from before the rename), or the logs
         folder inside the per-user data directory on a packaged build. Include a
         couple of minutes either side of the failure, not just the error line;
         the association setup before it is usually where the answer is. The
@@ -187,7 +188,7 @@ body:
         it is clear whether one was set.
       render: json
       placeholder: |
-        "scp": { "enabled": true, "aet": "CARINOPACS", "bind": "0.0.0.0", "port": 11112, "tls": false },
+        "scp": { "enabled": true, "aet": "CARINODICOM", "bind": "0.0.0.0", "port": 11112, "tls": false },
         "web": { "host": "127.0.0.1", "port": 8042, "auth_token": "<redacted>" }
 
   - type: textarea

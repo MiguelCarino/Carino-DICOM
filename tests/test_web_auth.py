@@ -172,7 +172,7 @@ def test_status_is_gated_and_leaks_nothing_before_login():
     _, _, c = make(_tmp(), token=TOKEN)
     r = c.get("/api/status")
     assert r.status_code == 401
-    assert r.headers.get("WWW-Authenticate") == 'Bearer realm="Carino PACS"'
+    assert r.headers.get("WWW-Authenticate") == 'Bearer realm="Carino DICOM"'
     body = r.get_json()
     assert body["ok"] is False
     assert body["auth"] == {"required": True, "reason": "missing", "retry_after": 0}

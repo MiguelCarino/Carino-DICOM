@@ -1,4 +1,4 @@
-"""Refuse to start Carino PACS on a configuration that would expose patient data.
+"""Refuse to start Carino DICOM on a configuration that would expose patient data.
 
 Run as ExecStartPre= by carino-pacs.service:
 
@@ -49,7 +49,7 @@ def main(argv: list) -> int:
 
     if not os.path.isfile(path):
         fail(
-            f"{path} does not exist. Carino PACS would start on built-in defaults "
+            f"{path} does not exist. Carino DICOM would start on built-in defaults "
             "with every service disabled and the dashboard on 127.0.0.1, so it is "
             "refused instead. Create it with:\n"
             f"    sudo -u carino-pacs /opt/carino-pacs/venv/bin/python -m pacs --config {path} init"

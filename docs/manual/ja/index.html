@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>マニュアル — Carino PACS</title>
-  <meta name="description" content="Carino PACSの日本語マニュアル: 導入の手順、セキュリティモデルとトークンのルールが存在する理由、各サービスの役割と有効にする場面、そしてこれは医療機器ではないという率直な表明。" />
+  <title>マニュアル — Carino DICOM</title>
+  <meta name="description" content="Carino DICOMの日本語マニュアル: 導入の手順、セキュリティモデルとトークンのルールが存在する理由、各サービスの役割と有効にする場面、そしてこれは医療機器ではないという率直な表明。" />
   <link rel="icon" href="../../favicon.webp" />
   <link rel="stylesheet" href="../manual.css" />
   <script>
@@ -38,7 +38,7 @@
   <!-- 時計はこの深さで正しいパスを使って読み込みます。carino-navbar.js は
        [data-carino-clock] を見て二重に読み込みません。 -->
   <script src="../../carino-clock.js" data-carino-clock async></script>
-  <script src="../../carino-navbar.js" data-app="PACS" data-repo="Carino-PACS" defer></script>
+  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
   <script src="../../carino-lang.js" defer></script>
 </head>
 <body>
@@ -49,11 +49,11 @@
       <a href="../es/" lang="es">Español</a>
       <a href="../pt-BR/" lang="pt-BR">Português (BR)</a>
       <a href="../ru/" lang="ru">Русский</a>
-      <a href="../../">← Carino PACS</a>
+      <a href="../../">← Carino DICOM</a>
     </nav>
 
-    <h1>Carino PACS マニュアル</h1>
-    <p class="standfirst">Carino PACSは<strong>DICOMゲートウェイ</strong>であり、<strong>継続運用のための
+    <h1>Carino DICOM マニュアル</h1>
+    <p class="standfirst">Carino DICOMは<strong>DICOMゲートウェイ</strong>であり、<strong>継続運用のための
       アプライアンス</strong>です。検査を受信し、振り分けて転送し、保持しているものをクエリ/取得と
       DICOMwebで公開し、PACSやRISが応答しなくなっても画像診断部門の仕事を止めません。本マニュアルは、
       導入、セキュリティモデル、すべてのサービス、そしてこのソフトウェアの実際の限界を扱います。</p>
@@ -75,7 +75,7 @@
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="what">1. これは何で、どんな役割を担うのか</h2>
 
-    <p>Carino PACSは、画像を生み出す機器と、それを保存したり読影したりするシステムとの<em>あいだ</em>に
+    <p>Carino DICOMは、画像を生み出す機器と、それを保存したり読影したりするシステムとの<em>あいだ</em>に
       立ちます。あなたのアーカイブを置き換えようとしているのではありません。それらをつなぐ部品であり、
       そのどれかが倒れたときにも立っている部品であろうとしています。</p>
 
@@ -178,7 +178,7 @@ journalctl -u carino-pacs -f</code></pre>
       <table>
         <thead><tr><th>形</th><th>ディレクトリ</th></tr></thead>
         <tbody>
-          <tr><td>デスクトップ / CLI</td><td><code>~/CarinoPACS/</code></td></tr>
+          <tr><td>デスクトップ / CLI</td><td><code>~/CarinoDICOM/</code>（既存のインストールは <code>~/CarinoPACS</code> のままです）</td></tr>
           <tr><td>Docker</td><td>コンテナ内の<code>/data</code> → ホストの<code>./data</code></td></tr>
           <tr><td>systemd</td><td><code>/var/lib/carino-pacs/</code>（モード0750）</td></tr>
         </tbody>
@@ -349,7 +349,7 @@ openssl rand -base64 32</code></pre>
     <div class="note">
       <p><b>バックアップ。</b>sqliteの索引はキャッシュで、自分で作り直せます。画像はそうではありません。
         保存先のディレクトリをバックアップし、そして少なくとも一度は復元を試してください。</p>
-      <p><b>テレメトリはありません。</b>Carino PACSはどこへも何も送りません。解析も、クラッシュレポートも、
+      <p><b>テレメトリはありません。</b>Carino DICOMはどこへも何も送りません。解析も、クラッシュレポートも、
         更新確認も、実行時に取ってくる第三者のスクリプトもありません。外向きの接続は、あなたが設定した
         DICOMのアソシエーションとHL7の応答だけで、接続先はあなたが名指しした相手だけです。それを破るような
         変更は、脆弱性として扱われます。</p>
@@ -595,7 +595,7 @@ openssl rand -base64 32</code></pre>
     <h2 id="not">5. これは医療機器ではありません</h2>
 
     <div class="danger">
-      <p><b>Carino PACSは医療機器ではありません。</b>どの国のどの規制当局からも、認証・承認・登録を受けて
+      <p><b>Carino DICOMは医療機器ではありません。</b>どの国のどの規制当局からも、認証・承認・登録を受けて
         いません。医療機器としてのCEマーキングも、FDAのクリアランスも、ANVISA、COFEPRIS、その他同等の機関
         への登録もありません。臨床使用のバリデーションを実施した者もいません。</p>
       <p><b>一次診断のためのものではありません。</b>ここに診断用ビューアはありません。ウィンドウ調整も、
@@ -627,7 +627,7 @@ openssl rand -base64 32</code></pre>
 
     <!-- ─────────────────────────────────────────────────────────── -->
     <h2 id="help">6. ライセンスと相談先</h2>
-    <p>Carino PACSは<strong>AGPL-3.0-or-later</strong>で公開されています。ネットワークサーバーであるため
+    <p>Carino DICOMは<strong>AGPL-3.0-or-later</strong>で公開されています。ネットワークサーバーであるため
       §13が適用されます。改変版をサービスとして運用するなら、それを使う人々にソースを提供しなければなりません。
       改変した配備には<code>LICENSE</code>ファイルと、ソースへの参照を残してください。</p>
     <ul>
@@ -641,7 +641,7 @@ openssl rand -base64 32</code></pre>
     <p>本マニュアルの誤り — あるいは放射線科医なら決して言わない訳 — を見つけたら、issueを立ててください。
       日本語をはじめとする各言語のドキュメントは、おまけではなくプロジェクトの一部です。</p>
 
-    <p class="foot">Carino PACS · <a href="../../">トップページ</a> ·
+    <p class="foot">Carino DICOM · <a href="../../">トップページ</a> ·
       <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a>の工房の一部 ·
       AGPL-3.0-or-later.</p>
   </main>

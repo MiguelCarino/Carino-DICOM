@@ -1,4 +1,4 @@
-// i18n — DICOM editor UI chrome (fleet convention, see Topo/js/i18n.js).
+// i18n — Carino DICOM Editor UI chrome (fleet convention, see Topo/js/i18n.js).
 // English source strings ARE the keys, so a missing entry falls back to
 // English. Locale is resolved by the shared fleet file carino-lang.js
 // (?lang > cookie > browser > en); this file only owns the dictionaries

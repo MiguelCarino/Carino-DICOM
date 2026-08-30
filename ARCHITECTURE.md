@@ -1,6 +1,6 @@
 # Architecture
 
-Carino PACS is a DICOM gateway with a store-and-forward core and a set of
+Carino DICOM is a DICOM gateway with a store-and-forward core and a set of
 optional listeners around it: a Storage SCP that files what arrives, a folder
 watcher that forwards what is put in front of it, and — each off unless somebody
 turned it on — a virtual film printer, a Modality Worklist SCP, a Query/Retrieve
@@ -1473,7 +1473,8 @@ recording. Read the rest of this section as consequences of that.
 ### The document, and why `load()` does not validate
 
 `Config` is one object per process, wrapping one file
-(`~/CarinoPACS/config.json` by default). `load()` reads it, `_parse()` refuses
+(`~/CarinoDICOM/config.json` by default, or `~/CarinoPACS/config.json` on an
+install that predates the rename and still has that directory). `load()` reads it, `_parse()` refuses
 anything that is not a JSON object with a message an operator can act on, and the
 result is deep-merged over `DEFAULTS` — so an absent key is the default, and a
 section the dashboard does not send back is reset to it. Relative paths
@@ -1905,11 +1906,13 @@ the CLI flags that start a service for one run without writing anything. An
 appliance that ships listening is an appliance that joins a hospital network with
 ports open that nobody chose.
 
-**One JSON file, in one place, resolved against itself.** `~/CarinoPACS/` holds
+**One JSON file, in one place, resolved against itself.** `~/CarinoDICOM/` holds
 the config, the folders, the logs, the index and the order store, and relative
-paths in the document resolve against the document's own directory. The same file
-therefore behaves identically under a shell, a systemd unit and a container, and
-an operator asking "where is everything" has one answer. `CONFIGURATION.md`
+paths in the document resolve against the document's own directory. The same
+file therefore behaves identically under a shell, a systemd unit and a
+container, and an operator asking "where is everything" has one answer — which
+is also why an install made before the rename keeps using its `~/CarinoPACS/`
+instead of being split across two directories by an upgrade. `CONFIGURATION.md`
 documents every key; `config.py` owns defaults, validation and the security gate.
 
 **Threads, blocking calls, and no supervisor.** The two libraries that own the

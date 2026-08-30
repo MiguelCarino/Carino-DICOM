@@ -1,4 +1,4 @@
-/* Carino PACS landing page — detect the visitor's OS, highlight their download,
+/* Carino DICOM landing page — detect the visitor's OS, highlight their download,
    and wire per-platform links to the latest GitHub release (fallback: Releases). */
 (function () {
   "use strict";
@@ -41,7 +41,8 @@
     if (n.slice(-4) === ".exe") return "windows";
     if (n.slice(-4) === ".dmg") return "macos";
     if (n.slice(-9) === ".appimage") return "linux";
-    // Release zips are named carinopacs-<runner>-v<version>.zip
+    // Release zips are named <product>-<runner>-v<version>.zip, and the
+    // product half changed at the rename, so match on the runner half.
     if (n.slice(-4) === ".zip") {
       if (n.indexOf("windows") >= 0) return "windows";
       if (n.indexOf("macos") >= 0 || n.indexOf("darwin") >= 0) return "macos";

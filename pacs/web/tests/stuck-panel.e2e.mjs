@@ -161,7 +161,7 @@ class CDP {
 }
 
 /* ---- fixture --------------------------------------------------------- */
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-pacs-stuck-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-dicom-stuck-"));
 const cfgPath = path.join(tmp, "config.json");
 const outgoing = path.join(tmp, "outgoing");
 fs.mkdirSync(outgoing, { recursive: true });

@@ -135,7 +135,7 @@ class CDP {
 }
 
 /* ---- fixture --------------------------------------------------------- */
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-pacs-profiles-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "carino-dicom-profiles-"));
 const cfgPath = path.join(tmp, "config.json");
 const received = path.join(tmp, "received");
 fs.mkdirSync(received, { recursive: true });

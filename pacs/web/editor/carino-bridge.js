@@ -5,7 +5,7 @@
  * In the fleet:
  *
  *   media.carino.systems  →  metadata.carino.systems   (one file, to inspect)
- *   Carino PACS           →  DICOM-editor              (a whole study)
+ *   Carino DICOM          →  Carino DICOM Editor       (a whole study)
  *
  * The exchange, both sides:
  *   1. the sender opens the receiver at "#carino-bridge"
@@ -32,7 +32,9 @@
   const MARKER  = 'carino-bridge';       // marks the receiving page's URL
   const TRUST   = 'carino-bridge.trusted';
 
-  // Carino PACS and DICOM-editor spoke this before the bridge had a name.
+  // Carino DICOM and its editor spoke this before the bridge had a name; the
+  // message names below keep the old spelling because every build already in
+  // the field still sends them.
   // The two sides settle the dialect by ear: whichever "ready" arrives first
   // decides what the payload looks like, so an old page and a new one still
   // understand each other. Only hosts that pass legacy:true accept it.

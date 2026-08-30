@@ -1,10 +1,10 @@
-# Packaging Carino PACS
+# Packaging Carino DICOM
 
-How to run Carino PACS as a background service — the little box in the corner of
+How to run Carino DICOM as a background service — the little box in the corner of
 the imaging department that receives studies and forwards them, and comes back
 on its own after a power cut.
 
-Carino PACS is AGPL-3.0-or-later. It contains no telemetry of any kind: nothing
+Carino DICOM is AGPL-3.0-or-later. It contains no telemetry of any kind: nothing
 in this directory, and nothing it installs, phones home, checks for updates, or
 reports usage. If you deploy it, the only machine that learns anything about
 your patients is yours. Because the dashboard is served over the network, the
@@ -40,6 +40,13 @@ The script creates the `carino-pacs` system user, provisions
 `/var/lib/carino-pacs`, copies the code to `/opt/carino-pacs`, builds a
 virtualenv there, scaffolds `config.json`, and installs the unit.
 
+Those names stay `carino-pacs` although the product is now Carino DICOM, and
+they are not going to change. systemd creates a renamed `StateDirectory=` empty
+on first start and nothing in this stack falls back to the old path, so renaming
+them would leave an installed archive stranded under an account the next
+sysusers run had already removed. Every `carino-pacs` below is that identifier,
+not the product.
+
 **It does not start the service.** Starting a PACS opens listeners that accept
 patient data from any modality that can reach them, so that stays a decision you
 make after reading the config. The script prints the exact next steps.
@@ -56,7 +63,7 @@ Re-running the script upgrades the code in place and never touches an existing
 | `/etc/systemd/system/carino-pacs.service` | the unit | `root` |
 
 `config.json` lives **with the data, not in `/etc`**. That is not an oversight.
-Carino PACS resolves every relative path in the config (`"./received"`,
+Carino DICOM resolves every relative path in the config (`"./received"`,
 `"./logs"`, `"./index.db"`) against the directory the config file itself sits
 in. A config in `/etc` would scatter patient studies through `/etc`, and `/etc`
 has to stay read-only for the sandboxing to mean anything.
@@ -324,7 +331,7 @@ Without sysusers.d, the equivalent is:
 
 ```
 sudo useradd --system --home-dir /var/lib/carino-pacs --no-create-home \
-     --shell /usr/sbin/nologin --comment "Carino PACS DICOM gateway" carino-pacs
+     --shell /usr/sbin/nologin --comment "Carino DICOM gateway" carino-pacs
 sudo install -d -o carino-pacs -g carino-pacs -m 0750 /var/lib/carino-pacs
 for d in received outgoing sent pending logs; do
   sudo install -d -o carino-pacs -g carino-pacs -m 0700 "/var/lib/carino-pacs/$d"
@@ -377,18 +384,20 @@ other service. It replaces both `docker compose up -d` and the deprecated
 `podman generate systemd`.
 
 ```bash
-mkdir -p ~/CarinoPACS
-podman build --format docker -t carino-pacs:local .
-install -Dm644 packaging/podman/carino-pacs.container \
-        ~/.config/containers/systemd/carino-pacs.container
+# an install from before the rename: move the archive to the new name first
+[ -d ~/CarinoPACS ] && [ ! -d ~/CarinoDICOM ] && mv ~/CarinoPACS ~/CarinoDICOM
+mkdir -p ~/CarinoDICOM
+podman build --format docker -t carino-dicom:local .
+install -Dm644 packaging/podman/carino-dicom.container \
+        ~/.config/containers/systemd/carino-dicom.container
 systemctl --user daemon-reload
-systemctl --user start carino-pacs
-journalctl --user -u carino-pacs -f      # the access token prints on first boot
+systemctl --user start carino-dicom
+journalctl --user -u carino-dicom -f     # the access token prints on first boot
 ```
 
 Then open <http://127.0.0.1:8042/> and paste the token when the dashboard asks.
 
-`packaging/podman/carino-pacs.container` is written to be read, the same way
+`packaging/podman/carino-dicom.container` is written to be read, the same way
 `docker-compose.yml` is. It carries the same conservative defaults — loopback
 only, all capabilities dropped, read-only root filesystem, the Storage SCP as
 the one enrolled listener.
@@ -407,7 +416,7 @@ be. The data directory stays yours on the host and the image needs no `PUID` /
 **`systemctl start` waits for the DICOM port.** The unit sets `Notify=healthy`,
 so systemd holds it in *activating* until the healthcheck passes — which asks
 the dashboard for `/api/status` and checks that the Storage SCP is really
-listening. `systemctl --user start carino-pacs` returns after about thirty
+listening. `systemctl --user start carino-dicom` returns after about thirty
 seconds, and when it returns the gateway is genuinely accepting associations.
 Anything ordered `After=` it waits for that too. Compose has no equivalent:
 `docker compose up -d` returns when the process has begun to exist.
@@ -431,7 +440,7 @@ logs into means it never starts at all:
 
 ```bash
 loginctl enable-linger $USER
-systemctl --user enable carino-pacs
+systemctl --user enable carino-dicom
 ```
 
 For a machine-wide service instead, put the same file in `/etc/containers/systemd/`
@@ -445,7 +454,7 @@ Against Podman 5.8.4 on Fedora, rootless, with the unit exactly as it ships:
 the dashboard, the API, the bundled editor and its WebAssembly decoders all
 answer; `systemctl start` blocks for 31s and returns healthy; a real C-ECHO from
 `pynetdicom` is accepted on 11112; `systemctl stop` is graceful in under a
-second; and `~/CarinoPACS` comes out owned by the invoking user.
+second; and `~/CarinoDICOM` comes out owned by the invoking user.
 
 ## macOS (launchd)
 
@@ -467,7 +476,7 @@ handler is inside the program (see the table above), so point
 wrapper you were carrying. The same applies to any other supervisor without a
 configurable stop signal.
 
-The data directory should be somewhere like `/Library/Application Support/CarinoPACS`,
+The data directory should be somewhere like `/Library/Application Support/CarinoDICOM`,
 owned by the service account, with the same rule as on Linux: `config.json` goes
 inside it, because the relative paths resolve against it.
 
@@ -480,7 +489,7 @@ at `python.exe` produces a service that Windows reports as failing to start.
 The practical options, in order of preference:
 
 1. **NSSM.** Install `python.exe` with the arguments `-m pacs --config
-   C:\ProgramData\CarinoPACS\config.json serve`, set the startup directory to
+   C:\ProgramData\CarinoDICOM\config.json serve`, set the startup directory to
    the install path, and run it as a dedicated low-privilege account rather than
    LocalSystem. NSSM's default console stop method sends Ctrl+C, which Python
    raises as `KeyboardInterrupt` — the same unwind the SIGTERM handler produces
@@ -494,7 +503,7 @@ The practical options, in order of preference:
    `SERVICE_CONTROL_STOP` properly. That is a code change, not packaging, and
    nothing here implements it.
 
-Put the data directory under `C:\ProgramData\CarinoPACS`, not in a user profile,
+Put the data directory under `C:\ProgramData\CarinoDICOM`, not in a user profile,
 and restrict its ACL to the service account. The same rules apply: `config.json`
 lives inside the data directory, and a dashboard on anything other than
 `127.0.0.1` needs `web.auth_token` set or the app will refuse it.

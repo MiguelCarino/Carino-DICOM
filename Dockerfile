@@ -1,13 +1,13 @@
-# Carino PACS — server image
+# Carino DICOM — server image
 #
 #   docker compose up -d          # see docker-compose.yml, which is the documentation
-#   docker build -t carino-pacs .
+#   docker build -t carino-dicom .
 #
 # Two stages: the first resolves the Python dependencies into a virtualenv, the
 # second copies only that virtualenv and the application. pip, its cache and its
 # build machinery never reach the shipped image.
 #
-# There is no telemetry in this image. Carino PACS does not phone home, check
+# There is no telemetry in this image. Carino DICOM does not phone home, check
 # for updates or report crashes anywhere, and the build makes no network call
 # beyond the package index.
 
@@ -49,7 +49,7 @@ ARG PGID=1000
 # Bump alongside pacs/__init__.py when cutting a release.
 ARG VERSION=1.1.0
 
-LABEL org.opencontainers.image.title="Carino PACS" \
+LABEL org.opencontainers.image.title="Carino DICOM" \
       org.opencontainers.image.description="Self-hosted DICOM gateway and continuity appliance" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \

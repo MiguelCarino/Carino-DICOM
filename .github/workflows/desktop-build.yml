@@ -1,6 +1,6 @@
 name: Build desktop app
 
-# Builds the Carino PACS desktop app (tray agent) for Linux, macOS and Windows.
+# Builds the Carino DICOM desktop app (tray agent) for Linux, macOS and Windows.
 # Each OS is built on its own runner — PyInstaller and electron-builder cannot
 # cross-compile. Artifacts are produced UNSIGNED by default; add the signing
 # secrets below and the same workflow produces signed + notarized builds with
@@ -83,7 +83,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: carinopacs-${{ matrix.os }}
+          name: carino-dicom-${{ matrix.os }}
           if-no-files-found: error
           path: |
             desktop/dist/*.AppImage
