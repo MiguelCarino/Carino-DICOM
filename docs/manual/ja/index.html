@@ -38,7 +38,7 @@
   <!-- 時計はこの深さで正しいパスを使って読み込みます。carino-navbar.js は
        [data-carino-clock] を見て二重に読み込みません。 -->
   <script src="../../carino-clock.js" data-carino-clock async></script>
-  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
+  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
   <script src="../../carino-lang.js" defer></script>
 </head>
 <body>
@@ -135,13 +135,13 @@
 
     <h3>デスクトップアプリ</h3>
     <p>お使いのOS向けのパッケージを
-      <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">リリースの
+      <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">リリースの
       ページ</a>からダウンロードして開いてください。システムトレイに収まり、クリックするとダッシュボードが
       開きます。まだコード署名をしていないため、WindowsとmacOSは初回起動時に警告を出します。それでも開くための
       正確な手順は<a href="../../">トップページ</a>にあります。</p>
 
     <h3>Docker</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
 docker compose up -d
@@ -159,7 +159,7 @@ docker compose logs -f pacs</code></pre>
     </div>
 
     <h3>systemdサービス（Linux）</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS.git
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM.git
 cd Carino-PACS
 sudo packaging/systemd/install.sh</code></pre>
     <p>インストーラは<code>carino-pacs</code>というシステムユーザーを作り、コードを
@@ -631,11 +631,11 @@ openssl rand -base64 32</code></pre>
       §13が適用されます。改変版をサービスとして運用するなら、それを使う人々にソースを提供しなければなりません。
       改変した配備には<code>LICENSE</code>ファイルと、ソースへの参照を残してください。</p>
     <ul>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">GitHubの
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">GitHubの
         ソースとissueトラッカー</a></li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener">セキュリティ
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/SECURITY.md" target="_blank" rel="noopener">セキュリティ
         ポリシー</a> — 何が守られ、何が守られないか、そして脆弱性の報告方法</li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">貢献の
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">貢献の
         しかた</a></li>
     </ul>
     <p>本マニュアルの誤り — あるいは放射線科医なら決して言わない訳 — を見つけたら、issueを立ててください。

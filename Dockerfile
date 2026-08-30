@@ -53,7 +53,7 @@ LABEL org.opencontainers.image.title="Carino DICOM" \
       org.opencontainers.image.description="Self-hosted DICOM gateway and continuity appliance" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
-      org.opencontainers.image.source="https://github.com/MiguelCarino/Carino-PACS"
+      org.opencontainers.image.source="https://github.com/MiguelCarino/Carino-DICOM"
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \

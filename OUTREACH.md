@@ -124,7 +124,7 @@ platforms:
   - Docker
 tags:
   - Health and Fitness
-source_code_url: https://github.com/MiguelCarino/Carino-PACS
+source_code_url: https://github.com/MiguelCarino/Carino-DICOM
 ```
 
 Notes on the fields, because each one has a rule behind it:
@@ -229,7 +229,7 @@ a maintainer who answers comments.
 >   useful issue to open.
 >
 > AGPL-3.0, Python, no telemetry.
-> Source: https://github.com/MiguelCarino/Carino-PACS
+> Source: https://github.com/MiguelCarino/Carino-DICOM
 >
 > Happy to answer anything, including "why not just use Orthanc", which is
 > usually the right question.
@@ -306,7 +306,7 @@ not after.
 > and the dashboard is plain HTTP unless you front it with a proxy. All
 > documented in the README's regulatory section rather than buried.
 >
-> https://github.com/MiguelCarino/Carino-PACS
+> https://github.com/MiguelCarino/Carino-DICOM
 
 ---
 
@@ -369,7 +369,7 @@ handling.
 > device, not validated for clinical use, not for primary diagnosis, and never
 > yet run against real clinical equipment.
 >
-> Source: https://github.com/MiguelCarino/Carino-PACS — and thanks for the
+> Source: https://github.com/MiguelCarino/Carino-DICOM — and thanks for the
 > libraries; the print SCP in particular would not have been a weekend's work
 > without them.
 

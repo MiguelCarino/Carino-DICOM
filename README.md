@@ -76,7 +76,7 @@ two-minute proof below.
 The container is the fastest path and needs nothing on the host but Docker.
 
 ```bash
-git clone https://github.com/MiguelCarino/Carino-PACS.git
+git clone https://github.com/MiguelCarino/Carino-DICOM.git
 cd Carino-PACS
 
 # The container never runs as root, so ./data has to be writable by your uid.

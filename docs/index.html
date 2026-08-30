@@ -10,7 +10,7 @@
 </head>
 <body>
   <!-- Carino navbar self-injects at the top of <body> (loads carino-clock.js locally) -->
-  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
+  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
 
@@ -54,11 +54,11 @@
       <p class="version" id="version">Checking for the latest version…</p>
 
       <div class="downloads" id="downloads">
-        <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-PACS/releases/download/v1.0.0/carinopacs-windows-v.1.0.0.zip" target="_blank" rel="noopener">
+        <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-windows-v.1.0.0.zip" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b>🪟 Windows</b><span class="fmt">.zip</span></a>
-        <a class="dl-btn" data-os="macos" href="https://github.com/MiguelCarino/Carino-PACS/releases/download/v1.0.0/carinopacs-macos-v.1.0.0.zip" target="_blank" rel="noopener">
+        <a class="dl-btn" data-os="macos" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-macos-v.1.0.0.zip" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b> macOS</b><span class="fmt">.zip</span></a>
-        <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-PACS/releases/download/v1.0.0/carinopacs-ubuntu-latest-v1.0.0.zip" target="_blank" rel="noopener">
+        <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-ubuntu-latest-v1.0.0.zip" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.zip</span></a>
         <!-- A button, not a link: there is nothing to download. The three
              server deployments run from a container image you build or from
@@ -77,7 +77,7 @@
            manual does not have yet. -->
       <p class="dl-manual"><a class="btn ghost" id="manualLink" href="manual/" data-i18n>📖 Read the manual</a></p>
 
-      <p class="dl-all"><a href="https://github.com/MiguelCarino/Carino-PACS/releases"
+      <p class="dl-all"><a href="https://github.com/MiguelCarino/Carino-DICOM/releases"
          target="_blank" rel="noopener" data-i18n>All versions and changelogs →</a></p>
 
       <!-- One note, not two. It used to be a line about Docker followed by a
@@ -128,18 +128,18 @@
       <article>
         <h3>🐳 Docker</h3>
         <p data-i18n>Compose file, everything on loopback. The first boot prints an access token — open http://127.0.0.1:8042/ and paste it when the dashboard asks.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
 docker compose up -d
 docker compose logs -f pacs</code></pre>
-        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
+        <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
       <article>
         <h3>🦭 Podman</h3>
         <p data-i18n>Rootless, and systemd owns it. Needs no compose provider, and the token prints to the journal on first boot.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 [ -d ~/CarinoPACS ] &amp;&amp; [ ! -d ~/CarinoDICOM ] &amp;&amp; mv ~/CarinoPACS ~/CarinoDICOM
 mkdir -p ~/CarinoDICOM
@@ -149,23 +149,23 @@ install -Dm644 packaging/podman/carino-dicom.container \
 systemctl --user daemon-reload
 systemctl --user start carino-dicom
 journalctl --user -u carino-dicom -f</code></pre>
-        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/podman/carino-dicom.container" target="_blank" rel="noopener" data-i18n>Details →</a>
+        <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/podman/carino-dicom.container" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
       <article>
         <h3>🐧 systemd</h3>
         <p data-i18n>From source, as a system service with an account of its own. The installer stops before starting it — opening listeners that accept patient data stays your decision.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 sudo packaging/systemd/install.sh
 # then edit /var/lib/carino-pacs/config.json and:
 sudo systemctl start carino-pacs</code></pre>
-        <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
+        <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
     </div>
 
     <p class="server-foot">
-      <a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/packaging/README.md"
+      <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/README.md"
          target="_blank" rel="noopener" data-i18n>Full deployment guide →</a></p>
     </div>
   </dialog>
@@ -275,7 +275,7 @@ sudo systemctl start carino-pacs</code></pre>
             <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code></li>
           <li id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
             <code>.deb</code> (Debian/Ubuntu) from the
-            <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.
+            <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>.
             The <code>.AppImage</code> needs FUSE — <code>sudo dnf install fuse-libs</code>
             (Fedora) / <code>sudo apt install libfuse2</code> (Debian), or run it with
             <code>--appimage-extract-and-run</code>.</li>
@@ -313,15 +313,15 @@ sudo systemctl start carino-pacs</code></pre>
             <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>),
               tray app, Docker image, or systemd unit. DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
           </ul>
-          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+          <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
 ./run.sh init                    # scaffold config.json + folders
 ./run.sh serve                   # dashboard → http://127.0.0.1:8042</code></pre>
           <div class="tech-links">
-            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">GitHub</a>
-            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/README.md" target="_blank" rel="noopener">README</a>
-            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n>Security policy</a>
-            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/BUILDING.md" target="_blank" rel="noopener" data-i18n>Build &amp; release</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">GitHub</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/README.md" target="_blank" rel="noopener">README</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n>Security policy</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/BUILDING.md" target="_blank" rel="noopener" data-i18n>Build &amp; release</a>
           </div>
         </div>
     </div>

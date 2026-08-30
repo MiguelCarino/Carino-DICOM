@@ -7,7 +7,7 @@
 # run had already removed, with a clean empty directory in front of it.
 [Unit]
 Description=Carino DICOM — DICOM gateway and continuity appliance
-Documentation=https://github.com/MiguelCarino/Carino-PACS
+Documentation=https://github.com/MiguelCarino/Carino-DICOM
 Documentation=file:/opt/carino-pacs/packaging/README.md
 
 # The DICOM listeners bind a concrete address from config.json (often a LAN IP,

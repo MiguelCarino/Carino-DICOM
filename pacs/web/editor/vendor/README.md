@@ -109,7 +109,7 @@ building; keep it that way.
 
 ## If you are syncing from upstream DICOM-editor
 
-The editor is a vendored copy of https://github.com/MiguelCarino/DICOM-editor.
+The editor is a vendored copy of https://github.com/MiguelCarino/Carino-DICOM-Editor.
 Upstream is where the self-hosting was done — the fonts and all four bundles are
 already local there, so nothing has to move to make this copy offline-clean.
 

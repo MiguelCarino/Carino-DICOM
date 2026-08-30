@@ -39,7 +39,7 @@
   <!-- Часы подключаются здесь с путём, верным для этой глубины;
        carino-navbar.js видит [data-carino-clock] и не загружает их повторно. -->
   <script src="../../carino-clock.js" data-carino-clock async></script>
-  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
+  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
   <script src="../../carino-lang.js" defer></script>
 </head>
 <body>
@@ -140,14 +140,14 @@
 
     <h3>Настольное приложение</h3>
     <p>Скачайте пакет для вашей системы со
-      <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">страницы
+      <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">страницы
       releases</a> и откройте его. Оно сворачивается в системный трей; по клику открывается панель.
       Приложение пока не подписано цифровой подписью, поэтому Windows и macOS предупреждают при первом
       запуске — на <a href="../../">главной странице</a> есть точные шаги, как всё-таки его
       открыть.</p>
 
     <h3>Docker</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
 docker compose up -d
@@ -166,7 +166,7 @@ docker compose logs -f pacs</code></pre>
     </div>
 
     <h3>Служба systemd (Linux)</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS.git
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM.git
 cd Carino-PACS
 sudo packaging/systemd/install.sh</code></pre>
     <p>Установщик создаёт системного пользователя <code>carino-pacs</code>, копирует код в
@@ -785,11 +785,11 @@ openssl rand -base64 32</code></pre>
       исходный код тем, кто им пользуется. Сохраняйте файл <code>LICENSE</code> и ссылку на исходный код
       при любом изменённом развёртывании.</p>
     <ul>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">Исходный
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">Исходный
         код и трекер задач на GitHub</a></li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener">Политика
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/SECURITY.md" target="_blank" rel="noopener">Политика
         безопасности</a> — что защищено, что нет и как сообщить об уязвимости</li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Как
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Как
         внести вклад</a></li>
     </ul>
     <p>Нашли ошибку в этом руководстве — или перевод, который врач-рентгенолог никогда не произнёс бы?

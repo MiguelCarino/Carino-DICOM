@@ -11,7 +11,7 @@ body:
         right implementation is often not the one either of us guessed.
 
         Please read the scope section of
-        [CONTRIBUTING.md](https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md)
+        [CONTRIBUTING.md](https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONTRIBUTING.md)
         first. This is a
         gateway and continuity appliance, not an enterprise PACS, and requests
         that move it toward being one are the ones most likely to be declined.

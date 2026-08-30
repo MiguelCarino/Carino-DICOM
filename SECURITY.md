@@ -31,7 +31,7 @@ running the software before there is anything to upgrade to.
 Report privately by either route:
 
 1. **GitHub private vulnerability reporting** — on
-   <https://github.com/MiguelCarino/Carino-PACS>, go to the *Security* tab and
+   <https://github.com/MiguelCarino/Carino-DICOM>, go to the *Security* tab and
    choose *Report a vulnerability*. This is the preferred route: it creates a
    private thread, keeps the history with the project, and needs no key
    exchange.

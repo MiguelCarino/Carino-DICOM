@@ -117,7 +117,7 @@ You need **Python 3.10+** and, for the desktop app, **Node 18+**. Nothing is
 compiled.
 
 ```bash
-git clone https://github.com/MiguelCarino/Carino-PACS
+git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 ./setup.sh                 # Windows: .\setup.ps1
 ./run.sh init              # creates ~/CarinoDICOM/config.json and its folders

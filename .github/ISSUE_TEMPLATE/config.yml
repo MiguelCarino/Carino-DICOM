@@ -5,7 +5,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question — how do I do X?
-    url: https://github.com/MiguelCarino/Carino-PACS/discussions
+    url: https://github.com/MiguelCarino/Carino-DICOM/discussions
     about: >
       "How do I point my modality at this?", "which port do I use?", "is this
       the right tool for my department?" — ask in Discussions rather than the
@@ -13,7 +13,7 @@ contact_links:
       question in it is fine and will not be held against you.
 
   - name: Setup, running and building
-    url: https://github.com/MiguelCarino/Carino-PACS/blob/main/BUILDING.md
+    url: https://github.com/MiguelCarino/Carino-DICOM/blob/main/BUILDING.md
     about: >
       Installing from source, the desktop app in dev mode, freezing the engine
       with PyInstaller, and building the OS installers. If the app starts and
@@ -21,20 +21,20 @@ contact_links:
       copied .venv — delete it and re-run setup.sh.
 
   - name: What the software does and how it is configured
-    url: https://github.com/MiguelCarino/Carino-PACS/blob/main/README.md
+    url: https://github.com/MiguelCarino/Carino-DICOM/blob/main/README.md
     about: >
       The services, the dashboard, the emergency RIS and worklist, and the
       config.json keys. config.example.json in the repo root is the full
       annotated shape.
 
   - name: Contributing — dev setup, architecture, house conventions
-    url: https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md
+    url: https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONTRIBUTING.md
     about: >
       Where each module lives, how to run the tests, and the conventions that
       have caused real bugs. Read this before opening a pull request.
 
   - name: Security vulnerability — report it privately
-    url: https://github.com/MiguelCarino/Carino-PACS/security/advisories/new
+    url: https://github.com/MiguelCarino/Carino-DICOM/security/advisories/new
     about: >
       Do NOT open a public issue for a vulnerability. This software handles
       patient data, and a public report tells everyone running it about the

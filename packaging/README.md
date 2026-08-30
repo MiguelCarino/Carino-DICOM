@@ -31,7 +31,7 @@ below is for the other case — a machine with no one logged in.
 ### Install
 
 ```
-git clone https://github.com/MiguelCarino/Carino-PACS.git
+git clone https://github.com/MiguelCarino/Carino-DICOM.git
 cd Carino-PACS
 sudo packaging/systemd/install.sh
 ```

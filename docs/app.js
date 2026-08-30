@@ -3,7 +3,12 @@
 (function () {
   "use strict";
 
-  var REPO = "MiguelCarino/Carino-PACS";
+  // The repository's real name, not the old one behind GitHub's redirect: this
+  // string is used for an api.github.com call, and the API does not follow the
+  // rename redirect the way the website does. Left stale, the latest-release
+  // lookup below fails quietly and the page keeps serving the pinned v1.0.0
+  // links for ever.
+  var REPO = "MiguelCarino/Carino-DICOM";
   var RELEASES = "https://github.com/" + REPO + "/releases";
 
   // Pinned v1.0.0 assets — the default links; the latest-release fetch below

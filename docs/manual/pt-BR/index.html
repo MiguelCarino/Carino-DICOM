@@ -39,7 +39,7 @@
   <!-- O relógio é carregado aqui com o caminho certo para esta profundidade;
        carino-navbar.js detecta pelo [data-carino-clock] e não repete. -->
   <script src="../../carino-clock.js" data-carino-clock async></script>
-  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-PACS" defer></script>
+  <script src="../../carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
   <script src="../../carino-lang.js" defer></script>
 </head>
 <body>
@@ -139,13 +139,13 @@
 
     <h3>App de desktop</h3>
     <p>Baixe o pacote do seu sistema na
-      <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">página
+      <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">página
       de releases</a> e abra. Ele fica na bandeja do sistema; ao clicar, abre o painel. Como ainda não é
       assinado digitalmente, Windows e macOS avisam na primeira execução: a
       <a href="../../">página inicial</a> traz o passo a passo para abrir mesmo assim.</p>
 
     <h3>Docker</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
 cd Carino-PACS
 mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
 docker compose up -d
@@ -163,7 +163,7 @@ docker compose logs -f pacs</code></pre>
     </div>
 
     <h3>Serviço systemd (Linux)</h3>
-    <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS.git
+    <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM.git
 cd Carino-PACS
 sudo packaging/systemd/install.sh</code></pre>
     <p>O instalador cria o usuário de sistema <code>carino-pacs</code>, copia o código para
@@ -779,11 +779,11 @@ openssl rand -base64 32</code></pre>
       usa. Mantenha o arquivo <code>LICENSE</code> e um ponteiro para o código junto de qualquer
       implantação modificada.</p>
     <ul>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">Código e
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">Código e
         issues no GitHub</a></li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/SECURITY.md" target="_blank" rel="noopener">Política
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/SECURITY.md" target="_blank" rel="noopener">Política
         de segurança</a> — o que está protegido, o que não está e como reportar uma vulnerabilidade</li>
-      <li><a href="https://github.com/MiguelCarino/Carino-PACS/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Como
+      <li><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Como
         contribuir</a></li>
     </ul>
     <p>Se você achar um erro neste manual — ou uma tradução que um radiologista nunca diria — abra uma

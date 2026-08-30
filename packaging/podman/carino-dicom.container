@@ -32,7 +32,7 @@
 
 [Unit]
 Description=Carino DICOM — DICOM gateway and continuity appliance
-Documentation=https://github.com/MiguelCarino/Carino-PACS
+Documentation=https://github.com/MiguelCarino/Carino-DICOM
 Documentation=file:%h/.config/containers/systemd/carino-dicom.container
 
 # The DICOM listeners bind a concrete address from config.json — often a LAN IP
