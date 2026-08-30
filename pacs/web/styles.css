@@ -411,8 +411,15 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
    so a keyboard can reach them. The row owns the gap; the badges do not chain
    margins off each other, because either one may be hidden at zero and a
    margin-left:auto on the first would strand the survivor mid-row. */
-.navrow { display: flex; align-items: stretch; gap: 6px; }
-.navrow .navbtn { flex: 1 1 auto; min-width: 0; }
+.navrow { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+/* min-width is max-content, not 0, for the one row that holds two full buttons
+   rather than a button and its badges: Manual and Sign out. Sharing a sidebar
+   row leaves each about 43px of text space and they want 51 and 56, so with
+   min-width:0 both ellipsed to "Man…" and "Sig…" — at every window width, since
+   the sidebar is fixed, which is why no breakpoint ever revealed it. Refusing to
+   shrink below the label makes the pair wrap to a row each instead, and a row
+   whose buttons do fit is unaffected. */
+.navrow .navbtn { flex: 1 1 auto; min-width: max-content; }
 /* text-decoration is here for the one nav row that is an <a> rather than a
    <button>: the Manual opens a real page in a new tab, so it has to be a link
    for middle-click and "open in new tab" to work, and a button would have to
