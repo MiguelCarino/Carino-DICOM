@@ -1327,13 +1327,55 @@
     setAtomic("ovAetPort", rx.aet
       ? rx.aet + ":" + rx.port + (rx.running ? "" : " · " + T("not listening"))
       : "");
-    txt("ovVersion", dash(s.version));
+    txt("ovVersionV", dash(s.version));
     setPath("ovConfigPath", setup.config_path || s.config_path);
     setPath("ovStorageDir", rx.storage_dir);
     setPath("ovLogsDir", s.logs_dir);
 
     renderOvDests(s);
     renderOvLast(s);
+  }
+
+  /* ── The desktop shell's update notice ───────────────────────────
+     The Electron shell publishes window.carinoDesktop (its preload.js); a
+     browser has nothing there, none of this runs, and the <a> stays hidden
+     exactly as it was served. That is the whole compatibility story — one
+     feature test, no fallback, no polling, nothing to strip for the web build.
+
+     It is a suffix on the Version row and nowhere else: no toast, no banner, no
+     startup modal, nothing that moves the layout or has to be dismissed. The
+     shell announces on every page load as well as on every discovery, so this
+     never has to ask twice. */
+  let desktopUpdate = null;
+
+  function paintDesktopUpdate() {
+    const a = $("ovVersionUpd");
+    if (!a) return;
+    if (!desktopUpdate) { a.hidden = true; a.textContent = ""; return; }
+    // Reads "1.1.0 · 1.2.0 available ↗". The separator and the arrow are
+    // punctuation between two values and stay out of the dictionary; only the
+    // sentence is translated, as one literal so i18n-parity can see it.
+    a.textContent = "· " + TF("{v} available", { v: desktopUpdate.version }) + " ↗";
+    a.hidden = false;
+  }
+
+  function initDesktopShell() {
+    const d = window.carinoDesktop;
+    if (!d || typeof d.onUpdate !== "function") return;
+    const a = $("ovVersionUpd");
+    if (a) {
+      a.addEventListener("click", (ev) => {
+        // The shell opens it in the user's real browser. preventDefault stops
+        // the anchor from also navigating, which would open the page twice; the
+        // href stays in the markup so the link is a real one — hoverable,
+        // focusable, and still correct if it is ever middle-clicked instead.
+        ev.preventDefault();
+        if (d.openReleasePage) d.openReleasePage();
+      });
+    }
+    const seen = (u) => { desktopUpdate = u && u.version ? u : null; paintDesktopUpdate(); };
+    try { seen(d.getUpdate && d.getUpdate()); } catch (e) { /* an older shell: wait for the event */ }
+    d.onUpdate(seen);
   }
 
   function renderOvDests(s) {
@@ -4244,6 +4286,9 @@
       // while the next poll is in flight.
       paintTicker();
       if (lastStatus) renderOverview(lastStatus);
+      // Its own element, so renderOverview does not reach it — and it can be on
+      // screen with no poll pending at all.
+      paintDesktopUpdate();
       retitleWatcherWarn();
       // Rendered by this file, so the language pass does not reach them.
       renderAuthState();
@@ -4280,6 +4325,9 @@
       resolveHash(location.hash);
     });
     retitleWatcherWarn();
+    // Independent of auth: it reads nothing from the engine, and behind the gate
+    // there is no Overview panel to see it in anyway.
+    initDesktopShell();
     // Auth before anything else. With a token configured every /api route 401s,
     // so loading the config or starting the pollers first would just knock on a
     // closed door — GET /api/auth is public precisely so this decision can be

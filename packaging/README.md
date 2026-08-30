@@ -6,10 +6,13 @@ on its own after a power cut.
 
 Carino DICOM is AGPL-3.0-or-later. It contains no telemetry of any kind: nothing
 in this directory, and nothing it installs, phones home, checks for updates, or
-reports usage. If you deploy it, the only machine that learns anything about
-your patients is yours. Because the dashboard is served over the network, the
-AGPL's source requirement applies to the people who use it — keep the `LICENSE`
-file and a pointer to the source with any modified deployment.
+reports usage. That sentence is unchanged and stays unchanged — the opt-in
+version check added to the Electron tray app lives in the desktop build alone,
+and no container, Quadlet unit or systemd service here has it to switch on. If
+you deploy it, the only machine that learns anything about your patients is
+yours. Because the dashboard is served over the network, the AGPL's source
+requirement applies to the people who use it — keep the `LICENSE` file and a
+pointer to the source with any modified deployment.
 
 ## What is in this directory
 

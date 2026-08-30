@@ -32,13 +32,23 @@ It is deliberately **not**:
   by anyone, and the licence disclaims warranty in the strongest terms the law
   allows. Do not submit changes premised on it being a regulated device, and do
   not add claims to the docs that imply it is one.
-- **Not telemetric.** The software never phones home — no analytics, no crash
-  reporting, no update pings, no usage counters, no remote logging. This is not
-  an oversight to be fixed, it is a property to be preserved. A patch that adds
-  an outbound network call to anything other than a DICOM node the operator
-  configured, or the operator's own dashboard, will be rejected on sight. The
-  same goes for a bundled asset fetched from a CDN at runtime: everything the
-  dashboard needs is vendored in the repo.
+- **Not telemetric.** The engine never phones home — no analytics, no crash
+  reporting, no usage counters, no remote logging — and a Docker, Podman or
+  systemd deployment is that and nothing more. This is not an oversight to be
+  fixed, it is a property to be preserved. A patch that adds an outbound network
+  call to anything other than a DICOM node the operator configured, or the
+  operator's own dashboard, will be rejected on sight. The same goes for a
+  bundled asset fetched from a CDN at runtime: everything the dashboard needs is
+  vendored in the repo.
+
+  The Electron tray app has exactly one exception and it is meant to stay exactly
+  one: an **opt-in version check** — asked once on first run, off unless somebody
+  said yes, off again from a tray checkbox — which is a single HTTPS GET a day to
+  GitHub's releases API carrying a `User-Agent` and nothing else, downloads
+  nothing and installs nothing. Do not widen it. A patch that made it default to
+  on, that removed the question, that added an identifier, a counter or a version
+  string of anything but the app itself, or that turned the notice into an
+  installer, is the same rejection as the paragraph above.
 
 Feature requests are welcome. Feature requests that turn this into a small
 enterprise PACS are the ones most likely to be declined, and it will not be
@@ -342,10 +352,12 @@ DICOM-TLS on both the server and client sides.
 no framework, nothing from a CDN. `index.html`, `app.js`, `styles.css`,
 `i18n.js`, plus the shared fleet scripts (`carino-navbar.js`, `carino-lang.js`,
 `carino-bridge.js`) and the bundled Carino DICOM Editor under `web/editor/`. That
-editor is a vendored copy of the upstream `DICOM-editor` repository — the
-directory and the git remote still carry the old name — and is meant to stay
-byte-identical to it — including `web/editor/tests/`, which is not development
-scaffolding here: `dicom-forge.js` builds the sample studies the empty state
+editor is a vendored copy of its upstream repository,
+[MiguelCarino/Carino-DICOM-Editor](https://github.com/MiguelCarino/Carino-DICOM-Editor)
+— a local clone's working directory is usually still `DICOM-editor`, the name the
+repository carried before the rename, which GitHub still redirects — and is meant
+to stay byte-identical to it — including `web/editor/tests/`, which is not
+development scaffolding here: `dicom-forge.js` builds the sample studies the empty state
 offers, and `tests/suites/*.js` are what `/editor/#selftest` runs to report
 which DICOM encodings the browser on this workstation decodes correctly.
 `pacs/web/editor/vendor/README.md` says what may and may not be copied over.

@@ -143,6 +143,14 @@
       de releases</a> y ábrelo. Se queda en la bandeja del sistema; al hacer clic se abre el panel. Como
       todavía no está firmado digitalmente, Windows y macOS avisan la primera vez: en la
       <a href="../../">portada</a> están los pasos exactos para abrirlo igualmente.</p>
+    <p>En el primer arranque pregunta, una sola vez, si puede consultar en GitHub si hay una versión más
+      nueva. Si respondes que no —o si cierras la pregunta— se queda desactivado, que es como viene de
+      fábrica. Si está activado, una versión nueva aparece como una línea en el menú de la bandeja y
+      junto a la versión en el panel <em>Resumen</em>; al hacer clic en cualquiera de las dos se abre la
+      página del release en tu navegador. No se descarga nada ni se instala nada solo. La casilla
+      <em>Buscar actualizaciones</em> del menú de la bandeja lo activa y lo desactiva cuando quieras, y
+      esto solo existe en la versión de escritorio: los despliegues en contenedor y con systemd no lo
+      tienen.</p>
 
     <h3>Docker</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
@@ -359,11 +367,20 @@ openssl rand -base64 32</code></pre>
     <div class="note">
       <p><b>Copias de seguridad.</b> El índice sqlite es una caché y se reconstruye solo; las imágenes
         no. Respalda los directorios de almacenamiento, y compruébalo restaurando alguna vez.</p>
-      <p><b>Sin telemetría.</b> Carino DICOM no envía nada a ninguna parte: ni analítica, ni informes de
-        errores, ni comprobación de actualizaciones, ni scripts de terceros cargados en tiempo de
-        ejecución. Las únicas conexiones salientes son las asociaciones DICOM y los ACK HL7 que tú
-        configuraste, hacia los pares que tú nombraste. Que dejara de ser así se trataría como una
-        vulnerabilidad.</p>
+      <p><b>Sin telemetría, con una excepción que activas tú.</b> El motor no envía nada a ninguna
+        parte: ni analítica, ni informes de errores, ni contadores de uso, ni scripts de terceros
+        cargados en tiempo de ejecución. Sus únicas conexiones salientes son las asociaciones DICOM y los
+        ACK HL7 que tú configuraste, hacia los pares que tú nombraste — y un despliegue con Docker,
+        Podman o systemd es eso y nada más, que es la frase que importa, porque esa es la forma que está
+        en el servicio de imagen con los datos de los pacientes encima. La app de escritorio puede además
+        comprobar si se ha publicado una versión más nueva, y solo si dijiste que sí a la pregunta que
+        hace una vez, en el primer arranque; viene desactivada y la bandeja del sistema vuelve a
+        desactivarla. Esa comprobación es una sola petición HTTPS al día a la lista de releases de
+        GitHub, con un User-Agent y nada más — sin identificadores, sin contadores, sin configuración,
+        sin datos de pacientes —, de modo que lo que GitHub llega a saber es la dirección IP de esta
+        máquina y aproximadamente cuándo se abrió la app, y eso es todo. No se descarga nada ni se
+        instala nada solo. Un cambio que enviara algo más, o que enviara algo que nadie hubiera
+        aceptado, se trataría como una vulnerabilidad.</p>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
@@ -617,6 +634,48 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
+      <h3>Modalidades registradas</h3>
+      <p class="port">Sin puerto · <em>Configuración → Modalidades</em></p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>La lista de salas a las que sirve este equipo: un nombre que una persona reconoce, el AE title
+          de la estación que la worklist compara <em>exactamente</em>, el código de modalidad y, si quieres,
+          el nombre de estación. No es una lista de permisos: un equipo no necesita estar aquí para enviar
+          imágenes, y estar aquí tampoco se lo permite. Lo que se gana es que el destino de una orden pase
+          a elegirse de una lista en vez de teclearse, y es la lista de la que la sonda de worklist toma
+          prestado un AE title.</dd>
+        <dt>Cuándo rellenarla</dt>
+        <dd>Cuando sirves la worklist o tecleas órdenes a mano. Mientras no haya ninguna estación
+          registrada, el destino de una orden se escribe a mano y una errata no se puede detectar.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Sonda de worklist — preguntarle al otro RIS</h3>
+      <p class="port">Cliente saliente · C-FIND de worklist · <em>Configuración → Modalidades</em></p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Responde a «¿por qué este equipo no ve su lista?» sin tocar el equipo. Dale una dirección al RIS
+          real del hospital —o a su bróker— en <em>Ajustes</em> y pulsa <em>Probar worklist</em> en la fila
+          de una modalidad: Carino le hace a ese RIS la pregunta que haría esa modalidad, usando su mismo AE
+          title, y archiva cada respuesta en <em>Actividad</em> → <em>Capturadas</em>. Una ejecución hace la
+          misma pregunta cinco veces, ensanchándola de clave en clave —estación, fecha y modalidad; luego
+          sin la modalidad; sin la fecha; sin la estación—, porque lo que localiza el fallo es la
+          <em>diferencia</em> entre las respuestas. Si no vuelve nada en ninguna, el otro RIS no tiene nada
+          programado; si sólo la más estrecha vuelve vacía, el que está mal es el AE title de la
+          estación.</dd>
+        <dt>Antes de pulsar</dt>
+        <dd><strong>Saca la modalidad de la red primero.</strong> La sonda llama <em>como</em> esa
+          modalidad, y dos cosas respondiendo al mismo AE title en un mismo RIS es un lío que luego hay que
+          ir a deshacer.</dd>
+        <dt>Qué no es</dt>
+        <dd>Ni un servicio, ni una agenda, ni una cola. Lo que hay en <em>Capturadas</em> es el registro de
+          lo que contestó otro: esas órdenes no se sirven nunca en la worklist de este equipo, que no
+          reclama ninguna. <em>Limpiar</em> vacía ese registro y nada más.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
       <h3>RIS de emergencia — órdenes HL7</h3>
       <p class="port">Puerto 2575 · HL7 <code>ORM^O01</code> sobre MLLP</p>
       <dl>
@@ -661,6 +720,36 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
+      <h3>Avisos — webhook y correo</h3>
+      <p class="port">Sólo saliente · webhook HTTP, SMTP</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Llega a quien no tiene el panel abierto. El aviso en pantalla basta para quien está mirando un
+          envío y no sirve para el caso que justifica esto: el principal se cae a las 03:00 y el radiólogo
+          de guardia no está delante de ninguna pantalla. Dos canales, independientes entre sí, los dos
+          muertos mientras el interruptor general esté apagado.</dd>
+        <dt>Qué envía</dt>
+        <dd><strong>Sólo eventos de failover</strong>: disparado, activado, resuelto. Ninguna otra parte del
+          equipo genera un aviso. Esto no es un sistema de alertas general y no se convierte en uno por
+          encenderlo.</dd>
+        <dt>Quién recibe el correo</dt>
+        <dd>Perfiles, no direcciones. El mensaje va a cada perfil activo al que el failover esté configurado
+          para avisar <em>y</em> que tenga una dirección de correo puesta. Con SMTP configurado y ninguna
+          dirección en ningún perfil no sale nada, y sin ruido: eso es lo primero que hay que mirar cuando
+          «el correo está activado y no se enteró nadie». El texto cambia según el papel de cada uno, y la
+          dirección del destino que falla sólo aparece para quien ya puede ver la tabla de destinos: un
+          correo sale del edificio y no se puede recuperar.</dd>
+        <dt>Qué no hará nunca</dt>
+        <dd>Retrasar ni romper aquello de lo que informa. Cada envío se entrega a un hilo aparte, la cola
+          tiene tope —se descarta lo más viejo y el descarte se cuenta, porque un «el principal está caído»
+          entregado después de la recuperación es peor que el silencio— y un fallo se convierte en un
+          contador y una línea de registro, no en una excepción. Enviados, fallidos, descartados, en cola y
+          el último error se pueden leer, así que «activado y no ha entregado nunca nada» se ve
+          <em>antes</em> de la caída que depende de ello. Pruébalo una tarde tranquila, no durante una.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
       <h3>Impresión virtual</h3>
       <p class="port">Puerto 11113 · DICOM Print, salida PDF</p>
       <dl>
@@ -687,13 +776,16 @@ openssl rand -base64 32</code></pre>
           CLI.</dd>
         <dt>Cómo se navega</dt>
         <dd>El menú de la izquierda tiene seis filas: <em>Resumen</em>, <em>Servicios</em>,
-          <em>Estudios</em>, <em>Órdenes</em>, <em>Configuración</em> y <em>Actividad</em>. Las tres
+          <em>Estudios</em>, <em>Órdenes</em>, <em>Configuración</em> y <em>Actividad</em>; y una séptima,
+          <em>Nodo de pruebas</em>, sólo en un proceso arrancado con <code>--dev-peer</code>. Las tres
           preguntas que se hacen sobre el mismo montón de ficheros son las pestañas de
           <em>Estudios</em> —<em>Historial</em>, <em>Pendientes</em> y <em>Atascados</em>—; lo que se
           ajusta al poner el equipo en marcha son las pestañas de <em>Configuración</em>
-          —<em>Destinos</em>, <em>Rutas</em>, <em>Ajustes</em> y <em>Personas</em>—, y esa pantalla
-          abre por <em>Destinos</em>, no por <em>Ajustes</em>; y los dos registros son las pestañas
-          de <em>Actividad</em> —<em>Registro</em> y <em>Auditoría</em>—. <em>Órdenes</em> mantiene
+          —<em>Destinos</em>, <em>Rutas</em>, <em>Ajustes</em>, <em>Modalidades</em> y
+          <em>Personas</em>—, y esa pantalla abre por <em>Destinos</em>, no por <em>Ajustes</em>; y los
+          tres registros son las pestañas de <em>Actividad</em> —<em>Registro</em>, <em>Auditoría</em> y
+          <em>Capturadas</em>, esta última lo que contestó otro RIS cuando este equipo le preguntó como
+          una de tus modalidades—. <em>Órdenes</em> mantiene
           su propia tira de abiertas y cerradas. La fila de <em>Estudios</em> lleva dos contadores
           que son botones, 📎 lo que espera aprobación y ⚠ lo que está atascado, y cada uno abre su
           pestaña directamente; <em>Órdenes</em> lleva el suyo. Un contador se oculta cuando vale
@@ -738,6 +830,49 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
+    <div class="svc-doc">
+      <h3>El nodo de pruebas — un segundo archivo desechable</h3>
+      <p class="port">Sólo loopback · <code>pacs serve --dev-peer</code> · nunca en una versión distribuida</p>
+      <dl>
+        <dt>Qué hace</dt>
+        <dd>Crea un segundo archivo completo dentro de este mismo proceso, sólo en <code>127.0.0.1</code>,
+          con su propio AE title, sus propios puertos de recepción y de Query/Retrieve y su propio
+          almacenamiento en una carpeta temporal, y deja en este equipo un destino ya apuntando a él. Es un
+          sitio de verdad al que un estudio puede <em>ir</em> mientras compruebas que el reenvío, una regla
+          de enrutamiento, la anonimización al reenviar o un C-MOVE hacen lo que crees. Junto a él se crea
+          un destino «agujero negro» desactivado: actívalo y los envíos fallan a propósito, que es como se
+          llena la pestaña de atascados a voluntad y se ve qué aspecto tiene un atasco antes de que ocurra
+          de verdad.</dd>
+        <dt>Cómo se abre uno</dt>
+        <dd>Arranca el motor con <code>pacs serve --dev-peer</code> —lo dice en la línea de debajo de la URL
+          del panel—, elige <strong>🧪 Nodo de pruebas</strong> en el menú de la izquierda y pulsa
+          <em>Crear nodo</em>. El panel pasa a mostrar su AE title, los dos puertos, su carpeta y lo que
+          lleva recibido. Sin ese parámetro la fila no está, la API responde 404 y ningún ajuste de
+          <code>config.json</code> la trae de vuelta. Es deliberado: un ajuste lo puede cambiar cualquiera
+          que tenga el token del panel, y un parámetro de arranque no se alcanza por HTTP.</dd>
+        <dt>Quién puede</dt>
+        <dd>Un perfil con permiso para <em>crear y descartar el archivo de pruebas desechable</em>. De los
+          perfiles de serie, eso es TI y un administrador: demostrar dónde se muere un reenvío es trabajo de
+          banco de pruebas. Recepción y el radiólogo no lo tienen, porque un segundo archivo es una
+          herramienta de banco, no clínica. Crearlo y descartarlo quedan los dos escritos en la
+          auditoría.</dd>
+        <dt>Qué pasa con lo que guardó</dt>
+        <dd>Se va todo —la carpeta y las dos filas de destino de este equipo— al pulsar <em>Descartar</em>,
+          al parar el proceso y en el siguiente arranque después de un cierre brusco o un corte de luz. No
+          sobrevive nada, que es justo la razón de usar esto en vez de escribir a mano una segunda
+          configuración y olvidarse de la carpeta. Una cosa que hay que esperar: si lo descartas con envíos
+          todavía en cola contra él, esos envíos se quedan sin sitio al que reintentar; límpialos en
+          <em>Estudios</em> → <em>Atascados</em>.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>Es una herramienta de banco, y el parámetro es lo que hace que siga siéndolo.</b> El nodo es
+          sólo loopback, y sin excepción: un archivo de pruebas que una modalidad de la red pudiera
+          encontrar sería un segundo almacén, sin auditar, de las imágenes de alguien, y nadie se daría
+          cuenta de que está ahí. No pases el parámetro en un equipo con estudios reales. Las versiones de
+          escritorio y de contenedor no lo pasan nunca por ti.</p>
+      </div>
+    </div>
+
     <h2 id="no-es">5. Esto no es un producto sanitario</h2>
 
     <div class="danger">

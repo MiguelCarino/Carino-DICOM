@@ -417,6 +417,13 @@ into the exam, so the study that comes back reconciles to the order exactly. If
 a destination PACS simply *has no RIS*, tick its "No RIS" box and Carino runs
 the worklist for it permanently.
 
+When the question is the other way round — *why is this scanner not seeing its
+list?* — the **worklist probe** asks the hospital's real RIS the question that
+modality would ask, borrowing its AE title, and files every answer under
+Activity → Caught. One run asks the same question five times, widened a key at a
+time, because the difference between the answers is what locates the fault. Take
+the modality off the network first: the probe calls as it.
+
 ### Emergency failover
 
 Rather than run the worklist all the time, Carino can watch your primary PACS
@@ -559,13 +566,32 @@ it over the shared Carino Bridge. Its de-identification profile is kept in step
 with the Python one by a test that re-parses the JavaScript and fails if the two
 drift apart. It is a tag editor, **not a diagnostic viewer**.
 
+### The dev peer — a disposable second archive
+
+Testing store-and-forward needs somewhere for a study to *go*. `pacs serve
+--dev-peer` lets the dashboard create a whole second archive inside the same
+process, on `127.0.0.1` only, with its own AE title, ports and temporary storage
+— plus a destination already aimed at it and a disabled black hole for making
+sends fail on purpose. Everything it stored, and both destination rows, are
+deleted when it is discarded, when the process stops, and by a sweep on the next
+start after a crash.
+
+It is a **launch flag and never a config key**: a key would be editable through
+the API, so an admin token on a deployed appliance would be enough to switch on
+"spawn a second archive". Without the flag the routes answer 404 and the nav row
+is not there, and the shipped container and desktop builds never pass it. See
+[CONFIGURATION.md](CONFIGURATION.md#--dev-peer).
+
 ### Dashboard, CLI, packaging
 
 Every function has a head-less command; the dashboard is optional. The interface
 is available in **English, Spanish, Portuguese (Brazil), Japanese and Russian**.
 Deployment shapes: Docker/compose, systemd units
 ([packaging/README.md](packaging/README.md)), and an Electron tray app for a
-clinician's workstation ([BUILDING.md](BUILDING.md)).
+clinician's workstation ([BUILDING.md](BUILDING.md)). That tray app — and only
+it — can watch GitHub for a newer release, off unless somebody answers yes to the
+question it asks on first run; it downloads nothing, and what the check costs in
+privacy is spelled out below.
 
 ---
 
@@ -712,18 +738,36 @@ TLS, with client certificates for mutual authentication, and `allowed_aets` /
 
 ---
 
-## No telemetry, and the licence
+## No telemetry, one opt-in version check, and the licence
 
-**Carino DICOM collects nothing and sends nothing.** No analytics, no crash
-reporting, no update checks, no usage counters, no remote logging, no license
-server, and no third-party script fetched at runtime — everything the dashboard
-needs, fonts included, is vendored in this repository. The only outbound
-connections it ever makes are the DICOM associations and HL7 acknowledgements
-you configured, to the peers you named. Patient data never leaves the machines
-you pointed it at.
+**The engine collects nothing and sends nothing.** No analytics, no crash
+reporting, no usage counters, no remote logging, no license server, and no
+third-party script fetched at runtime — everything the dashboard needs, fonts
+included, is vendored in this repository. The only outbound connections it ever
+makes are the DICOM associations and HL7 acknowledgements you configured, to the
+peers you named. That is worth stating in those words because it is the whole of
+what a Docker, Podman or systemd deployment does — the shape that sits in the
+imaging department with the patient data on it, unchanged from the day this
+paragraph was first written. Patient data never leaves the machines you pointed
+it at.
 
-That is a guarantee, not a preference: a change adding an outbound call to
-anything else would be treated as a vulnerability, and
+**The desktop app can check whether a newer version exists, and only if you said
+so.** It asks once, on first run; dismissing that question leaves it off, and off
+is the default. A *Check for updates* checkbox in the tray menu turns it on or
+off afterwards. When it is on, what leaves the machine is one HTTPS GET to
+GitHub's releases API, at most once a day, carrying a User-Agent and nothing
+else — no analytics, no crash reporting, no usage counter, no identifier, no
+patient data, and nothing about the studies on this machine or that there are
+any. What GitHub necessarily learns from a request like that is the machine's IP
+address and roughly when the app was started; that is the actual privacy cost and
+it is the whole of it. Nothing is downloaded and nothing installs itself: a newer
+version becomes a line in the tray menu and beside the version on the dashboard's
+Overview panel, and clicking it opens the release page in your browser. It is a
+notice, not an updater.
+
+That is a guarantee, not a preference: an outbound call beyond those two — one
+nobody asked for, or one carrying anything about this machine, its operator or
+its patients — would be treated as a vulnerability, and
 [CONTRIBUTING.md](CONTRIBUTING.md) says such a patch will be rejected on sight.
 
 ### What is mine

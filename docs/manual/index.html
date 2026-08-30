@@ -131,6 +131,12 @@
       page</a> and open it. It tucks into the system tray; clicking it opens the dashboard. It is not
       code-signed yet, so Windows and macOS warn on first launch — the
       <a href="../">landing page</a> has the exact steps to open it anyway.</p>
+    <p>On first run it asks, once, whether it may check GitHub for a newer version. Answering no — or
+      closing the question — leaves it off, which is the default. If it is on, a newer release shows up
+      as a line in the tray menu and beside the version on the <em>Overview</em> panel; clicking either
+      opens the release page in your browser. Nothing is downloaded and nothing installs itself. The tray
+      menu's <em>Check for updates</em> tick turns it on or off whenever you like, and only this desktop
+      build has it at all — the container and systemd deployments do not.</p>
 
     <h3>Docker</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
@@ -344,10 +350,19 @@ openssl rand -base64 32</code></pre>
     <div class="note">
       <p><b>Backups.</b> The sqlite index is a cache and rebuilds itself; the images do not. Back up the
         storage directories — and test a restore at least once.</p>
-      <p><b>No telemetry.</b> Carino DICOM sends nothing anywhere: no analytics, no crash reporting, no
-        update checks, no third-party scripts fetched at runtime. The only outbound connections are the
-        DICOM associations and HL7 acknowledgements you configured, to the peers you named. A change that
-        broke that would be treated as a vulnerability.</p>
+      <p><b>No telemetry, with one exception you switch on yourself.</b> The engine sends nothing
+        anywhere: no analytics, no crash reporting, no usage counters, no third-party scripts fetched at
+        runtime. Its only outbound connections are the DICOM associations and HL7 acknowledgements you
+        configured, to the peers you named — and a Docker, Podman or systemd deployment is that and
+        nothing more, which is the sentence that matters, because that is the shape sitting in the
+        imaging department with the patient data on it. The desktop app can additionally check whether a
+        newer version has been published, and only if you said yes to the question it asks once on first
+        run; it is off by default and the tray menu turns it off again. That check is one HTTPS request a
+        day to GitHub's list of releases, carrying a User-Agent that names the app and nothing else — no
+        identifier, no counter, no configuration, no patient data — so what GitHub learns is this
+        machine's IP address and roughly when the app was started, and that is the whole of it. Nothing
+        is downloaded and nothing installs itself. A change that sent more than that, or that sent
+        anything nobody had agreed to, would be treated as a vulnerability.</p>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
@@ -591,6 +606,47 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
+      <h3>Registered modalities</h3>
+      <p class="port">No port · <em>Configuration → Modalities</em></p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>The list of rooms this appliance serves — a name a person recognises, the station AE title the
+          worklist matches <em>exactly</em>, the modality code, and an optional station name. It is not a
+          permission list: a scanner does not have to be registered here to send images, and being here does
+          not let it. What it buys is that an order's target becomes a pick from a list rather than a field
+          somebody types, and it is the list the worklist probe below borrows an AE title from.</dd>
+        <dt>Fill it in when</dt>
+        <dd>You are serving the worklist or hand-keying orders. Until one station is registered, an order's
+          target is typed by hand and a typo cannot be caught.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
+      <h3>Worklist probe — asking the other RIS</h3>
+      <p class="port">Outbound client · worklist C-FIND · <em>Configuration → Modalities</em></p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Answers “why is this scanner not seeing its list?” without touching the scanner. Give the
+          hospital's real RIS or its broker an address under <em>Settings</em>, then press <em>Test
+          worklist</em> on a modality's row: Carino asks that RIS the question that modality would ask,
+          using that modality's own AE title, and files every answer under <em>Activity</em> → <em>Caught</em>.
+          One run asks the same question five times, widened a key at a time — station and date and modality,
+          then without the modality, without the date, without the station — because the <em>difference</em>
+          between the answers is what locates the fault. Nothing comes back to any of them and the other RIS
+          has nothing scheduled; only the narrowest comes back empty and it is the station AE title that is
+          wrong.</dd>
+        <dt>Before you press it</dt>
+        <dd><strong>Take the modality off the network first.</strong> The probe calls <em>as</em> that
+          modality, and two things answering to one AE title on one RIS is a confusion somebody then has to
+          go and undo.</dd>
+        <dt>What it is not</dt>
+        <dd>Not a service, not a schedule and not a queue. What <em>Caught</em> holds is a record of what
+          somebody else answered: those orders are never served on this appliance's own worklist, and it
+          claims none of them. <em>Clear</em> empties that record and does nothing else.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
       <h3>Emergency RIS — HL7 orders</h3>
       <p class="port">Port 2575 · HL7 <code>ORM^O01</code> over MLLP</p>
       <dl>
@@ -633,6 +689,36 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
+      <h3>Notifications — webhook and e-mail</h3>
+      <p class="port">Outbound only · HTTP webhook, SMTP</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Reaches the people who do not have the dashboard open. The banner on screen is enough for
+          whoever is watching a transfer and useless for the case this exists for: the primary goes down at
+          03:00 and the radiologist on call is not looking at a screen. Two channels, independent of each
+          other, both dead until the master switch is on.</dd>
+        <dt>What it sends</dt>
+        <dd><strong>Failover events, and nothing else</strong> — triggered, activated, resolved. No other
+          part of the appliance produces a notification. This is not a general alerting system and does not
+          become one by being switched on.</dd>
+        <dt>Who receives the mail</dt>
+        <dd>Profiles, not addresses. A message goes to every enabled profile that failover is set to notify
+          <em>and</em> that has an e-mail address on it. SMTP configured with no address on any profile
+          sends nothing at all, quietly — that is the first thing to check when “e-mail is on and nobody was
+          told”. The wording differs by role, and the failing destination's address appears only for a reader
+          already allowed to see the destination table: an e-mail leaves the building and cannot be
+          recalled.</dd>
+        <dt>What it will never do</dt>
+        <dd>Delay or break the thing it is reporting. Every send is handed to a worker thread, the queue is
+          bounded — the oldest is dropped and the drop is counted, because a stale “primary is down”
+          delivered after recovery is worse than silence — and a failure becomes a counter and a log line
+          rather than an exception. Sent, failed, dropped, queued and the last error are all readable, so
+          “enabled and has never actually delivered anything” is visible <em>before</em> the outage that
+          depends on it. Test it on a quiet afternoon, not during one.</dd>
+      </dl>
+    </div>
+
+    <div class="svc-doc">
       <h3>Virtual print</h3>
       <p class="port">Port 11113 · DICOM Print, PDF output</p>
       <dl>
@@ -658,12 +744,15 @@ openssl rand -base64 32</code></pre>
           editor. Everything the dashboard does also exists in the CLI.</dd>
         <dt>Getting around</dt>
         <dd>The sidebar has six rows: <em>Overview</em>, <em>Services</em>, <em>Studies</em>,
-          <em>Orders</em>, <em>Configuration</em> and <em>Activity</em>. The three questions asked of the
+          <em>Orders</em>, <em>Configuration</em> and <em>Activity</em> — and a seventh, <em>Dev peer</em>,
+          only in a process started with <code>--dev-peer</code>. The three questions asked of the
           same pile of files are the tabs of <em>Studies</em> — <em>History</em>, <em>Pending</em> and
           <em>Stuck</em>; what you set when commissioning the machine are the tabs of
-          <em>Configuration</em> — <em>Destinations</em>, <em>Routing</em>, <em>Settings</em> and
-          <em>People</em>, and it opens on <em>Destinations</em>, not on <em>Settings</em>; and the two
-          records are the tabs of <em>Activity</em> — <em>Logs</em> and <em>Audit</em>. <em>Orders</em>
+          <em>Configuration</em> — <em>Destinations</em>, <em>Routing</em>, <em>Settings</em>,
+          <em>Modalities</em> and <em>People</em>, and it opens on <em>Destinations</em>, not on
+          <em>Settings</em>; and the three records are the tabs of <em>Activity</em> — <em>Logs</em>,
+          <em>Audit</em> and <em>Caught</em>, the last being what another RIS answered when this appliance
+          asked it as one of your modalities. <em>Orders</em>
           keeps its own strip of open and closed. The <em>Studies</em> row carries two counts that are
           buttons in their own right, 📎 pending and ⚠ stuck, and each opens its own tab: so reaching
           <em>Stuck</em> is one click while something is stuck, and two — the row, then the tab — when
@@ -702,6 +791,47 @@ openssl rand -base64 32</code></pre>
           alt="The editor's Edit tab: a toolbar with Anonymize all, Randomize all, add Tag, JSON, CSV, Print and Download all; a strip of the five loaded series; filter chips for patient, study, series, image, equipment, UIDs and private tags; the tag table itself, one row per attribute with its group and element numbers, description, VR and an editable value; and down the right-hand third an Image edits panel — rotate, flip, invert and redact burned-in text, written into the stored pixels — above the frame preview, a folded Window/Level reading and the drop zone." />
         <figcaption>The tag table, where a header is corrected before a study is re-sent — a wrong accession number or a mistyped patient ID, fixed at the gateway rather than at the modality that has already moved on.</figcaption>
       </figure>
+    </div>
+
+    <div class="svc-doc">
+      <h3>The dev peer — a disposable second archive</h3>
+      <p class="port">Loopback only · <code>pacs serve --dev-peer</code> · never in a shipped build</p>
+      <dl>
+        <dt>What it does</dt>
+        <dd>Creates a whole second archive inside this same process, on <code>127.0.0.1</code> only, with its
+          own AE title, its own receiver and Query/Retrieve ports and its own storage in a temporary folder —
+          and a destination on this appliance already aimed at it. It is somewhere real for a study to
+          <em>go</em> while you prove that forwarding, a routing rule, de-identify-on-forward or C-MOVE does
+          what you believe it does. A black-hole destination is created beside it, switched off: enable that
+          one and sends fail on purpose, which is how you fill the Stuck tab on demand and find out what
+          being stuck looks like before it happens for real.</dd>
+        <dt>How to open one</dt>
+        <dd>Start the engine with <code>pacs serve --dev-peer</code> — it says so on the line under the
+          dashboard URL — then pick <strong>🧪 Dev peer</strong> in the sidebar and press <em>Create
+          peer</em>. The panel then reports its AE title, both ports, its folder and what it has received.
+          Without that flag the row is not there, the API answers 404, and no setting in
+          <code>config.json</code> will bring it back. That is deliberate: a setting can be changed by
+          anybody holding the dashboard's token, and a launch argument cannot be reached over HTTP at
+          all.</dd>
+        <dt>Who may</dt>
+        <dd>A profile allowed to <em>create and discard the disposable test archive</em>. Among the built-in
+          profiles that means IT, and an administrator — proving where a forward is dying is bench work.
+          Reception and the radiologist do not get it: a second archive is a bench tool, not a clinical one.
+          Creating one and discarding one are both written to the audit trail.</dd>
+        <dt>What becomes of what it stored</dt>
+        <dd>All of it goes — the folder, and both destination rows on this appliance — when you press
+          <em>Discard</em>, when the process stops, and on the next start after a crash or a power cut.
+          Nothing outlives it, which is the entire reason to use this rather than hand-writing a second
+          config and forgetting the folder. One thing to expect: discard a peer with sends still queued
+          against it and those sends have nowhere left to retry, so clear them in <em>Studies</em> →
+          <em>Stuck</em>.</dd>
+      </dl>
+      <div class="warn">
+        <p><b>A bench tool, and the flag is what keeps it one.</b> The peer is loopback-only and
+          unconditionally so — a test archive a modality on the network could find would be a second,
+          unaudited store of somebody's images, and nobody would notice it was there. Do not pass the flag on
+          an appliance holding real studies. The desktop and container builds never pass it for you.</p>
+      </div>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->

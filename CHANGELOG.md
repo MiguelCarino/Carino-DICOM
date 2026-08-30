@@ -308,6 +308,52 @@ release also queries, retrieves, routes and de-identifies.
   JavaScript profiles drift apart. Node checks live beside what they check: the
   dashboard's login flow, its stuck panel and its translation parity in
   `pacs/web/tests/`, the documentation site's own translations in `docs/tests/`.
+- **The dev peer — a disposable second archive** (`pacs serve --dev-peer`,
+  `pacs/devpeer.py`). One click stands up a whole second engine inside the same
+  process, on `127.0.0.1` only, with its own AE title, receiver and Q/R ports
+  and its own storage in a temporary folder, plus two destination rows on the
+  primary: one enabled and aimed at the peer, and a disabled black hole for
+  making sends fail on purpose. Store-and-forward, routing, de-identify-on-
+  forward and C-MOVE can then be proved against somewhere a study actually goes.
+  It is a **launch flag and deliberately not a config key**: a key would be
+  editable through `POST /api/config`, so an admin token on a deployed appliance
+  would be enough to switch on "spawn a second archive that stores patient
+  images somewhere new". Without the flag both routes answer 404, the status
+  block is absent and the nav row stays hidden; the shipped container CMD and
+  the desktop launcher never pass it. Loopback is unconditional and not a
+  setting. The capability is `devpeer.manage` — IT and admin, never reception or
+  the radiologist. Deletion happens on exactly three occasions — an explicit
+  discard, process shutdown (with an `atexit` net), and a startup sweep of stale
+  `carino-peer-*` trees that runs on *every* `pacs serve` and skips any peer
+  whose owner process is still alive — never on a tab closing and never on a
+  timer, and every delete is guarded to a directory one level under the system
+  temp folder wearing the prefix. Documented in
+  [CONFIGURATION.md](CONFIGURATION.md#--dev-peer) and in the manual.
+- **An opt-in version check, in the desktop app only** — the tray build can ask
+  GitHub whether a newer release exists, and it asks *you* first: one dialog on
+  first run, dismissing it counts as no, and no is the default, so an install
+  nobody answers never makes the request. A *Check for updates* tick sits beside
+  *Start at login* in the tray menu and reverses the answer at any time. What
+  goes out when it is on is one HTTPS GET to the releases API, at most once a
+  day, carrying a `User-Agent` because GitHub refuses requests without one — no
+  identifier, no counter, no configuration, no patient data, nothing that says a
+  study has ever passed through this machine. What GitHub learns is the IP
+  address and roughly when the app started, and [SECURITY.md](SECURITY.md) says
+  so in those words rather than calling the whole thing "no telemetry" and
+  hoping nobody runs a packet capture. A failure is silent: no dialog, no log
+  line, no retry, because a version check that interrupts somebody mid-shift is
+  worse than one that never runs. A newer version becomes a line in the tray
+  menu and a small link beside the version on Overview, both of which open the
+  release page in the real browser; **nothing is downloaded and nothing installs
+  itself**, which is deliberate and not a stage on the way to an updater — this
+  is a medical device's neighbour, and unattended upgrades to one are somebody's
+  decision, never a timer's. Tag comparison is strict `major.minor.patch`:
+  anything else is not an update, so a `nightly-…` tag or a rewritten release
+  cannot produce a notice, and neither can a *lower* number than the one
+  running. The engine is untouched — none of this exists outside `desktop/`, so
+  no Docker, Podman or systemd deployment has it to enable, and
+  [packaging/README.md](packaging/README.md) keeps its original promise word for
+  word. (`desktop/main.js`, `desktop/preload.js`, `pacs/web/app.js`)
 - Dashboard: Query/Retrieve card, routing panel with "Explain route", DICOMweb
   settings, index status and rescan, and a token login prompt — all translated
   into the five shipped languages.

@@ -34,6 +34,13 @@ const STRINGS = {
         'Start at login': 'Iniciar al arrancar sesión',
         'Quit Carino DICOM': 'Salir de Carino DICOM',
         'Carino DICOM — DICOM store': 'Carino DICOM — almacén DICOM',
+        // Update check
+        'Carino DICOM — updates': 'Carino DICOM — actualizaciones',
+        'Should Carino DICOM check GitHub for a newer version?': '¿Debe Carino DICOM comprobar en GitHub si hay una versión más reciente?',
+        'It only looks — nothing is downloaded or installed. A newer version appears in the tray menu and on the Overview panel. You can change this at any time from the tray.': 'Solo lo comprueba: no se descarga ni se instala nada. Una versión más reciente aparece en el menú de la bandeja y en el panel Resumen. Puedes cambiarlo cuando quieras desde la bandeja.',
+        'Check for updates': 'Buscar actualizaciones',
+        "Don't check": 'No comprobar',
+        'Update available — {v}': 'Actualización disponible — {v}',
     },
     'pt-BR': {
         'Carino DICOM — choose data folder': 'Carino DICOM — escolha a pasta de dados',
@@ -50,6 +57,12 @@ const STRINGS = {
         'Start at login': 'Iniciar ao fazer login',
         'Quit Carino DICOM': 'Sair do Carino DICOM',
         'Carino DICOM — DICOM store': 'Carino DICOM — repositório DICOM',
+        'Carino DICOM — updates': 'Carino DICOM — atualizações',
+        'Should Carino DICOM check GitHub for a newer version?': 'O Carino DICOM deve verificar no GitHub se há uma versão mais recente?',
+        'It only looks — nothing is downloaded or installed. A newer version appears in the tray menu and on the Overview panel. You can change this at any time from the tray.': 'Ele apenas verifica: nada é baixado nem instalado. Uma versão mais recente aparece no menu da bandeja e no painel Resumo. Você pode mudar isso quando quiser pela bandeja.',
+        'Check for updates': 'Procurar atualizações',
+        "Don't check": 'Não verificar',
+        'Update available — {v}': 'Atualização disponível — {v}',
     },
     ja: {
         'Carino DICOM — choose data folder': 'Carino DICOM — データフォルダの選択',
@@ -66,6 +79,12 @@ const STRINGS = {
         'Start at login': 'ログイン時に起動',
         'Quit Carino DICOM': 'Carino DICOM を終了',
         'Carino DICOM — DICOM store': 'Carino DICOM — DICOMストレージ',
+        'Carino DICOM — updates': 'Carino DICOM — 更新',
+        'Should Carino DICOM check GitHub for a newer version?': 'Carino DICOM が GitHub で新しいバージョンを確認してもよいですか？',
+        'It only looks — nothing is downloaded or installed. A newer version appears in the tray menu and on the Overview panel. You can change this at any time from the tray.': '確認するだけで、ダウンロードもインストールもしません。新しいバージョンはトレイメニューと「概要」パネルに表示されます。設定はトレイからいつでも変更できます。',
+        'Check for updates': '更新を確認',
+        "Don't check": '確認しない',
+        'Update available — {v}': '更新あり — {v}',
     },
     ru: {
         'Carino DICOM — choose data folder': 'Carino DICOM — выбор папки данных',
@@ -82,6 +101,12 @@ const STRINGS = {
         'Start at login': 'Запускать при входе в систему',
         'Quit Carino DICOM': 'Выйти из Carino DICOM',
         'Carino DICOM — DICOM store': 'Carino DICOM — хранилище DICOM',
+        'Carino DICOM — updates': 'Carino DICOM — обновления',
+        'Should Carino DICOM check GitHub for a newer version?': 'Проверять на GitHub, не вышла ли более новая версия Carino DICOM?',
+        'It only looks — nothing is downloaded or installed. A newer version appears in the tray menu and on the Overview panel. You can change this at any time from the tray.': 'Только проверка: ничего не скачивается и не устанавливается. Новая версия показывается в меню в трее и на панели «Обзор». Это можно изменить в любой момент из трея.',
+        'Check for updates': 'Проверять обновления',
+        "Don't check": 'Не проверять',
+        'Update available — {v}': 'Доступно обновление — {v}',
     },
 };
 

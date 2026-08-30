@@ -16,9 +16,10 @@
    ============================================================ */
 "use strict";
 
-const { app, BrowserWindow, Tray, Menu, dialog, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, dialog, nativeImage, shell, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
+const https = require("https");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -211,15 +212,219 @@ function waitForServer(timeoutMs = 40000) {
   });
 }
 
+// ---- update check ------------------------------------------------------
+/* Check-only, on purpose, and the smallest thing that can work: one GET to the
+   GitHub releases API. Nothing is downloaded, nothing is installed, there is no
+   updater framework and no code signing to keep alive — a shell that runs on a
+   clinical machine has no business rewriting itself behind the operator.
+
+   The repo name is a PINNED LITERAL rather than something derived from
+   package.json or the git remote, because api.github.com does NOT follow
+   GitHub's rename redirect. Point this at a former name and every request 404s
+   forever while the app stays perfectly quiet, which is indistinguishable from
+   "you are up to date" — the one failure this feature must not have.
+
+   /releases/latest is the right endpoint precisely because it excludes
+   prereleases. Today this build is 1.1.0 while the newest STABLE release is
+   v1.0.0, so a correct implementation shows NOTHING; a "the tag differs, say
+   so" version would invite a 1.1.0 user to go and install 1.0.0. */
+// owner/repo, together, in ONE constant. They were two, and the API path was
+// built from the repo half alone — /repos/Carino-DICOM/releases/latest, which
+// is a 404. fetchLatestTag treats every non-200 as "no answer" and is silent by
+// design, so the notifier could never fire and never said why: exactly the
+// indistinguishable-from-up-to-date failure the paragraph above exists to
+// prevent. One constant, so the two URLs cannot disagree again.
+const UPDATE_SLUG = "MiguelCarino/Carino-DICOM";
+const UPDATE_API = "/repos/" + UPDATE_SLUG + "/releases/latest";
+const RELEASE_PAGE = "https://github.com/" + UPDATE_SLUG + "/releases/latest";
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Late enough that the check never competes with the engine starting or the
+// dashboard loading. The answer is worth nothing in the first seconds anyway.
+const FIRST_CHECK_DELAY_MS = 25000;
+// The 24 h rule lives in checkForUpdate(); this ticker only has to be finer
+// than a day so a machine that is never restarted still checks about daily.
+const CHECK_TICK_MS = 6 * 60 * 60 * 1000;
+
+// enabled: null means never asked (first run), false means the user said no.
+// Three fields and nothing else — this file is a preference, not a cache.
+let updatePrefs = { enabled: null, lastCheckMs: 0, lastSeenVersion: "" };
+let update = null;   // { version } while a newer release is known, null otherwise
+
+function updateFile() { return path.join(app.getPath("userData"), "update.json"); }
+
+function loadUpdatePrefs() {
+  try {
+    const j = JSON.parse(fs.readFileSync(updateFile(), "utf8"));
+    // Read field by field: a truthy check on `enabled` would turn a corrupt
+    // file's leftover string into a yes the user never gave.
+    if (j && typeof j === "object") {
+      updatePrefs = {
+        enabled: j.enabled === true ? true : (j.enabled === false ? false : null),
+        lastCheckMs: Number(j.lastCheckMs) || 0,
+        lastSeenVersion: typeof j.lastSeenVersion === "string" ? j.lastSeenVersion : "",
+      };
+    }
+  } catch (e) { /* absent or unreadable → never asked, which is OFF */ }
+}
+function saveUpdatePrefs() {
+  try {
+    fs.mkdirSync(path.dirname(updateFile()), { recursive: true });
+    fs.writeFileSync(updateFile(), JSON.stringify(updatePrefs));
+  } catch (e) { /* non-fatal: the worst case is being asked once more */ }
+}
+
+/* Field-by-field numeric compare, never string inequality: "1.9.0" > "1.10.0"
+   is true as text and false as a version, and that single mistake points every
+   user at an older release. A tag this cannot parse — a date, "nightly", the
+   null an empty repo returns — is treated as "no update", because the only safe
+   reading of a version we do not understand is that ours is fine. */
+function parseVersion(tag) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(tag == null ? "" : tag).trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function isNewer(remote, local) {
+  const a = parseVersion(remote), b = parseVersion(local);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;   // equal is not newer, and neither is older
+}
+
+/* One request, ten seconds, no retry. A failure is SILENT AND FORGOTTEN: no
+   dialog, no retry loop, and above all no log line. This app runs on air-gapped
+   clinical networks where a daily "couldn't reach GitHub" is noise in the one
+   log an operator opens to diagnose a real problem. */
+function fetchLatestTag(cb) {
+  let done = false;
+  const finish = (tag) => { if (!done) { done = true; cb(tag); } };
+  let req;
+  try {
+    req = https.get({
+      hostname: "api.github.com",
+      path: UPDATE_API,
+      headers: {
+        Accept: "application/vnd.github+json",
+        // Not decoration: GitHub rejects a request that carries no User-Agent,
+        // so without this every check would 403 and nothing would ever fire.
+        "User-Agent": "Carino-DICOM-desktop",
+      },
+      timeout: 10000,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return finish(null); }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (d) => {
+        body += d;
+        // A release payload is a few kB. Anything past this is not the reply we
+        // asked for, and buffering it would be the only unbounded thing here.
+        if (body.length > 262144) { req.destroy(); finish(null); }
+      });
+      res.on("end", () => { try { const j = JSON.parse(body); finish(j && j.tag_name); } catch (e) { finish(null); } });
+      res.on("error", () => finish(null));
+    });
+  } catch (e) { return finish(null); }
+  req.on("timeout", () => req.destroy());   // destroy → "error" → finish(null)
+  req.on("error", () => finish(null));
+}
+
+function checkForUpdate(force) {
+  if (updatePrefs.enabled !== true) return;
+  const now = Date.now();
+  // At most once a day. The stamp is written BEFORE the request goes out, so a
+  // network that hangs and a user who restarts cannot together turn this into a
+  // request loop against api.github.com.
+  if (!force && now - updatePrefs.lastCheckMs < DAY_MS) return;
+  updatePrefs.lastCheckMs = now;
+  saveUpdatePrefs();
+  fetchLatestTag((tag) => {
+    // One test covers null, garbage, older and equal — every one of which means
+    // there is nothing to say, and saying nothing is the whole design here.
+    if (!isNewer(tag, app.getVersion())) return;
+    updatePrefs.lastSeenVersion = String(tag).replace(/^v/, "");
+    saveUpdatePrefs();
+    setUpdate(updatePrefs.lastSeenVersion);
+  });
+}
+
+/* The notice lives in exactly two places — the tray menu and the dashboard's
+   Overview Version row — and both are painted from here, so they can never
+   disagree about what this machine knows. */
+function setUpdate(version) {
+  update = version ? { version } : null;
+  refreshTray();
+  sendUpdate();
+}
+function sendUpdate() {
+  if (win && !win.isDestroyed()) { try { win.webContents.send("carino:update", update); } catch (e) {} }
+}
+function openReleasePage() { shell.openExternal(RELEASE_PAGE); }
+
+/* Asked once, in one sentence, and never again: dismissing the dialog is an
+   answer and it means no. The default when nothing has ever been recorded is
+   OFF, which is what makes this opt-in rather than an announcement with a
+   checkbox attached. */
+async function askUpdateOptIn() {
+  const r = await dialog.showMessageBox({
+    type: "question",
+    title: t("Carino DICOM — updates"),
+    message: t("Should Carino DICOM check GitHub for a newer version?"),
+    detail: t("It only looks — nothing is downloaded or installed. A newer version appears in the tray menu and on the Overview panel. You can change this at any time from the tray."),
+    buttons: [t("Check for updates"), t("Don't check")],
+    defaultId: 0, cancelId: 1, noLink: true,
+  });
+  setUpdateEnabled(r.response === 0);
+}
+
+function setUpdateEnabled(on) {
+  updatePrefs.enabled = !!on;
+  saveUpdatePrefs();
+  // Switching it off retracts the notice as well; leaving it on screen would be
+  // the app arguing with the answer it was just given.
+  if (!on) { setUpdate(null); return; }
+  refreshTray();
+  checkForUpdate(true);   // an explicit yes deserves an answer now, not tomorrow
+}
+
+// Runs once, well after the window is up.
+async function startUpdateChecks() {
+  loadUpdatePrefs();
+  /* A version found yesterday is worth showing today without needing a network
+     at all — that is what lastSeenVersion is for. It is re-tested against THIS
+     build's version, so installing the update is what clears it, and nothing
+     has to remember to. */
+  if (updatePrefs.enabled === true && isNewer(updatePrefs.lastSeenVersion, app.getVersion())) {
+    setUpdate(updatePrefs.lastSeenVersion);
+  }
+  if (updatePrefs.enabled === null) await askUpdateOptIn();
+  else refreshTray();   // the tray was built before the file was read
+  checkForUpdate(false);
+  setInterval(() => checkForUpdate(false), CHECK_TICK_MS);
+}
+
 // ---- window + tray -----------------------------------------------------
 function createWindow() {
   win = new BrowserWindow({
     width: 1150, height: 820, show: false,
     title: "Carino DICOM", icon: path.join(ASSETS, "icon.png"),
     backgroundColor: "#050505", autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true, nodeIntegration: false,
+      // The dashboard is the same page any browser gets from 127.0.0.1, so this
+      // bridge only ever ADDS a fact the page feature-detects (see preload.js).
+      // It is attached at construction because the window is never recreated —
+      // loading.html and the dashboard are two navigations of this same one.
+      preload: path.join(__dirname, "preload.js"),
+      // Passed as a switch so the bridge can answer synchronously: the renderer
+      // reads the shell version while it is drawing, and an IPC round trip there
+      // would mean drawing the row once without it.
+      additionalArguments: ["--carino-app-version=" + app.getVersion()],
+    },
   });
   win.loadFile(path.join(__dirname, "loading.html"));   // never a blank/black window
+  // A check can resolve before the dashboard exists, and a send into a page that
+  // is not there yet is simply dropped. Re-announcing on every load is what
+  // carries the notice across the loading.html → dashboard navigation, and back
+  // across a reload.
+  win.webContents.on("did-finish-load", sendUpdate);
   win.webContents.setWindowOpenHandler(({ url }) => {
     // The bundled editor opens in its OWN Electron window (not the system
     // browser). action:"allow" keeps window.opener wired, so the PACS→editor
@@ -227,23 +432,74 @@ function createWindow() {
     // LinkedIn, …) opens in the user's browser.
     try {
       const u = new URL(url);
-      const local = u.hostname === "127.0.0.1" || u.hostname === "localhost";
-      if (local && u.pathname.startsWith("/editor")) {
+      // Segment test, not a prefix test, and it must stay identical to the one
+      // in preload.js: they disagreed, and the set between them —
+      // http://127.0.0.1:9999/editorEVIL/ — opened as an in-app Electron window
+      // while the preload still published the bridge into it, which is the one
+      // combination neither guard is allowed to admit. Protocol and port are
+      // checked too: the engine this shell started is at serverUrl and nothing
+      // else on this machine is the bundled editor, whatever it calls its path.
+      const local = u.protocol === "http:" && u.origin === new URL(serverUrl).origin;
+      if (local && /^\/editor(\/|$)/.test(u.pathname)) {
         return {
           action: "allow",
           overrideBrowserWindowOptions: {
             width: 1200, height: 860,
             title: "Carino DICOM Editor", icon: path.join(ASSETS, "icon.png"),
             backgroundColor: "#000000", autoHideMenuBar: true,
-            webPreferences: { contextIsolation: true, nodeIntegration: false },
+            webPreferences: {
+              contextIsolation: true, nodeIntegration: false,
+              // Written out rather than left off: a window opened through this
+              // handler inherits the embedder's webPreferences and this object
+              // is merged OVER them, so omitting the key is not the same as
+              // asking for none. The bundled editor is a separate product with
+              // its own releases — handing it the PACS's update state would
+              // print the wrong version in the wrong app, silently. Whether an
+              // undefined actually wins that merge is Electron's business, so
+              // preload.js refuses to publish the bridge on /editor as well.
+              preload: undefined,
+            },
           },
         };
       }
-    } catch (_) { /* not a parseable URL — fall through to external */ }
-    shell.openExternal(url);
+    } catch (_) { /* not a parseable URL — refused below, like any other */ }
+    openExternally(url);
     return { action: "deny" };
   });
+  // A renderer must not be able to navigate this window away from the engine.
+  // It matters more than it did: the window now carries a preload, and a page
+  // that reached an attacker origin would keep it attached, so the bridge —
+  // and openExternally behind it — would be published to that origin.
+  const stayHome = (e, url) => {
+    try {
+      if (new URL(url).origin === new URL(serverUrl).origin) return;
+    } catch (_) { /* unparseable is not our origin either */ }
+    e.preventDefault();
+    openExternally(url);
+  };
+  win.webContents.on("will-navigate", stayHome);
+  win.webContents.on("will-frame-navigate", (e) => {
+    if (!e.isMainFrame) stayHome(e, e.url);
+  });
   win.on("close", (e) => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
+}
+
+/* Every URL this shell hands to the operating system goes through here.
+   shell.openExternal launches whatever handler the OS has registered for a
+   scheme, so an unfiltered call is an arbitrary-launcher: file:// opens a local
+   application, smb:// posts an NTLM hash to a remote share on Windows, and
+   ms-msdt: and friends are a documented command-execution surface. The
+   renderer is the least trusted input this process takes — the dashboard is
+   plain HTTP on loopback, reachable by any other process on this machine — so
+   nothing but a real web link is allowed out. An unparseable string is refused,
+   not passed on: `new URL()` throwing is not a reason to trust it more.
+   Deliberately not a log line: a refusal here is either a bug of ours or an
+   attack, and neither is the operator's to read at 3am. */
+function openExternally(url) {
+  let u;
+  try { u = new URL(String(url)); } catch (_) { return; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return;
+  shell.openExternal(u.href);
 }
 
 function showError(msg) {
@@ -264,19 +520,40 @@ function showError(msg) {
 
 function showWindow() { if (!win) createWindow(); win.show(); win.focus(); }
 
+/* Built from a live array rather than a constant, because two of these rows
+   describe state that changes while the app runs. Every caller goes through
+   refreshTray() — a template is a snapshot, and Electron keeps the menu it was
+   handed until it is handed another one. */
 function buildMenu() {
-  return Menu.buildFromTemplate([
+  const items = [
     { label: t("Open Carino DICOM"), click: showWindow },
     { type: "separator" },
-    {
-      label: t("Start at login"), type: "checkbox",
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
-    },
-    { type: "separator" },
-    { label: t("Quit Carino DICOM"), click: quitApp },
-  ]);
+  ];
+  // Present only when there is something to say. An always-there row that reads
+  // "no updates" is a permanent negative in a menu that is otherwise all verbs,
+  // and it would be one more thing to notice on a screen nobody is watching.
+  if (update) {
+    items.push({ label: t("Update available — {v}", { v: update.version }), click: openReleasePage });
+    items.push({ type: "separator" });
+  }
+  items.push({
+    label: t("Start at login"), type: "checkbox",
+    checked: app.getLoginItemSettings().openAtLogin,
+    click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+  });
+  // Unchecked until the first-run question is answered, which is also what it
+  // looks like when the answer was no — both are OFF, and OFF is the default.
+  items.push({
+    label: t("Check for updates"), type: "checkbox",
+    checked: updatePrefs.enabled === true,
+    click: (item) => setUpdateEnabled(item.checked),
+  });
+  items.push({ type: "separator" });
+  items.push({ label: t("Quit Carino DICOM"), click: quitApp });
+  return Menu.buildFromTemplate(items);
 }
+
+function refreshTray() { if (tray) tray.setContextMenu(buildMenu()); }
 
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, "tray.png")));
@@ -303,6 +580,9 @@ if (!app.requestSingleInstanceLock()) {
     // shell text (first-run dialog, tray, error page) runs after this point.
     initI18n(app);
     Menu.setApplicationMenu(null);
+    // The only thing the renderer may ask this process to do. It takes no
+    // argument, so there is no URL a compromised page could aim it at.
+    ipcMain.on("carino:open-release-page", openReleasePage);
 
     let base = loadSavedDataDir();
     if (!base) { base = await firstRunSetup(); if (!base) { app.quit(); return; } }
@@ -317,6 +597,11 @@ if (!app.requestSingleInstanceLock()) {
     const up = await waitForServer();
     if (up) win.loadURL(serverUrl);
     else showError("The dashboard did not respond in time. The engine may have failed to start.");
+
+    // Last, and on a timer: whether a newer release exists is the least urgent
+    // thing this process knows, and the first-run question must not arrive on
+    // top of a window that is still coming up.
+    setTimeout(startUpdateChecks, FIRST_CHECK_DELAY_MS);
   });
 
   app.on("window-all-closed", () => { /* keep running in the tray */ });

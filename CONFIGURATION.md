@@ -2128,6 +2128,27 @@ normal retry pipeline back-fills the primary when it returns. The node that actu
 triggered the outage stays pinned even if the flag is later cleared, because it is the one
 the operator is waiting on.
 
+### `destinations[].ephemeral`
+
+`boolean` · default `false` · **written by the appliance, not by you**
+
+Marks a row that [`--dev-peer`](#--dev-peer) created and will delete again. Two rows carry
+it while a peer is running — the peer's receiver and the black hole beside it — and both
+go when the peer is discarded, when the process stops, and on the startup sweep that
+follows a crash.
+
+Set it on a row of your own and you lose that row at the next discard. That is the whole
+reason it is documented rather than left as an implementation detail: `config.json` is a
+file operators read and edit. The dashboard hands the flag straight back on a Save
+(a whole-document save that dropped it would leave a destination aimed at an archive that
+no longer exists) and marks the row visibly, so an ephemeral row cannot be edited into a
+real node by accident. The row stays fully editable — enabling the black hole is exactly
+what the demo recipe asks for.
+
+Type-checked along with `enabled`, `tls`, `no_ris` and `emergency_trigger`. A quoted
+`"false"` here reads as TRUE at runtime and would strip a real destination at the next
+discard, so it is refused at save time.
+
 ### A gap in destination validation
 
 Every entry is assumed to be an object without being checked, unlike
@@ -2343,6 +2364,163 @@ which services are enabled; it only re-opens the screen.
 
 Validation covers the type only. Nothing parses the stamp, so any non-blank string counts as
 "done" — which is the property that makes clearing it the way to get the chooser back.
+
+---
+
+## `--dev-peer`
+
+**A launch flag, and deliberately not a config key.** It appears in a configuration
+reference because the question "where is the setting for this?" has an answer that
+matters here: there is none, and there is not going to be one.
+
+`pacs serve --dev-peer` allows the dashboard to create a **disposable second archive** —
+a complete second engine inside the same process, listening on `127.0.0.1` only, with its
+own AE title, its own receiver and Query/Retrieve ports, and its own storage under a
+generated temporary folder. It is there so that store-and-forward, routing rules,
+de-identify-on-forward and C-MOVE have somewhere real for a study to go while they are
+being proved, without an operator hand-writing a second `config.json`, finding two free
+ports, and then — the part that actually goes wrong — leaving a destination on the real
+appliance aimed at an archive that stopped existing weeks ago.
+
+Without the flag the feature is not merely hidden. `GET /api/dev-peer` and
+`POST /api/dev-peer` answer **404**, the status poll carries no `dev_peer` block at all,
+and the dashboard's *Dev peer* row stays hidden — an offer that does nothing reads as
+broken software. The shipped builds never pass it: the Dockerfile's `CMD` is `["serve"]`
+and the desktop launcher builds a fixed argument list with no route for an extra one.
+(`docker/entrypoint.py` does forward container `CMD` arguments, so a container operator
+can pass it on purpose. That is the correct property, not a leak: a deliberate local
+decision, never a remote one.)
+
+### Why it is not a key
+
+A config key is editable through `POST /api/config`. A key would therefore mean that an
+admin token on a deployed appliance is enough to switch on *"spawn a second archive that
+stores patient images somewhere new"* — and the dashboard is exactly where an attacker
+holding that token already is. A launch argument cannot be reached over HTTP at all.
+
+The same argument settles two more things, both unconditional and neither a setting. The
+peer binds **loopback only**: a test archive a modality on the LAN can find is a second,
+unaudited store for somebody's images, and nobody would notice it was there. And it runs
+**in-process**: no subprocess to supervise, nothing extra to package, and it dies with its
+parent by construction.
+
+### Who can work it
+
+The capability is `devpeer.manage`. An admin profile has it, and of the built-in
+profiles only **IT** does — standing up a throwaway archive to prove where a forward is
+dying is bench work, and that is the bench. Reception and the radiologist do not get it:
+a second archive is a bench tool, not a clinical one. Both routes check the capability
+before they check the flag, so a profile that may not work a peer is told the same thing
+whether or not the flag was passed. Create and discard are both recorded on the primary's
+audit trail, with the acting profile and the action.
+
+### How to open one
+
+1. Start the engine with the flag: `pacs serve --dev-peer`. It prints
+   *Dev peer enabled — the dashboard may create a second, disposable archive.* beside the
+   dashboard URL.
+2. Open the dashboard as a profile holding `devpeer.manage`, and pick **🧪 Dev peer** in
+   the sidebar.
+3. Press **Create peer**. The panel then reports the AE title, both ports, the storage
+   folder and what the peer has received.
+4. Press **🗑 Discard** when finished — or just stop the process.
+
+### What the peer is configured as
+
+You do not write this config and cannot edit it: it is generated, validated and started in
+one step. It is set out here because "what will this second archive do to my network?" is
+a fair question to want a checkable answer to.
+
+| section | in the peer |
+| --- | --- |
+| `scp` | **on** — generated AE title, `127.0.0.1`, an OS-assigned free port, `./received`, `organize: true`, no AE allow-list |
+| `qr` | **on** — same AE title, loopback, an OS-assigned free port, and one `move_destinations` entry pointing back at the primary's receiver |
+| `index` | **on** — `./index.db`, no rescan on start |
+| `scu`, `routing` | **off**, with no rules — a peer that forwarded onward could send a study straight back to the archive it came from, and a test that loops is worse than a test that does not run |
+| `print`, `mwl`, `ris`, `dicomweb` | **off** — nothing binds a port the test does not need |
+| `emergency` | disarmed |
+| `audit` | **off**, on purpose. A trail deleted with the thing it audits is theatre; the record that matters — that a second archive was created, and by whom — is written to the *primary's* trail |
+| `users` | no profiles |
+| `web` | left at defaults and never served — nothing builds a Flask app over this config |
+
+Every path in it stays **relative**, so the storage folder, the index, the send state and
+the logs all land beside the generated `config.json` and the whole archive goes in one
+delete. The AE title is `CARINOPEER` plus four random hex characters — 14, inside the
+16-character DICOM limit that config validation enforces — and the randomness is not
+decoration: [`allowed_aets`](#allowed_aets), routing rules and
+[`qr.move_destinations`](#qrmove_destinations) are all keyed by AE title, so a peer that
+reused a title the site already has configured for a real node would be resolved as that
+node by the first C-MOVE anybody tried.
+
+### What it writes on the primary
+
+Two [`destinations`](#destinations) rows, both carrying
+[`ephemeral: true`](#destinationsephemeral):
+
+- **`Dev peer <AET>`** — `127.0.0.1`, the peer's receiver port, **enabled**.
+- **`Black hole <AET>`** — `127.0.0.1`, a port nothing listens on, AE title `CARINOVOID`,
+  **disabled**.
+
+The asymmetry is the point. With [`routing`](#routing) off — or on with no rule matching —
+the fallback route is *every* enabled destination, so an enabled black hole would strand
+every study this archive receives in the Stuck tab. Enable it in **Configuration →
+Destinations** on the day that filling the Stuck tab is what you are trying to do.
+Neither row is ever an [`emergency_trigger`](#destinationsemergency_trigger): the failover
+monitor probes those while armed, and a discarded peer would then read as the primary PACS
+going offline.
+
+Nothing else on the primary is touched. In particular its own [`qr`](#qr) section is left
+alone: `QrSCP` copies `move_destinations` at construction and applies `allowed_aets` at
+start, so writing either would change the file and not the running listener — a config
+edit that silently does nothing until a restart is worse than no edit. It is also
+unnecessary, because a C-MOVE resolves against the enabled destination row by AE title
+anyway.
+
+**One consequence to know before testing C-MOVE in the other direction.** The peer's
+config names the primary as a move destination, but that is an *address*, not permission:
+the primary's receiver applies its own [`scp.allowed_aets`](#scpallowed_aets) at start. On
+an appliance that restricts callers, a C-MOVE issued *at* the peer is refused at
+association time — which says nothing at all on the peer's side — until the peer's AE
+title is added there and the receiver restarted. Creating a peer logs exactly that when it
+applies.
+
+### When it is deleted
+
+Deletion ends in a recursive directory removal, which makes it the highest-risk part of
+the feature, so it happens on exactly three occasions and no others:
+
+1. an explicit **Discard** from the dashboard;
+2. the parent process shutting down, plus an `atexit` net for the exits that bypass it;
+3. a startup sweep of stale `carino-peer-*` trees — the only possible answer to `SIGKILL`
+   and to power loss.
+
+That sweep runs on **every `pacs serve`**, not only the ones carrying the flag. The
+restart after a crash is normally the plain one — the developer has finished testing, and
+the container and desktop launchers never pass the flag at all — and gating the cleanup on
+the flag left the appliance with a live destination aimed at a released loopback port,
+which is the single outcome this feature promises never to leave behind. It removes
+nothing belonging to a peer whose owner process is still alive, so a second dashboard
+running on the same machine is safe from it.
+
+It is **never** deleted when a browser tab closes: there is no reliable unload event, and a
+page that was merely refreshed would take the archive with it. And never on a timer — a
+timer that deletes a directory tree is a worse thing to own than a test config that
+outlives its session. Every delete goes through a guard that refuses anything which is not
+a directory one level under the system temporary folder wearing the `carino-peer-` prefix.
+
+Discarding a peer with sends still queued against it leaves those sends nowhere to retry.
+The dashboard says so in as many words, and they are cleared in **Studies → Stuck**.
+
+### If create refuses
+
+`mkdtemp` lands in the system temporary folder, so this should not normally arise — but if
+that folder turns out to be inside this appliance's own storage or watch tree, create
+refuses with the reason instead of proceeding: the watcher would pick the peer's tree up
+as a new study and forward it to the peer, which would store it in the watched folder
+again. Every other failure — a full temporary filesystem, a primary whose own AE title is
+over-long, a destination name collision — is handled in one guarded region running from
+the first byte written to the last row saved, so a refused create leaves no temporary
+tree, no bound port and no half-written destination behind.
 
 ---
 

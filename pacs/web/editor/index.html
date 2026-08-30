@@ -1635,6 +1635,15 @@
       </nav>
 
       <div class="header-right">
+        <!-- Desktop shell only, and hidden twice over on purpose: this file is
+             vendored verbatim into the PACS and served to ordinary browsers, so
+             the notice must stay invisible unless the Electron preload has
+             published window.carinoDesktop. The `hidden` attribute states the
+             intent; the .hidden class is the guarantee, because a bare [hidden]
+             carries no more weight than a class and loses to any authored rule
+             that sets `display`. Reusing .app-tag puts it in the header's own
+             pill idiom and leaves the fleet slot order untouched. -->
+        <a class="app-tag hidden" id="deskUpdate" hidden data-i18n>Update available ↗</a>
         <div class="social-row">
           <a href="https://github.com/MiguelCarino/Carino-DICOM-Editor" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
@@ -10124,6 +10133,37 @@ document.addEventListener('keydown', e => {
   window.ovView = { view, applyTransform };
 })();
 
+</script>
+
+<script>
+  // The desktop shell's update notice. window.carinoDesktop is published by the
+  // Electron preload and exists nowhere else, so on dcm.carino.systems and in
+  // the PACS bundle this block returns on its first line: no fetch, no timer,
+  // no listener, no output. The check itself already happened in the main
+  // process — nothing here reaches the network.
+  (function () {
+    const desk = window.carinoDesktop;
+    if (!desk) return;
+    const el = document.getElementById('deskUpdate');
+    if (!el) return;
+    const reveal = (u) => {
+      if (!u || !u.version) return;
+      // A version string is data, so it stays out of the dictionaries and off
+      // the pill itself, where five locales would have to agree on its width.
+      el.title = 'Carino DICOM Editor ' + u.version;
+      el.href = u.url;
+      el.hidden = false;
+      el.classList.remove('hidden');
+    };
+    // openExternal is the sanctioned way out of the app:// origin; the href is
+    // there so the pill behaves like the link it looks like.
+    el.addEventListener('click', (e) => { e.preventDefault(); desk.openReleasePage(); });
+    // The answer may already be in hand or may land minutes later, depending on
+    // whether the delayed first check has run yet, so take both. Whichever
+    // arrives second reveals an element that is already revealed.
+    reveal(desk.getUpdate());
+    desk.onUpdate(reveal);
+  })();
 </script>
 </body>
 </html>

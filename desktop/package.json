@@ -21,7 +21,7 @@
     "productName": "Carino-DICOM",
     "afterSign": "build/notarize.js",
     "beforeBuild": "build/before-build.js",
-    "files": ["main.js", "i18n.js", "loading.html", "assets/**/*"],
+    "files": ["main.js", "preload.js", "i18n.js", "loading.html", "assets/**/*"],
     "extraResources": [
       { "from": "engine", "to": "engine" }
     ],

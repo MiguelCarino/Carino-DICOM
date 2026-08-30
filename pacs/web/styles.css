@@ -973,6 +973,18 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 }
 .ov-atomic { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-path { font-size: .74rem; word-break: normal; overflow-wrap: anywhere; }
+/* The desktop shell's "a newer release exists" suffix, and the only link in
+   this list. Written here rather than borrowed from .linkish because .linkish
+   is button chrome in accent amber at the sans face: on this row every one of
+   those declarations would have to be overridden, and amber underlined is the
+   loudest inline treatment the dashboard has — wrong for a notice nobody asked
+   for. Muted and mono keeps it on the value's own line as an aside, and amber
+   arrives on hover, which is how everything else in this file answers a
+   pointer. It shares the row's prose wrapping deliberately: this must never be
+   ellipsised away, and .ov-atomic is where that would start. */
+.ov-upd { margin-left: 6px; color: var(--muted); font-family: var(--mono); font-size: .74rem; }
+.ov-upd:hover, .ov-upd:focus-visible { color: var(--accent); }
+.ov-upd[hidden] { display: none; }
 
 /* Destinations. The state span carries a word as well as a colour, and it is
    only ever green when a timestamped probe says so — an unprobed node reads

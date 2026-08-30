@@ -442,15 +442,17 @@ and it should be built against a real requirement rather than against the phrase
 
 ---
 
-## No telemetry
+## No telemetry, and the one request that does leave
 
-Carino DICOM collects nothing and sends nothing. No analytics, no crash
-reporting, no update checks, no usage counters, no remote logging, no bundled
-third-party scripts fetched at runtime. The only outbound network connections it
-ever makes are the DICOM associations and HL7 acknowledgements the operator
-configured, to the peers the operator named — and, since emergency notification
-was added, the webhook URL and SMTP server the operator configured, to the
-addresses on the profiles the operator named. Notification is **off by default**
+The **engine** collects nothing and sends nothing. No analytics, no crash
+reporting, no usage counters, no remote logging, no bundled third-party scripts
+fetched at runtime. This is the whole of what a Docker, Podman or systemd
+deployment does, unchanged and worth naming as such, because that is the shape
+that sits in the imaging department with the patient data on it. The only
+outbound network connections it ever makes are the DICOM associations and HL7
+acknowledgements the operator configured, to the peers the operator named —
+and, since emergency notification was added, the webhook URL and SMTP server the
+operator configured, to the addresses on the profiles the operator named. Notification is **off by default**
 and every part of it is empty until somebody fills it in; nothing is sent
 anywhere the operator has not written down. What is sent is the fact of the
 outage, its destination name and its state — no patient identifiers, and no
@@ -475,11 +477,30 @@ at runtime**, which also means the editor works unchanged on an air-gapped
 network — the deployment where a silent CDN dependency would present as a page
 that renders and then refuses to open a study.
 
+The **desktop app** is the one place any of that is not the whole story, and it
+is stated here rather than left for somebody to find in a packet capture. The
+Electron tray build can check whether a newer version has been published. It is
+opt-in: it asks once, on first run, dismissing the question leaves it off, off is
+the default, and a *Check for updates* checkbox in the tray menu turns it on or
+off at any time afterwards. When it is on, what leaves the machine is one HTTPS
+GET to GitHub's releases API, at most once a day, carrying one `User-Agent`
+header — the fixed string `Carino-DICOM-desktop`, present because GitHub refuses
+a request without one — and nothing else: no analytics, no crash report, no usage
+counter, no install identifier, no configuration, no patient data, and nothing
+that says a study has ever passed through this machine. What GitHub necessarily learns from a request
+like that is the machine's IP address and roughly when the app was started, and
+that is the actual privacy cost of turning it on. Nothing is downloaded and
+nothing installs itself: a newer version becomes a line in the tray menu and
+beside the version on the Overview panel, and following it opens the release page
+in the operator's browser. It is a notice, not an updater. None of this exists in
+the engine, so no container or systemd deployment has it to switch on.
+
 This is a deliberate property of the project, and it is treated as a security
 guarantee rather than a preference: patient data never leaves the machines you
-pointed it at. A change that added an outbound call to anything else would be
-treated as a vulnerability, and reporting one is a legitimate use of this
-policy.
+pointed it at. A change that added an outbound call beyond those — one nobody was
+asked about, or one carrying anything about this machine, its operator or its
+patients — would be treated as a vulnerability, and reporting one is a legitimate
+use of this policy.
 
 ---
 
