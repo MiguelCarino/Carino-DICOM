@@ -207,12 +207,36 @@
     .ov-samples-note a { color: var(--text-dim); white-space: nowrap; }
     .ov-samples-note a:hover { color: var(--accent); }
 
-    /* The desktop build, offered on the public site and nowhere else. No
-       `display` property here on purpose: the element carries both [hidden] and
-       .hidden, and an authored display rule would beat the UA's [hidden]. */
-    .ov-get { color: var(--text-muted); font-size: 11px; text-align: center; }
-    .ov-get a { color: var(--text-dim); white-space: nowrap; margin-left: 5px; }
-    .ov-get a:hover { color: var(--accent); }
+    /* The two ways in, side by side: open a file here, or take the whole thing
+       away with you. The row wraps rather than shrinking, because the drop zone
+       is a drop TARGET and a narrow one is a worse one. With #ovGet hidden —
+       which is every context except the public site — this row has one child
+       and centres it, exactly as the drop zone sat before the card existed. */
+    .ov-hero { display: flex; gap: 14px; align-items: stretch; justify-content: center;
+      flex-wrap: wrap; width: 100%; }
+    /* No `display` property on .ov-get itself, on purpose: it carries both
+       [hidden] and .hidden, and an authored display rule would beat the UA's
+       [hidden] and reveal it everywhere. Flex lives on the inner column. */
+    .ov-get { width: min(300px, 90%); padding: 24px 22px; text-align: left;
+      border: 1px solid var(--border); border-radius: 16px;
+      background: linear-gradient(180deg,#0d0d0d,#080808); }
+    .ov-get-col { display: flex; flex-direction: column; height: 100%; }
+    .ov-get h2 { font-size: 15px; font-weight: 800; margin-bottom: 6px; }
+    .ov-get p { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+    /* text-decoration off explicitly: this page has no global anchor reset, so
+       every component opts out for itself and a button that keeps the UA
+       underline does not read as a button. */
+    .ov-get-primary { display: block; margin-top: 16px; padding: 10px 14px; text-align: center;
+      text-decoration: none;
+      border: 1px solid var(--accent); border-radius: var(--r-sm); background: var(--accent-faint);
+      color: var(--accent); font: 700 13px var(--font); transition: .15s; }
+    .ov-get-primary:hover { background: var(--accent); color: #050505; }
+    .ov-get-meta { margin-top: 7px; color: var(--text-muted); font-size: 11px; text-align: center;
+      font-family: var(--mono); }
+    .ov-get-others { margin-top: auto; padding-top: 14px; display: flex; flex-wrap: wrap; gap: 4px 10px;
+      color: var(--text-muted); font-size: 11px; }
+    .ov-get-others a { color: var(--text-dim); white-space: nowrap; }
+    .ov-get-others a:hover { color: var(--accent); }
 
     /* Content shell */
     .ov-content { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
@@ -1701,6 +1725,7 @@
              button inside a button is not something a screen reader can
              describe. Clicking the background still opens files, as a
              convenience for the mouse rather than as the only way in. -->
+        <div class="ov-hero">
         <div class="ov-drop" id="ovDrop">
           <div class="ov-drop-icon">🩻</div>
           <h2 data-i18n>Open a DICOM file</h2>
@@ -1709,6 +1734,22 @@
             <button class="ov-drop-open" id="ovFilesBtn" data-i18n>📄 Open files</button>
             <button class="ov-drop-open ov-drop-folder" id="ovFolderBtn" data-i18n>📁 Open folder</button>
           </div>
+        </div>
+
+        <!-- The other way in. Hidden in the markup and revealed only by the
+             script below, which refuses to run anywhere but the public site.
+             See the guard there for the whole argument: this file is also
+             served by a Carino DICOM appliance and packaged inside the desktop
+             app, and in neither place is there anything to offer. -->
+        <aside class="ov-get hidden" id="ovGet" hidden aria-labelledby="ovGetH">
+          <div class="ov-get-col">
+            <h2 id="ovGetH" data-i18n>Have it offline</h2>
+            <p data-i18n>The same editor as an application, for a workstation that should not depend on a website being up.</p>
+            <a class="ov-get-primary" id="ovGetLink" target="_blank" rel="noopener"></a>
+            <div class="ov-get-meta" id="ovGetMeta"></div>
+            <div class="ov-get-others" id="ovGetOthers"></div>
+          </div>
+        </aside>
         </div>
 
         <!-- Also a sibling of #ovDrop, and for the same reason: a button nested
@@ -1727,16 +1768,6 @@
             <span data-i18n>Built in your browser from a synthetic phantom. Nothing is uploaded, and no patient ever existed.</span>
             <a href="tests/gallery.html" data-i18n>More test files →</a>
           </div>
-        </div>
-
-        <!-- The desktop download. Hidden in the markup and revealed only by the
-             script below, which refuses to run anywhere but the public site —
-             this file is also served by a Carino DICOM appliance and packaged
-             inside the desktop app itself, and in neither place is there
-             anything to offer. See the guard for the whole argument. -->
-        <div class="ov-get hidden" id="ovGet" hidden>
-          <span data-i18n>Prefer an app? The editor runs on your desktop too.</span>
-          <a id="ovGetLink" href="https://github.com/MiguelCarino/Carino-DICOM-Editor/releases/latest" target="_blank" rel="noopener"></a>
         </div>
       </div>
 
@@ -10162,63 +10193,88 @@ document.addEventListener('keydown', e => {
   // offer to download the app — the appliance already ships the editor, the app
   // IS the download, and, far more importantly, an appliance on a clinical
   // network must not make a request to api.github.com because somebody visited
-  // its editor. Carino DICOM promises exactly that and the promise is not
-  // negotiable, so the fetch below is unreachable from it by construction.
+  // its editor. Carino DICOM promises exactly that, in five languages, and the
+  // fetch below has to be unreachable from there by construction rather than by
+  // intent.
   //
-  // The request itself costs a visitor to the public site nothing they have not
-  // already paid: this page is served by GitHub Pages, so GitHub has already
-  // seen the visit and the IP before this line runs. That is what makes it
-  // acceptable here and unacceptable one directory into a hospital.
+  // The request costs a visitor to the public site nothing they have not
+  // already paid: this page is served by GitHub Pages, so GitHub has seen the
+  // visit and the IP before this line runs. That asymmetry is the whole of why
+  // the same request is fine here and unacceptable one directory into a
+  // hospital.
   //
-  // It is also why the offer is fetched rather than hardcoded: there is no
-  // release yet, and a link to an empty Releases page is worse than no link.
-  // A 404 leaves the element hidden, so this turns itself on the day a release
-  // is published and needs no edit here.
+  // It is also why the offer is fetched rather than hardcoded: a link to an
+  // empty Releases page is worse than no link, so a 404 leaves the card hidden
+  // and this turns itself on the day a release is published.
   (function () {
     if (location.hostname !== 'dcm.carino.systems') return;
 
-    const T = window.t || String;
-    const el = document.getElementById('ovGet');
-    const link = document.getElementById('ovGetLink');
-    if (!el || !link) return;
+    const T = (k) => (window.t || String)(k);
+    const card = document.getElementById('ovGet');
+    const primary = document.getElementById('ovGetLink');
+    const meta = document.getElementById('ovGetMeta');
+    const others = document.getElementById('ovGetOthers');
+    if (!card || !primary || !meta || !others) return;
 
-    // Name and matcher together, so a platform cannot be detected under a name
-    // whose assets nothing knows how to find. Order matters: 'linux' appears in
-    // an Android UA string too, so Android is tested first and simply gets the
-    // fallback — there is no build for it.
-    const s = ((navigator.userAgentData && navigator.userAgentData.platform) ||
-               navigator.platform || navigator.userAgent || '').toLowerCase();
-    let os = null;
-    if (s.indexOf('android') >= 0) os = null;
-    else if (s.indexOf('win') >= 0) os = { name: 'Windows', want: (n) => /\.exe$/.test(n) };
-    else if (s.indexOf('mac') >= 0 || s.indexOf('darwin') >= 0) os = { name: 'macOS', want: (n) => /\.dmg$/.test(n) };
-    else if (s.indexOf('linux') >= 0 || s.indexOf('x11') >= 0) os = { name: 'Linux', want: (n) => /\.appimage$/.test(n) };
+    // Name and matcher together, so a platform can never be detected under a
+    // name whose installer nothing knows how to find. Order matters: an Android
+    // user agent contains 'linux', so Android is tested first and falls through
+    // to the plain list — there is no build for it and offering one would lie.
+    const PLATFORMS = [
+      { id: 'macos', name: 'macOS', is: (s) => s.indexOf('mac') >= 0 || s.indexOf('darwin') >= 0, want: (n) => n.endsWith('.dmg') },
+      { id: 'windows', name: 'Windows', is: (s) => s.indexOf('win') >= 0, want: (n) => n.endsWith('.exe') },
+      { id: 'linux', name: 'Linux', is: (s) => s.indexOf('linux') >= 0 || s.indexOf('x11') >= 0, want: (n) => n.endsWith('.appimage') },
+    ];
+    const ua = ((navigator.userAgentData && navigator.userAgentData.platform) ||
+                navigator.platform || navigator.userAgent || '').toLowerCase();
+    const mine = ua.indexOf('android') >= 0 ? null : PLATFORMS.find((p) => p.is(ua)) || null;
+
+    const RELEASES = 'https://github.com/MiguelCarino/Carino-DICOM-Editor/releases/latest';
+    const mb = (n) => Math.round(Number(n) / 1048576) + ' MB';
 
     fetch('https://api.github.com/repos/MiguelCarino/Carino-DICOM-Editor/releases/latest',
           { credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } })
       .then((r) => (r.ok ? r.json() : null))
       .then((rel) => {
-        if (!rel || !rel.tag_name) return;             // no release yet — stay hidden
-        // The asset is preferred; the release page is the fallback, so a
-        // platform whose installer failed to build still gets somewhere useful
-        // rather than a link that 404s.
-        let href = null;
-        if (os) {
-          const hit = (rel.assets || []).find((a) => a && typeof a.name === 'string' && os.want(a.name.toLowerCase()));
-          if (hit && typeof hit.browser_download_url === 'string') href = hit.browser_download_url;
-        }
-        // textContent, never innerHTML: tag_name and the asset names are values
-        // from a network response and are treated as such even though we own
-        // the repository they come from.
-        link.textContent = (os && href)
-          ? T('Download for {os}').replace('{os}', os.name)
-          : T('All downloads');
-        if (href) link.href = href;
-        link.title = 'Carino DICOM Editor ' + String(rel.tag_name).replace(/^v/, '');
-        el.hidden = false;
-        el.classList.remove('hidden');
+        if (!rel || !rel.tag_name) return;            // no release yet — stay hidden
+        const assets = Array.isArray(rel.assets) ? rel.assets : [];
+        const assetFor = (p) => assets.find((a) => a && typeof a.name === 'string' &&
+          typeof a.browser_download_url === 'string' && p.want(a.name.toLowerCase())) || null;
+
+        // The detected platform gets the button; a platform whose installer did
+        // not build falls back to the releases page rather than to a link that
+        // 404s, and an undetected platform gets the plain list.
+        const hit = mine ? assetFor(mine) : null;
+        primary.textContent = mine ? T('Download for {os}').replace('{os}', mine.name) : T('All downloads');
+        primary.href = hit ? hit.browser_download_url : RELEASES;
+
+        // Version is data and stays out of the dictionaries; the size is the
+        // number people actually want before clicking on a metered connection.
+        const version = String(rel.tag_name).replace(/^v/, '');
+        meta.textContent = hit ? version + ' · ' + mb(hit.size) : version;
+
+        // textContent and explicit element creation throughout — never
+        // innerHTML. These names and URLs arrive over the network and are
+        // treated as untrusted values even though we own the repository.
+        others.textContent = '';
+        PLATFORMS.filter((p) => !mine || p.id !== mine.id).forEach((p) => {
+          const a = document.createElement('a');
+          const own = assetFor(p);
+          a.textContent = p.name;
+          a.href = own ? own.browser_download_url : RELEASES;
+          a.target = '_blank'; a.rel = 'noopener';
+          if (own) a.title = p.name + ' · ' + mb(own.size);
+          others.appendChild(a);
+        });
+        const all = document.createElement('a');
+        all.textContent = T('All downloads');
+        all.href = RELEASES; all.target = '_blank'; all.rel = 'noopener';
+        others.appendChild(all);
+
+        card.hidden = false;
+        card.classList.remove('hidden');
       })
-      .catch(() => { /* offline, rate-limited, blocked — the offer simply is not made */ });
+      .catch(() => { /* offline, rate-limited, blocked — the offer is not made */ });
   })();
 
   // The desktop shell's update notice. window.carinoDesktop is published by the
