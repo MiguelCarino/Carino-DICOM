@@ -223,3 +223,59 @@ jobs:
             desktop/dist/*.dmg
             desktop/dist/*.zip
             desktop/dist/*.exe
+
+  # Assembling a release by hand is what has kept the download page pinned to an
+  # old version: six artifact bundles to fetch, unzip and re-attach, every time,
+  # and any one of them forgotten ships a release that is missing a platform. So
+  # the tag does it. This job runs ONLY for a v* tag — `workflow_dispatch` builds
+  # stop at the artifacts, which is what makes dispatch the safe way to try a
+  # matrix change without publishing anything.
+  #
+  # `needs: build` is the gate: every leg must be green, and on a tag the two
+  # experimental arm64 legs are NOT forgiven (continue-on-error is scoped to
+  # workflow_dispatch), so a release cannot go out missing an architecture.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # The default token is read-only in repositories that were configured that
+    # way, and a release job silently 403ing is worse than one that never ran.
+    permissions:
+      contents: write
+    steps:
+      # merge-multiple flattens all six bundles into one directory. Their
+      # filenames are unique by construction — every artifact carries its
+      # architecture — which is the property that makes flattening safe.
+      - name: Collect every leg's installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          # A hyphen in the tag means a pre-release: v1.1.0-rc03 is one, v1.1.0
+          # is not. That is the convention this repo already follows by hand, and
+          # it matters beyond a label — the website asks for /releases/latest,
+          # which skips pre-releases, so this flag alone decides whether a tag
+          # moves the download buttons.
+          case "$GITHUB_REF_NAME" in
+            *-*) flag="--prerelease" ;;
+            *)   flag="--latest" ;;
+          esac
+          # Idempotent, because a re-run must not fail on a release that the
+          # first run already created.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release exists — replacing its assets"
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Installers for every supported platform and architecture. See CHANGELOG.md for what changed." \
+              $flag
+          fi
