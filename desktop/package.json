@@ -38,6 +38,9 @@
       "target": ["nsis"],
       "icon": "build/icon.ico"
     },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
     "linux": {
       "target": ["AppImage", "rpm", "deb"],
       "category": "Utility",

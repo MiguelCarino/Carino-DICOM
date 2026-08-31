@@ -53,13 +53,20 @@
            installers, so this line and the buttons can never disagree. -->
       <p class="version" id="version">Checking for the latest version…</p>
 
+      <!-- These three hrefs are the no-JS path and must stay byte-identical to
+           PINNED in app.js: the same tag, the same asset names, derived from the
+           artifactName patterns in desktop/package.json. macOS and Linux each
+           ship two architectures and an href holds one, so the pin is the
+           majority build; app.js turns those chips into two links the moment it
+           can read the release. The format slot says which one you are getting
+           without it. -->
       <div class="downloads" id="downloads">
-        <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-windows-v.1.0.0.zip" target="_blank" rel="noopener">
-          <span class="rec" data-i18n>recommended</span><b>🪟 Windows</b><span class="fmt">.zip</span></a>
-        <a class="dl-btn" data-os="macos" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-macos-v.1.0.0.zip" target="_blank" rel="noopener">
-          <span class="rec" data-i18n>recommended</span><b> macOS</b><span class="fmt">.zip</span></a>
-        <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.0.0/carinopacs-ubuntu-latest-v1.0.0.zip" target="_blank" rel="noopener">
-          <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.zip</span></a>
+        <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-Setup-1.1.0-x64.exe" target="_blank" rel="noopener">
+          <span class="rec" data-i18n>recommended</span><b>🪟 Windows</b><span class="fmt">.exe · x86-64</span></a>
+        <a class="dl-btn" data-os="macos" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0-arm64.dmg" target="_blank" rel="noopener">
+          <span class="rec" data-i18n>recommended</span><b> macOS</b><span class="fmt">.dmg · Apple Silicon</span></a>
+        <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0.AppImage" target="_blank" rel="noopener">
+          <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.AppImage · x86-64</span></a>
         <!-- A button, not a link: there is nothing to download. The three
              server deployments run from a container image you build or from
              source, so this opens the chooser instead of starting a transfer.
@@ -82,9 +89,15 @@
 
       <!-- One note, not two. It used to be a line about Docker followed by a
            line about versions, and they are the same sentence: what you can
-           download, versus what you can run. -->
-      <p class="dl-note release-note" id="dl-release">These installers are <b>v1.0.0</b> — store and forward only.
-        Everything else on this page is <b>v1.1.0</b>, which runs today from Docker, Podman, systemd or source.
+           download, versus what you can run.
+           It carries no version number any more. The one it did carry went stale
+           the day the installers caught up with the page, and took four
+           hand-kept translations stale with it; the version belongs in the line
+           above the buttons, which app.js writes from the release rather than
+           from memory. What this note says instead is the thing the buttons
+           cannot say on their own. -->
+      <p class="dl-note release-note" id="dl-release">macOS and Linux ship <b>two builds each</b> — Apple Silicon and Intel, ARM64 and x86-64.
+        The buttons name both rather than guess: an Intel Mac cannot open an Apple Silicon build at all, and no browser can tell the two machines apart honestly.
         These buttons only ever hand you a stable build; pre-release installers sit under <i>All versions</i> above.</p>
 
       <!-- What used to be three sections and a disclosure below the fold. They
@@ -225,36 +238,36 @@ sudo systemctl start carino-pacs</code></pre>
           <p data-i18n>Forwards to as many nodes as you like, with rules: CT from the ER to the archive, ultrasound to the reading room. Each destination is retried until it accepts. A file that matches no rule goes everywhere rather than nowhere.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>🕶️ De-identify on the way out</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>🕶️ De-identify on the way out</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>A rule can de-identify the copy it sends (PS3.15 Basic profile) while the archived original stays untouched. It does not clean burned-in pixel text — a human still has to look at the images.</p>
         </div>
         <div class="svc-item">
           <!-- Protocol identifiers are never translated (fleet convention). -->
-          <b>🔎 Query/Retrieve</b><span class="svc-ver">v1.1</span>
+          <b>🔎 Query/Retrieve</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>C-FIND, C-MOVE and C-GET over an indexed view of what is actually on disk, so a twelve-year-old ultrasound or CR reader can ask what you hold and pull it back.</p>
         </div>
         <div class="svc-item">
-          <b>🌐 DICOMweb</b><span class="svc-ver">v1.1</span>
+          <b>🌐 DICOMweb</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>QIDO-RS, WADO-RS and STOW-RS, so OHIF, Weasis and other modern viewers can read the archive over HTTP without negotiating a DICOM association.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>📋 Worklist and emergency RIS</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>📋 Worklist and emergency RIS</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>Takes HL7 orders over MLLP or hand-keyed ones, and serves them to modalities as a Modality Worklist. If your primary PACS stops answering, it can take over, hold what arrives, and forward it once the primary is back.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>🖨️ Virtual print</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>🖨️ Virtual print</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>Captures print-only modalities as PDF, so a machine whose only output is film still produces something you can file.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>🔑 Token authentication</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>🔑 Token authentication</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>The dashboard and the DICOMweb API take a single shared token. Bind them to anything other than localhost without one and the server refuses to start — the refusal is the feature.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>👥 People and permissions</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>👥 People and permissions</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>Optional per-person sign-in with four editable presets. Permissions are checked at every endpoint, not hidden in the browser, and you choose per profile which patient identifiers each person may see — so IT can trace a study by accession number without reading anyone's chart.</p>
         </div>
         <div class="svc-item">
-          <b data-i18n>🔒 Audit trail</b><span class="svc-ver">v1.1</span>
+          <b data-i18n>🔒 Audit trail</b><span class="svc-ver now">v1.1</span>
           <p data-i18n>Append-only, hash-chained records of who did what, to which study, from where, and whether it worked — refusals included. Any edit or deletion inside the file breaks the chain and the dashboard says which record and why.</p>
         </div>
       </div>

@@ -139,6 +139,14 @@ a { color: var(--accent); }
 .dl-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
 .dl-btn b { font-size: min(1.42rem, calc(1.02rem + var(--tall) * .013)); }
 .dl-btn .fmt { font-family: var(--mono); font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+/* A release carrying two architectures for one OS turns that chip from a link
+   into a box with one link per arch in the format slot — a link cannot nest
+   inside a link, so the chip itself stops being the hit target and the arch
+   names become it. They have to look like it: the slot is 0.68rem, which is
+   small enough that colour alone would not read as "press this". */
+.dl-btn .fmt a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(234,179,8,.45); }
+.dl-btn .fmt a:hover { border-bottom-color: currentColor; }
+.dl-btn.recommended .fmt a { color: #3a2c00; border-bottom-color: rgba(58,44,0,.5); }
 .dl-btn .rec { display: none; }
 .dl-btn.recommended {
   border-color: var(--accent); background: var(--accent); color: #050505;
@@ -272,10 +280,13 @@ a { color: var(--accent); }
   font-size: min(1.02rem, calc(.82rem + var(--tall) * .008)); color: var(--muted);
   word-break: normal; overflow-wrap: break-word; }
 
-/* The page describes the gateway; the newest installer is still the
-   store-and-forward 1.0.0. This note is the only thing standing between a
-   visitor and downloading something that does not match what they just read,
-   so it is tinted rather than left as one more grey line. */
+/* The note used to say the newest installer was a release behind the page, and
+   it is tinted because that was the only thing standing between a visitor and a
+   download that did not match what they had just read. The installers have
+   caught up; what the note carries now is the architecture split, which is the
+   same kind of fact — something a visitor has to read BEFORE clicking, because
+   an Intel Mac handed an Apple Silicon build does not open it. So the tint
+   stays. */
 .release-note { border-left: 2px solid var(--accent); padding-left: 12px; text-align: left; }
 .release-note b { color: var(--accent); }
 .release-note a { white-space: nowrap; }

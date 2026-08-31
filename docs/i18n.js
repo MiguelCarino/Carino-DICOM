@@ -402,11 +402,18 @@ const RICH = {
     // and Podman added, these four still carried the old sentence AND an anchor
     // to a section that no longer exists — visible only to a reader in one of
     // these languages.
+    // The version numbers are gone from all five as of 1.1.0, and that is the
+    // point rather than a side effect: a hand-kept translation carrying a
+    // version is a translation that goes stale on a schedule nobody is watching,
+    // and this entry had already done it once. The arch names stay in Latin
+    // script deliberately — Apple Silicon, Intel, ARM64 and x86-64 are machine
+    // names, and translating them would put four new keys through a CI guard
+    // that exists to catch exactly the drift above.
     '#dl-release': {
-        es: 'Estos instaladores son <b>v1.0.0</b>: solo reciben y reenvían. Todo lo demás de esta página es <b>v1.1.0</b>, que ya funciona hoy con Docker, Podman, systemd o desde el código. Estos botones solo entregan versiones estables; los instaladores preliminares están en <i>Todas las versiones</i>, arriba.',
-        'pt-BR': 'Estes instaladores são <b>v1.0.0</b>: apenas recebem e encaminham. Todo o resto desta página é <b>v1.1.0</b>, que já funciona hoje com Docker, Podman, systemd ou a partir do código. Estes botões só entregam versões estáveis; os instaladores de pré-lançamento ficam em <i>Todas as versões</i>, acima.',
-        ja: 'ここにあるインストーラーは <b>v1.0.0</b> で、受信と転送だけを行います。このページの他の機能は <b>v1.1.0</b> で、Docker・Podman・systemd またはソースからなら今日すでに動きます。このボタンから配布されるのは安定版だけです。プレリリース版のインストーラーは上の<i>全バージョン</i>にあります。',
-        ru: 'Эти установщики — <b>v1.0.0</b>: только приём и пересылка. Всё остальное на этой странице — <b>v1.1.0</b>, которая уже работает сегодня через Docker, Podman, systemd или из исходников. Эти кнопки выдают только стабильные сборки; предварительные установщики — в разделе <i>Все версии</i> выше.',
+        es: 'macOS y Linux traen <b>dos compilaciones cada uno</b>: Apple Silicon e Intel, ARM64 y x86-64. Los botones nombran las dos en vez de adivinar: un Mac Intel no puede abrir una compilación Apple Silicon, y ningún navegador distingue con honestidad una máquina de la otra. Estos botones solo entregan versiones estables; los instaladores preliminares están en <i>Todas las versiones</i>, arriba.',
+        'pt-BR': 'macOS e Linux trazem <b>duas compilações cada um</b>: Apple Silicon e Intel, ARM64 e x86-64. Os botões nomeiam as duas em vez de adivinhar: um Mac Intel não abre uma compilação Apple Silicon de jeito nenhum, e nenhum navegador distingue as duas máquinas com honestidade. Estes botões só entregam versões estáveis; os instaladores de pré-lançamento ficam em <i>Todas as versões</i>, acima.',
+        ja: 'macOS と Linux は<b>それぞれ 2 種類</b>のビルドを配布します — Apple シリコンと Intel、ARM64 と x86-64。推測せず両方を並べているのは、Intel Mac では Apple シリコン版がそもそも起動せず、しかもブラウザーからこの 2 つを正しく見分ける方法がないからです。このボタンから配布されるのは安定版だけです。プレリリース版のインストーラーは上の<i>全バージョン</i>にあります。',
+        ru: 'macOS и Linux выходят <b>в двух сборках каждая</b> — Apple Silicon и Intel, ARM64 и x86-64. Кнопки называют обе, а не угадывают: на Intel-Маке сборка для Apple Silicon просто не запустится, и ни один браузер не отличит эти машины честно. Эти кнопки выдают только стабильные сборки; предварительные установщики — в разделе <i>Все версии</i> выше.',
     },
 };
 

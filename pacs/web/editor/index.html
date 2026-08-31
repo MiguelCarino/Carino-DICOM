@@ -10220,14 +10220,81 @@ document.addEventListener('keydown', e => {
     // name whose installer nothing knows how to find. Order matters: an Android
     // user agent contains 'linux', so Android is tested first and falls through
     // to the plain list — there is no build for it and offering one would lie.
+    // `owns` answers one question and one only: is this asset for this OS. The
+    // architecture is a second question, asked separately, because a release
+    // carries more than one build per OS now and a predicate that resolves to a
+    // single asset has no way to say so — it just silently keeps whichever one
+    // the API happened to list first.
     const PLATFORMS = [
-      { id: 'macos', name: 'macOS', is: (s) => s.indexOf('mac') >= 0 || s.indexOf('darwin') >= 0, want: (n) => n.endsWith('.dmg') },
-      { id: 'windows', name: 'Windows', is: (s) => s.indexOf('win') >= 0, want: (n) => n.endsWith('.exe') },
-      { id: 'linux', name: 'Linux', is: (s) => s.indexOf('linux') >= 0 || s.indexOf('x11') >= 0, want: (n) => n.endsWith('.appimage') },
+      { id: 'macos', name: 'macOS', is: (s) => s.indexOf('mac') >= 0 || s.indexOf('darwin') >= 0, owns: (n) => n.endsWith('.dmg') },
+      { id: 'windows', name: 'Windows', is: (s) => s.indexOf('win') >= 0, owns: (n) => n.endsWith('.exe') },
+      { id: 'linux', name: 'Linux', is: (s) => s.indexOf('linux') >= 0 || s.indexOf('x11') >= 0, owns: (n) => n.endsWith('.appimage') },
     ];
     const ua = ((navigator.userAgentData && navigator.userAgentData.platform) ||
                 navigator.platform || navigator.userAgent || '').toLowerCase();
-    const mine = ua.indexOf('android') >= 0 ? null : PLATFORMS.find((p) => p.is(ua)) || null;
+    // Android is read off the FULL user-agent, never off `ua`. An Android phone
+    // is a Linux machine by every test above it — navigator.platform on Firefox
+    // for Android is the literal string "Linux aarch64" — so without this it is
+    // offered a desktop AppImage it cannot possibly run. Testing `ua` for it was
+    // not enough: `ua` prefers userAgentData.platform, which Firefox does not
+    // implement at all, so the exclusion fired only in the browsers that were
+    // already excluded by it. Shipping arm64 AppImages makes the miss worse
+    // rather than better, because the offer stops looking obviously wrong.
+    const isAndroid = /android/i.test(navigator.userAgent || '') || ua.indexOf('android') >= 0;
+    const mine = isAndroid ? null : PLATFORMS.find((p) => p.is(ua)) || null;
+
+    // Each architecture is a SET of spellings rather than one string, and no
+    // artifactName pattern can reduce it to one: electron-builder expands
+    // ${arch} and THEN respells the token to whatever the package format calls
+    // it — x64 becomes x86_64 in an AppImage and amd64 in a .deb, arm64 becomes
+    // aarch64 in an .rpm. Matching a single spelling is how a picker works on
+    // the machine it was written on and quietly offers Linux nothing.
+    // 'universal' is matched although nothing here builds one today: mac.target
+    // is dmg + zip and the workflow passes --x64 --arm64, so a release carries
+    // two arch-specific dmgs. It is listed because a universal dmg is the one
+    // asset that would be right for every Mac, so if this project ever produces
+    // one the ranking below should lead with it without anybody remembering to
+    // come back here — and because a matcher that silently fails to recognise
+    // an asset it was handed drops that download rather than mislabelling it.
+    const ARCHS = [
+      { id: 'universal', name: 'Universal', re: /(^|[-_.])universal($|[-_.])/ },
+      { id: 'arm64', name: 'ARM64', re: /(^|[-_.])(arm64|aarch64)($|[-_.])/ },
+      { id: 'x64', name: 'x86-64', re: /(^|[-_.])(x64|x86[-_]?64|amd64)($|[-_.])/ },
+    ];
+    const archOf = (n) => ARCHS.find((a) => a.re.test(n)) || null;
+
+    // Machine names, deliberately untranslated. Apple Silicon, Intel, ARM64,
+    // x86-64 and Universal stay in Latin script in all five languages this
+    // editor speaks — the same call the version number already gets — and that
+    // is what lets the whole change land without one new dictionary key, in a
+    // repository whose CI checks nothing about this file.
+    const archName = (p, a) => !a ? null
+      : a.id === 'universal' ? a.name
+      : p.id === 'macos' ? (a.id === 'arm64' ? 'Apple Silicon' : 'Intel')
+      : a.name;
+
+    // Where a guess is safe it is made and where it is not it is refused.
+    // navigator.platform says 'Linux x86_64' or 'Linux aarch64' literally, so
+    // reading it is not a guess at all — but it has to be read from its own
+    // string and not from `ua`, which prefers userAgentData.platform. That one
+    // is a low-entropy enum — 'Linux', 'macOS', 'Windows' — that never carries
+    // an architecture and, being truthy, shadows navigator.platform entirely.
+    // Sharing `ua` here is how every Chromium browser reaches this line with an
+    // arch-free string and falls through to null on the one platform where the
+    // answer was sitting in plain sight. Windows on ARM runs the x64 installer
+    // under emulation, so x64 is the answer that always works there. A Mac gets
+    // nothing: the browser can only report ITS OWN architecture, and a universal
+    // Chrome under Rosetta answers x86 on an Apple Silicon machine — wrong in
+    // the one direction that matters, since an Intel build on Apple Silicon is
+    // merely slower while an arm64 build on an Intel Mac will not launch. So a
+    // Mac gets no guess at all: the card leads with arm64 because that is every
+    // Mac sold since 2020, and names the Intel dmg right beside it. Refusing to
+    // guess costs a Mac reader one glance; guessing wrong costs an Intel reader
+    // a download that cannot open.
+    const uaArch = (navigator.platform || navigator.userAgent || '').toLowerCase();
+    const preferred = (p) => p.id === 'windows' ? 'x64'
+      : p.id === 'linux' ? (/aarch64|arm64/.test(uaArch) ? 'arm64' : /x86_64|amd64/.test(uaArch) ? 'x64' : null)
+      : null;
 
     const RELEASES = 'https://github.com/MiguelCarino/Carino-DICOM-Editor/releases/latest';
     const mb = (n) => Math.round(Number(n) / 1048576) + ' MB';
@@ -10238,33 +10305,95 @@ document.addEventListener('keydown', e => {
       .then((rel) => {
         if (!rel || !rel.tag_name) return;            // no release yet — stay hidden
         const assets = Array.isArray(rel.assets) ? rel.assets : [];
-        const assetFor = (p) => assets.find((a) => a && typeof a.name === 'string' &&
-          typeof a.browser_download_url === 'string' && p.want(a.name.toLowerCase())) || null;
+
+        // A LIST per platform, not one asset, because a platform can now hold
+        // more than one build — and ranked, because the button can only hold
+        // the head of it. A universal build leads wherever one exists, since it
+        // runs on both machines; then whatever the reader's own hardware asked
+        // for; then the majority build for that platform, which is arm64 on a
+        // Mac and x86-64 everywhere else. That last one is presentation and not
+        // a recommendation: it decides an order, never which of the two the
+        // card names, because both are always named.
+        const lead = (p) => p.id === 'macos' ? 'arm64' : 'x64';
+        const rank = (p, e) => !e.arch ? 4
+          : e.arch.id === 'universal' ? 0
+          : e.arch.id === preferred(p) ? 1
+          : e.arch.id === lead(p) ? 2 : 3;
+        const assetsFor = (p) => {
+          const list = assets
+            .filter((a) => a && typeof a.name === 'string' &&
+                    typeof a.browser_download_url === 'string' && p.owns(a.name.toLowerCase()))
+            .map((a) => ({ asset: a, arch: archOf(a.name.toLowerCase()) }));
+          // The token a filename does not carry. electron-builder's DEFAULT
+          // artifactName omits the arch from the DEFAULT arch, which is x64, so
+          // a target left on the default naming ships an arm64 build that says
+          // so beside an x64 build that looks like a release from before any of
+          // this existed. Within one OS that resolves itself: a lone untokened
+          // asset sitting beside a tokened sibling IS the default arch, by
+          // construction. With no token anywhere there is nothing to reason
+          // from and the architecture stays unknown, which is correct.
+          const blanks = list.filter((e) => !e.arch);
+          if (list.length > 1 && blanks.length === 1 && !list.some((e) => e.arch && e.arch.id === 'x64')) {
+            blanks[0].arch = ARCHS.find((a) => a.id === 'x64');
+          }
+          return list.sort((x, y) => rank(p, x) - rank(p, y));
+        };
 
         // The detected platform gets the button; a platform whose installer did
         // not build falls back to the releases page rather than to a link that
         // 404s, and an undetected platform gets the plain list.
-        const hit = mine ? assetFor(mine) : null;
+        const hits = mine ? assetsFor(mine) : [];
+        const hit = hits[0] || null;
         primary.textContent = mine ? T('Download for {os}').replace('{os}', mine.name) : T('All downloads');
-        primary.href = hit ? hit.browser_download_url : RELEASES;
+        primary.href = hit ? hit.asset.browser_download_url : RELEASES;
 
         // Version is data and stays out of the dictionaries; the size is the
         // number people actually want before clicking on a metered connection.
+        // The architecture joins them because this is the line the reader is
+        // already scanning, and naming it here is the whole difference between
+        // a silent guess and an informed one — the sibling build is one click
+        // below, but only somebody who knows which one they were handed knows
+        // to look for it.
         const version = String(rel.tag_name).replace(/^v/, '');
-        meta.textContent = hit ? version + ' · ' + mb(hit.size) : version;
+        const line = [version];
+        const an = hit ? archName(mine, hit.arch) : null;
+        if (an) line.push(an);
+        if (hit) line.push(mb(hit.asset.size));
+        meta.textContent = line.join(' · ');
 
         // textContent and explicit element creation throughout — never
         // innerHTML. These names and URLs arrive over the network and are
         // treated as untrusted values even though we own the repository.
         others.textContent = '';
-        PLATFORMS.filter((p) => !mine || p.id !== mine.id).forEach((p) => {
+        const add = (text, url, title) => {
           const a = document.createElement('a');
-          const own = assetFor(p);
-          a.textContent = p.name;
-          a.href = own ? own.browser_download_url : RELEASES;
+          a.textContent = text;
+          a.href = url;
           a.target = '_blank'; a.rel = 'noopener';
-          if (own) a.title = p.name + ' · ' + mb(own.size);
+          if (title) a.title = title;
           others.appendChild(a);
+        };
+        // The architecture this reader was NOT handed comes first, ahead of the
+        // other operating systems. A wrong guess about the machine is the only
+        // failure here that ends with an application that will not start, so it
+        // has to cost one click on a row that already exists rather than a trip
+        // to a releases page and a filename to interpret.
+        hits.slice(1).forEach((e) => {
+          const n = archName(mine, e.arch) || mine.name;
+          add(n, e.asset.browser_download_url, mine.name + ' · ' + n + ' · ' + mb(e.asset.size));
+        });
+        PLATFORMS.filter((p) => !mine || p.id !== mine.id).forEach((p) => {
+          const own = assetsFor(p);
+          if (!own.length) { add(p.name, RELEASES, null); return; }
+          // Another OS with two builds is named twice rather than once: this
+          // card cannot read a machine it is not running on, so picking one for
+          // a reader downloading for a different computer would be a guess with
+          // nothing behind it at all.
+          own.forEach((e) => {
+            const n = own.length > 1 ? archName(p, e.arch) : null;
+            const label = n ? p.name + ' ' + n : p.name;
+            add(label, e.asset.browser_download_url, label + ' · ' + mb(e.asset.size));
+          });
         });
         const all = document.createElement('a');
         all.textContent = T('All downloads');

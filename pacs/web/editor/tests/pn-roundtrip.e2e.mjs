@@ -274,9 +274,20 @@ try {
   r = await run('anonymize');
   noObjectObject('no PN tag was stringified', r.tags);
   const pn = r.tags['00100010'];
-  if (!pn || pn.vr !== 'PN' || typeof pn.Value?.[0] !== 'string' || !/\^/.test(pn.Value[0])) {
-    fail(`the dummy patient name is not a well-formed PN — got ${JSON.stringify(pn)}`);
-  } else ok(`the dummy patient name is a well-formed PN (${pn.Value[0]})`);
+  // What this suite is entitled to assert about the anonymized name is its
+  // SHAPE, not its content: a plain string under VR PN, because that pair is
+  // exactly what parseByVR() gets wrong and everything above is here to catch.
+  // It used to demand a caret as well, from back when Anonymize invented a
+  // person-shaped name. The placeholder is deliberately flat now — ANONYMOUS,
+  // the same value in every file, chosen so a reader can tell it from Randomize
+  // at a glance — and the caret check outlived the behaviour it described,
+  // failing on a study the editor had handled correctly. Whether the
+  // placeholder is the right string is settled next door in
+  // tests/suites/deid.js and tests/suites/edits.js, against the constant
+  // itself; asserting it here too would only mean two files to edit.
+  if (!pn || pn.vr !== 'PN' || typeof pn.Value?.[0] !== 'string' || !pn.Value[0]) {
+    fail(`the dummy patient name is not a plain PN string — got ${JSON.stringify(pn)}`);
+  } else ok(`the dummy patient name is a plain PN string (${pn.Value[0]})`);
   eq('the real name is gone', pn?.Value?.[0] === PN['00100010'][0], false);
   eq('the patient ID is cleared', r.tags['00100020']?.Value, ['']);
 } catch (e) {

@@ -3,7 +3,7 @@
 All notable changes to Carino DICOM. Versions follow [Semantic Versioning](https://semver.org/).
 Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-08-30
 
 Everything added on top of the upstream **1.0.0** store-and-forward baseline.
 Existing configs keep working and the defaults are unchanged — every new
@@ -816,8 +816,25 @@ release also queries, retrieves, routes and de-identifies.
   them**: the `.icns` carries the same eight member types as the one that
   shipped in 1.0.0 and every payload decodes at its declared size, but nothing
   has opened either file on macOS or Windows. Tagging a release runs
-  `desktop-build.yml` on all three runners, which is the first real test of
-  both.
+  `desktop-build.yml` across the whole matrix below, which is the first real
+  test of both.
+- The desktop matrix is one runner per operating system **and architecture**
+  rather than one per operating system, because the engine inside the shell is
+  a PyInstaller freeze and PyInstaller builds for the machine it runs on: Linux
+  x86-64 and arm64, macOS Intel and Apple Silicon, Windows x64 and arm64. Every artifact
+  names its architecture in the filename now — electron-builder's default
+  pattern omits that token from the x64 build, which meant two Windows jobs
+  would have written the same filename over each other and no download page
+  could tell an Intel `.dmg` from one built before any of this mattered.
+  **None of the arm64 builds has been launched on arm64 hardware, and neither
+  has the Intel `.dmg`.** What the workflow proves is that they packaged; it
+  proves nothing about whether they start. The two arm64 legs are marked
+  experimental for that reason, which lets them fail a manual build without
+  taking their siblings down; a tag build is never forgiving, because a release
+  that goes out missing an installer must go out red. Windows on arm64 is built
+  but is not what the website offers a Windows visitor: that machine runs the
+  x64 installer under emulation, so x64 is the answer that always works there
+  and arm64 is a speed improvement for anyone who goes looking for it.
 - **Nothing here has been validated against clinical equipment by anyone.**
   Development and testing use `pynetdicom`'s own SCU/SCP tools and synthetic
   studies, which proves protocol conformance and promises nothing about a

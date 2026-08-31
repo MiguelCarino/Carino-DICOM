@@ -1,8 +1,37 @@
 name: Build desktop app
 
 # Builds the Carino DICOM desktop app (tray agent) for Linux, macOS and Windows.
-# Each OS is built on its own runner — PyInstaller and electron-builder cannot
-# cross-compile. Artifacts are produced UNSIGNED by default; add the signing
+# Each OS *and each architecture* is built on its own runner — PyInstaller freezes
+# the engine into desktop/engine/ as a native executable for the machine it runs
+# on, and neither it nor electron-builder can cross-compile, so an arm64 installer
+# needs an arm64 runner exactly as much as a Windows installer needs a Windows one.
+# electron-builder is then told which arch to package with an explicit CLI flag per
+# leg: given no flag it falls back to the runner's own process.arch, which is how
+# v1.1.0-rc02 shipped an arm64 dmg and no Intel dmg at all. The target *lists* stay
+# in desktop/package.json as plain strings for the same reason — a target object
+# carrying its own "arch" array overrides the CLI flag, and a leg asked for two
+# arches would package a frozen engine that is only ever one of them.
+#
+# Runner labels are pinned rather than left as ubuntu/macos/windows-latest: a
+# floating label would raise the frozen engine's glibc floor, or move one mac leg
+# to a newer macOS major than the other, in the middle of a release series and
+# without anybody reviewing it.
+#
+# The Windows installer name is overridden in desktop/package.json (build.nsis.
+# artifactName) because electron-builder's default NSIS pattern is the only one
+# with no ${arch} macro in it — both Windows legs would otherwise write
+# "Carino-DICOM Setup <version>.exe" and the second upload would silently replace
+# the first in the release. dmg, mac zip, AppImage, deb and rpm all already carry
+# the arch, so they need nothing.
+#
+# That override also swaps the default's SPACES for hyphens, which is not
+# cosmetic: GitHub rewrites every space in a release asset to a dot as it takes
+# the upload, so a spaced name is one string here and a different one in the
+# download URL. The website pins these filenames by hand for readers with no JS
+# or a rate-limited API (docs/app.js), and it can only do that honestly while the
+# name on disk and the name in the URL are the same string.
+#
+# Artifacts are produced UNSIGNED by default; add the signing
 # secrets below and the same workflow produces signed + notarized builds with
 # no changes.
 #
@@ -22,9 +51,57 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # One leg per (platform, arch). `eb` is the electron-builder arch selector;
+      # `expect` is the exact manifest that leg must leave in desktop/dist, so a
+      # leg that half-works cannot pass as green. The names come from each
+      # target's own default artifactName pattern: x64 is stripped where the
+      # pattern allows it, arm64 never is.
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - id: linux-x64
+            os: ubuntu-24.04
+            eb: "--linux --x64"
+            expect: |
+              Carino-DICOM-1.1.0.AppImage
+              carino-dicom-desktop-1.1.0.x86_64.rpm
+              carino-dicom-desktop_1.1.0_amd64.deb
+          - id: linux-arm64
+            os: ubuntu-24.04-arm
+            eb: "--linux --arm64"
+            experimental: true
+            expect: |
+              Carino-DICOM-1.1.0-arm64.AppImage
+              carino-dicom-desktop-1.1.0.aarch64.rpm
+              carino-dicom-desktop_1.1.0_arm64.deb
+          - id: mac-x64
+            os: macos-15-intel
+            eb: "--mac --x64"
+            expect: |
+              Carino-DICOM-1.1.0.dmg
+              Carino-DICOM-1.1.0-mac.zip
+          - id: mac-arm64
+            os: macos-15
+            eb: "--mac --arm64"
+            expect: |
+              Carino-DICOM-1.1.0-arm64.dmg
+              Carino-DICOM-1.1.0-arm64-mac.zip
+          - id: win-x64
+            os: windows-2025
+            eb: "--win --x64"
+            expect: |
+              Carino-DICOM-Setup-1.1.0-x64.exe
+          - id: win-arm64
+            os: windows-11-arm
+            eb: "--win --arm64"
+            experimental: true
+            expect: |
+              Carino-DICOM-Setup-1.1.0-arm64.exe
     runs-on: ${{ matrix.os }}
+    # The two arm64 legs are new and have not gone green yet, so they are allowed
+    # to fail a manual smoke run without taking the run down with them. A tag build
+    # is never forgiving: a v* push that publishes a release with an installer
+    # missing must go red. Drop `experimental` from a leg once it has passed once.
+    continue-on-error: ${{ matrix.experimental == true && github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -44,10 +121,25 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y rpm
 
+      # electron-builder's deb and rpm targets shell out to a prebuilt fpm that it
+      # downloads, and that prebuilt exists only as linux-x86_64 and linux-x86 —
+      # app-builder's DownloadFpm() is a two-way branch that hands anything not
+      # amd64 the 32-bit x86 build, which cannot execute on aarch64. USE_SYSTEM_FPM
+      # is the documented escape hatch and takes fpm from PATH instead; Ruby and
+      # rpmbuild are already on the image, so a gem install is all that is missing.
+      - name: Provide a native fpm for the arm64 Linux leg
+        if: matrix.id == 'linux-arm64'
+        run: sudo gem install --no-document fpm
+
+      # --only-binary=:all: is a coverage tripwire, not a speedup. Every dependency
+      # (direct and transitive) publishes a wheel for all six targets today, so the
+      # flag costs nothing now; the day one of them stops doing so for one arch, it
+      # turns a silent source build — or a subtly wrong engine — into a pip error
+      # on the exact leg that lost coverage.
       - name: Freeze the DICOM engine (PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install --only-binary=:all: -r requirements.txt pyinstaller
           pyinstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi --noconfirm
 
       - name: Install desktop dependencies
@@ -76,14 +168,53 @@ jobs:
             fi
           done
 
+      # matrix.eb carries the platform and arch flags. Without an arch flag
+      # electron-builder builds only archFromString(process.arch), which is fine by
+      # accident on a matching runner and wrong the moment a leg is meant to differ
+      # from its host. USE_SYSTEM_FPM renders as the literal "false" off the arm64
+      # Linux leg — it must never render as the empty string, which app-builder's
+      # IsEnvTrue() reads as true.
       - name: Build installers (electron-builder)
         working-directory: desktop
-        run: npx --no-install electron-builder --publish never
+        env:
+          USE_SYSTEM_FPM: ${{ matrix.id == 'linux-arm64' }}
+        run: npx --no-install electron-builder ${{ matrix.eb }} --publish never
+
+      # if-no-files-found: error on the upload only catches a leg that produced
+      # nothing at all; a Linux leg that built the AppImage and lost the deb and
+      # rpm would still upload, still be green, and still ship a release with a
+      # hole in it. Checking the leg's declared manifest catches partial output
+      # too, and doubles as the reviewable statement of what a release contains.
+      - name: Verify this leg produced everything it promised
+        shell: bash
+        run: |
+          missing=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ -f "desktop/dist/$f" ]; then
+              echo "ok      $f"
+            else
+              echo "MISSING $f"
+              missing=1
+            fi
+          done <<'__EXPECT__'
+          ${{ matrix.expect }}
+          __EXPECT__
+          {
+            echo "### ${{ matrix.id }} (${{ matrix.os }})"
+            echo ""
+            echo '```'
+            ls -l desktop/dist
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $missing
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: carino-dicom-${{ matrix.os }}
+          # upload-artifact@v4 hard-errors on a duplicate artifact name within a
+          # run, and two legs now share every os value, so the leg id is the key.
+          name: carino-dicom-${{ matrix.id }}
           if-no-files-found: error
           path: |
             desktop/dist/*.AppImage
