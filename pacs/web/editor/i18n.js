@@ -30,6 +30,11 @@ const I18N = {
         'Good afternoon.': 'Buenas tardes.',
         'Good evening.': 'Buenas noches.',
         // Overview tab
+        // Overview hero
+        'That file has a patient in it.': 'Ese archivo lleva dentro a un paciente.',
+        'Nothing you open here leaves this machine.': 'Nada de lo que abras aquí sale de esta máquina.',
+        'Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.': 'Lee y edita cada etiqueta, aplica el perfil de anonimización PS3.15, borra la identidad grabada en la propia imagen y compara un estudio en paralelo.',
+        'It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.': 'Todo se ejecuta en esta pestaña — sin servidor, sin subidas, sin cuenta — y por eso sigue funcionando con la red desconectada.',
         'Open a DICOM file': 'Abre un archivo DICOM',
         'Drag & drop': 'Arrastra y suelta',
         'files here — or a whole folder.': 'archivos aquí, o una carpeta completa.',
@@ -359,6 +364,11 @@ const I18N = {
         'Good morning.': 'Bom dia.',
         'Good afternoon.': 'Boa tarde.',
         'Good evening.': 'Boa noite.',
+        // Overview hero
+        'That file has a patient in it.': 'Esse arquivo tem um paciente dentro.',
+        'Nothing you open here leaves this machine.': 'Nada do que você abre aqui sai desta máquina.',
+        'Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.': 'Leia e edite cada tag, aplique o perfil de anonimização PS3.15, apague a identidade gravada na própria imagem e compare um estudo lado a lado.',
+        'It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.': 'Tudo roda nesta aba — sem servidor, sem upload, sem conta — e é por isso que continua funcionando com a rede desligada.',
         'Open a DICOM file': 'Abra um arquivo DICOM',
         'Drag & drop': 'Arraste e solte',
         'files here — or a whole folder.': 'arquivos aqui, ou uma pasta inteira.',
@@ -682,6 +692,11 @@ const I18N = {
         'Good morning.': 'おはようございます。',
         'Good afternoon.': 'こんにちは。',
         'Good evening.': 'こんばんは。',
+        // Overview hero
+        'That file has a patient in it.': 'そのファイルには患者が入っています。',
+        'Nothing you open here leaves this machine.': 'ここで開いたものは、このPCから出ません。',
+        'Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.': 'すべてのタグを読み書きし、PS3.15 の匿名化プロファイルを適用し、画像そのものに焼き込まれた識別情報を塗りつぶし、検査を並べて比較できます。',
+        'It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.': 'すべてこのタブ内で動作します。サーバーもアップロードもアカウントも不要で、だからネットワークを抜いたままでも使えます。',
         'Open a DICOM file': 'DICOMファイルを開く',
         'Drag & drop': 'ここに',
         'files here — or a whole folder.': 'ファイル、またはフォルダごとドラッグ＆ドロップしてください。',
@@ -1005,6 +1020,11 @@ const I18N = {
         'Good morning.': 'Доброе утро.',
         'Good afternoon.': 'Добрый день.',
         'Good evening.': 'Добрый вечер.',
+        // Overview hero
+        'That file has a patient in it.': 'В этом файле есть пациент.',
+        'Nothing you open here leaves this machine.': 'Ничто из открытого здесь не покидает эту машину.',
+        'Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.': 'Читайте и редактируйте любой тег, применяйте профиль обезличивания PS3.15, закрашивайте идентификацию, впечатанную в само изображение, и сравнивайте исследования рядом.',
+        'It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.': 'Всё работает в этой вкладке — без сервера, без загрузки, без учётной записи, — поэтому оно продолжает работать с отключённой сетью.',
         'Open a DICOM file': 'Откройте файл DICOM',
         'Drag & drop': 'Перетащите сюда',
         'files here — or a whole folder.': 'файлы или папку целиком.',

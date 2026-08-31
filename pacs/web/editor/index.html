@@ -212,7 +212,29 @@
        is a drop TARGET and a narrow one is a worse one. With #ovGet hidden —
        which is every context except the public site — this row has one child
        and centres it, exactly as the drop zone sat before the card existed. */
-    .ov-hero { display: flex; gap: 14px; align-items: stretch; justify-content: center;
+    /* The hero, and then the two ways in. Both live INSIDE #ovEmpty and go away
+       together the moment a file is loaded: this page is a tool that happens to
+       have a front door, not a landing page with a tool underneath it, and a
+       headline still sitting above someone's study while they work would be the
+       wrong way round. It is deliberately short for the same reason — the drop
+       zone has to stay reachable on a laptop without scrolling. */
+    .ov-hero { width: min(680px, 92%); text-align: center; }
+    .ov-hero-mark { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 10px; }
+    .ov-hero-mark img { width: 64px; height: 64px; }
+    /* Same trace the loading overlay draws, at the size the mark wants. It reads
+       as the mark's underline, and it is the one piece of motion on the screen. */
+    .ov-hero-mark .ekg { width: 150px; height: 34px; }
+    .ov-hero h1 { margin: 0 0 12px; font-size: clamp(20px, 3.4vw, 30px); line-height: 1.25; font-weight: 700; letter-spacing: -.01em; }
+    .ov-hero h1 .gold { color: var(--accent); }
+    .ov-hero-lede { margin: 0; font-size: 14.5px; line-height: 1.65; color: var(--text-dim); }
+    /* Two sentences in two spans, because data-i18n overwrites textContent and
+       would eat any markup nested inside a translated element. They need no rule
+       of their own: the newline between them in the markup already collapses to
+       exactly one space, and adding a margin on top of it produced a visible
+       double gap mid-paragraph. */
+    @media (max-width: 560px) { .ov-hero-mark .ekg { display: none; } }
+
+    .ov-ways { display: flex; gap: 14px; align-items: stretch; justify-content: center;
       flex-wrap: wrap; width: 100%; }
     /* No `display` property on .ov-get itself, on purpose: it carries both
        [hidden] and .hidden, and an authored display rule would beat the UA's
@@ -1725,7 +1747,28 @@
              button inside a button is not something a screen reader can
              describe. Clicking the background still opens files, as a
              convenience for the mouse rather than as the only way in. -->
-        <div class="ov-hero">
+        <!-- What this is, before the two ways into it. The page had no h1 at all
+             until now: the drop zone's "Open a DICOM file" is an instruction, not
+             a name, and a reader arriving from a search result was told what to
+             do without ever being told what the thing was. Both lines are plain
+             text in their own spans because the i18n pass overwrites textContent
+             and would eat any markup nested inside a translated element. -->
+        <section class="ov-hero">
+          <div class="ov-hero-mark" aria-hidden="true">
+            <img src="logo.svg" alt="" width="64" height="64" decoding="async">
+            <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
+              <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+              <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+            </svg>
+          </div>
+          <h1><span data-i18n>That file has a patient in it.</span><br><span class="gold" data-i18n>Nothing you open here leaves this machine.</span></h1>
+          <p class="ov-hero-lede">
+            <span data-i18n>Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.</span>
+            <span data-i18n>It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.</span>
+          </p>
+        </section>
+
+        <div class="ov-ways">
         <div class="ov-drop" id="ovDrop">
           <div class="ov-drop-icon">🩻</div>
           <h2 data-i18n>Open a DICOM file</h2>
