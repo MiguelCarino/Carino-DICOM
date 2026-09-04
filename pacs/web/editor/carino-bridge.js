@@ -6,15 +6,25 @@
  *
  *   media.carino.systems  →  metadata.carino.systems   (one file, to inspect)
  *   Carino DICOM          →  Carino DICOM Editor       (a whole study)
+ *   fiscal.carino.systems →  quote.carino.systems      (one tax card)
  *
  * The exchange, both sides:
  *   1. the sender opens the receiver at "#carino-bridge"
- *   2. the receiver announces its listener   { carinoBridge: 'ready' }
- *   3. the sender posts the files            { carinoBridge: 'files', … }
+ *   2. the receiver announces its listener   { carinoBridge: 'ready', v }
+ *   3. the sender posts the files            { carinoBridge: 'files', v, … }
  *   4. the receiver acknowledges             { carinoBridge: 'received' }
  *
  * Step 2 is not ceremony. The sender cannot know when the receiver's listener
- * exists, and a payload posted a moment too early is simply lost.
+ * exists, and a payload posted a moment too early is simply lost. Step 4 is
+ * not ceremony either: it is sent only once the receiver has taken the files,
+ * so a sender that hears it may tell the user the handoff worked.
+ *
+ * The v both sides carry is read, not decoration. These are independently
+ * deployed static sites, so the two copies can be months apart; a side that
+ * meets a protocol it does not know says so, and the sender reports "too old"
+ * or "too new" instead of leaving the user with a mystery timeout.
+ *
+ * Canonical copy: Quote/carino-bridge.js, propagated by Carino-Systems/propagate.sh.
  *
  * The window is opened WITHOUT noopener, deliberately: that flag severs
  * window.opener, and the opener is the channel. Which is exactly why the
@@ -28,9 +38,10 @@
 (function (global) {
   'use strict';
 
-  const KEY     = 'carinoBridge';        // marks our messages
-  const MARKER  = 'carino-bridge';       // marks the receiving page's URL
-  const TRUST   = 'carino-bridge.trusted';
+  const KEY      = 'carinoBridge';       // marks our messages
+  const MARKER   = 'carino-bridge';      // marks the receiving page's URL
+  const TRUST    = 'carino-bridge.trusted';
+  const PROTOCOL = 1;                    // bump only for a breaking payload change
 
   // Carino DICOM and its editor spoke this before the bridge had a name; the
   // message names below keep the old spelling because every build already in
@@ -98,7 +109,9 @@
    *   otherwise  what an origin outside that list gets: 'deny' (default) or 'ask'
    *   ask        (origin, count) → bool | Promise<bool>, for the 'ask' case
    *   remember   let a granted 'ask' stick for that origin next time
-   *   onFiles    (File[], { origin, trusted }) — where the files actually go
+   *   onFiles    (File[], { origin, trusted }) — where the files actually go;
+   *              returning false refuses them, and the sender is told so
+   *              instead of being left believing the handoff worked
    *   legacy     also understand the pre-bridge carino-pacs-* messages
    *
    * Returns false when this is an ordinary visit, so the caller can carry on.
@@ -121,10 +134,21 @@
     let taken = false;
     const onMsg = async e => {
       if (taken || e.source !== global.opener) return;
-      const files = payloadFiles(e.data, !!opts.legacy);
-      if (!files) return;
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d[KEY] !== 'files' && !(opts.legacy && d.type === LEGACY.files)) return;
+      // The verdict comes before anything is said back. A denied origin gets
+      // silence, not the shape of a listener it can then work against.
       const call = verdict(e.origin);
       if (call === 'deny') return;                 // not ours to take; stay listening
+      // A payload from a newer bridge than this copy knows: say so out loud
+      // rather than dropping it, since to the sender the two are identical.
+      if (d[KEY] === 'files' && +d.v > PROTOCOL) {
+        reply(e, { [KEY]: 'unsupported', v: PROTOCOL });
+        return;
+      }
+      const files = payloadFiles(d, !!opts.legacy);
+      if (!files) return;
 
       taken = true;                                // one handoff per page, and no
       global.removeEventListener('message', onMsg);// second sender racing the dialog
@@ -137,9 +161,14 @@
       // Drop the marker: reloading this tab should be an ordinary visit, not a
       // handoff waiting on a sender that finished long ago.
       try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
-      reply(e, { [KEY]: 'received', n: files.length });
-      try { opts.onFiles(files, { origin: e.origin, trusted: call === 'allow' }); }
+      // The acknowledgement is the receiver's word that it has the files, so it
+      // waits for the handler to take them: one that refuses them (returns
+      // false) or throws leaves the sender with a refusal rather than a success
+      // it can do nothing about.
+      let kept = false;
+      try { kept = (await opts.onFiles(files, { origin: e.origin, trusted: call === 'allow' })) !== false; }
       catch (err) { if (opts.onError) opts.onError(err); }
+      reply(e, kept ? { [KEY]: 'received', n: files.length } : { [KEY]: 'declined' });
     };
     global.addEventListener('message', onMsg);
 
@@ -155,7 +184,7 @@
     else targets = allow;
 
     targets.forEach(o => {
-      try { global.opener.postMessage({ [KEY]: 'ready', v: 1 }, o); } catch (_) {}
+      try { global.opener.postMessage({ [KEY]: 'ready', v: PROTOCOL }, o); } catch (_) {}
       if (opts.legacy) { try { global.opener.postMessage({ type: LEGACY.ready }, o); } catch (_) {} }
     });
     return true;
@@ -221,7 +250,7 @@
           entries.map(e => (legacy ? e.buf : e.body)).filter(b => b instanceof ArrayBuffer);
 
         win.postMessage(legacy ? { type: LEGACY.files, files: entries }
-                               : { [KEY]: 'files', v: 1, files: entries }, target, transfer);
+                               : { [KEY]: 'files', v: PROTOCOL, files: entries }, target, transfer);
         // The old dialect has no acknowledgement to wait for.
         if (legacy) finish(resolve, { count: entries.length, acknowledged: false });
       }
@@ -230,11 +259,14 @@
         if (done || e.source !== win || e.origin !== target || !e.data) return;
         const d = e.data;
         if (!posted && (d[KEY] === 'ready' || (opts.legacy && d.type === LEGACY.ready))) {
+          if (+d.v > PROTOCOL) return finish(reject, new Error('bridge: this page is too old for the other one'));
           deliver(d[KEY] !== 'ready').catch(err => finish(reject, err));
         } else if (d[KEY] === 'received') {
           finish(resolve, { count: d.n || 0, acknowledged: true });
         } else if (d[KEY] === 'declined') {
           finish(reject, new Error('bridge: the other page declined the files'));
+        } else if (d[KEY] === 'unsupported') {
+          finish(reject, new Error('bridge: the other page is too old for this one'));
         }
       };
       global.addEventListener('message', onMsg);
