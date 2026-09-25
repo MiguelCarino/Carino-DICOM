@@ -16,15 +16,16 @@ from . import __version__
 from .audit import AuditLog
 from .config import Config
 from . import users
-from .emergency import EmergencyController
+from .emergency import ACTIVE as EMG_ACTIVE, EmergencyController, RECOVERING as EMG_RECOVERING
 from .index import InstanceIndex
 from .logbuf import LogBuffer
+from . import mwl
 from .mwl import MwlSCP
 from .notify import Notifier
 from .print_scp import PrintSCP
 from .qr import QrSCP
 from . import ris
-from .caught import CaughtStore
+from .caught import CaughtStore, split_by_addressee
 from .ris import OrderStore, RisListener, _utc_stamp
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
@@ -269,6 +270,29 @@ def _dcm_today() -> str:
     return date.today().strftime("%Y%m%d")
 
 
+def _addressed(probe: dict, station_aet: str) -> dict:
+    """One probe row split by who its items are addressed to.
+
+    Through caught.split_by_addressee(), which is the same predicate CaughtStore
+    counted the row with — asked a second time rather than answered a second
+    way. That distinction is the whole repair: "addressed to nobody" has two
+    spellings on the wire (a blank from a third-party provider, ``UNASSIGNED``
+    from this appliance's own Type 1-safe worklist), and while only some readers
+    knew the second one, the same item was a scheduled order to the row and an
+    unaddressed one to the sentence printed over it.
+
+    Recounted here rather than simply read off the row because a round filed
+    before the second spelling existed still carries the old tallies; its items
+    are stored verbatim, so they can be. A row that came back EMPTY has nothing
+    to recount, and its stored tallies (zeros, for an empty answer) stand.
+    """
+    items = probe.get("items") or []
+    if items:
+        return split_by_addressee(items, station_aet)
+    return {k: int(probe.get(k) or 0)
+            for k in ("for_this_station", "for_nobody", "for_someone_else")}
+
+
 def _probe_verdict(rnd: dict) -> str:
     """Read the four answers and say, in one sentence, where the fault is.
 
@@ -284,20 +308,45 @@ def _probe_verdict(rnd: dict) -> str:
     if not a["ok"]:
         # The association itself failed: nothing downstream of it means anything.
         return f"Could not reach the worklist source — {a['message']}. Check the host, port and its called AE title before reading anything else."
+    # Every row is read through the one predicate, not just the first: a row
+    # whose unaddressed orders were filed as somebody else's made this sentence
+    # name stations that do not exist, and send the operator to edit a station
+    # field the order has not got.
+    station = str(rnd.get("station_aet", "") or "")
+    sa, sb, sc, sd = (_addressed(row, station) for row in (a, b, c, d))
     # Read narrowest first, and relax one key at a time. The first question that
-    # STARTS returning orders addressed to this station is the key that is wrong.
-    if a["for_this_station"] > 0:
-        return f"Working. {a['for_this_station']} order(s) addressed to this modality for today, and it would see them."
-    if a["count"] > 0 and a["for_nobody"] == a["count"]:
+    # STARTS returning orders this scanner would see is the key that is wrong.
+    if sa["for_this_station"] > 0:
+        return f"Working. {sa['for_this_station']} order(s) addressed to this modality for today, and it would see them."
+    if a["count"] > 0 and sa["for_nobody"] == a["count"]:
         return f"The {a['count']} order(s) coming back are addressed to NOBODY, so every modality sees them. Nothing is scheduled to this one specifically."
-    if b["ok"] and b["for_this_station"] > 0:
-        return f"The MODALITY key is the problem. Drop it and {b['for_this_station']} order(s) for this station appear; the orders are not tagged with the modality this scanner asks for."
-    if c["ok"] and c["for_this_station"] > 0:
-        return f"Orders exist for this modality but not for today ({c['for_this_station']} on other dates). Check the date the scanner asks for, and the clock on both machines."
+    if b["ok"] and sb["for_this_station"] > 0:
+        return f"The MODALITY key is the problem. Drop it and {sb['for_this_station']} order(s) for this station appear; the orders are not tagged with the modality this scanner asks for."
+    # Same key, same repair, and the orders behind it are unaddressed: the
+    # scanner WOULD see them once the modality key stops hiding them, so naming
+    # the key is the useful half — but an unaddressed order is still scheduled
+    # to nothing, and this line may no more call that "for this station" than
+    # the branch above may call it working.
+    if b["ok"] and sb["for_nobody"] > 0:
+        return f"The MODALITY key is the problem. Drop it and {sb['for_nobody']} order(s) appear — addressed to NOBODY, so every modality would see them, but none is assigned to this one. The orders are not tagged with the modality this scanner asks for."
+    if c["ok"] and sc["for_this_station"] > 0:
+        return f"Orders exist for this modality but not for today ({sc['for_this_station']} on other dates). Check the date the scanner asks for, and the clock on both machines."
+    if c["ok"] and sc["for_nobody"] > 0:
+        return f"Orders exist on other dates ({sc['for_nobody']}), addressed to NOBODY rather than to this station. Check the date the scanner asks for, and the clock on both machines."
     if d["ok"] and d["count"] > 0:
-        elsewhere = d["for_someone_else"]
+        # Named one at a time, and only when there are any: "addressed to other
+        # stations" about orders addressed to nobody is the wrong repair told in
+        # a confident voice. This is also the one branch that may NOT add "so
+        # every modality sees them" — the station key was dropped to ask it, so
+        # nothing here shows that an answer naming this station would carry
+        # them, and a provider stricter than ours would withhold them.
+        named = []
+        if sd["for_someone_else"]:
+            named.append(f"{sd['for_someone_else']} addressed to other stations")
+        if sd["for_nobody"]:
+            named.append(f"{sd['for_nobody']} addressed to no station at all")
         return (f"The RIS has {d['count']} order(s) for today, but none for this station"
-                + (f" — {elsewhere} addressed to other stations." if elsewhere else
+                + (f" — {' and '.join(named)}." if named else
                    " and none addressed to any station.")
                 + " The order is not being assigned to this AE title.")
     if e["ok"] and e["count"] > 0:
@@ -369,6 +418,17 @@ class PacsServer:
         self.print_scp: Optional[PrintSCP] = None
         self.ris: Optional[RisListener] = None
         self.mwl_scp: Optional[MwlSCP] = None
+        # True while the bound worklist exists only because something needed
+        # serving — an emergency, or an order typed during one that is still
+        # open — rather than because configuration or an operator asked for it.
+        # It is what release_worklist() needs and the emergency controller's own
+        # ``_mwl_ours`` cannot supply: resume() clears that flag on the way out,
+        # deliberately, so by the time the last stranded order is finally closed
+        # nothing downstream remembers whose worklist this was. Set by the two
+        # callers that bind such a worklist — EmergencyController.activate() and
+        # sync_worklist() — and by nobody else; see start_mwl() for why it is
+        # not a default.
+        self.mwl_for_orders = False
         self.qr_scp: Optional[QrSCP] = None
         # The instance index is a cache in front of the stored files — QR and
         # DICOMweb answer out of it, nothing else depends on it, and losing it
@@ -677,6 +737,27 @@ class PacsServer:
             )
             self._counter_since["mwl"] = time.time()
             self.mwl_scp.start()
+            # Whose worklist is this? The caller's, and it stays up until the
+            # caller stops it. The opposite default — "a worklist nothing in the
+            # configuration wanted must be the emergency's, so it may be
+            # reclaimed" — reads well and is wrong, because ``serve --mwl`` is
+            # also a worklist nothing in the configuration wanted: the
+            # documented run-once override inherited a "may be reclaimed" it
+            # never asked for, and release_worklist() then took it down on the
+            # first order that CLOSED — a reconciled C-STORE, a cancel, a
+            # delete, even a purge that removed nothing — stranding the orders
+            # that were still open and logging a stand-down that had not
+            # happened. A default that every caller but one has to undo is a
+            # default the next caller will forget to undo, and the next caller
+            # was a launch flag documented in two manuals.
+            #
+            # So the two starts that ARE reclaimable claim the worklist
+            # themselves, immediately after us: EmergencyController.activate(),
+            # for the one an outage brings up, and sync_worklist(), for the one
+            # a restart mid-outage re-binds for orders that exist in this store
+            # and nowhere else. Both of those reasons end; a flag nobody set
+            # cannot.
+            self.mwl_for_orders = False
 
     def stop_mwl(self) -> None:
         with self._lock:
@@ -723,19 +804,134 @@ class PacsServer:
     def worklist_wanted(self) -> bool:
         """True if the Modality Worklist should run as a permanent service: the
         SCP is explicitly enabled, OR any enabled destination is flagged
-        ``no_ris`` (that PACS has no RIS, so Carino is its worklist source)."""
+        ``no_ris`` (that PACS has no RIS, so Carino is its worklist source).
+
+        Strictly the CONFIGURED question, and it has to stay that way: this is
+        what EmergencyController._worklist_is_permanent() reads to decide
+        whether a worklist is the hospital's or the emergency's own, and what
+        the "no Modality Worklist is enabled" line reception reads is computed
+        from — but only AFTER _worklist_outcome() has ruled out an emergency
+        worklist that failed to bind, because on that appliance this predicate
+        is False and "enable MWL" is not the remedy. Whether something is being
+        SERVED right now that nothing else can serve is a different question —
+        worklist_in_use()."""
         if self.cfg.mwl.get("enabled"):
             return True
         return any(d.get("no_ris") for d in self.cfg.enabled_destinations())
 
+    def orders_only_we_can_serve(self) -> int:
+        """How many OPEN orders exist that nothing but this worklist will serve.
+
+        Manual orders only, and that is the whole distinction: ``carino-manual``
+        means somebody typed a real patient into this box during an outage,
+        precisely because the RIS could not be reached — so the RIS does not
+        have the order, will not have it when it comes back, and no other
+        worklist in the hospital can put it in front of a tech. An order that
+        arrived as HL7 (``carino-ris``) is the real RIS's to re-serve, and a test
+        order is nobody's exam: neither is a reason to hold a port open.
+
+        The counting itself is ris.open_orders_stranded_here(), because the
+        emergency controller asks the same question when the operator stands
+        down, and the two answering it differently would strand exactly the
+        patient both of them exist to protect.
+        """
+        return ris.open_orders_stranded_here(self.orders)
+
+    def worklist_in_use(self) -> bool:
+        """True if the worklist must keep running whatever configuration says:
+        it is configured, an emergency is on the air, or an order typed during
+        one is still open.
+
+        This is the predicate the config paths use, because a save is not a
+        decision about an outage. apply_config() stops and restarts every bound
+        service, and the worklist was the one service whose restart asked only
+        about configuration — so an administrator finishing the setup chooser in
+        the middle of a failover took the emergency's only path to the modalities
+        down with it, permanently (sync_worklist() runs on launch and on a save,
+        not on a timer) and without a word. The same hole swallows a hand-keyed
+        order that outlives the emergency: it exists in this store and nowhere
+        else, and the RIS that is now back was never told about it.
+
+        Deliberately NOT folded into worklist_wanted(): resume() reads that one
+        to tell the hospital's worklist from the emergency's own, and an
+        emergency that is still ACTIVE would make its own worklist look
+        permanent — resume() would then never stop what it started.
+        """
+        if self.worklist_wanted() or self.orders_only_we_can_serve() > 0:
+            return True
+        # getattr both ways: sync_worklist() is reachable from startup paths
+        # that run before the controller is built, and a fake server in a test
+        # need not carry one at all.
+        return getattr(getattr(self, "emergency", None), "state", "") in (EMG_ACTIVE, EMG_RECOVERING)
+
     def sync_worklist(self) -> None:
         """Start the worklist SCP if it's wanted and not already running
         (called on launch and after a config change)."""
-        if self.worklist_wanted() and not (self.mwl_scp and self.mwl_scp.running):
+        if self.worklist_in_use() and not (self.mwl_scp and self.mwl_scp.running):
+            # Asked BEFORE the start, because afterwards the question is no
+            # longer answerable the same way, and asked at all because this is
+            # the one place that binds a worklist without a human behind it:
+            # worklist_in_use() said yes, so if worklist_wanted() says no the
+            # only reasons left are an emergency on the air or an order it
+            # stranded. That is the appliance coming back up in the middle of
+            # an outage and re-binding the worklist for patients whose orders
+            # exist here and nowhere else — the same worklist activate() would
+            # have bound, and it has to be lettable-go of in the same way, or
+            # the port stays bound for the life of the process after the last
+            # of those patients is finally scanned.
+            reclaimable = not self.worklist_wanted()
             try:
                 self.start_mwl()
             except Exception as exc:
                 self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
+            else:
+                self.mwl_for_orders = reclaimable
+
+    def release_worklist(self) -> None:
+        """The other half of sync_worklist(): stop a worklist that is bound for
+        a reason which has now expired.
+
+        EmergencyController.resume() deliberately leaves the worklist serving
+        when an order typed during the outage is still open — that order exists
+        in this store and nowhere else, so stopping it would end the only path
+        the patient has to a scanner — and the log tells the operator what to do
+        about it: scan those patients and it comes down. It did not come down.
+        sync_worklist() only ever starts, it runs on launch and on a config save
+        rather than on a timer, and nothing re-asked the question when the last
+        of those orders was finally closed, so the port stayed bound for the
+        life of the process and the operator was told a behaviour the appliance
+        did not have.
+
+        So the closing paths ask here. Three conditions, all of them necessary:
+        the worklist has to be up; ``worklist_in_use()`` has to be False, which
+        is the whole of "configuration does not want it, no emergency is on the
+        air, and no hand-keyed order is still open"; and it has to be a worklist
+        we bound for those reasons rather than one the hospital configured, an
+        operator started by hand, or a run-now service apply_config is keeping
+        alive — that last distinction is ``mwl_for_orders``, and it is why this
+        is not simply sync_worklist() run backwards.
+        """
+        if not (self.mwl_scp and self.mwl_scp.running):
+            return
+        if not self.mwl_for_orders or self.worklist_in_use():
+            return
+        try:
+            self.stop_mwl()
+        except Exception as exc:
+            # A worklist that will not stop is still answering modalities with
+            # orders that belong to the RIS again — the same reason resume()
+            # surfaces its own failed stop rather than swallowing it.
+            self.log.error(f"Could not stop worklist SCP: {exc}", kind="mwl")
+            return
+        self.mwl_for_orders = False
+        # The counterpart of the "worklist left serving" line resume() writes:
+        # whoever read that one and went and scanned the patients gets to see
+        # that it worked, without having to go and look at the services panel.
+        self.log.info(
+            "Worklist stopped — the last order typed during the outage is closed, "
+            "and nothing else needs a worklist on this appliance",
+            kind="mwl",
+        )
 
     def _reconcile_study(self, ds, path: str) -> None:
         """Called for every C-STORE'd instance: try to match it to an open RIS
@@ -765,6 +961,10 @@ class PacsServer:
                 f"[acc {order.get('accession') or '—'}] ← study {os.path.basename(path)}",
                 kind="ris",
             )
+            # The study for a stranded order just landed — this is literally
+            # "scan those patients and it comes down", so ask whether the
+            # worklist resume() left up still has anybody to serve.
+            self.release_worklist()
         else:
             self.log.info(
                 f"RIS order matched (left open — auto-close off): "
@@ -868,9 +1068,201 @@ class PacsServer:
     def list_orders(self, status: Optional[str] = None) -> dict:
         return {"orders": self.orders.list(status), "counts": self.orders.counts()}
 
+    def station_list(self, *, usable_only: bool = False) -> list:
+        """The department's rooms as the order form needs them: name, AE title,
+        modality code. Nothing else from the entry.
+
+        This exists so that "which rooms can an order be aimed at?" has ONE
+        answer on the wire, published in two places — inside the status payload,
+        and on its own at GET /api/ris/orders/stations for the order form, which
+        needs it before the first status poll lands and cannot read the
+        configuration to get it. Reception holds orders.read and orders.write
+        and not config.read, and that gap is why the station field was free text
+        while the modality beside it was a closed list: an AE title that is not
+        exactly a console's AE title is matched by nothing (mwl.py matches
+        ScheduledStationAETitle by equality, leniently only when the ORDER's is
+        blank), so "SALA CT" typed where CT_1 was meant hides the order from the
+        very console that asks for it while reception is told the worklist is
+        serving it.
+
+        Deliberately a projection and never the config entry itself: an entry
+        may grow a field that is the administrator's business, and a list an
+        unprivileged profile reads must not widen because something upstream
+        did. Four keys, named here, and that is the whole contract.
+
+        *usable_only* drops the rooms an order cannot actually be aimed at — a
+        disabled one is equipment out of service, and one with no AE title is
+        matched by no worklist query at all, so offering either would offer a
+        target that silently reaches nobody, which is the failure the picker
+        exists to end. The row shape does not change with it, so one renderer
+        reads either list.
+        """
+        out = []
+        for m in self.cfg.modalities:
+            enabled = bool(m.get("enabled", True))
+            aet = str(m.get("aet", ""))
+            if usable_only and (not enabled or not aet):
+                continue
+            out.append({"name": str(m.get("name", "")), "aet": aet,
+                        "modality": str(m.get("modality", "")),
+                        "enabled": enabled})
+        return out
+
+    def order_stations(self) -> dict:
+        """The rooms an order may be aimed at, as the order form reads them.
+
+        An empty list is a real answer — nobody has registered this
+        department's equipment yet — and the form has to keep accepting an
+        order with no station either way: a blank ScheduledStationAETitle is
+        served to EVERY console, which is the safe direction and the documented
+        default. Reception is never left unable to file an order because the
+        configuration is thin.
+        """
+        return {"ok": True, "stations": self.station_list(usable_only=True)}
+
+    # What reception is told when they press Queue: a machine-readable outcome
+    # the dashboard translates, and the English that outcome means.
+    #
+    # "Order queued" on its own answered the wrong question. Reception does not
+    # care that the order reached a file on this box; they care that the tech at
+    # the modality will see it, and that only happens if a Modality Worklist is
+    # actually serving. So the confirmation says which of the four situations
+    # they are in, and never claims the order propagated when nothing is there
+    # to serve it.
+    #
+    # It travels as a code rather than as engine text, which is the exception to
+    # this file's usual rule, and it is worth saying why. Engine text is English
+    # here because of WHO reads it: a log line, an API error, a start failure's
+    # cause are all read by the person who can act on them, and that person
+    # reads the log anyway. Three of these four sentences are not that. They are
+    # read by a receptionist, in the middle of an outage, and one of them is the
+    # ONLY place anybody is told that the order just typed is reaching no
+    # scanner at all — there is no banner for it, no badge, no LED. This
+    # appliance ships in es, pt-BR, ja and ru. A safety warning the person at
+    # the desk cannot read is not a warning, so the dashboard gets a code it can
+    # put through T() and says it in their language.
+    #
+    # The English stays on ``message`` regardless: curl, the tests and any
+    # client that is not the dashboard keep exactly the sentence they had, and a
+    # dashboard too old to know a code still has something true to show.
+    ORDER_QUEUED_MESSAGES = {
+        "order_queued_serving":
+            "Order queued — the Modality Worklist is serving it",
+        "test_order_queued_serving":
+            "Test order queued — the Modality Worklist is serving it",
+        "order_queued_mwl_stopped":
+            "Order queued, but the Modality Worklist is NOT running, so no modality can "
+            "query it. It is enabled — start it, or check the log for why it stopped.",
+        "test_order_queued_mwl_stopped":
+            "Test order queued, but the Modality Worklist is NOT running, so no modality can "
+            "query it. It is enabled — start it, or check the log for why it stopped.",
+        "order_queued_mwl_failed":
+            "Order queued, but the Modality Worklist failed to start, so the order will not "
+            "reach any modality. Check the log for the cause — usually its port is already "
+            "in use — and hand the details to the tech.",
+        "test_order_queued_mwl_failed":
+            "Test order queued, but the Modality Worklist failed to start, so the order will "
+            "not reach any modality. Check the log for the cause — usually its port is "
+            "already in use — and hand the details to the tech.",
+        "order_queued_no_mwl":
+            "Order queued, but no Modality Worklist is enabled, so the order will not reach "
+            "any modality. Enable MWL, or hand the details to the tech.",
+        "test_order_queued_no_mwl":
+            "Test order queued, but no Modality Worklist is enabled, so the order will not "
+            "reach any modality. Enable MWL, or hand the details to the tech.",
+        # The fifth outcome, and the only one that is about the order rather
+        # than about the service: a worklist really is serving it, and the AE
+        # title it was aimed at belongs to no console this appliance has heard
+        # of, so every console that filters by station queries past it. Narrower
+        # than the three above — a console that sends no station key still sees
+        # the order — and said narrowly, because a warning that overstates is a
+        # warning that gets ignored.
+        "order_queued_station_unknown":
+            "Order queued, but no station registered here answers to that AE title, so a "
+            "console that filters by station will not see it. Pick the room from the list, "
+            "or leave the target blank to show the order on every worklist.",
+        "test_order_queued_station_unknown":
+            "Test order queued, but no station registered here answers to that AE title, so a "
+            "console that filters by station will not see it. Pick the room from the list, "
+            "or leave the target blank to show the order on every worklist.",
+    }
+
+    # Why an order is refused outright, as a code the dashboard translates and
+    # the English that code means — the same two-part contract as
+    # ORDER_QUEUED_MESSAGES above, and here for the same reason: a receptionist
+    # in the middle of an outage reads it, and this appliance ships in es,
+    # pt-BR, ja and ru.
+    #
+    # These are the only refusals this endpoint issues that are about a VALUE
+    # rather than about the request, and they exist because the alternative is
+    # worse in a way nobody can see. An accession the worklist cannot carry used
+    # to be accepted, confirmed with the green "the Modality Worklist is serving
+    # it", and then dropped from the item on the wire — so the study coming back
+    # from the scanner had nothing to reconcile against, the order never closed,
+    # and the first person to notice was whoever audited the open list days
+    # later. Refusing at the moment it is typed is the only point in the whole
+    # path where the person who can fix it is still looking at it.
+    #
+    # Each sentence states the WHOLE rule for its field — the cap and the
+    # characters — because the two failures are one refusal, and an instruction
+    # to shorten a value whose real problem is a backslash is an instruction
+    # that does not work. The caps are mwl.SH_MAX and mwl.LO_MAX; they are
+    # spelled out rather than interpolated so that a translator sees a whole
+    # sentence, and mwl.identifier_fits, not this text, is what actually decides.
+    ORDER_REFUSED_MESSAGES = {
+        "order_refused_accession":
+            "Order NOT queued — a Modality Worklist cannot carry that accession number. It "
+            "must be at most 16 characters and must not contain a backslash. Shorten or "
+            "retype it, or leave it blank — a shortened accession names a different order, "
+            "so this appliance will not shorten it for you.",
+        "order_refused_patient_id":
+            "Order NOT queued — a Modality Worklist cannot carry that patient ID. It must be "
+            "at most 64 characters and must not contain a backslash. Shorten or retype it, or "
+            "leave it blank and the order will carry a temporary ID naming itself.",
+        # No dashboard field writes this one — study_uid is only reachable over
+        # the API — so it is here to be an honest answer to a client that sends
+        # one, not a sentence reception will ever be shown.
+        "order_refused_study_uid":
+            "Order NOT queued — that Study Instance UID is not a legal DICOM UID (digits and "
+            "dots, at most 64 characters, no leading zero in a component). Leave it out and "
+            "this appliance will generate one.",
+    }
+
+    def _unrepresentable_identifier(self, fields: dict) -> str:
+        """The refusal code for the first reconciling identifier this order
+        carries that a worklist could not send as typed, or '' when it carries
+        none.
+
+        Only the three keys OrderStore reconciles on are checked
+        (mwl.RECONCILING_IDENTIFIERS), and the narrowness is the point. The
+        order's other values degrade honestly inside mwl.py — a description is
+        shortened, a modality nobody can parse becomes OT, a station nobody
+        knows is warned about rather than refused — and refusing an order over
+        any of those would be refusing a patient during an outage over a label.
+        These three are different: they are what a returning study is matched
+        against, so an unrepresentable one is not a degraded order, it is an
+        order that can never be closed.
+
+        Fields the caller did not send are not checked, so this is safe to ask
+        on a partial update: identifier_fits() reads an absent value as fine,
+        and an update that does not mention the accession must not be refused
+        over the one already stored.
+        """
+        for field, vr in mwl.RECONCILING_IDENTIFIERS.items():
+            if field in fields and not mwl.identifier_fits(fields.get(field), vr):
+                return f"order_refused_{field}"
+        return ""
+
     def add_order(self, fields: dict) -> dict:
         if not any(str(fields.get(k, "")).strip() for k in ("accession", "patient", "patient_id")):
             return {"ok": False, "message": "an order needs at least an accession, patient name or patient ID"}
+        # Asked before the order is stored, never after: an order that is in the
+        # store is already being served, and by the time anything downstream
+        # notices, reception has been told the worklist has it.
+        refused = self._unrepresentable_identifier(fields)
+        if refused:
+            return {"ok": False, "code": refused,
+                    "message": self.ORDER_REFUSED_MESSAGES[refused]}
         # A test order and a real one behave identically all the way through —
         # that is the point of testing with them — so the only thing separating
         # them is this flag, and it has to be carried rather than guessed.
@@ -880,11 +1272,101 @@ class PacsServer:
             source="test generator" if testing else "manual",
             origin=ris.ORIGIN_TEST if testing else ris.ORIGIN_MANUAL,
         )
-        return {"ok": True,
-                "message": "Test order queued" if testing else "Order queued",
+        code = (("test_order_queued_" if testing else "order_queued_")
+                + self._worklist_outcome(fields.get("station_aet", "")))
+        return {"ok": True, "code": code, "message": self.ORDER_QUEUED_MESSAGES[code],
                 "order": order}
 
+    def _worklist_outcome(self, station_aet: str = "") -> str:
+        """Which of the five situations the order that was just queued is in,
+        as the tail of an ``order_queued_*`` code.
+
+        The failed-start case is asked BEFORE worklist_wanted(), and that order
+        is the whole point of it. An emergency brings its own worklist up
+        (EmergencyController.activate), and it does so whether or not
+        ``mwl.enabled`` is set — so when that start fails on a squatted port,
+        the strictly-configured predicate is False and reception used to be told
+        "no Modality Worklist is enabled … Enable MWL". Both halves were wrong
+        in the way that costs the most: the cause was not a missing setting, and
+        the remedy could not work, because enabling MWL binds the same port that
+        is already being held by whatever the log names. The appliance knew —
+        ``emergency.mwl_error`` is on the very status payload the dashboard is
+        polling — and said something else. Now the specific answer wins.
+        """
+        if self.mwl_scp and self.mwl_scp.running:
+            # A worklist is serving, so the only thing left that can keep this
+            # order off a screen is where it was aimed. Asked last of the four
+            # service questions and only in this branch, because the three
+            # below are about a worklist that is not there at all, and they say
+            # it better than this can.
+            if self._station_is_unknown(station_aet):
+                return "station_unknown"
+            return "serving"
+        # getattr for the same reason worklist_in_use() uses it: this is
+        # reachable from a fake server in a test that carries no controller.
+        # mwl_error is written in three places — activate() sets it, resume()
+        # clears it, and _recheck_worklist() both sets and clears it on every
+        # tick of a live outage — but all three of them run inside ACTIVE or
+        # RECOVERING, and nothing writes it outside that window. So the state
+        # gate below, not the setters, is what keeps a stale reason left over
+        # from a previous outage from speaking for this order; it is also what
+        # lets a worklist that died mid-outage name itself as the cause here
+        # rather than reporting the healthy verdict activate() left an hour ago.
+        emg = getattr(self, "emergency", None)
+        if (getattr(emg, "mwl_error", "")
+                and getattr(emg, "state", "") in (EMG_ACTIVE, EMG_RECOVERING)):
+            return "mwl_failed"
+        if self.worklist_wanted():
+            return "mwl_stopped"
+        return "no_mwl"
+
+    def _station_is_unknown(self, station_aet: str) -> bool:
+        """Was this order aimed at an AE title no console here answers to?
+
+        The order is never refused for it — an outage is not the moment to
+        reject a patient over an AE title, and the registry is not evidence of
+        what exists, only of what somebody wrote down. What changes is the
+        sentence reception reads, which is the only surface they have.
+
+        Three deliberate Falses, each one a case where a warning would be worse
+        than silence:
+
+        * A BLANK station is the lenient branch of the matcher and the form's
+          default — ``mwl.py`` shows such an order to every console — so it is
+          "show it everywhere", never a miss.
+        * An EMPTY registry means nothing has been written down. Most installs
+          start that way, and checking against an empty list would warn about
+          every station anybody ever typed, which is how a safety sentence
+          stops being read.
+        * A registered room that is switched OFF still answers to its AE title:
+          ``enabled`` governs what this appliance SENDS to, not what pulls a
+          worklist, so an order aimed at one is not aimed at nothing. Hence
+          station_list() rather than station_list(usable_only=True) here — the
+          picker offers fewer rooms than the check accepts, on purpose.
+
+        Compared upper-cased, which is how ``mwl.py`` matches the key and how
+        config.py already refuses two rooms the same AE title: an order that
+        WILL reach its console must never be warned about over a difference the
+        matcher does not make.
+        """
+        want = str(station_aet or "").strip().upper()
+        if not want:
+            return False
+        known = {s["aet"].strip().upper() for s in self.station_list() if s["aet"].strip()}
+        if not known:
+            return False
+        return want not in known
+
     def update_order(self, oid: str, fields: dict) -> dict:
+        # The same gate as add_order, because this writes the same fields into
+        # the same store. An edit is in fact the repair path for an order that
+        # arrived over HL7 carrying an accession the worklist could not send, so
+        # the one thing it must not do is let a second unrepresentable value in
+        # while the operator is trying to get the first one out.
+        refused = self._unrepresentable_identifier(fields)
+        if refused:
+            return {"ok": False, "code": refused,
+                    "message": self.ORDER_REFUSED_MESSAGES[refused]}
         o = self.orders.update(oid, fields)
         if not o:
             return {"ok": False, "message": "order not found"}
@@ -913,15 +1395,24 @@ class PacsServer:
                                "cancel it there, or delete it here if it should never have arrived."}
         o = self.orders.close(oid, reason=ris.CLOSE_BY_OPERATOR)
         self.log.info(f"RIS order cancelled here [acc {o.get('accession') or '—'}]", kind="ris")
+        # Cancelling the last stranded order settles it as finally as scanning
+        # the patient does: nothing is waiting on that worklist any more.
+        self.release_worklist()
         return {"ok": True, "message": "Order cancelled"}
 
     def delete_order(self, oid: str) -> dict:
         ok = self.orders.delete(oid)
+        if ok:
+            self.release_worklist()
         return {"ok": ok, "message": "Order deleted" if ok else "order not found"}
 
     def purge_closed_orders(self) -> dict:
         n = self.orders.purge_closed()
         self.log.info(f"Purged {n} closed RIS order(s)", kind="ris")
+        # Purging only removes orders that are already closed, so it cannot be
+        # what frees the worklist — but it is the operator tidying the list
+        # after the outage, and asking costs one predicate.
+        self.release_worklist()
         return {"ok": True, "removed": n, "message": f"Removed {n} closed order(s)"}
 
     def create_study_from_order(self, order_id: str, filename: str, data: bytes) -> dict:
@@ -969,6 +1460,14 @@ class PacsServer:
             f"→ {os.path.basename(out)} into outgoing; order closed",
             kind="ris",
         )
+        # The fifth and last way an order settles, and the one an outage is
+        # most likely to use: use case B exists for the legacy unit that cannot
+        # C-STORE, so on that site every hand-keyed order ends here rather than
+        # at _reconcile_study(). Without this call the worklist resume() left up
+        # "until those patients are scanned" survived exactly the path that
+        # scans them, which is the promise emergency.py makes to the operator in
+        # the log line they are meant to act on.
+        self.release_worklist()
         if self.watcher.running:
             msg = "Study created and queued — Auto-send will forward it (held until the PACS is reachable)."
         else:
@@ -1764,13 +2263,23 @@ class PacsServer:
                 # sync_services() retries the rest into a results row.
                 if was and not enabled and first_exc is None:
                     first_exc = exc
-        # The worklist is not in the loop above: worklist_wanted(), not the flag,
-        # decides whether it runs, and sync_worklist() starts a wanted one. This
+        # The worklist is not in the loop above: worklist_in_use(), not the flag,
+        # decides whether it runs, and sync_worklist() starts one that is. This
         # is only the run-now case — a worklist nothing wants, kept alive across
         # a plain save the same way the three services above are.
-        if was_mwl and not enforce and not self.worklist_wanted():
+        if was_mwl and not enforce and not self.worklist_in_use():
             try:
                 self.start_mwl()
+                # This worklist is not the emergency's — it was up before the
+                # save and nothing but the save could have taken it down, so it
+                # is a run-now service an operator is keeping alive by hand.
+                # release_worklist() must not reclaim it when an order closes;
+                # only a deliberate Stop should end it. start_mwl() says the
+                # same thing by default now, and this still is not redundant:
+                # it returns early if the bounce failed to stop the SCP, and
+                # the answer for a worklist an operator is keeping alive must
+                # not depend on whether a stop worked.
+                self.mwl_for_orders = False
             except Exception as exc:
                 self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
                 if first_exc is None:
@@ -1789,8 +2298,22 @@ class PacsServer:
         # last thing standing between a dark primary and a failover, but a
         # thread that will not join is no reason to swallow the log line that
         # tells the operator their save landed.
+        #
+        # The bounce is a monitor-thread restart, and it must not double as a
+        # decision about the outage: stop() sets the state to OFF and start()
+        # sets it to IDLE, so before this line a save landing mid-failover ended
+        # the emergency outright — banner gone, `activated_by` still set,
+        # _recheck_worklist (which only runs while ACTIVE) silently off for the
+        # rest of the outage, and nobody told. Saving a configuration is not
+        # answering "is the primary back?"; only the operator's Resume normal,
+        # and the monitor's own recovery detection, are. So an emergency that
+        # was on the air before the bounce is on the air after it, and the
+        # monitor re-evaluates it on its next tick like any other.
+        was_emergency = getattr(self.emergency, "state", "")
         self._apply_step(self.emergency.stop, "pause the health monitor", "emergency")
         self._apply_step(self.emergency.start, "resume the health monitor", "emergency")
+        if was_emergency in (EMG_ACTIVE, EMG_RECOVERING) and self.emergency.state != was_emergency:
+            self.emergency.state = was_emergency
         self.log.info("Configuration updated", kind="config")
         if first_exc is not None:
             raise first_exc
@@ -1811,10 +2334,15 @@ class PacsServer:
              self.start_printer, self.stop_printer, "print receiver", "print"),
             ("ris", bool(self.cfg.ris.get("enabled")), bool(self.ris and self.ris.running),
              self.start_ris, self.stop_ris, "RIS listener", "ris"),
-            # worklist_wanted(), not mwl.enabled: a no_ris destination makes the
+            # worklist_in_use(), not mwl.enabled: a no_ris destination makes the
             # worklist permanent, and sync_worklist() would otherwise start
-            # again what this just stopped.
-            ("mwl", self.worklist_wanted(), bool(self.mwl_scp and self.mwl_scp.running),
+            # again what this just stopped. The wider predicate rather than the
+            # flag is also what stops an enforcing save — the setup chooser —
+            # from stopping the worklist that an emergency in progress, or an
+            # order typed during one, is being served from; and, because this
+            # row runs in both directions, what STARTS one that a save already
+            # stopped.
+            ("mwl", self.worklist_in_use(), bool(self.mwl_scp and self.mwl_scp.running),
              self.start_mwl, self.stop_mwl, "worklist SCP", "mwl"),
             ("qr", bool(self.cfg.qr.get("enabled")), bool(self.qr_scp and self.qr_scp.running),
              self.start_qr, self.stop_qr, "Query/Retrieve SCP", "qr"),
@@ -2393,17 +2921,18 @@ class PacsServer:
                 # is built once and survives every save, unlike the receiver.
                 "since": int(self.started_at),
             },
-            # The station list. Deliberately ungated: it is names and AE titles
-            # of this department's own equipment — no address, no PHI — and the
-            # order form needs it to offer a target to whoever keys orders in,
-            # which is the profile with the fewest capabilities of any. They can
-            # already type an AE title today, so publishing the list discloses
-            # nothing they could not already write.
-            "modalities": [
-                {"name": m.get("name", ""), "aet": m.get("aet", ""),
-                 "modality": m.get("modality", ""), "enabled": m.get("enabled", True)}
-                for m in self.cfg.modalities
-            ],
+            # The station list: names and AE titles of this department's own
+            # equipment — no address, no credential, no PHI — and the order form
+            # needs it to offer a target to whoever keys orders in, which is the
+            # profile with the fewest capabilities of any. It used to be ungated
+            # on that argument. It is now gated on orders.read (web._STATUS_GATES),
+            # which is the same argument said properly: the room list is what an
+            # order is aimed at, so it belongs to whoever handles orders, and a
+            # profile that may not even see an order has no business enumerating
+            # the department's equipment. Reception holds orders.read, so nothing
+            # the argument was made for loses anything; see order_stations(),
+            # which is the same list served on its own for the order form.
+            "modalities": self.station_list(),
             "ris": {
                 "enabled": bool(rcfg.get("enabled", False)),
                 "running": bool(ris and ris.running),
@@ -2425,12 +2954,28 @@ class PacsServer:
                 # is a current state, not a window, and has no origin to give.
                 "since": int(self._counter_since.get("ris", self.started_at)),
                 "counts": self.orders.counts(),
+                # A tick to diff, never a number to display: monotonic over the
+                # life of the STORE, so it is carried across a restart rather
+                # than starting over at 0 — a dashboard that was up all shift
+                # would otherwise adopt the smaller value in silence and eat
+                # every order the new process had already taken. It counts real
+                # orders CREATED (manual + HL7) and nothing else, so a dashboard
+                # can tell "an order just arrived" from "an order just closed" without
+                # diffing counts that fall on a purge. Deliberately not written
+                # `if ris else 0`: the store is live even with the HL7 listener
+                # stopped (see the note below), and a receptionist typing an
+                # order during an outage is the primary case this exists for.
+                "created_seq": self.orders.created_seq,
                 # The store is always live (manual entry works with the listener
                 # stopped), so these are real whatever "running" says.
                 "last_order": _order_brief(
                     self.orders.latest("open"),
+                    # `origin` travels with the brief so the dashboard can tell a
+                    # test order from a real one on the enum (ris.ORIGINS) rather
+                    # than by matching `source`, which is a display string that
+                    # is free to be reworded or translated at any time.
                     ("id", "accession", "patient", "patient_id", "modality",
-                     "study_desc", "created", "source", "status")),
+                     "study_desc", "created", "source", "status", "origin")),
                 # Orders in without orders matched cannot answer whether
                 # reconciliation — the whole point of the RIS — is working.
                 "last_closed": _order_brief(

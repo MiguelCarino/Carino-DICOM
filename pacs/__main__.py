@@ -183,6 +183,13 @@ def cmd_serve(args) -> int:
     # The flags are run-once overrides for headless launches: they start a
     # service for THIS run without enrolling it in the config. start_* is a
     # no-op when the service is already up, so an override never doubles a sync.
+    #
+    # "For THIS run" is the contract, and --mwl is the one where it can be
+    # taken away: the worklist is the only service this appliance ever stops on
+    # its own (release_worklist(), once the orders an outage stranded are all
+    # closed). A worklist started here is an operator's, not the emergency's,
+    # and start_mwl() leaves it that way — see the ownership note there before
+    # changing either side.
     for flag, start, label, kind in (
         (args.receive, server.start_receiver, "receiver", "scp"),
         (args.watch, server.start_watcher, "watcher", "watch"),

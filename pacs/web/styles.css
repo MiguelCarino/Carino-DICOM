@@ -15,6 +15,14 @@
   --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
 }
 * { box-sizing: border-box; }
+/* Visible to a screen reader, to nothing else. The repo had no such helper
+   until #ordAlertLive needed one: an arrival that is only a flash and a beep
+   is nothing to a blind operator. clip-path (not clip) and a 1px box, so the
+   text is still laid out and still announced. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
   height: 100dvh; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
@@ -455,6 +463,30 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
    (the number is not privileged) and stops pretending to be a control. */
 .navrow .badge[data-forbidden="1"] { cursor: default; }
 .navrow .badge[data-forbidden="1"]:hover { filter: none; }
+/* A new order arrived. Same ambient-alert idiom as .svc-chip.tx above — a
+   short retriggerable border pulse, fired from JS by removing the class,
+   forcing a reflow and re-adding it. BOTH the nav button and its badge carry
+   it: the badge is hidden at zero on purpose, so an order created and matched
+   inside one 2s poll would otherwise leave nothing on screen. No new
+   vocabulary — the amber is the same #fbbf24 chipDotTx flashes to. */
+.navbtn.alert, .navrow .badge.alert { animation: ordAlert .6s ease-in-out 3; }
+@keyframes ordAlert {
+  0%, 100% { border-color: var(--accent); }
+  50%      { border-color: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+}
+/* Reduced motion is not "no alert": the pulse is the VISIBLE half of an
+   arrival, and switching it off left a receptionist who has asked for less
+   motion with nothing but a beep they may have muted. Same amber, same
+   duration, held steady instead of flashing — steps(1, end) holds the first
+   keyframe for the whole run and then drops back, so nothing moves and nothing
+   is lost. */
+@media (prefers-reduced-motion: reduce) {
+  .navbtn.alert, .navrow .badge.alert { animation: ordAlertHold 1.8s steps(1, end) 1; }
+}
+@keyframes ordAlertHold {
+  0%   { border-color: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+  100% { border-color: var(--accent); }
+}
 @media (max-width: 640px) {
   .shell { flex-direction: column; }
   .sidebar { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; }

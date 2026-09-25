@@ -92,6 +92,22 @@ jobs:
       - name: Check the dashboard translations
         run: node pacs/web/tests/i18n-parity.mjs
 
+      # The new-order alert is the half of the emergency-RIS feature that a
+      # receptionist's shift actually depends on, and all of it lives in
+      # app.js: whether an arrival is announced at all, what the live region
+      # says, whether a tone owed to a sleeping audio context is still paid
+      # when it wakes, and which /api/status response is allowed to render.
+      # Python cannot reach any of it, and the two gates above have nothing to
+      # say about it either — a dictionary stays valid and a file still parses
+      # with every one of those decisions inverted. Before this step the whole
+      # set could be reverted at once with pytest, i18n-parity and `node
+      # --check` all green, which is the same as having no gate at all. This
+      # harness drives those decisions as a state machine against a clock, a
+      # speaker and a store it controls, and it belongs in the cheap job for
+      # the same reason the other two do: plain Node, no dependencies.
+      - name: Check the new-order alert state machine
+        run: node pacs/web/tests/alert-state.mjs
+
   # ------------------------------------------------------------------ tests
   test:
     name: ${{ matrix.os }} / py${{ matrix.python }}

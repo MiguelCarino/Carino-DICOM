@@ -86,7 +86,10 @@ class FakeServer:
             "receiver": {"running": False},
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
-            "ris": {"last_order": {"patient": "SECRET^PATIENT"}},
+            # created_seq rides the same gated block as the patient identifier
+            # above: the order-arrival alert is delivered by that gate and by
+            # nothing else, so the walk in test_capabilities.py needs it here.
+            "ris": {"last_order": {"patient": "SECRET^PATIENT"}, "created_seq": 7},
         }
 
     # -- config (PacsServer.apply_config, minus the service bouncing)

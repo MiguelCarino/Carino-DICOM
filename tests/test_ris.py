@@ -66,8 +66,17 @@ PASS, FAIL = [], []
 
 
 def check(cond, label):
+    """Records and prints like the other suites' check(), and then ASSERTS.
+
+    The bare recording form only appended to a list, which returns None — and a
+    test function that returns None is a PASS to pytest. Every check in this
+    file could therefore fail aloud in a terminal nobody reads while CI called
+    the suite green. main() below catches the assertion so a standalone run
+    still prints the whole tally; under pytest the first bad check fails its
+    test, which is the only way this file is a gate."""
     (PASS if cond else FAIL).append(label)
     print(("  ok    " if cond else "  FAIL  ") + label)
+    assert cond, label
 
 
 # ---- parsing -------------------------------------------------------------
@@ -366,7 +375,10 @@ def main():
         key=lambda f: f.__code__.co_firstlineno,
     ):
         print(fn.__name__)
-        fn()
+        try:
+            fn()
+        except AssertionError:
+            pass               # check() already recorded and printed it
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     return 1 if FAIL else 0
 

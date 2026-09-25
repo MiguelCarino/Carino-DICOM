@@ -37,6 +37,13 @@
     if (!res.ok) {
       const err = new Error(body.error || body.message || res.statusText);
       err.status = res.status;
+      /* The engine's machine-readable outcome, where it sent one. A rejection
+         is exactly as likely to be read by a receptionist as an acceptance is —
+         an order refused for an accession a worklist cannot carry is the case
+         this was added for — so the code has to survive the throw, or the only
+         sentence left to show is the engine's English. Callers that know the
+         code translate it; the rest keep using err.message exactly as before. */
+      err.code = body.code || "";
       // auth.required is the flag to test, not a bare ok:false — every other
       // error in this API is also ok:false, and "wrong input" and "you are not
       // signed in" have nothing in common as recoveries. See pacs/auth.py.
@@ -75,6 +82,14 @@
   // No form field outside its own tab, so a Save from elsewhere must post this
   // back verbatim or apply_config resets it to []. See collectConfig.
   let loadedModalities = [];
+  /* The same station registry, arriving the other way round. /api/config is
+     behind config.read, which reception does not hold, so the list the order
+     form's target field is built from also rides in on the status payload,
+     ungated there because it is this department's own room names and AE titles
+     — no address, no PHI, and nothing reception could not already type by hand.
+     Left empty by an appliance whose status predates that list, and the target
+     field then degrades to the free-text AE title it has always had. */
+  let statusModalities = [];
   let loadedWorklistSource = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   // The onboarding stamp has no form input at all, and it is TOP-LEVEL: without
@@ -86,6 +101,19 @@
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
   let devPeerAvailable = false;                      // --dev-peer was given AND we may see it (the status block is gated)
   let lastStatus = null;                             // newest /api/status, for the panels that render on demand
+
+  /* Emergency-RIS order arrival. Both are BASELINES, not counters: each is
+     adopted from the first status payload this page (or this sign-in) sees and
+     only ever compared against, so a reload never announces history.
+       lastCreatedSeq   ris.created_seq — a tick the engine raises once per
+                        order actually CREATED (hand-keyed or HL7). Diffed, never
+                        displayed.
+       lastOrderCounts  "open/closed/total" from ris.counts, the one signal that
+                        moves on a create AND on all three close paths (C-STORE,
+                        STOW-RS, capture) and on a cancel, which is what makes
+                        the Orders list repaint itself. */
+  let lastCreatedSeq = null;   // null = no baseline yet
+  let lastOrderCounts = null;  // null = no baseline yet
 
   /* ── Authentication ──────────────────────────────────────────────
      web.auth_token is mandatory for every non-loopback bind and is generated on
@@ -318,6 +346,11 @@
     const gate = $("authGate");
     if (!gate) return;
     gateOpen = true;
+    // Every alert this session had decided on but not yet delivered goes with
+    // it. They are dropped in one named place rather than one at a time here —
+    // see dropSessionAlerts() for which they are and why each of them is
+    // history the moment this prompt goes up.
+    dropSessionAlerts();
     gate.hidden = false;
     picked = null;
     show($("authPwWrap"), false);
@@ -474,11 +507,34 @@
     if (logTimer) clearInterval(logTimer);
     statusTimer = null;
     logTimer = null;
+    // Clearing the timers stops the NEXT request; it does nothing about one
+    // already on the wire. Bumping the token retires those responses instead of
+    // an AbortController, which would have to be threaded through api() for
+    // every caller: the response is allowed to arrive and is then ignored,
+    // which is all this needs. Every caller here is ending the session or the
+    // process — a 401, a logout, a rotated token, a shutdown — and a late
+    // render would paint live status over the prompt (re-adopting the arrival
+    // baseline the prompt just dropped) or over the shutdown overlay.
+    // The rendered watermark is dragged up to the same place, because the
+    // watermark is what pollStatus() now tests against: leaving it behind would
+    // let a response issued before the session ended still count as "newer than
+    // anything drawn" and paint over the prompt.
+    statusReq += 1;
+    statusSeen = statusReq;
   }
 
   // Everything that must not run before there is a credential lives here.
   async function startApp() {
     if (gateOpen) return;
+    paintBeepBtn();        // the button ships with no label; it must never be blank
+    /* The modality codes are a constant, so the list is filled here rather than
+       waiting on anything: reception usually has no config.read, and that is
+       precisely the profile that needs a closed list. Both targeting lists are
+       rebuilt the moment the station registry arrives — from loadConfig() below
+       for whoever may read it, from the status payload for everyone else —
+       which is also when the codes can be marked against the rooms that
+       actually answer to them. */
+    fillModalityChoices();
     await loadConfig().catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false));
     if (!booted) {
       booted = true;
@@ -584,6 +640,16 @@
 
     editorUrl = (s.editor_url || "").trim();
 
+    /* The order form's two targeting fields follow the station registry, and
+       this poll is where reception receives it: `modalities` is common ground
+       on the status payload (see _STATUS_GATES in web.py — named rooms and AE
+       titles carry no address and no identifier), while /api/config is not.
+       Rebuilt only when the registry actually moved, because this runs every
+       two seconds and re-filling a <select> underneath an operator who is
+       choosing from it is its own small failure. */
+    if (Array.isArray(s.modalities)) statusModalities = s.modalities;
+    if (registryChanged()) refreshTargetChoices();
+
     // A gated section is DROPPED, not blanked, for a profile without the
     // capability (see _STATUS_GATES), so "absent" covers both "the flag was
     // never given" and "not yours to see" — and the panel is hidden either way.
@@ -604,6 +670,63 @@
     setBadge("pendingBadge", nPend, "📎", TN(nPend, "{n} pending imports"));
     setBadge("stuckBadge", nStuck, "⚠", TN(nStuck, "{n} stuck sends"));
     setBadge("ordersBadge", nOrd, "", TN(nOrd, "{n} open orders"));
+
+    /* An order arrived. Edge-triggered off ris.created_seq — the engine's
+       count of orders CREATED (hand-keyed at the front desk or delivered over
+       HL7), which only ever rises. It rides the status poll that is already
+       running, so there is no new timer and no new request, and it sits here so
+       the Orders badge above has already been repainted from the same payload:
+       the number and the flash agree in one paint.
+       `typeof seq === "number"` is the whole capability check. A profile
+       without orders.read never receives the ris block at all (_STATUS_GATES),
+       so `rs` is {} and this is simply inert for them — no second gate to keep
+       in step with the server's. */
+    const seq = rs.created_seq;
+    if (typeof seq === "number") {
+      if (lastCreatedSeq === null || seq < lastCreatedSeq) {
+        /* First poll after load or sign-in: adopt the value, never announce it.
+           A value that has gone BACKWARDS lands here too, and it no longer
+           means "the engine restarted" — the tick is persisted with the orders
+           now (pacs/ris.py), precisely so that a restart keeps counting and the
+           orders taken while the service was coming back are announced instead
+           of being swallowed by the adoption. What is left here is the tick
+           losing its base altogether: an orders.json written before it was
+           persisted, or one restored from a backup, or a store directory
+           repointed. The number then means nothing this page can diff against,
+           so it is adopted in silence rather than turned into an arrival count
+           that would be invented. */
+        lastCreatedSeq = seq;
+      } else if (seq > lastCreatedSeq) {
+        const n = seq - lastCreatedSeq;
+        lastCreatedSeq = seq;   // advance BEFORE announcing: once per arrival, not once per poll
+        onOrderArrived(n);
+      }
+    }
+
+    /* The Orders list repaints itself. Driven by ris.counts rather than by the
+       arrival above, because counts moves on everything the list draws: a
+       create raises open+total, and a close lowers open / raises closed
+       whichever path closed it (C-STORE, STOW-RS or a capture), as does a
+       cancel — so a row stops showing as actionable Open on its own.
+       Known gap, stated rather than papered over: an HL7 amendment moves no
+       count, so an amended row stays stale until the next counted change or a
+       manual ↻ Refresh. */
+    const c = rs.counts;
+    if (c) {
+      const sig = c.open + "/" + c.closed + "/" + c.total;
+      if (lastOrderCounts === null) lastOrderCounts = sig;   // adopt: opening the panel fetches anyway
+      else if (sig !== lastOrderCounts) {
+        lastOrderCounts = sig;
+        // Only while the panel is on screen: repainting a hidden list would be
+        // a wasted request every time anything happens, and openPanel already
+        // runs the loader, so a freshly opened panel is current.
+        if (!gateOpen && activePanel === "dlgOrders") loadOrders();
+      }
+      // Cheap, and it is the half of loadOrders() that used to go stale: the
+      // purge button's reason to exist is the CLOSED count, which changes
+      // without anybody touching this panel.
+      paintOrdPurge(c.closed);
+    }
 
     // Low-disk warning banner (only when the storage volume is below the floor).
     const dw = $("diskWarn");
@@ -775,7 +898,16 @@
       banner.className = "emg-banner " + state;
       let text, actions;
       if (state === "active") {
-        text = TF("🚨 EMERGENCY ACTIVE — '{who}' unreachable. Worklist is serving; received studies are held for forward.", { who });
+        /* Ask the engine whether the worklist is actually serving instead of
+           asserting it. A worklist that failed to start (or has since died) is
+           the one thing that stops an emergency order reaching the scanner, and
+           the banner used to claim it was serving regardless — so the tech
+           pulled an empty worklist while the dashboard said everything was
+           fine. Absent reads as serving: an appliance whose status predates the
+           field must not be accused of an outage it may not have. */
+        text = emg.worklist_serving === false
+          ? TF("🚨 EMERGENCY ACTIVE — '{who}' unreachable. The worklist is NOT serving, so orders will not reach the modalities; received studies are held for forward.", { who })
+          : TF("🚨 EMERGENCY ACTIVE — '{who}' unreachable. Worklist is serving; received studies are held for forward.", { who });
         actions = [[T("Resume normal"), "resume", "btn"]];
       } else if (state === "recovering") {
         text = TF("↩ '{who}' is back — flushing held studies to it. Click Resume when done.", { who });
@@ -1630,9 +1762,546 @@
     void chip.offsetWidth;
     chip.classList.add("tx");
   }
+
+  /* ── An order arrived ────────────────────────────────────────────
+     During an outage the front desk types orders straight into this dashboard,
+     and the people who have to act on one are not looking at the screen when it
+     lands. So an arrival is announced on four surfaces at once, and three of
+     them are silent: the nav row and its badge flash, the RIS card's LED and
+     the navbar chip pulse (only while the HL7 listener is running — which is
+     exactly why they cannot be the primary signal, since a hand-keyed order
+     during an outage is routinely queued with that listener stopped), a polite
+     live region speaks it, and the Orders list repaints if it is open.
+     Deliberately NOT flashNote(): that toast is the outcome of a click the
+     operator just made, and an unattended toast every time HL7 fires teaches
+     people to ignore the one control that means "your click did something". */
+
+  // The same restart trick blink() and pulseChip() use, on an element that has
+  // no "running" state to guard on.
+  function pulseAlert(id) {
+    const el = document.getElementById(id);
+    if (!el || el.hidden) return;
+    el.classList.remove("alert");
+    void el.offsetWidth;
+    el.classList.add("alert");
+  }
+
+  let arrivalClear = null, arrivalPaint = null, arrivalPending = 0;
+  /* #ordAlertLive ships EMPTY and carries no data-i18n, so the language pass
+     cannot write a stale placeholder over a live announcement (the #ovTickerMsg
+     trap). Cleared after a few seconds so the region is quiet again before the
+     next arrival, and the pending clear is cancelled first — two arrivals in a
+     row must not cut each other's sentence short.
+
+     The region is emptied and rewritten a tick later rather than overwritten in
+     place. Two single-order arrivals inside the same window produce the
+     identical sentence, and screen readers that diff a live region against what
+     it last held (NVDA and JAWS both do) treat "1 new order" → "1 new order" as
+     no change and say nothing for the second one. The blank in between is what
+     makes the second announcement a change. A timer, not rAF: a backgrounded
+     tab pauses animation frames, and this is the one surface that still works
+     for somebody who cannot see the flash. */
+  function announceArrival(n) {
+    const el = $("ordAlertLive");
+    if (!el) return;
+    clearTimeout(arrivalClear);
+    el.textContent = "";
+    // A second arrival inside that blank window is ADDED to the sentence still
+    // waiting to be written rather than replacing it. The gap exists to make
+    // the next announcement a change the screen reader will speak; it must not
+    // become a way to drop a count on the floor.
+    arrivalPending += n;
+    if (arrivalPaint) return;
+    arrivalPaint = setTimeout(() => {
+      const total = arrivalPending;
+      arrivalPending = 0;
+      arrivalPaint = null;
+      el.textContent = TN(total, "{n} new orders");
+      arrivalClear = setTimeout(() => { el.textContent = ""; }, 5000);
+    }, 50);
+  }
+
+  /* Arrivals announced while the document was hidden, waiting to be shown
+     again. The flash is a CSS animation on the document timeline, and that
+     timeline keeps running for a tab nobody is looking at while nothing is
+     being painted — so an order that lands in a background tab spends its
+     three pulses invisibly and there is nothing left on screen by the time the
+     operator switches over. The badge count is the only residue, and it is
+     hidden at zero, so a create matched by a C-STORE in the same stretch leaves
+     literally nothing. Counted here and re-shown on return. */
+  let hiddenArrivals = 0;
+
+  function onOrderArrived(n) {
+    // Same reason flashNote() bails: behind the prompt there is nobody to tell,
+    // and the baselines have been dropped anyway.
+    if (gateOpen) return;
+    if (document.hidden) hiddenArrivals += n;
+    // The badge alone is not enough — it is hidden at zero on purpose, so an
+    // order created and matched inside one 2 s poll would leave nothing on
+    // screen. The nav row is always there for anyone with orders.read.
+    pulseAlert("navOrders");
+    pulseAlert("ordersBadge");
+    blink($("rsDot"));
+    pulseChip("rs");
+    announceArrival(n);
+    beepNewOrder();
+  }
+
+  /* Coming back to a tab that was in the background. Two separate repairs, and
+     they are separate because a hidden tab fails the alert twice over.
+
+     The poll first. Chrome clamps timers in a hidden page and, past five
+     minutes hidden, throttles them intensively to once a minute — so the 2 s
+     interval at startPollers() can be up to a minute late in noticing an order
+     that is already queued. Polling on the way back collapses that to the
+     moment somebody looks, which is the only moment it matters.
+
+     Then the flash, re-fired for whatever landed while nobody could see it. The
+     alert is deliberately not gated on document.hidden — it exists for a screen
+     nobody is watching, and the beep does reach the room from a background tab
+     — but the VISIBLE half is spent on an empty screen, and a front desk whose
+     sound is muted or not yet armed had nothing else. Deliberately not a second
+     beep: the tone, if it was ever going to play, already played at the real
+     arrival, and chirping at somebody who has just clicked into the page says
+     "something just arrived" about something that did not. */
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    pollStatus();
+    const n = hiddenArrivals;
+    hiddenArrivals = 0;
+    // Same bail as onOrderArrived: behind the prompt there is nobody to tell.
+    if (!n || gateOpen) return;
+    pulseAlert("navOrders");
+    pulseAlert("ordersBadge");
+    announceArrival(n);
+  });
+
+  /* ── The arrival beep ────────────────────────────────────────────
+     Per workstation, and stored in localStorage rather than in the server
+     config, because the people this alert is FOR cannot reach the server
+     config: Reception holds orders.read/orders.write/studies.read and the
+     radiologist holds studies.read/studies.send/orders.read — neither holds
+     config.read, and GET /api/config is gated on it. A web.* toggle would be
+     settable only by the one role that never receives the ris block at all.
+     Per-workstation is also the right answer on its own: a shared reception PC
+     and a tech's reading screen want different things.
+     app.js writes no other browser storage, so this is a precedent inside this
+     file; it follows carino-lang.js exactly — store only the deviation, clear
+     the key to return to the default, and try/catch every access because a
+     private-mode window throws on the property itself. */
+  const BEEP_KEY = "carino_pacs_order_beep";
+  function beepOn() {
+    // Unreadable storage falls back to SOUND ON. A reception PC that silently
+    // lost its preference must fail loud: an alert that defaults to silent is
+    // not an alert.
+    try { return localStorage.getItem(BEEP_KEY) !== "off"; } catch (e) { return true; }
+  }
+  function setBeepOn(on) {
+    try { on ? localStorage.removeItem(BEEP_KEY) : localStorage.setItem(BEEP_KEY, "off"); } catch (e) { /* private mode */ }
+  }
+
+  /* The tone is SYNTHESISED, not shipped. This appliance installs offline and
+     runs from a packaged folder, so an alert that depends on a sound file is an
+     alert somebody can delete; a generated one costs zero bytes in the package
+     and cannot go missing. WebAudio and not the Notification API: the dashboard
+     is served over plain HTTP, so every workstation that is not localhost is a
+     non-secure context, where notifications are unavailable by spec — WebAudio
+     is not secure-context gated and works there. */
+  let actx = null, audioFailed = false, beepFreeAt = 0;
+  /* Deadline for a tone that was asked for while the context was not running,
+     and 0 for "nothing owed". Not the audio clock, on purpose: the whole point
+     of the debt is that the audio clock may be stopped. Not the wall clock
+     either, though it was at first — performance.now() is monotonic and is a
+     different clock from the audio one, so it costs nothing to be right here.
+     An appliance PC does see its wall clock step: an RTC correction or an NTP
+     step inside the four seconds either pays a tone twenty minutes after the
+     order it claims to be announcing (a step backwards) or silences a real
+     arrival (a step forwards), and both are exactly what the deadline exists to
+     prevent. The fallback keeps a browser without performance.now() working on
+     the wall clock rather than owing a tone forever. */
+  const monoNow = () => (window.performance && performance.now ? performance.now() : Date.now());
+  let beepDueBy = 0;
+  /* HOW MANY arrivals are owed a tone, not merely whether any is. The debt used
+     to be the deadline alone, which is one flag: two orders landing seconds
+     apart into a suspended context — the receptionist queueing one by hand
+     while the reconnecting RIS flushes another, which is exactly the pair
+     emitBeep() refuses to collapse — bought a single chirp between them,
+     because the second arrival overwrote the first's debt instead of adding to
+     it. The deadline stays a single value and is carried by the newest arrival:
+     it answers a different question, "is this news still fresh enough to chirp
+     about at all", and the newest arrival is the one that settles it. How many
+     of the owed tones actually reach the speaker is then emitBeep()'s decision
+     as it is for every other arrival — it spaces them so that two read as two,
+     and drops a queue deeper than two seconds as history. */
+  let beepOwed = 0;
+
+  /* The one question the rest of this file asks about audio, and the one the
+     button is painted from: can a tone actually be produced right now? A
+     context that exists but is "suspended" answers no — the browser is still
+     waiting for a gesture — and saying otherwise is how the control ends up
+     claiming the alert is on while the page is structurally incapable of
+     making a sound. */
+  function audioReady() { return !!(actx && actx.state === "running"); }
+
+  function armAudio() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) {
+        audioFailed = true;                   // no WebAudio here: stay silent, stay visible, SAY SO
+      } else {
+        // A CLOSED context counts as no context, and that is not a theoretical
+        // state: close() is never called in this file, but the user agent is
+        // allowed to close one on its own and Chromium does when the output
+        // device goes away — the front desk's USB speaker being unplugged
+        // mid-shift is the whole scenario. A closed context can never be
+        // resumed, so treating it as "already have one" left the page
+        // permanently silent with a button that kept inviting a click which
+        // did nothing. Building a fresh one is the only recovery there is.
+        if (!actx || actx.state === "closed") {
+          actx = new AC();
+          // The queue clock belongs to the context that is going away: a fresh
+          // AudioContext starts its currentTime at zero, so a beepFreeAt left
+          // over from a context that had been running for minutes sits far in
+          // the new one's future and every later arrival is dropped by the
+          // "queue deeper than two seconds" guard — permanently silent, with
+          // the button still promising sound.
+          beepFreeAt = 0;
+          // The context tells us when it stops being able to play, which is
+          // the only way the button learns it without waiting for the next
+          // arrival or the next click. Without this the control goes on
+          // reading "🔔 Sound" for however long it takes something else to
+          // repaint it — the exact lie the three-state label exists to stop.
+          actx.onstatechange = afterArm;
+        }
+        audioFailed = false;
+        // resume() settles a turn later, so the button cannot be painted from
+        // its result synchronously — it is repainted again when it does. The
+        // promise is checked for rather than assumed: the prefixed
+        // webkitAudioContext of an older Safari takes a callback and returns
+        // nothing, and reaching for .then on that throws out of this whole
+        // function. onstatechange above is what covers those browsers instead,
+        // since the transition to "running" repaints either way.
+        if (actx.state === "suspended") {
+          const p = actx.resume();
+          if (p && typeof p.then === "function") p.then(afterArm, afterArm);
+        }
+      }
+    } catch (e) {
+      // Never let audio break a status poll — but only a context that could not
+      // be BUILT means this PC cannot play sound. A throw from anything after
+      // the constructor (resume() on a legacy implementation is the realistic
+      // one) must not discard a context that is alive and running, because
+      // doing so paints "This PC cannot play sound" over a working speaker and
+      // sends the operator looking for a fault that is not there.
+      if (!actx || actx.state === "closed") {
+        actx = null;
+        audioFailed = true;
+      }
+    }
+    afterArm();
+  }
+  /* The gesture listeners are bound to READINESS rather than bound once and
+     dropped on the first success. Dropping them was already an improvement on
+     { once: true }, but it made success a one-way door: a context that was
+     running and then died — device removed, renderer reclaimed it — could no
+     longer be re-armed by the operator's next click anywhere, because there was
+     nothing left listening for it. The only paths back were the next arrival
+     (too late for that arrival) and the mute button itself. So they go back on
+     whenever sound stops being possible, and come off again as soon as it is.
+     The flag is not there to make this idempotent — addEventListener already
+     ignores a duplicate registration — but to state what is bound, since this
+     now runs on every gesture and on every state change the context reports. */
+  let armListening = false;
+  function listenForGesture(on) {
+    if (on === armListening) return;
+    armListening = on;
+    if (on) {
+      window.addEventListener("pointerdown", armAudio);
+      window.addEventListener("keydown", armAudio);
+    } else {
+      window.removeEventListener("pointerdown", armAudio);
+      window.removeEventListener("keydown", armAudio);
+    }
+  }
+  function afterArm() {
+    listenForGesture(!audioReady());
+    /* The arrival that found the context asleep still gets its tone. A context
+       can be running when the page is armed and suspended by the time an order
+       lands — iOS suspends one whenever the tab goes to the background, and a
+       machine coming back from sleep does the same — and resume() then succeeds
+       a turn later off the page's sticky activation, with nobody having done
+       anything. Dropping the beep for that arrival meant the FIRST order after
+       every backgrounding was silent, repeatably. The deadline is what keeps
+       this from becoming a delayed surprise: if sound only becomes possible
+       minutes later, because the operator finally clicked, the order is old news
+       and they are already looking at the screen — chirping then would say
+       "something just arrived" about something that did not.
+
+       The mute is re-read HERE rather than trusted from when the debt was
+       taken on. beepNewOrder() checked the preference at the arrival, but the
+       preference lives in localStorage and is shared by every tab on the
+       workstation, so it can change between owing the tone and paying it: a
+       backgrounded tab owes a chirp, the operator mutes at the tab in front of
+       them, and this tab then comes forward and beeps at a workstation whose
+       control says silent. A debt is an intention to beep, not a licence. */
+    if (beepOwed) {
+      if (monoNow() > beepDueBy || !beepOn()) { beepOwed = 0; beepDueBy = 0; }
+      else if (audioReady()) {
+        // Cleared before the tones are queued rather than after, so nothing
+        // that runs while they are being scheduled can find the debt still
+        // standing and pay it a second time.
+        const owed = beepOwed;
+        beepOwed = 0;
+        beepDueBy = 0;
+        for (let i = 0; i < owed; i++) emitBeep();
+      }
+    }
+    paintBeepBtn();
+  }
+  // Signing in is a pointerdown, so a gated appliance is armed by the very
+  // click that opens the dashboard, and an ungated one by the operator's first
+  // click anywhere — no special case in doLogin is needed.
+  listenForGesture(true);
+  /* Tried once at load as well, because the workstation this alert exists for
+     is the one nobody is sitting at: a kiosk autostart, a restored session or
+     an F5 (the keypress landed on the PREVIOUS page) reaches a dashboard that
+     never receives a gesture at all, and the loopback appliance opens with no
+     sign-in prompt to click through. Where the browser's autoplay policy allows
+     it — a kiosk switch, or a site the operator has used all shift — this
+     succeeds outright and the alert is armed with nobody present. Where it does
+     not, the context still gets built, state stays "suspended", and the button
+     tells the operator the truth instead of a comfortable lie. */
+  armAudio();
+
+  function beepNewOrder() {
+    try {
+      if (!beepOn()) return;
+      if (!audioReady()) {
+        // Ask again — a context can be suspended long after it was armed (the
+        // browser reclaims one on some platforms, and iOS suspends one for
+        // every backgrounded tab) — and repaint, so the moment sound stops
+        // being possible is the moment the button stops promising it. The tone
+        // is not abandoned: it is owed for the next few seconds, and afterArm()
+        // pays it the instant the context runs, which for a resume off sticky
+        // activation is a turn later and inaudibly soon. If nothing can wake
+        // the context the debt expires and this arrival is silent — the flash
+        // and the live region already fired, which is exactly why they are not
+        // optional.
+        // Counted and not flagged: a second arrival inside this window is a
+        // second order, and the floor owes it a second tone.
+        beepOwed += 1;
+        beepDueBy = monoNow() + 4000;
+        armAudio();
+        return;
+      }
+      emitBeep();
+    } catch (e) { /* a hostile audio stack must never take the poll loop down */ }
+  }
+
+  /* The tone itself, split from the decision to make one so that afterArm() can
+     pay a debt beepNewOrder() could not. Every caller has already established
+     that sound is wanted and that the context is running. */
+  function emitBeep() {
+    try {
+      /* No time floor. The floor that used to live here claimed to stop a burst
+         machine-gunning, but a burst between two polls ALREADY collapses into a
+         single onOrderArrived(n) through the created_seq diff, so it never once
+         suppressed the case it was written for. Every call that reaches this
+         line is a separate arrival detected by a separate status response — the
+         HL7 order that lands while the receptionist is queueing one by hand is
+         precisely the pair the floor was eating, and it is precisely the pair
+         that must both be heard.
+         What is left worth preventing is two chirps landing on top of each
+         other and reading as noise rather than as two orders. So a beep is
+         QUEUED on the audio clock instead of being dropped: it starts when the
+         previous one has finished, which costs a third of a second and loses
+         nothing. The one thing that is dropped is a queue already more than two
+         seconds deep — past that the speaker would be reporting history, and a
+         flood of that size has the badge count and the list to speak for it. */
+      const now = actx.currentTime;
+      const t0 = Math.max(now + 0.01, beepFreeAt);
+      if (t0 - now > 2) return;
+      beepFreeAt = t0 + 0.34;                     // 0.31 of tone plus a gap, so two are two
+      // Two short rising sine chirps, A5 -> D6. Rising reads as "something
+      // arrived", not "something failed", and two notes survive a noisy front
+      // desk in a way one does not. Peak 0.09 is deliberately low: the
+      // workstation's volume is unknown and this repeats all shift.
+      [[880, 0], [1174.66, 0.18]].forEach(([hz, at]) => {
+        const osc = actx.createOscillator(), g = actx.createGain();
+        osc.type = "sine";                        // no harmonics to go shrill on cheap PC speakers
+        osc.frequency.value = hz;
+        const s = t0 + at;
+        // Ramped, not switched: a bare start/stop on a non-zero gain clicks.
+        // Never ramp exponentially to literal 0.
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(0.09, s + 0.010);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.12);
+        osc.connect(g); g.connect(actx.destination);
+        osc.start(s); osc.stop(s + 0.13);
+        osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (e) {} };
+      });
+    } catch (e) { /* a hostile audio stack must never take the poll loop down */ }
+  }
+
+  /* #ordBeep ships with no text and no data-i18n: its label, title and spoken
+     name all depend on the state, so they are written here instead. Called at
+     startup, whenever arming is attempted, and again on a language change,
+     since the static pass cannot reach a label JS owns. aria-pressed mirrors
+     MUTED — the button is a mute.
+
+     THREE states, not two, because the preference is only half the answer.
+     "Sound is on" and "sound can play" are different facts: the localStorage
+     preference says nothing about whether this page ever received the gesture
+     the browser demands, and a workstation that was never touched has the
+     preference ON and no audio context at all. Painting the preference alone is
+     how the button came to read "🔔 Sound" on a page that could not beep for
+     anything. The unarmed state is a distinct label so it is visible across the
+     room, and the two reasons for it — waiting for a click, versus a browser
+     with no usable audio at all — differ in the tooltip, because the first is
+     something the operator can fix in one click and the second is not. */
+  function paintBeepBtn() {
+    const btn = $("ordBeep");
+    if (!btn) return;
+    const on = beepOn();
+    const ready = audioReady();
+    let label, tip;
+    if (!on) {
+      label = T("🔕 Muted");
+      tip = T("New orders are silent on this PC — click to unmute");
+    } else if (ready) {
+      label = T("🔔 Sound");
+      tip = T("New orders beep on this PC — click to mute");
+    } else {
+      label = T("🔔 Arm sound");
+      tip = audioFailed
+        ? T("This PC cannot play sound — new orders still flash on screen")
+        : T("Sound is not armed on this PC — click to enable the order beep");
+    }
+    btn.textContent = label;
+    btn.title = tip;
+    btn.setAttribute("aria-label", tip);
+    btn.setAttribute("aria-pressed", on ? "false" : "true");
+  }
+  /* The preference is localStorage, so it belongs to the WORKSTATION and not to
+     this tab — and a front desk really does keep two open, the orders list on
+     one screen and the queue on the other. Every other reader of it re-reads at
+     the moment it matters (beepNewOrder() at the arrival, the click handler at
+     the click), so the only thing that can fall out of date is the label. Mute
+     in one tab and the other went on reading "🔔 Sound" while beeping; unmute
+     and it read "🔕 Muted" while beeping. The control has to describe what the
+     machine does, and one tab over it was describing the opposite.
+
+     The event only ever fires in the OTHER tabs, never the one that wrote, so
+     this cannot race the click handler's own paint. A null key is a
+     localStorage.clear(), which returns the preference to its ON default and
+     must repaint too. Anything owed by a tab that has just been muted elsewhere
+     is dropped here as well as at the payment, so the debt does not sit around
+     looking like a pending beep. */
+  window.addEventListener("storage", (e) => {
+    if (e.key !== null && e.key !== BEEP_KEY) return;
+    if (!beepOn()) { beepOwed = 0; beepDueBy = 0; }
+    paintBeepBtn();
+  });
+
+  /* Everything this session is still OWED, dropped together, because the prompt
+     going up is the moment all of it stops being true. Each one of these is an
+     alert that has been decided on and not yet delivered, and by the time
+     somebody answers the prompt they all say the same wrong thing: the orders
+     behind them are already on the list in front of whoever signs back in, so
+     delivering them then is announcing history.
+
+     One function rather than a run of assignments at the prompt, because a run
+     of assignments is what let this drift: the two baselines were dropped
+     first, the hidden-arrival count was added beside them later, the deferred
+     tone later still, and the live region's pending sentence was missed
+     altogether — it is written from a 50 ms timer, and a status response
+     carrying an arrival genuinely does land milliseconds before a 401 at a
+     token expiry, so the region spoke behind the prompt. That announcement is
+     the only one the order would ever get, since the first poll after signing
+     back in adopts the backlog in silence by design. The next deferred alert
+     anybody adds belongs in here, where the whole list of them is in one place
+     and cannot be forgotten again. */
+  function dropSessionAlerts() {
+    // The arrival baselines: with no baseline the first poll back ADOPTS the
+    // backlog instead of announcing it.
+    lastCreatedSeq = null;
+    lastOrderCounts = null;
+    // The arrivals a hidden tab was holding on to so it could flash for them
+    // when somebody came back to it.
+    hiddenArrivals = 0;
+    // The tones owed by a context that was asleep when they arrived. Answering
+    // this prompt is a pointerdown, so it arms the audio and afterArm() would
+    // pay the debt right there — a chirp announcing "an order just arrived" to
+    // somebody who is still typing their token.
+    beepOwed = 0;
+    beepDueBy = 0;
+    // The live region's pending sentence, and the clear scheduled behind it.
+    // The gate is only a fixed overlay painted over the dashboard — nothing
+    // marks the page inert or aria-hidden — so a polite region that is written
+    // now is read out over the sign-in prompt.
+    clearTimeout(arrivalPaint);
+    clearTimeout(arrivalClear);
+    arrivalPaint = null;
+    arrivalClear = null;
+    arrivalPending = 0;
+    // Emptying a live region is not itself an announcement, so this is safe to
+    // do to a sentence that was already spoken, and it leaves nothing for the
+    // language pass or the next arrival to find.
+    const live = $("ordAlertLive");
+    if (live) live.textContent = "";
+  }
+
+  /* The status poll carries the arrival edge, so it needs the same in-flight
+     token loadOrders() has — and for a sharper reason. Two /api/status requests
+     are genuinely in flight at once: the 2 s interval runs alongside the dozen
+     imperative pollStatus() calls that follow a click, and the engine serves
+     them on separate threads, so a slow one can land after a fast one. An
+     out-of-order payload carries a STALE created_seq, which renderStatus reads
+     as `seq < lastCreatedSeq` — the engine-restart branch — and quietly
+     regresses the baseline; the next poll then announces the same order a
+     second time. Nothing in the payload distinguishes a stale response from a
+     restarted engine, so the ordering has to be decided here, where it is
+     known. A superseded response is simply dropped — but "superseded" means
+     something newer has been DRAWN, not merely issued (see the watermark
+     below), because a request that is issued is not a promise that anything
+     will ever be painted.
+
+     The gate is re-checked AFTER the await as well as before. stopPollers()
+     cancels the timers but cannot cancel a request already on the wire, so a
+     response issued while somebody was signed in can resolve after the prompt
+     went up — and showAuthGate() has just nulled the baselines precisely so
+     that the backlog which accumulates behind the prompt is never announced.
+     Letting that response render would re-adopt the pre-prompt baseline and
+     hand the whole backlog to the first poll after sign-in. */
+  let statusReq = 0;     // issued
+  let statusSeen = 0;    // the newest one that has actually been RENDERED
   async function pollStatus() {
     if (gateOpen) return;          // nothing to poll for while the prompt is up
-    try { renderStatus(await api("/api/status")); } catch (e) { /* keep last */ }
+    const req = ++statusReq;
+    try {
+      const s = await api("/api/status");
+      /* Superseded by something already DRAWN, or the session ended.
+         Compared against the rendered watermark and not against the issue
+         counter, which is the difference between dropping a stale payload and
+         starving: the interval issues a poll every 2 s whatever the engine is
+         doing, so the moment a response takes longer than that there is always
+         a newer request in flight and `req !== statusReq` was true for every
+         single one of them — forever. A NAS holding scp.storage_dir going
+         unresponsive (shutil.disk_usage and idx.stats() are on this path for
+         every profile, gated out of the payload but not out of the work) left
+         the dashboard permanently unpainted: no arrival edge, no badges, no
+         Orders repaint, and no error either, because api() neither times out
+         nor rejects. Against the watermark the newest response to LAND always
+         renders and the older ones are still dropped, so the ordering repair
+         keeps its whole effect and the failure mode is gone.
+         There is deliberately no time floor anywhere near this: two arrivals
+         one second apart are two arrivals, and the created_seq diff below
+         already collapses a burst inside one poll into a single announcement
+         carrying the right count. */
+      if (req <= statusSeen || gateOpen) return;
+      statusSeen = req;
+      renderStatus(s);
+    } catch (e) { /* keep last */ }
   }
 
   /* ── Log timestamps ──────────────────────────────────────────────
@@ -1736,7 +2405,10 @@
     $("wsAet").value = loadedWorklistSource.aet || "";
     $("wsTls").checked = !!loadedWorklistSource.tls;
     renderMods(loadedModalities);
-    fillStationChoices();
+    // The richer of the two copies of the registry has just landed, so both
+    // targeting controls are rebuilt from it rather than from the status
+    // payload's copy they were holding.
+    refreshTargetChoices();
     loadedScp = c.scp || {};
     loadedScu = c.scu || {};
     loadedPrint = c.print || {};
@@ -2049,13 +2721,113 @@
   // (a profile without config.read) the snapshot is the only one there is.
   function modsOpen() { return !!document.getElementById("modBody"); }
 
-  /* The order form's target field. With modalities registered it is a list of
-     them; with none it stays the free-text AE title it has always been, because
-     an order that cannot be keyed in is worse than one aimed at a typo. */
+  /* This department's registered equipment, from whichever copy of it the
+     person at this keyboard is allowed to have.
+
+     There are two and they carry the same rooms. loadConfig() fills
+     loadedModalities for a profile with config.read, and the Modalities tab
+     edits that copy in place, so it is the fresher of the two for whoever can
+     see it. Everyone else — reception above all, who holds orders.read and
+     nothing resembling config.read — receives the same list on the status
+     payload. Asking here rather than at each call site is what lets the order
+     form's target field be a closed list at the front desk, which is the one
+     place it has to be one. */
+  function knownModalities() {
+    const src = (loadedModalities && loadedModalities.length) ? loadedModalities : statusModalities;
+    return (src || []).filter((m) => m && m.enabled !== false && m.aet);
+  }
+
+  /* The DICOM modality codes some console on this appliance actually answers
+     to — or nothing at all, whenever the registry is not in a position to say.
+
+     An empty set means "not known" and never "none". Four situations arrive
+     here looking identical: no registry at all, a status payload older than the
+     station list, a registry of rooms that carry an AE title and no code, and a
+     registry where even ONE room is missing its code. Every caller has to read
+     empty as "do not judge the operator's choice" rather than as an accusation.
+
+     That last situation is why this reads the rows itself instead of going
+     through knownModalities(), and it is worth being exact about. The modality
+     code is OPTIONAL in config.py — the validator demands a name and an AE
+     title and nothing else — so a room may be registered by the two fields that
+     make it reachable and never by the one that says what it is. A registry
+     like that cannot support the sentence "no console here answers to CT",
+     because the console that answers to CT may be precisely the room whose code
+     was never filled in. Half a registry is not a smaller registry; it is a
+     registry that cannot answer this question, and answering anyway turns a
+     correct order into a red warning. A safety sentence that cries wolf is
+     wrong twice — now, and on the day it is right and nobody reads it.
+
+     `enabled` is deliberately ignored, for the same reason the server asks
+     station_list() rather than station_list(usable_only=True) in
+     _station_is_unknown(): the flag governs what this appliance SENDS studies
+     to, not what pulls a worklist, so a room switched off still answers to its
+     own code when its console queries. Filtering on it would raise the warning
+     over the department whose only CT is ticked out of service for the
+     afternoon — the shift that can least afford a wrong order. */
+  function configuredModalityCodes() {
+    /* The same two copies knownModalities() chooses between, and chosen the
+       same way, because the reason is the same: an administrator has the
+       config, reception has only the status payload, and both carry every
+       registered room including the disabled ones (server.station_list()). */
+    const rows = (loadedModalities && loadedModalities.length) ? loadedModalities : statusModalities;
+    const out = new Set();
+    for (const m of (rows || [])) {
+      if (!m) continue;
+      const code = String(m.modality || "").trim().toUpperCase();
+      // One room whose code was left blank, and the whole set goes back empty:
+      // "cannot tell" has to travel as "not known", never as a shorter list of
+      // what is known, which is what would accuse the operator of the gap.
+      if (!code) return new Set();
+      out.add(code);
+    }
+    return out;
+  }
+
+  /* Both targeting controls are built from that registry, so they are refilled
+     together: the station list offers the rooms, and the modality list marks
+     which codes those rooms answer to. */
+  function refreshTargetChoices() {
+    registryChanged();          // adopt the signature, so the next poll does not redo this
+    fillStationChoices();
+    fillModalityChoices();
+  }
+
+  /* Has the registry moved since the form was last built? renderStatus asks
+     every two seconds, and rebuilding a <select> is not free — an operator with
+     the list open would have it shut under them, and a rebuild is also the only
+     moment their half-made choice has to be carried across. */
+  let registrySig = null;
+  function registryChanged() {
+    const sig = JSON.stringify(knownModalities().map((m) => [m.aet, m.modality || "", m.name || ""]));
+    if (sig === registrySig) return false;
+    registrySig = sig;
+    return true;
+  }
+
+  /* The order form's target field.
+
+     ScheduledStationAETitle is matched on the wire by exact string — mwl.py's
+     lenient rule is lenient about a BLANK order, not about a wrong one — so
+     this is the modality field above it wearing a different name, and it fails
+     the same way: a room called "SALA CT" typed where an AE title goes produces
+     an order every station-filtered console misses, while reception is told the
+     Modality Worklist is serving it. So with a registry in hand the field
+     cannot express anything but an AE title a console answers to, and the blank
+     choice — the one that shows the order on every worklist — stays first.
+
+     It is built from knownModalities(), which is what makes it reachable at the
+     front desk at all: the copy in /api/config is behind config.read and the
+     copy on the status payload is not.
+
+     With NO registry it stays the free-text AE title it has always been,
+     because an order that cannot be aimed at all is worse than one aimed at a
+     typo — and that is also how this degrades on an appliance whose status
+     payload does not carry the station list yet. */
   function fillStationChoices() {
     const sel = $("ordStationSel"), txt = $("ordStation");
     if (!sel || !txt) return;
-    const mods = (loadedModalities || []).filter((m) => m && m.enabled !== false && m.aet);
+    const mods = knownModalities();
     if (!mods.length) {
       sel.hidden = true; txt.hidden = false;
       return;
@@ -2076,8 +2848,115 @@
       sel.appendChild(o);
     });
     if (chosen && [...sel.options].some((o) => o.value === chosen)) sel.value = chosen;
+    // Whatever was typed before the registry arrived and is not one of these AE
+    // titles is dropped rather than kept out of sight. The picker has just
+    // refused it; leaving it in the hidden box would put it back on the next
+    // order if the registry ever emptied.
+    else txt.value = "";
     sel.hidden = false; txt.hidden = true;
   }
+
+  /* The order form's modality field, as a closed list.
+
+     A worklist query names a modality by its DICOM code and the match is exact,
+     so anything reception types that is not a code — "ct head", "Ultrasound",
+     "TAC" — produces an order that reaches no modality-filtered console, while
+     every surface here reports it queued and the worklist serving it. Typing
+     more than the code makes the patient less visible, not more, which is not a
+     rule a receptionist during an outage can be expected to know. So the field
+     cannot express it: every value it can submit is a code a scanner can ask
+     for, and the blank first choice is the one that shows up everywhere.
+
+     The codes are never translated — a technologist matches them
+     character-for-character against the console's configuration — but the words
+     naming the exam are, because the person choosing is at the front desk.
+     Shape follows fillStationChoices(): a named blank choice, then `words ·
+     CODE`.
+
+     Unlike the station list this is built from a constant rather than from the
+     configuration, and that is the point: reception rarely has config.read, so
+     a list that only appeared for administrators would leave exactly the
+     profile that types these orders with the free text that caused the trouble.
+     The set is the one this fleet plausibly schedules; anything else is OT,
+     which is also what the write path would have chosen. */
+  function modalityChoices() {
+    return [
+      ["CT", T("Computed tomography")],
+      ["MR", T("Magnetic resonance")],
+      ["US", T("Ultrasound")],
+      ["CR", T("Computed radiography (X-ray)")],
+      ["DX", T("Digital radiography (X-ray)")],
+      ["XA", T("Angiography")],
+      ["RF", T("Fluoroscopy")],
+      ["MG", T("Mammography")],
+      ["NM", T("Nuclear medicine")],
+      ["PT", T("Positron emission tomography")],
+      ["BMD", T("Bone density")],
+      ["ES", T("Endoscopy")],
+      ["OP", T("Eye photography")],
+      ["PX", T("Panoramic dental X-ray")],
+      ["ECG", T("Electrocardiogram")],
+      ["OT", T("Other — anything not on this list")],
+    ];
+  }
+  function fillModalityChoices() {
+    const sel = $("ordMod");
+    if (!sel) return;
+    // Keep whatever is selected across a language switch: this runs again on
+    // carino:langchange, and a half-typed order must not lose its modality
+    // because somebody changed the interface language.
+    const chosen = sel.value;
+    sel.textContent = "";
+    const none = document.createElement("option");
+    none.value = ""; none.textContent = T("Not stated — shows on every worklist");
+    sel.appendChild(none);
+    const add = (parent, code, label) => {
+      const o = document.createElement("option");
+      o.value = code;
+      o.textContent = label ? label + " · " + code : code;
+      parent.appendChild(o);
+    };
+    /* Where the appliance knows its own equipment, say which codes it is.
+       "Computed radiography (X-ray) · CR" and "Digital radiography (X-ray) ·
+       DX" are one exam to a front desk booking a chest film, and in a
+       department that registered a single X-ray room exactly one of them
+       reaches a console — so the two groups put the codes some room here
+       answers to ahead of the ones no room does, and name the difference
+       instead of leaving the operator to guess between two adjacent lines.
+
+       It MARKS rather than removes. A registry can be incomplete, a console can
+       be added between the config save and the outage, and an order refused at
+       the front desk during an outage is the one outcome this panel exists to
+       prevent — so an unregistered code is still choosable, and addOrder() says
+       plainly what it will and will not reach. When the registry is unknown
+       (see configuredModalityCodes) nothing is claimed at all and the list is
+       the flat one it has always been. */
+    const here = configuredModalityCodes();
+    if (here.size) {
+      const mine = document.createElement("optgroup");
+      mine.label = T("Registered here — a console asks for these");
+      const rest = document.createElement("optgroup");
+      rest.label = T("Not registered here — no console asks for these");
+      modalityChoices().forEach(([code, label]) => add(here.has(code) ? mine : rest, code, label));
+      /* A code an administrator registered that this list has never heard of —
+         a department with a console outside the set below — belongs in the form
+         all the same, or a closed list would be unable to express the one room
+         the appliance is most certain about. It carries no words because there
+         are none to translate: it is whatever the registry says, matched
+         character-for-character by the console that asks. */
+      const named = new Set(modalityChoices().map(([code]) => code));
+      [...here].filter((code) => !named.has(code)).sort().forEach((code) => add(mine, code, ""));
+      if (mine.children.length) sel.appendChild(mine);
+      if (rest.children.length) sel.appendChild(rest);
+    } else {
+      modalityChoices().forEach(([code, label]) => add(sel, code, label));
+    }
+    // select.options is flat across optgroups, so this (and the station
+    // prefill's guard, which asks the same question) is unaffected by the
+    // grouping above.
+    if (chosen && [...sel.options].some((o) => o.value === chosen)) sel.value = chosen;
+  }
+
   // The station the operator picked, whichever control is on screen.
   /* Ticking "Test order" fills the form in and gets out of the way. A test
      order exists to prove the chain — order out, worklist, study back — so the
@@ -2305,18 +3184,69 @@
     } finally { btn.textContent = old; btn.disabled = false; }
   }
 
-  function flashNote(msg, ok) {
+  /* A toast. `ok` picks the colour — green for a thing that worked, red for one
+     that did not — and `opts.warn` marks the messages on this page that must
+     not be missed.
+
+     Nothing is invented for it. The colour is this function's own red, the same
+     one a failed save gets; the persistence is the emergency banner's, which
+     stays on screen while the thing it describes is still true rather than
+     timing out. What `warn` adds is that the toast is also SAID. #toast carries
+     no role of its own, so the three "this order reaches no modality" sentences
+     were shown to a sighted reader for five seconds and to a screen reader
+     never — while #ordAlertLive, a few lines below it in the markup, politely
+     announced "1 new order" about the very same order at the very same moment.
+     role="alert" is assertive, so the warning interrupts that instead of
+     queueing behind it; and the role is set BEFORE the text so the sentence
+     lands as a change inside a live region rather than arriving together with
+     the region, which several screen readers do not announce at all. */
+  let noteGen = 0;
+  function flashNote(msg, ok, opts) {
     // While the token prompt is up it owns the screen and its own message line.
     // Anything still in flight when a 401 lands would otherwise pile a stack of
     // "authentication required" toasts behind a modal nobody can read them
     // through, once per poll.
     if (gateOpen) return;
     const t = $("toast");
-    t.textContent = msg;
-    t.className = "toast " + (ok ? "ok" : "bad");
-    t.hidden = false;
+    const warn = !!(opts && opts.warn);
+    const gen = ++noteGen;
     clearTimeout(flashNote._t);
-    flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
+    t.textContent = "";
+    t.className = "toast " + (ok ? "ok" : "bad");
+    if (warn) { t.setAttribute("role", "alert"); t.setAttribute("aria-live", "assertive"); }
+    else { t.removeAttribute("role"); t.removeAttribute("aria-live"); }
+    t.hidden = false;
+    const paint = () => {
+      if (gen !== noteGen) return;      // a newer toast landed inside the gap
+      t.textContent = msg;
+      if (warn) t.append(" ", dismissNote());
+    };
+    if (warn) setTimeout(paint, 60); else paint();
+    /* A warning does not time out. Five seconds is not enough to read a
+       sentence nobody was expecting, and the fact it carries — the order is not
+       reaching a scanner — stays true until somebody acts on it. It goes when
+       it is dismissed, or when the next toast replaces it. */
+    if (!warn) flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  /* The way out of a toast that does not time out. A real button rather than a
+     click anywhere on the box: the reader this stays up for may be working from
+     the keyboard. ✕ reads the same in every language this dashboard speaks, so
+     the name of the control is on the aria-label instead of in the glyph. */
+  function dismissNote() {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn ghost tiny";
+    b.textContent = "✕";
+    b.setAttribute("aria-label", T("Dismiss this warning"));
+    b.addEventListener("click", () => {
+      const t = $("toast");
+      t.hidden = true;
+      t.textContent = "";
+      t.removeAttribute("role");
+      t.removeAttribute("aria-live");
+    });
+    return b;
   }
 
   function webSection() {
@@ -2517,6 +3447,13 @@
     $("killSvc").disabled = true;
     post("/api/shutdown", {}).catch(() => {});   // process may exit before responding
     stopPollers();
+    // The same debts the sign-in prompt drops, for the same reason: this is the
+    // other way a session ends. The overlay below is only a painted sheet over
+    // a live DOM, so the pending live-region sentence would still be read out
+    // and an owed tone would still be paid by the operator's next click —
+    // announcing an arrival to somebody looking at "Carino DICOM has shut
+    // down", about an engine that is no longer there to serve it.
+    dropSessionAlerts();
     setDot($("rxDot"), false);
     setDot($("wxDot"), false);
     const ov = document.createElement("div");
@@ -3049,16 +3986,59 @@
 
   /* ── RIS orders (emergency RIS: intake + reconciliation) ─────── */
   let orderStatus = "open";
+  /* This list is now repainted by the status poll as well as by a click, so two
+     responses can be in flight at once — and the Open tab's slow answer landing
+     after the Closed tab's fast one would paint the wrong rows under the
+     wrong tab. Every request carries the tab it was made for and a sequence
+     number; anything superseded is dropped instead of drawn. */
+  let ordersReq = 0;
+
+  /* The purge button's only reason to exist is the number of CLOSED orders, and
+     that number moves whenever a study arrives — on any of the three close
+     paths — without anybody touching this panel. Deciding it only inside
+     loadOrders() is what left it stale, so it is a function the status poll can
+     call too. */
+  function paintOrdPurge(closed) {
+    const btn = $("ordPurge");
+    if (!btn) return;
+    btn.hidden = orderStatus !== "closed" || !closed;
+  }
+
+  /* The Open/Closed strip is a tablist in the markup — role=tab, aria-selected
+     and a roving tabindex — so the selection has to move in the DOM and not
+     only in a class: aria-selected is what a screen reader reads out, and the
+     roving tabindex is the only reason the unselected tab is reachable at all.
+     Both callers go through here (the click handler and addOrder(), which snaps
+     back to Open after queueing) so the two can never drift apart. */
+  function selectOrderTab(status) {
+    orderStatus = status;
+    const list = $("ordersList");
+    document.querySelectorAll("#dlgOrders .hist-tab[data-ostatus]").forEach((t) => {
+      const on = t.dataset.ostatus === status;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      // One pane serves both tabs, so it is named by whichever is selected.
+      if (on && list && t.id) list.setAttribute("aria-labelledby", t.id);
+    });
+    loadOrders();
+  }
 
   async function loadOrders() {
     const list = $("ordersList");
-    listLoading(list);
+    const req = ++ordersReq;
+    const want = orderStatus;
+    // Only say "Loading…" when there is nothing on screen. Blanking a populated
+    // list on every create or close would flicker the row somebody is reading.
+    if (!list.querySelector(".order-row")) listLoading(list);
     try {
-      const data = await api("/api/ris/orders?status=" + orderStatus);
+      const data = await api("/api/ris/orders?status=" + want);
+      if (req !== ordersReq || want !== orderStatus) return;   // a newer load owns the list
       renderOrders(data.orders || []);
-      $("ordPurge").hidden = orderStatus !== "closed" || !(data.counts && data.counts.closed);
+      paintOrdPurge(data.counts && data.counts.closed);
       reflowActive();
     } catch (e) {
+      if (req !== ordersReq || want !== orderStatus) return;
       listError(list, e.message);
     }
   }
@@ -3140,6 +4120,170 @@
     return String(iso).replace("T", " ").replace("Z", "");
   }
 
+  /* What reception is told when the order lands, in the language they read.
+
+     Every other call site on this page renders r.message verbatim, because
+     engine text is read by whoever can act on it — a log line, a start
+     failure's cause — and that person is reading the log anyway. These
+     sentences are the exception the engine itself documents next to
+     ORDER_QUEUED_MESSAGES: they are read by a receptionist, in the middle of an
+     outage, and every outcome but "serving it" is the ONLY place anybody is
+     told that the order just typed is reaching no scanner, or is reaching no
+     scanner that will ask for it — no banner, no badge, no LED carries that. A
+     safety warning in a language the person at the desk does not read is not a
+     warning, so the engine sends a code and the sentence is said here, where
+     there are four languages to say it in. Which of them are warnings rather
+     than confirmations is ORDER_UNREACHED, below; flashNote paints those red
+     and makes them stay.
+
+     A code this build does not know — an appliance newer than the dashboard
+     served with it — falls back to the engine's English, which is still true,
+     and then to the old bare confirmation, which is at least not a claim about
+     propagation. */
+  function orderQueuedText(r) {
+    switch (r && r.code) {
+      case "order_queued_serving":
+        return T("Order queued — the Modality Worklist is serving it");
+      case "test_order_queued_serving":
+        return T("Test order queued — the Modality Worklist is serving it");
+      case "order_queued_mwl_stopped":
+        return T("Order queued, but the Modality Worklist is NOT running, so no modality can query it. It is enabled — start it, or check the log for why it stopped.");
+      case "test_order_queued_mwl_stopped":
+        return T("Test order queued, but the Modality Worklist is NOT running, so no modality can query it. It is enabled — start it, or check the log for why it stopped.");
+      case "order_queued_mwl_failed":
+        return T("Order queued, but the Modality Worklist failed to start, so the order will not reach any modality. Check the log for the cause — usually its port is already in use — and hand the details to the tech.");
+      case "test_order_queued_mwl_failed":
+        return T("Test order queued, but the Modality Worklist failed to start, so the order will not reach any modality. Check the log for the cause — usually its port is already in use — and hand the details to the tech.");
+      case "order_queued_no_mwl":
+        return T("Order queued, but no Modality Worklist is enabled, so the order will not reach any modality. Enable MWL, or hand the details to the tech.");
+      case "test_order_queued_no_mwl":
+        return T("Test order queued, but no Modality Worklist is enabled, so the order will not reach any modality. Enable MWL, or hand the details to the tech.");
+      /* The fifth outcome is about the ORDER, not about the service: a worklist
+         really is serving it and the AE title it was aimed at belongs to no
+         console this appliance has heard of. The target field above is a closed
+         list now, so reception should not be able to reach this — but an API
+         client can, and so can the free-text fallback on an appliance with no
+         registry, which is exactly where this sentence has to be right. */
+      case "order_queued_station_unknown":
+        return T("Order queued, but no station registered here answers to that AE title, so a console that filters by station will not see it. Pick the room from the list, or leave the target blank to show the order on every worklist.");
+      case "test_order_queued_station_unknown":
+        return T("Test order queued, but no station registered here answers to that AE title, so a console that filters by station will not see it. Pick the room from the list, or leave the target blank to show the order on every worklist.");
+      default:
+        return (r && r.message) || T("Order queued");
+    }
+  }
+
+  /* Which of those outcomes mean the order is reaching nobody.
+
+     Three of the engine's four say so in words, and until now all four were
+     painted the same green and gone in five seconds — so the one sentence on
+     this page that says an emergency order will not reach a scanner looked
+     exactly like the one that says it will. Enumerated by code rather than
+     matched by pattern, for the same reason orderQueuedText has eight cases: a
+     code this build has never heard of is not assumed to be bad news, and an
+     engine that adds one gets the neutral treatment until this list learns it. */
+  const ORDER_UNREACHED = new Set([
+    "order_queued_mwl_stopped", "test_order_queued_mwl_stopped",
+    "order_queued_mwl_failed", "test_order_queued_mwl_failed",
+    "order_queued_no_mwl", "test_order_queued_no_mwl",
+    // Narrower than the three above — a console that sends no station key
+    // still sees the order — and still here, because the confirmation it
+    // replaces was the strongest sentence this appliance owns, and the room
+    // the patient is actually walking to is the one that misses it.
+    "order_queued_station_unknown", "test_order_queued_station_unknown",
+  ]);
+
+  /* The gap the engine cannot see from where it stands. It answered "the
+     Modality Worklist is serving it", which is true, about a modality code no
+     console on this appliance asks for, which is also true: a CR-tagged order
+     in a department whose only X-ray room is registered DX sits on the worklist
+     and reaches nobody, and "serving it" is the wrong thing to tell the person
+     who just typed it. The registry is the same one the target field is built
+     from, so this costs no request.
+
+     There are three answers here, not two, and the empty string carries two of
+     them:
+
+     * NO GAP — the field was left blank, which is the choice that shows the
+       order on every worklist and is therefore never a miss; or some room here
+       is registered as exactly this code.
+     * CANNOT TELL — the registry is unknown or incomplete, which
+       configuredModalityCodes() hands over as an empty set. Nothing is said
+       about propagation, so addOrder() leaves the engine's own verdict
+       standing: the Modality Worklist really is serving the order, which is all
+       anybody on this appliance is in a position to claim. The doubt is not
+       swallowed, it is simply shown where it can still be acted on rather than
+       after the fact — fillModalityChoices() drops its two groups and offers
+       the flat list, so the codes stop being sorted into "a console asks for
+       these" and "no console asks for these" in the one place that sorting
+       would be a guess. Saying it twice, once as a claim the picker cannot
+       support and once as a red alert on a correct order, is how an operator
+       learns to click past this warning before the day it is real.
+     * A GAP — the registry answered, and it answered that nothing here asks for
+       this code. Only this one returns a sentence, and only this one is painted
+       red and made to stay. */
+  function modalityReachGap(code) {
+    const want = String(code || "").trim().toUpperCase();
+    const here = configuredModalityCodes();
+    if (!want || !here.size || here.has(want)) return "";
+    return TF("Order queued, but no modality registered here answers to {code}, so a console that filters by modality will not see it. Pick the code the room is registered as, or hand the details to the tech.", { code: want });
+  }
+
+  /* The other half of orderQueuedText: what reception is told when the order
+     was NOT queued at all.
+
+     Only the two fields the order form can actually write are said here. The
+     engine refuses a third (an illegal Study Instance UID) that no field on
+     this page produces, and that one falls through to the default below and is
+     shown in the engine's English — the same rule orderQueuedText uses for a
+     code this build has never heard of, and for the same reason: a sentence
+     this page cannot say honestly is better said badly than guessed at. */
+  function orderRefusedText(code) {
+    switch (code) {
+      case "order_refused_accession":
+        return T("Order NOT queued — a Modality Worklist cannot carry that accession number. It must be at most 16 characters and must not contain a backslash. Shorten or retype it, or leave it blank — a shortened accession names a different order, so this appliance will not shorten it for you.");
+      case "order_refused_patient_id":
+        return T("Order NOT queued — a Modality Worklist cannot carry that patient ID. It must be at most 64 characters and must not contain a backslash. Shorten or retype it, or leave it blank and the order will carry a temporary ID naming itself.");
+      default:
+        return "";
+    }
+  }
+
+  /* The same refusal, decided here, before the POST.
+
+     It is not a substitute for the engine's gate — an API client never reaches
+     this file, and this file is served from an appliance that may be older or
+     newer than the engine answering it — it is a duplicate on purpose, because
+     of WHEN it fires. The round trip is not the cost; the cost is that a
+     refusal arriving as a thrown 400 reads like a fault of the appliance, while
+     the same sentence raised before anything is sent reads like what it is: the
+     value in the box in front of you will not fit, here is the rule.
+
+     Mirrors pacs/mwl.py's _vr_value for the two VRs the form can write: trimmed
+     to nothing is fine (an order is allowed to carry neither), otherwise inside
+     the cap, no backslash — DICOM's value delimiter, which would turn one
+     accession into two — and no control character, which SH and LO do not
+     admit. Counted in CODE POINTS, because the engine counts Python characters
+     and a name carrying an emoji or an astral character would otherwise be
+     refused here and accepted there, which is the one direction of disagreement
+     the operator cannot act on. */
+  const ID_VR_MAX = { accession: 16, patient_id: 64 };   // mwl.SH_MAX, mwl.LO_MAX
+  function idFits(value, max) {
+    const v = String(value || "").trim();
+    if (!v) return true;
+    if ([...v].length > max) return false;
+    return ![...v].some((c) => {
+      const n = c.codePointAt(0);
+      return c === "\\" || n < 0x20 || (n >= 0x7F && n <= 0x9F);
+    });
+  }
+  function unrepresentableOrderId(fields) {
+    for (const [field, max] of Object.entries(ID_VR_MAX)) {
+      if (!idFits(fields[field], max)) return "order_refused_" + field;
+    }
+    return "";
+  }
+
   async function addOrder(btn) {
     const fields = {
       accession: $("ordAcc").value.trim(),
@@ -3158,19 +4302,65 @@
       flashNote(T("An order needs at least an accession, patient name or ID"), false);
       return;
     }
+    /* Refused here rather than shortened for them. An accession the worklist
+       cannot carry used to be accepted, confirmed green, and then dropped on
+       the wire, so the study came back with nothing to match the order on and
+       the order never closed — invisible to everyone until somebody read the
+       open list days later. Red and sticky, like every other piece of bad news
+       on this page, and the form is left exactly as typed so the value can be
+       corrected rather than retyped. */
+    const badId = unrepresentableOrderId(fields);
+    if (badId) {
+      flashNote(orderRefusedText(badId), false, { warn: true });
+      const box = $(badId === "order_refused_accession" ? "ordAcc" : "ordPid");
+      if (box) box.focus();
+      return;
+    }
     const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
     try {
       const r = await post("/api/ris/orders", fields);
-      flashNote(r.message || T("Order queued"), r.ok !== false);
+      /* What reception is told, and how loudly. A confirmation that the order
+         is NOT reaching a scanner is delivered the way this page delivers every
+         other piece of bad news — flashNote's red, not its green — and, alone
+         among the toasts, it stays up and announces itself (see flashNote).
+         The engine's own verdict comes first: only an outcome it called serving
+         is second-guessed against the local registry, because every outcome
+         that already names a reason — no worklist, a stopped one, a failed
+         start, an unknown station — says it better than this can. */
+      const gap = (r && (r.code === "order_queued_serving" || r.code === "test_order_queued_serving"))
+        ? modalityReachGap(fields.modality) : "";
+      const unreached = !!(gap || (r && ORDER_UNREACHED.has(r.code)));
+      flashNote(gap || orderQueuedText(r), !unreached && r.ok !== false, { warn: unreached });
       if (r.ok !== false) {
+        /* Untick "Test order" FIRST. Its fields are readOnly and filled with the
+           invented test patient while it is on, so leaving it ticked leaves a
+           form that cannot be typed into — and applyTestDefaults(false) has to
+           run before the clear below, because releasing the lock restores each
+           field's pre-test value. */
+        const test = $("ordTest");
+        if (test && test.checked) { test.checked = false; applyTestDefaults(false); }
         ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
-        orderStatus = "open";
-        document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.toggle("active", t.dataset.ostatus === "open"));
-        loadOrders();
+        /* The target station is NOT sticky. An inherited station sends the next
+           patient's order to the previous patient's room, where it sits on a
+           worklist nobody is reading — back to "Any modality", which is the
+           answer that shows up everywhere rather than nowhere. */
+        const sel = $("ordStationSel");
+        if (sel) sel.value = "";
+        // Back to Open, where the order just queued actually is — through the
+        // same helper the tabs use, so aria-selected and the roving tabindex
+        // follow the class instead of being left pointing at the old tab.
+        selectOrderTab("open");
         pollStatus();
       }
     } catch (e) {
-      flashNote(e.message, false);
+      /* A refusal the engine made and this build knows how to say is said in
+         the operator's language, red and sticky like the rest of this page's
+         bad news; anything else keeps the engine's English, which is what every
+         other catch here shows. The pre-check above normally gets there first —
+         this is the path for an API-shaped value the rule here has not learned,
+         and for a dashboard served by an engine newer than itself. */
+      const said = orderRefusedText(e.code);
+      flashNote(said || e.message, false, { warn: !!said });
     } finally { btn.disabled = false; btn.textContent = old; }
   }
 
@@ -4243,12 +5433,24 @@
     $("histDeleteAll").addEventListener("click", histDeleteAll);
     // RIS orders: Open/Closed sub-tabs + form + actions.
     document.querySelectorAll("#dlgOrders .hist-tab[data-ostatus]").forEach((tab) =>
-      tab.addEventListener("click", () => {
-        document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
-        orderStatus = tab.dataset.ostatus;
-        loadOrders();
-      }));
+      tab.addEventListener("click", () => selectOrderTab(tab.dataset.ostatus)));
+    /* Arrow keys along this strip too. The generic handler above is scoped to
+       .panel-tabs and deliberately does not match here, and without this the
+       roving tabindex would make the unselected tab unreachable by keyboard
+       entirely — a strip that is worse to use than the plain buttons it
+       replaced. */
+    const ordStrip = document.querySelector("#dlgOrders .hist-tabs");
+    if (ordStrip) ordStrip.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      const tabs = [...ordStrip.querySelectorAll(".hist-tab[data-ostatus]")];
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      const next = tabs[(i + step + tabs.length) % tabs.length];
+      selectOrderTab(next.dataset.ostatus);
+      next.focus();
+    });
     $("ordAdd").addEventListener("click", () => addOrder($("ordAdd")));
     $("ordTest").addEventListener("change", (e) => applyTestDefaults(e.target.checked));
     $("caughtRefresh").addEventListener("click", loadCaught);
@@ -4262,7 +5464,39 @@
     // Same route as Save destinations: the whole config document, so the
     // server's own validator is what decides a registry is acceptable.
     $("saveMods").addEventListener("click", async () => {
-      if (await saveConfig()) { loadedModalities = collectMods(); fillStationChoices(); }
+      // A saved registry changes which rooms the order form offers AND which
+      // modality codes it marks as answered, so both are rebuilt.
+      if (await saveConfig()) { loadedModalities = collectMods(); refreshTargetChoices(); }
+    });
+    // Mute toggle for the arrival beep. Unmuting also arms the audio context on
+    // this very click, so a receptionist who turns the sound back on does not
+    // have to click a second time somewhere else to hear the next order.
+    $("ordBeep").addEventListener("click", () => {
+      // While the button reads "Arm sound" the click in front of it is a
+      // request to ARM, not to mute — and it is itself the user gesture the
+      // browser was holding out for, which is why this branch exists rather
+      // than a second control. The exception is a browser with no usable audio
+      // at all: retrying there would leave the operator pressing a button that
+      // visibly does nothing, so the click falls through to the mute toggle and
+      // an unmute retries the arming anyway.
+      if (beepOn() && !audioReady() && !audioFailed) { armAudio(); return; }
+      const on = !beepOn();
+      setBeepOn(on);
+      if (on) armAudio();
+      paintBeepBtn();
+    });
+    /* Picking the room fills in the modality, which is what the Modalities tab
+       has been telling operators the registered code is for ("used to prefill
+       an order aimed at this room") without anything doing it. Only ever into a
+       blank field — an operator who chose a modality outranks the registry —
+       and only for a code this list actually offers, so the prefill cannot
+       reintroduce a value no scanner asks for. The select shows the answer, so
+       nothing is decided behind the operator's back. */
+    const ordStation = $("ordStationSel");
+    if (ordStation) ordStation.addEventListener("change", () => {
+      const mod = $("ordMod"), code = ordStation.selectedOptions[0] && ordStation.selectedOptions[0].dataset.modality;
+      if (!mod || mod.value || !code) return;
+      if ([...mod.options].some((o) => o.value === code)) mod.value = code;
     });
     $("ordRefresh").addEventListener("click", loadOrders);
     $("ordPurge").addEventListener("click", purgeClosedOrders);
@@ -4292,6 +5526,18 @@
       retitleWatcherWarn();
       // Rendered by this file, so the language pass does not reach them.
       renderAuthState();
+      // Its label, title and spoken name are written by JS because they depend
+      // on the mute state, so the static pass has nothing to retranslate.
+      paintBeepBtn();
+      /* Both targeting lists were written by this file too — the static pass
+         only reaches the one blank option that ships in the markup, and that
+         one has already been replaced. The station list is here as well as the
+         modality list now that it is the control reception actually sees: its
+         blank choice and the two group headings beside the codes are sentences,
+         not protocol identifiers, and a half-Spanish dropdown is exactly what
+         the language pass exists to prevent. Each carries its selection across,
+         so a half-typed order survives the switch. */
+      refreshTargetChoices();
       // The tab strips DID just get retranslated by the static pass, so the
       // subtitles built from their labels are now a sentence in two languages.
       Object.keys(PANEL_TABS).forEach(writeTabSub);

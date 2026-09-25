@@ -30,6 +30,7 @@ import threading
 import time
 from typing import Optional
 
+from . import ris
 from . import users
 from .logbuf import LogBuffer
 
@@ -97,6 +98,15 @@ class EmergencyController:
         # there is exactly one operator and the old behaviour is the right one.
         self.acknowledged: set = set()
         self.activated_by = ""
+        # Did THIS emergency start the Modality Worklist, or did it find one
+        # already serving? Only a worklist the emergency started may be stopped
+        # when the operator stands down — see resume().
+        self._mwl_ours = False
+        # Why the worklist is not serving, when activate() could not bring it up
+        # (or when it has since died). Empty means "nothing to report"; it is
+        # never a claim that the worklist IS serving — status()["worklist_serving"]
+        # answers that, and it is asked of the SCP rather than remembered.
+        self.mwl_error = ""
         self._now = time.time
 
     # ---- config views ------------------------------------------------------
@@ -300,6 +310,82 @@ class EmergencyController:
         return [p for p in users.enabled_profiles(self._users_cfg)
                 if self.notifies(p)]
 
+    # ---- the worklist half of the emergency --------------------------------
+    # The worklist is how an order reaches a modality at all. Everything else
+    # the emergency does (hold-and-forward, the banner, the notifications) is
+    # invisible to the tech standing at the scanner; this is not. Two questions
+    # about it have to be asked honestly, and neither used to be: is it serving
+    # NOW, and did WE start it.
+    def _worklist_serving(self) -> Optional[bool]:
+        """True serving / False not serving / None unknowable.
+
+        None is not a failure: the controller drives whatever is handed to it as
+        ``server``, and something that does not expose ``mwl_scp`` at all is no
+        evidence either way — there, a start that returned without raising is
+        taken at its word, exactly as this file behaved before. False is a
+        positive answer, the SCP itself saying it has no listener, and that is
+        the case that must never be reported as serving.
+        """
+        if not hasattr(self.server, "mwl_scp"):
+            return None
+        scp = getattr(self.server, "mwl_scp", None)
+        if scp is None:
+            return False
+        return bool(getattr(scp, "running", False))
+
+    def _worklist_is_permanent(self) -> bool:
+        """Does configuration want the worklist up outside any emergency?
+
+        The same predicate the server starts it from on launch —
+        ``worklist_wanted()``: ``mwl.enabled``, or any enabled destination
+        flagged ``no_ris`` (that PACS has no RIS, so this appliance is its
+        worklist source, emergency or not).
+
+        Unanswerable means True, deliberately. Leaving a worklist running costs
+        a bound port; stopping one the hospital configured takes every
+        modality's schedule away with nothing to bring it back — sync_worklist()
+        runs on launch and on a config change, not on a timer.
+        """
+        try:
+            return bool(self.server.worklist_wanted())
+        except Exception:
+            return True
+
+    def _stranded_orders(self) -> int:
+        """How many open orders would lose their only worklist if we stopped it.
+
+        Asked of the store the dashboard reads, through the same predicate the
+        server's ``orders_only_we_can_serve()`` uses, so standing down and
+        saving a configuration can never disagree about which patients are still
+        waiting. An appliance handed a ``server`` with no store answers 0 — no
+        store is no evidence that somebody is waiting.
+        """
+        store = getattr(self.server, "orders", None)
+        if store is None:
+            return 0
+        return ris.open_orders_stranded_here(store)
+
+    def _recheck_worklist(self) -> None:
+        """Keep the worklist verdict current while the emergency is up.
+
+        Deliberately NOT a retry: restarting an SCP on a timer turns a port
+        conflict into a log flood and a fight with whatever holds the port. This
+        only stops a stale verdict sticking to the banner for the rest of the
+        outage — an operator who fixes the fault and starts the worklist by hand
+        sees it clear, and a worklist that DIES mid-outage is reported instead of
+        being remembered as healthy from an activate() an hour ago.
+        """
+        serving = self._worklist_serving()
+        if serving is None:
+            return
+        if serving and self.mwl_error:
+            self.mwl_error = ""
+            self.log.info("Emergency: worklist SCP is serving again", kind="emergency")
+        elif not serving and not self.mwl_error:
+            self.mwl_error = "the worklist SCP is not listening"
+            self.log.error("Emergency: the worklist SCP has STOPPED — modalities are "
+                           "no longer being served orders", kind="emergency")
+
     # ---- operator actions --------------------------------------------------
     def activate(self, profile=None) -> dict:
         """Operator confirmed the pop-up: bring up the local emergency services.
@@ -315,19 +401,58 @@ class EmergencyController:
             # happened to be logged in would put a decision in someone's name
             # that they did not make.
             self.activated_by = getattr(profile, "name", "") or "the system"
+        # Read BEFORE the start: afterwards "we brought it up" and "it was
+        # already up" are indistinguishable, and resume() has to tell them apart.
+        before = self._worklist_serving()
+        self.mwl_error = ""
         try:
             self.server.start_mwl()
         except Exception as exc:
+            # A short fixed reason in the status, the exception itself only in
+            # the log. ``emergency`` is not in web._STATUS_GATES, so this block
+            # reaches every signed-in profile including reception — and a start
+            # failure's text carries exactly what the gated fields exist to
+            # withhold: a bind address, or the path of a TLS certificate that is
+            # not there. The person who can act on the cause can read the log.
+            self.mwl_error = "the worklist SCP failed to start"
             self.log.error(f"Emergency: worklist SCP failed to start: {exc}", kind="emergency")
+        else:
+            # A start that did not raise is not a bound port: start_mwl() is
+            # idempotent and returns early when an SCP object already exists, so
+            # the SCP itself is asked. This is the swallowed failure — the
+            # exception above was logged once and then the activation announced
+            # "Worklist serving" regardless, and the tech spent the outage
+            # pulling an empty worklist while the dashboard said it was fine.
+            if self._worklist_serving() is False:
+                self.mwl_error = "the worklist SCP is not listening"
+                self.log.error("Emergency: the worklist SCP did not come up — orders "
+                               "will NOT reach the modalities", kind="emergency")
+            elif before is not True:
+                self._mwl_ours = True
+                # The same fact in the server's own bookkeeping, set at the
+                # same moment so the two can never disagree: _mwl_ours answers
+                # "should resume() stop this worklist now?", and the server's
+                # flag answers "may a closing order stop it later?" — which is
+                # the question left over when resume() leaves it serving for
+                # orders that are still open. Set here rather than inside
+                # start_mwl(), because start_mwl() cannot tell an outage from a
+                # launch flag, and guessing is what took `serve --mwl`'s
+                # worklist away on the first order that closed.
+                self.server.mwl_for_orders = True
         # A running watcher is what forwards (and holds+retries) the studies.
         try:
             if not self.server.watcher.running:
                 self.server.start_watcher()
         except Exception as exc:
             self.log.error(f"Emergency: auto-send failed to start: {exc}", kind="emergency")
+        # The one line everybody reads afterwards, so it says what is actually
+        # true of the worklist rather than what activation intended.
+        worklist = ("Worklist serving" if not self.mwl_error else
+                    "WORKLIST NOT SERVING — modalities will NOT receive these orders "
+                    "(cause on the line above)")
         self.log.warn(
             f"EMERGENCY ACTIVATED by {self.activated_by} — primary "
-            f"'{self.trigger_dest}' unreachable. Worklist serving; received "
+            f"'{self.trigger_dest}' unreachable. {worklist}; received "
             f"studies held for forward.",
             kind="emergency",
         )
@@ -351,11 +476,72 @@ class EmergencyController:
         return self.status(profile)
 
     def resume(self, profile=None) -> dict:
-        """Operator stood down: stop the worklist SCP and return to armed/idle."""
-        try:
-            self.server.stop_mwl()
-        except Exception:
-            pass
+        """Operator stood down: return to armed/idle, stopping ONLY the worklist
+        this emergency started.
+
+        It used to stop the worklist unconditionally, and that had a long tail.
+        An appliance whose configuration permanently enables the Modality
+        Worklist — ``mwl.enabled``, or any enabled destination flagged
+        ``no_ris``, both of which ``worklist_wanted()`` reads — lost its worklist
+        the first time anybody pressed Resume normal, and nothing ever started it
+        again: sync_worklist() runs on launch and after a config change, not on a
+        timer. One emergency episode, and every modality in the hospital quietly
+        stopped being scheduled until somebody restarted the service. The
+        emergency is allowed to undo what it did; it is not allowed to undo what
+        the hospital configured.
+
+        Three independent guards, because each alone leaves a hole:
+        ``_mwl_ours`` covers the worklist that was already serving when we
+        activated; the permanence check covers an administrator who enabled it
+        DURING the outage — the reason it is re-asked here rather than decided
+        at activation time; and the stranded-order check covers the gap between
+        the two moments Resume normal is confused for. Resume is pressed when
+        the PRIMARY is back, which is not the moment the WORK is done. An order
+        hand-keyed during the outage exists in this appliance's store and
+        nowhere else — it was typed precisely BECAUSE the RIS could not be
+        reached, so the RIS that is now back was never told about it and will
+        never put it on a worklist. Stopping the worklist while that order is
+        still open ends the only path that patient has to a scanner, and the
+        order sits on the Open tab looking handled.
+        """
+        permanent = self._worklist_is_permanent()
+        stranded = self._stranded_orders()
+        if self._mwl_ours and not permanent and not stranded:
+            try:
+                self.server.stop_mwl()
+            except Exception as exc:
+                # Surfaced rather than swallowed: a worklist that would not stop
+                # is still serving orders that are about to be the real RIS's
+                # again, and that is worth a line in the log.
+                self.log.error(f"Emergency: worklist SCP failed to stop: {exc}",
+                               kind="emergency")
+        elif self._worklist_serving() is not False:
+            # A worklist still bound after the emergency is over is a surprise
+            # to the next person who looks at the services, so the log answers
+            # "the emergency is over, why is the MWL still up?" without anyone
+            # having to read this module. The stranded orders are named first
+            # when they are the binding reason, because that is the one an
+            # operator can act on — scan those patients and it comes down.
+            #
+            # That last clause is a promise, so it is worth naming what keeps
+            # it: PacsServer.release_worklist(), asked by every path that
+            # settles such an order — the study arriving and reconciling, an
+            # operator cancelling, a delete, a purge, and the use-case-B
+            # capture that is how these orders settle on a site with no
+            # modality that can C-STORE. The capture was the one that did not
+            # ask, which meant the sentence below was false on exactly the
+            # workflow an outage reaches for first.
+            if stranded and not permanent:
+                reason = (f"{stranded} order(s) typed during the outage are still open, "
+                          f"and the RIS that is back was never told about them")
+            elif permanent:
+                reason = "configuration enables it outside the emergency"
+            else:
+                reason = "it was already running before the emergency"
+            self.log.info("Emergency resolved — worklist left serving: " + reason,
+                          kind="emergency")
+        self._mwl_ours = False
+        self.mwl_error = ""
         with self._lock:
             self.state = IDLE if self.armed else OFF
             self.trigger_dest = ""
@@ -473,6 +659,12 @@ class EmergencyController:
             self._unlocked_notify = ""
             self._notify(pending)
 
+        # Outside the lock, like everything else that touches the server: the
+        # worklist is the emergency's only path to the modalities, so its state
+        # is re-read on every tick rather than remembered from activation.
+        if self.state == ACTIVE:
+            self._recheck_worklist()
+
         if self.state == RECOVERING:
             self._flush_once()
 
@@ -542,6 +734,14 @@ class EmergencyController:
                 "activate_by": [users.describe_principal(self._users_cfg, s)
                                 for s in (self._cfg.get("activate_by") or [])],
                 "activated_by": self.activated_by,
+                # The half of the emergency that actually reaches the
+                # modalities. Asked of the SCP on every request rather than
+                # remembered from activate(), because a failed start used to be
+                # logged once and then reported as serving for the rest of the
+                # outage. Unknowable reads as serving (see _worklist_serving);
+                # only a definite "no listener" says no.
+                "worklist_serving": self._worklist_serving() is not False,
+                "worklist_error": self.mwl_error,
                 "acknowledged": len(self.acknowledged),
                 "auto_activate": bool(self._cfg.get("auto_activate")),
                 "monitored": len(dests),

@@ -113,6 +113,33 @@ def origin_of(order: dict) -> str:
     return ORIGIN_RIS if str(o.get("source") or "").upper().startswith("HL7") else ORIGIN_MANUAL
 
 
+def open_orders_stranded_here(store) -> int:
+    """How many OPEN orders nothing but this appliance's worklist can serve.
+
+    Manual orders only, and that distinction is the whole point: ORIGIN_MANUAL
+    means somebody typed a real patient in here during an outage, precisely
+    because the RIS could not be reached — so the RIS does not have that order,
+    will not have it when it comes back, and no other worklist in the hospital
+    can put the patient in front of a tech. An order that arrived as HL7 belongs
+    to the RIS and is the RIS's to re-serve once the link is up; a test order is
+    nobody's exam. Neither is a reason to hold a port open.
+
+    It lives here rather than in either caller because two of them ask it — the
+    server, deciding whether a configuration change may take the worklist down,
+    and the emergency controller, deciding the same about standing down — and
+    the two answering it differently is exactly the hole it exists to close.
+
+    A store that cannot be read answers 0. An unreadable store is not evidence
+    that somebody is waiting, and with no evidence the decision belongs to
+    configuration rather than to a guess made here.
+    """
+    try:
+        return sum(1 for o in (store.list("open") or [])
+                   if origin_of(o) == ORIGIN_MANUAL)
+    except Exception:
+        return 0
+
+
 # How two messages are recognised as being about ONE order, strongest first.
 # The accession is last because it is the weakest of the three: it is derived
 # from whichever of four fields the sender populated, and some feeds do not
@@ -299,6 +326,27 @@ class OrderStore:
         self._now = now or _utc_stamp
         self._lock = threading.Lock()
         self._orders: dict[str, dict] = {}
+        # Orders created for a real patient over the life of the STORE, not of
+        # this process: seeded from orders.json at load and written back on
+        # every save. It is still only ever incremented, and it is still an edge
+        # to diff rather than a number to display.
+        #
+        # This counter used to be deliberately process-lifetime — "an edge
+        # counter, not a state", a restart resetting it to 0 being read by every
+        # dashboard as "re-baseline, announce nothing". That reasoning was wrong
+        # in the one direction that matters. A restart is not an empty moment:
+        # the HL7 listener is accepting before the web server answers its first
+        # poll, and reception keeps typing throughout, so by the time a
+        # dashboard that was up all shift sees the smaller value, the new
+        # process has ALREADY created orders — and they are inside the value
+        # being adopted in silence. A nightly restart followed by the upstream
+        # RIS flushing three STAT orders produced no beep, no flash and no
+        # announcement, which is the exact failure this whole feature exists to
+        # prevent. Persisting keeps the tick monotonic across the restart, so
+        # those orders read as the arrivals they are; a restart on its own still
+        # moves the tick by nothing and therefore still announces nothing, which
+        # is the property the old design was actually protecting.
+        self._created_seq = 0
         self._load()
 
     # ---- persistence -------------------------------------------------------
@@ -318,6 +366,20 @@ class OrderStore:
                     # this only ever has to be inferred once.
                     o["origin"] = origin_of(o)
                     self._orders[o["id"]] = o
+            # Seed the arrival tick so it survives a restart (see __init__).
+            # Read defensively rather than trusted: a hand-edited or truncated
+            # value must not raise here, because failing to load would cost the
+            # appliance the orders themselves. A file written before this key
+            # existed — the one upgrade restart — or one restored from a backup
+            # carries none, so the tick genuinely starts over there; the
+            # dashboards' "the value went backwards" arm adopts that in silence
+            # instead of announcing a number that would mean nothing. That
+            # window cannot be closed from a file that does not carry a count,
+            # and it now costs one restart rather than every restart.
+            try:
+                self._created_seq = max(0, int(data.get("created_seq") or 0))
+            except (TypeError, ValueError):
+                self._created_seq = 0
         except (OSError, ValueError):
             pass
 
@@ -325,7 +387,11 @@ class OrderStore:
         os.makedirs(self.store_dir, exist_ok=True)
         tmp = self._path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"orders": list(self._orders.values())}, fh, indent=2)
+            # The tick rides along with the orders because this rewrites the
+            # whole file on every change anyway, so keeping it monotonic across
+            # a restart costs one integer and no extra write.
+            json.dump({"orders": list(self._orders.values()),
+                       "created_seq": self._created_seq}, fh, indent=2)
         os.replace(tmp, self._path)
 
     # ---- CRUD --------------------------------------------------------------
@@ -359,6 +425,15 @@ class OrderStore:
             "closed": "",
             "matched_study": "",
         })
+        # This is the one place an order comes into existence — add() serves the
+        # receptionist's panel and apply() serves HL7 — so the arrival tick is
+        # stamped here and nowhere else. Read from the stored order rather than
+        # from the `origin` argument: an out-of-range origin has just been
+        # rewritten to carino-manual above, and it must count as the manual
+        # order it has become. Test orders are excluded because exercising the
+        # chain must not page anybody. The caller already holds self._lock.
+        if order["origin"] != ORIGIN_TEST:
+            self._created_seq += 1
         self._orders[oid] = order
         return dict(order)
 
@@ -613,6 +688,22 @@ class OrderStore:
             "closed": sum(1 for o in vals if o.get("status") == "closed"),
             "total": len(vals),
         }
+
+    @property
+    def created_seq(self) -> int:
+        """A tick to diff, never a number to display.
+
+        It counts orders created for a real patient — manual panel and HL7 both
+        — and nothing else. Closing, cancelling, amending, matching, deleting
+        and purging all leave it alone, which is exactly why ``counts()`` could
+        not do this job: purge_closed drops ``total``, and a client that saw a
+        count fall would go quiet for the next order that actually arrived.
+
+        It belongs to the store, not to the process: it is seeded from
+        orders.json and written back, so a restart carries it forward and the
+        orders created either side of one read as the arrivals they are."""
+        with self._lock:
+            return self._created_seq
 
 
 def _gen_uid() -> str:

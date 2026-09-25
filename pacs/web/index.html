@@ -64,7 +64,7 @@
           <button class="badge warn" id="stuckBadge" data-panel="dlgStudies" data-tab="stuck" data-cap="studies.read" hidden>⚠ 0</button>
         </div>
         <div class="navrow">
-          <button class="navbtn" data-panel="dlgOrders" data-cap="orders.read"><span class="nav-ico">📋</span> <span data-i18n>Orders</span></button>
+          <button class="navbtn" id="navOrders" data-panel="dlgOrders" data-cap="orders.read"><span class="nav-ico">📋</span> <span data-i18n>Orders</span></button>
           <button class="badge" id="ordersBadge" data-panel="dlgOrders" data-cap="orders.read" hidden>0</button>
         </div>
         <div class="navrow">
@@ -396,7 +396,24 @@
           <details class="order-new" id="orderNew">
             <summary data-i18n>➕ New order (manual entry)</summary>
             <div class="order-form">
-              <label><span data-i18n>Accession #</span> <input id="ordAcc" data-i18n-placeholder placeholder="the value the tech types into the modality" /></label>
+              <label><span data-i18n>Accession #</span>
+                <!-- Deliberately WITHOUT maxlength, unlike the AE title field
+                     below, and the difference is not an oversight.
+                     A Modality Worklist carries this in an SH element, sixteen
+                     characters, and a longer one cannot go out as typed. But
+                     maxlength enforces that by dropping the tail in silence:
+                     paste a twenty-character barcode, or let a scanner gun type
+                     one, and the box quietly holds the first sixteen. That is
+                     the worst of the three outcomes, because accession is the
+                     key the returning study is reconciled against — a shortened
+                     one names a DIFFERENT order, or none, and nothing anywhere
+                     says so.
+                     So the box takes whatever is typed and app.js refuses the
+                     order on submit with a sentence naming the rule (addOrder →
+                     unrepresentableOrderId). Reception is told while they are
+                     still looking at the value, which is the only moment in the
+                     whole path where fixing it is cheap. -->
+                <input id="ordAcc" data-i18n-placeholder placeholder="the value the tech types into the modality" data-i18n-title title="At most 16 characters, and no backslash — that is all a Modality Worklist can carry. Leave it blank if the department's accession will not fit." /></label>
               <label><span data-i18n>Patient name</span> <input id="ordPatient" data-i18n-placeholder placeholder="e.g. Jane Doe" /></label>
               <label><span data-i18n>Patient ID</span> <input id="ordPid" /></label>
               <label><span data-i18n>Date of birth</span> <input id="ordDob" type="date" data-i18n-title title="Patient date of birth" /></label>
@@ -408,14 +425,47 @@
                   <option value="O">O</option>
                 </select>
               </label>
-              <label><span data-i18n>Modality</span> <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
+              <label><span data-i18n>Modality</span>
+                <!-- A closed list of DICOM modality codes, never free text. A
+                     console asks the worklist for its own code and the match is
+                     exact, so "ct head", "Ultrasound" or "TAC" typed here is not
+                     a code any scanner asks for: the order is accepted, the
+                     receptionist is told the worklist is serving it, and it
+                     reaches no modality-filtered console at all. The blank
+                     choice stays and stays first — a modality nobody stated is
+                     matched leniently and shows up on every worklist, which is
+                     the right answer when reception does not know the room.
+                     app.js fills the rest in fillModalityChoices(), because the
+                     words naming each exam are translated and the codes beside
+                     them are not. -->
+                <select id="ordMod" data-i18n-title title="A worklist matches this code exactly. Leave it blank and the order shows on every worklist.">
+                  <option value="" data-i18n>Not stated — shows on every worklist</option>
+                </select>
+              </label>
               <label><span data-i18n>Target modality</span>
-                <!-- A dropdown once modalities are registered, a free-text AE
-                     title until then. Not either-or by preference: refusing to
-                     accept a station that is not yet in the registry would stop
-                     an order during an outage, which is the one thing this
-                     panel exists to prevent. -->
-                <select id="ordStationSel" hidden></select>
+                <!-- The same closed list as the field above, in the mirror.
+                     ScheduledStationAETitle is matched on the wire by exact
+                     string, so a room's NAME typed here — "SALA CT", "CT room
+                     1", "Somatom" — is not an AE title any console asks for:
+                     the order is accepted, reception is told the Modality
+                     Worklist is serving it, and every station-filtered query
+                     misses it. So the choices are the AE titles this department
+                     actually registered, and the blank one stays first, because
+                     an order addressed to nobody shows on every worklist —
+                     which is the right answer when reception does not know
+                     which room the patient is going to.
+                     app.js fills it in fillStationChoices(), from the station
+                     list on the /api/status payload rather than from the
+                     configuration: reception holds orders.read and not
+                     config.read, and a picker only administrators could see
+                     would leave exactly the person who types these orders with
+                     the free text that caused the trouble.
+                     The input below stays as the fallback for an appliance with
+                     no modalities registered, and for one whose status payload
+                     predates that list: with no registry to choose from, an
+                     order that cannot be aimed at all is worse than one aimed
+                     at a typo. -->
+                <select id="ordStationSel" data-i18n-title title="A worklist matches this AE title exactly. Leave it unset and the order shows on every worklist." hidden></select>
                 <input id="ordStation" data-i18n-placeholder placeholder="Scheduled Station AE (worklist filter)" maxlength="16" />
               </label>
               <label class="wide"><span data-i18n>Study description</span> <input id="ordDesc" data-i18n-placeholder placeholder="e.g. Ultrasound Abdomen" /></label>
@@ -429,16 +479,32 @@
             </div>
           </details>
           <div class="hist-bar">
-            <div class="hist-tabs">
-              <button class="hist-tab active" data-ostatus="open" data-i18n>🟢 Open</button>
-              <button class="hist-tab" data-ostatus="closed" data-i18n>✓ Closed</button>
+            <!-- A filter, but it behaves and is announced as a tab strip, so it
+                 wears the same idiom as the Studies / Configuration / Activity
+                 strips above: role=tab + aria-selected + a roving tabindex, and
+                 one shared pane (#ordersList) named by aria-controls. It is
+                 keyed on data-ostatus rather than data-tab so the generic
+                 .panel-tabs handlers keep ignoring it — app.js owns
+                 aria-selected and tabIndex here, exactly as selectTab() does
+                 for the panel strips. -->
+            <div class="hist-tabs" role="tablist">
+              <button class="hist-tab active" id="tab_ordOpen" data-ostatus="open" role="tab" aria-selected="true" tabindex="0" aria-controls="ordersList" data-i18n>🟢 Open</button>
+              <button class="hist-tab" id="tab_ordClosed" data-ostatus="closed" role="tab" aria-selected="false" tabindex="-1" aria-controls="ordersList" data-i18n>✓ Closed</button>
             </div>
             <div class="hist-tools">
+              <!-- The arrival beep is a per-workstation preference held in
+                   localStorage, not in the server config: neither Reception nor
+                   the Radiologist holds config.read, so a web.* toggle would be
+                   unreachable by exactly the people the alert is for. Label,
+                   title and aria-label are all state-dependent, so they ship
+                   empty and paintBeepBtn() writes them with T(); aria-pressed
+                   mirrors the MUTED state. -->
+              <button class="btn ghost tiny" id="ordBeep" aria-pressed="false"></button>
               <button class="btn ghost tiny" id="ordRefresh" data-i18n-title title="Reload orders" data-i18n>↻ Refresh</button>
               <button class="btn tiny danger" id="ordPurge" data-i18n-title title="Delete all closed orders" hidden data-i18n>🗑 Purge closed</button>
             </div>
           </div>
-          <div class="hist-list" id="ordersList"></div>
+          <div class="hist-list" id="ordersList" role="tabpanel" tabindex="0" aria-labelledby="tab_ordOpen"></div>
         </div>
       </section>
 
@@ -960,8 +1026,21 @@
     </div>
   </main>
 
-  <!-- global toast -->
+  <!-- Global toast. It ships with NO role: a routine confirmation that fades
+       after five seconds is noise to a screen reader, and most of what lands
+       here is one. flashNote() puts role="alert" on it for the exception —
+       the sentence that says an order is reaching no modality — because that
+       one has to interrupt #ordAlertLive below, which is politely announcing
+       "1 new order" about the very same order at the very same moment. -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- New-order announcement for a screen reader: a flash and a beep are
+       nothing to one. Body level on purpose — a [hidden] panel is outside the
+       accessibility tree and would announce nothing. Ships EMPTY and carries no
+       data-i18n, so the language pass cannot write stale text over a live
+       announcement (the #ovTickerMsg trap). app.js fills it with
+       TN(n, "{n} new orders") and clears it ~5s later. -->
+  <span id="ordAlertLive" class="sr-only" role="status" aria-live="polite"></span>
 
   <!-- API token prompt. The engine serves this shell to anyone (see auth.py:
        a login form the browser was not allowed to download is an outage), but

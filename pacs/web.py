@@ -324,6 +324,17 @@ def create_app(server: PacsServer) -> Flask:
         "stuck":          "studies.read",
         "index":          "studies.read",
         "ris":            "orders.read",    # carries the last order's identity
+        # This department's own rooms: name, AE title, modality code. No
+        # address, no credential, no PHI, and the profile that types orders
+        # must have it — an order is aimed at one of these AE titles by exact
+        # match, and reception, which holds orders.read and not config.read,
+        # was left typing that AE title from memory. So it is published to
+        # orders.read rather than to config.read (which would keep it out of
+        # the hands of the only people who need it) and rather than to nobody
+        # at all (which is what "ungated" amounts to saying, and a profile that
+        # may not see an order has no business enumerating the equipment).
+        # GET /api/ris/orders/stations serves the same list on its own.
+        "modalities":     "orders.read",
         "editor_url":     "studies.read",
         "audit":          "audit.read",
         # Carries the SMTP host and whether a signing key is set. Not secrets,
@@ -1177,6 +1188,15 @@ def create_app(server: PacsServer) -> Flask:
         try:
             if action == "start":
                 server.start_mwl()
+                # An operator pressing Start says the worklist should stay up
+                # until an operator presses Stop. start_mwl() clears the
+                # reclaimable flag on a start it actually performs, but it
+                # returns early when the SCP is already running — which is
+                # exactly the case this line exists for: pressing Start on a
+                # worklist the outage brought up is an operator adopting it,
+                # and it must not then be taken away by the next order that
+                # closes.
+                server.mwl_for_orders = False
             elif action == "stop":
                 server.stop_mwl()
             else:
@@ -1213,6 +1233,26 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         status = request.args.get("status") or None
         return jsonify(server.list_orders(status))
+
+    @app.get("/api/ris/orders/stations")
+    def api_ris_order_stations():
+        """The rooms an order can be aimed at, for the station picker.
+
+        orders.read, not config.read, and that is the whole point of the
+        endpoint: reception holds orders.read and orders.write and not
+        config.read, so GET /api/config 403s for them and the picker that reads
+        the station list out of it never appeared — leaving the one profile
+        that types orders typing an AE title by hand into a field the worklist
+        matches by exact equality. A room's name and AE title are not
+        configuration secrets; they are what an order is addressed to, and this
+        serves those three fields and nothing else (see PacsServer.station_list).
+        Nothing here widens config.read, and a profile without orders.read gets
+        the same 403 it gets for the order list itself.
+        """
+        denied = guard.deny("orders.read")
+        if denied:
+            return denied
+        return jsonify(server.order_stations())
 
     @app.post("/api/ris/orders")
     def api_ris_add_order():

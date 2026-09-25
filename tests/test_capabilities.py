@@ -258,11 +258,18 @@ def test_status_is_composed_per_profile_not_filtered_in_the_browser(app_and_ids)
     assert "destinations" not in reception
     assert "config_path" not in reception
     assert "routing" not in reception
+    # The arrival tick rides the ris block, and that gate IS its capability
+    # check: reception types the emergency orders, so reception must be the one
+    # told that one arrived.
+    assert "ris" in reception and "created_seq" in reception["ris"]
 
     it = status_for("IT")
     assert "destinations" in it
     assert "config_path" in it
     assert "ris" not in it              # carries the last order's identity
+    # …and with the whole block goes created_seq, so the order-arrival alert is
+    # simply inert for a profile without orders.read — no second gate in the
+    # browser to keep in step with this one.
 
     admin = status_for("Administrator")
     assert "destinations" in admin and "ris" in admin and "config_path" in admin

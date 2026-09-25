@@ -36,6 +36,17 @@ import uuid
 from typing import Optional
 
 from .logbuf import LogBuffer
+# "Addressed to nobody" has two spellings on the wire and this module is where
+# they are read as ONE. A worklist item may not carry a zero-length
+# ScheduledStationAETitle — it is Type 1, and a modality that validates it drops
+# the whole item — so this appliance's own worklist writes
+# mwl.UNASSIGNED_STATION_AET into the attribute instead of writing nothing,
+# while a third-party provider that still answers with a blank means exactly the
+# same thing. The word is imported rather than repeated here on purpose: a
+# second copy of it in a second file is precisely how the row tallies and the
+# verdict came to disagree about the same item. It is a constant, not a worklist
+# path — nothing in this module hands an order to anything.
+from .mwl import UNASSIGNED_STATION_AET
 
 # Probes are cheap to run and a bored operator will run a lot of them. Old
 # rounds are dropped rather than kept for ever: the useful window is "what did
@@ -83,6 +94,8 @@ class CaughtStore:
             rounds = data.get("rounds", [])
             if isinstance(rounds, list):
                 self._rounds = [r for r in rounds if isinstance(r, dict) and r.get("id")]
+                for rnd in self._rounds:
+                    _resplit(rnd)
         except (OSError, ValueError):
             pass
 
@@ -119,13 +132,11 @@ class CaughtStore:
                 # line that turns "3 came back" into an answer: an item with no
                 # ScheduledStationAETitle reaches EVERY modality, so a station
                 # can appear to be working while only ever seeing the
-                # unaddressed spillover.
-                "for_this_station": sum(1 for it in items
-                                        if _same_ae(it.get("station_aet"), station_aet)),
-                "for_nobody": sum(1 for it in items if not str(it.get("station_aet") or "").strip()),
-                "for_someone_else": sum(1 for it in items
-                                        if str(it.get("station_aet") or "").strip()
-                                        and not _same_ae(it.get("station_aet"), station_aet)),
+                # unaddressed spillover. Through split_by_addressee() rather
+                # than counted here, so the row and the sentence
+                # server._probe_verdict() writes over it read the item the same
+                # way.
+                **split_by_addressee(items, station_aet),
                 "items": items,
             })
         rnd = {
@@ -179,13 +190,78 @@ class CaughtStore:
         }
 
 
+def addressed_to_nobody(station_aet) -> bool:
+    """True when a worklist item is scheduled to no particular station.
+
+    THE predicate — every consumer of a probe round asks this one rather than
+    spelling the answer out for itself: the per-row split below, and
+    server._probe_verdict(), which builds its sentence out of that split. An
+    item like this reaches EVERY modality, so calling it another station's is
+    the false "your order went to a different scanner" (it sends somebody to
+    edit a station field the order has not got), and calling it this station's
+    is the false "working" the whole panel exists to prevent.
+
+    Two spellings, one meaning: a blank, which is what a third-party provider
+    answers with, and mwl.UNASSIGNED_STATION_AET, which is what this
+    appliance's own worklist has to answer with because the attribute is Type 1.
+    """
+    s = str(station_aet or "").strip()
+    return not s or s.upper() == UNASSIGNED_STATION_AET.upper()
+
+
+def split_by_addressee(items, station_aet: str) -> dict:
+    """One probe answer split three ways: for this station, for nobody, for
+    somebody else.
+
+    The three are exclusive and exhaustive by construction — they sum to
+    ``len(items)`` — because the verdict reads them against the row's ``count``
+    and an item counted twice, or not at all, is a sentence about orders that do
+    not exist. Nobody is tested FIRST: ``UNASSIGNED`` is not a station, so it can
+    neither match the one being asked as nor be filed under someone else's.
+    """
+    this = nobody = other = 0
+    for it in items:
+        aet = it.get("station_aet") if isinstance(it, dict) else ""
+        if addressed_to_nobody(aet):
+            nobody += 1
+        elif _same_ae(aet, station_aet):
+            this += 1
+        else:
+            other += 1
+    return {"for_this_station": this, "for_nobody": nobody, "for_someone_else": other}
+
+
+def _resplit(rnd: dict) -> None:
+    """Re-read one stored round's tallies under the CURRENT predicate.
+
+    A round filed before "nobody" gained its second spelling carries counts
+    split under the blank-only rule, and the panel draws those counts straight
+    out of the file. The items themselves are filed verbatim, so the answer can
+    simply be read again — and it has to be, because server._probe_verdict()
+    recounts from those same items: a panel row contradicting the sentence
+    printed above it would be this diagnosis disagreeing with itself, which is
+    the fault the split exists to find. Rows that came back empty have nothing
+    to recount and keep what they were stored with.
+    """
+    station = str(rnd.get("station_aet", "") or "")
+    for row in (rnd.get("probes") or []):
+        if not isinstance(row, dict):
+            continue
+        items = row.get("items")
+        if isinstance(items, list) and items:
+            row.update(split_by_addressee(items, station))
+
+
 def _same_ae(a, b) -> bool:
     """DICOM compares AE titles case-insensitively.
 
-    An empty AE title matches nothing here, not even another empty one. An item
-    with no ScheduledStationAETitle is addressed to nobody and is counted as
-    such; letting it count as this station's would produce exactly the false
-    "working" this panel exists to prevent.
+    An empty AE title matches nothing here, not even another empty one — an item
+    with no ScheduledStationAETitle is addressed to nobody, and letting it count
+    as this station's would produce exactly the false "working" this panel exists
+    to prevent. Callers ask addressed_to_nobody() first, so by the time this runs
+    both spellings of "nobody" are already out of the way; the guard stays
+    because a bare equality test on two empty strings is one edit away from
+    being true again.
     """
     return str(a or "").strip().upper() == str(b or "").strip().upper() and bool(str(a or "").strip())
 
