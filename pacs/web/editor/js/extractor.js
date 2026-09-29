@@ -131,7 +131,7 @@ async function renderExtractorGrid() {
   if (extractorFiles.length === 0) {
     extractorGrid.className = '';
     extractorGridWrap.classList.remove('has-files');
-    extractorGrid.innerHTML = `<div class="img-empty"><div class="img-empty-icon">🩻</div><span>${T('Drop .dcm files here or click to browse')}</span><span style="font-size:11px">${T('Renders DICOM pixel data as PNG images')}</span></div>`;
+    extractorGrid.innerHTML = `<div class="img-empty"><div class="img-empty-icon">🩻</div><span>${T('Drop .dcm files here or click to browse')}</span><span class="img-empty-hint">${T('Renders DICOM pixel data as PNG images')}</span></div>`;
     return;
   }
   extractorGrid.className = 'extractor-grid';

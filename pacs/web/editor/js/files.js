@@ -148,7 +148,8 @@ async function loadStudy(res) {
 }
 
 // ---- File handling ----
-async function handleFiles(list) {
+// Wipes the loaded study, pending edits, undo history and the per-study UI.
+function resetStudyState() {
   files = [];
   dict = meta = null;
   currentFileIdx = 0;
@@ -171,19 +172,17 @@ async function handleFiles(list) {
   editFuture  = [];
   datasetDirty = false;
   dropZone.classList.remove('compact');
+}
 
-  // Accepts a FileList/File[] or folder-walk {file, path} items; normalize to the latter.
-  const arr = Array.from(list || []).map(x => (x instanceof Blob) ? { file: x, path: x.webkitRelativePath || x.name } : x);
-  if (!arr.length) return;
+// Accepts a FileList/File[] or folder-walk {file, path} items; normalize to the latter.
+function toLoadItems(list) {
+  return Array.from(list || []).map(x => (x instanceof Blob) ? { file: x, path: x.webkitRelativePath || x.name } : x);
+}
 
-  showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, 0, `0 / ${arr.length}`);
-  log(`Loading ${arr.length} file(s)...`);
-
-  const failures = [];
-
-  // Read ahead so disk reads overlap parsing (modest gain; more on slow shares).
-  // Bounded by count AND bytes; the head file always passes so one huge file can't deadlock.
-  // The file being parsed stays in queuedBytes until its finally block.
+// Read ahead so disk reads overlap parsing (modest gain; more on slow shares).
+// Bounded by count AND bytes; the head file always passes so one huge file can't deadlock.
+// The file being parsed stays in queuedBytes until release(slot).
+function createReadAheadQueue(arr) {
   const READ_AHEAD = 4, READ_AHEAD_BYTES = 64 * 1024 * 1024;
   const queue = [];
   let queuedBytes = 0, nextRead = 0;
@@ -193,7 +192,7 @@ async function handleFiles(list) {
       const f = arr[nextRead++]?.file;
       const size = f?.size || 0;
       let p;
-      // Avoid an unhandled rejection; the await below re-throws into the per-file catch.
+      // Avoid an unhandled rejection; the await in handleFiles re-throws into the per-file catch.
       try { p = f.arrayBuffer(); } catch (e) { p = Promise.reject(e); }
       p.catch(() => {});
       queuedBytes += size;
@@ -201,50 +200,33 @@ async function handleFiles(list) {
     }
   };
   fillQueue();
+  return {
+    // Takes the head slot and tops the queue back up.
+    next() { const slot = queue.shift(); fillQueue(); return slot; },
+    release(slot) { queuedBytes -= slot.size; },
+  };
+}
 
-  let lastYield = performance.now();
-  for (let i = 0; i < arr.length; i++) {
-    const { file, path } = arr[i];
-    showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, (i + 1) / arr.length, `${i + 1} / ${arr.length}`);
-    // Pre-read buffers resolve as microtasks and never yield a frame; yield a real
-    // task every ~100 ms so the progress overlay repaints.
-    if (performance.now() - lastYield > 100) {
-      await new Promise(r => setTimeout(r));
-      lastYield = performance.now();
-    }
-    const slot = queue.shift();
-    fillQueue();
-    try {
-      const buf = await slot.p;
-      const msg = DicomMessage.readFile(buf);
-      normBin(msg.dict);
-      // Keep the File handle (not bytes) for on-demand hashing. `name` stays the basename
-      // because downloadOne uses it as a.download (no slashes); `path` is display-only.
-      const entry = { name: file.name, path, dict: msg.dict, meta: msg.meta || {}, pending: seedPending(msg.dict), file, size: file.size, sha: null, shaState: file.size <= SHA_AUTO_LIMIT ? 'idle' : 'deferred' };
-      files.push(entry);
-      if (entry.shaState === 'idle') computeEntrySha(entry, buf);   // fire-and-forget
-      log(`✓ ${path}`);
-    } catch (e) {
-      const errMsg = e.message || String(e);
-      // Path, not name: same-named slices from different series folders stay distinct.
-      failures.push({ name: path, error: errMsg });
-      log(`✗ ${path}: ${errMsg}`);
-    } finally {
-      queuedBytes -= slot.size;
-    }
-  }
+// Parses one read buffer into a files[] entry; throws on a bad file.
+function addParsedFile(file, path, buf) {
+  const msg = DicomMessage.readFile(buf);
+  normBin(msg.dict);
+  // Keep the File handle (not bytes) for on-demand hashing. `name` stays the basename
+  // because downloadOne uses it as a.download (no slashes); `path` is display-only.
+  const entry = { name: file.name, path, dict: msg.dict, meta: msg.meta || {}, pending: seedPending(msg.dict), file, size: file.size, sha: null, shaState: file.size <= SHA_AUTO_LIMIT ? 'idle' : 'deferred' };
+  files.push(entry);
+  if (entry.shaState === 'idle') computeEntrySha(entry, buf);   // fire-and-forget
+  log(`✓ ${path}`);
+}
 
-  showLoading?.(false);
+function renderLoadFailures(failures) {
+  errorBanner.className = 'error-banner';
+  errorBanner.innerHTML = `<summary>⚠ ${failures.length} file${failures.length > 1 ? 's' : ''} failed to load — click to expand</summary><ul>${
+    failures.map(f => `<li>${f.name}: ${f.error}</li>`).join('')
+  }</ul>`;
+}
 
-  if (failures.length) {
-    errorBanner.className = 'error-banner';
-    errorBanner.innerHTML = `<summary>⚠ ${failures.length} file${failures.length > 1 ? 's' : ''} failed to load — click to expand</summary><ul>${
-      failures.map(f => `<li>${f.name}: ${f.error}</li>`).join('')
-    }</ul>`;
-  }
-
-  if (!files.length) return;
-
+function showLoadedStudy() {
   // Sort before reading files[0] so the first image of the first series is shown.
   sortFiles();
 
@@ -257,6 +239,50 @@ async function handleFiles(list) {
 
   renderFileBrowser?.();
   syncToUI();
+}
+
+async function handleFiles(list) {
+  resetStudyState();
+
+  const arr = toLoadItems(list);
+  if (!arr.length) return;
+
+  showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, 0, `0 / ${arr.length}`);
+  log(`Loading ${arr.length} file(s)...`);
+
+  const failures = [];
+  const reads = createReadAheadQueue(arr);
+
+  let lastYield = performance.now();
+  for (let i = 0; i < arr.length; i++) {
+    const { file, path } = arr[i];
+    showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, (i + 1) / arr.length, `${i + 1} / ${arr.length}`);
+    // Pre-read buffers resolve as microtasks and never yield a frame; yield a real
+    // task every ~100 ms so the progress overlay repaints.
+    if (performance.now() - lastYield > 100) {
+      await new Promise(r => setTimeout(r));
+      lastYield = performance.now();
+    }
+    const slot = reads.next();
+    try {
+      addParsedFile(file, path, await slot.p);
+    } catch (e) {
+      const errMsg = e.message || String(e);
+      // Path, not name: same-named slices from different series folders stay distinct.
+      failures.push({ name: path, error: errMsg });
+      log(`✗ ${path}: ${errMsg}`);
+    } finally {
+      reads.release(slot);
+    }
+  }
+
+  showLoading?.(false);
+
+  if (failures.length) renderLoadFailures(failures);
+
+  if (!files.length) return;
+
+  showLoadedStudy();
 }
 
 

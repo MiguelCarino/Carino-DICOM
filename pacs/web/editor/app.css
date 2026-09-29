@@ -376,6 +376,14 @@
     }
     .btn.danger { background: rgba(239,68,68,0.12); border-color: var(--err); color: var(--err); }
     .btn.danger:hover { background: var(--err); border-color: var(--err); color: var(--on-accent); box-shadow: 0 0 16px rgba(239,68,68,0.3); }
+    .btn.btn-xs { padding: 4px 10px; font-size: 11px; }
+    .btn.btn-sm { padding: 5px 10px; font-size: 11px; }
+    /* Full-width sidebar buttons: spaced when stacked, and set off from a drop zone above. */
+    .btn.btn-block { width: 100%; }
+    .btn.btn-block:not(:last-child) { margin-bottom: 6px; }
+    .drop-zone + .btn.btn-block { margin-top: 8px; }
+    .btn-pair { display: flex; gap: 8px; }
+    .btn-pair > .btn { flex: 1; }
     
     /* ---- Main content ---- */
     /* Two thirds tags, one third image; the 280px floor keeps the sidebar usable near the stacking breakpoint. */
@@ -416,10 +424,6 @@
       border-radius: 20px;
       font-size: 12px;
       color: var(--text-dim);
-    }
-    .pill.glow {
-      border-color: var(--accent);
-      box-shadow: 0 0 15px var(--accent-glow);
     }
     
     /* ---- UID pattern display ---- */
@@ -555,6 +559,10 @@
       text-align: left;
       border-bottom: 1px solid var(--border);
     }
+    .col-tag { width: 140px; }
+    .col-vr  { width: 50px; }
+    .col-val { width: 40%; }
+    .col-act { width: 56px; }
     tbody tr {
       transition: background 0.15s;
     }
@@ -668,6 +676,7 @@
       flex-shrink: 0;
     }
     .actions-spacer { flex: 1; }
+    .batch-buttons { display: flex; align-items: center; gap: 6px; }
     
     /* ---- Right sidebar ---- */
     /* The column never scrolls: tools keep their height, the tail (Load Files, Log) shrinks first and
@@ -730,6 +739,7 @@
     }
     .card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
     .card-title-sub { color: var(--text-muted); letter-spacing: .04em; font-size: 10px; }
+    .card-title-split { display: flex; align-items: center; justify-content: space-between; }
     
     /* ---- Drop zone ---- */
     .drop-zone {
@@ -887,17 +897,6 @@
     .redact-count b { color: var(--text); font-family: var(--mono); }
     
     /* ---- Compare panel ---- */
-    .compare-drop {
-      border: 1px dashed var(--border);
-      border-radius: 4px;
-      padding: 12px;
-      text-align: center;
-      font-size: 11px;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .compare-drop:hover { border-color: var(--accent); background: rgba(234,179,8,0.05); }
     .compare-legend {
       display: flex;
       gap: 10px;
@@ -919,10 +918,6 @@
     tr.cmp-diff td      { background: rgba(251,146,60,0.10); }
     tr.cmp-only-a td    { background: rgba(248,113,113,0.07); }
     tr.cmp-only-b td    { background: rgba(34,211,238,0.07); }
-    /* ---- Compare value cell ---- */
-    .cmp-val { font: 12px var(--mono); color: var(--text-muted); padding: 2px 4px; word-break: break-all; }
-    .cmp-val.diff { color: var(--cat-image); }
-    .cmp-val.only-b { color: var(--cat-patient); font-style: italic; }
     /* ---- Copy button ---- */
     .cmp-copy-btn {
       padding: 2px 7px; font-size: 11px; border-radius: 4px;
@@ -931,20 +926,6 @@
       white-space: nowrap;
     }
     .cmp-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
-    /* ---- Compare stats bar ---- */
-    .compare-stats {
-      font: 600 10px var(--mono); color: var(--text-muted);
-      margin-top: 8px; text-transform: uppercase; letter-spacing: 0.05em;
-    }
-    .compare-stats span { margin-right: 8px; }
-    .compare-stats .s-match { color: var(--cat-equipment); }
-    .compare-stats .s-diff  { color: var(--cat-image); }
-    .compare-stats .s-only  { color: var(--text-muted); }
-    .compare-fname {
-      font: 500 11px var(--mono); color: var(--text-dim);
-      margin-top: 6px; word-break: break-all;
-      border-bottom: 1px solid var(--border); padding-bottom: 6px;
-    }
     
     /* ---- Log ---- */
     .log-area {
@@ -958,13 +939,6 @@
       white-space: pre-wrap;
     }
     
-    .social-btn {
-      width: 40px; height: 40px; align-items: center; justify-content: center;
-      background: rgba(125,125,125,0.1); border-radius: var(--r-md); color: var(--text-dim);
-      border: 1px solid transparent; transition: 0.2s; margin: 6px ;
-    }
-
-    .social-btn:hover { transform: translateY(-3px); color: var(--accent); }
     .card.disabled { opacity: 0.5; pointer-events: none; }
     .hidden { display: none !important; }
 
@@ -1039,6 +1013,7 @@
       font-size: 13px;
     }
     .img-empty-icon { font-size: 36px; opacity: 0.35; }
+    .img-empty-hint { font-size: 11px; }
     .img-thumb {
       background: var(--surface-solid);
       border: 1px solid var(--border);
@@ -1391,6 +1366,8 @@
     /* On the header, so collapsing hides the controls but keeps the readout. */
     .wl-summary { margin-left: auto; font: 500 11px var(--mono); color: var(--text-muted); letter-spacing: 0; text-transform: none; }
     .wl-body { margin-top: 8px; }
+    .wl-preset-row { display: flex; gap: 4px; margin-bottom: 8px; }
+    .batch-select.wl-preset { flex: 1; font-size: 11px; }
     .wl-section.collapsed .wl-body { display: none; }
     .wl-group { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
     .wl-label { display: flex; justify-content: space-between; align-items: center; font: 700 10px var(--mono); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
@@ -1409,9 +1386,6 @@
     .st-head { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
     .st-desc { font: 500 11px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
     .st-count { font: 600 10px var(--mono); opacity: .85; }
-    .file-tab { padding: 3px 10px; font: 500 11px var(--mono); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-    .file-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(234,179,8,0.1); }
-    .file-tab:hover:not(.active) { border-color: var(--text-muted); color: var(--text-dim); }
 
     /* ---- Add tag form ---- */
     .add-tag-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 10px; background: var(--surface-solid); border: 1px solid var(--border-glow); border-radius: 4px; margin-bottom: 6px; }
@@ -1420,6 +1394,10 @@
     .add-tag-row select { font: 13px var(--font); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 6px 8px; cursor: pointer; }
     .add-tag-row select:focus { outline: none; border-color: var(--accent); }
     .add-tag-row select option { background: var(--surface-solid); }
+    .add-tag-code { width: 120px; }
+    .add-tag-val { flex: 1; min-width: 120px; }
+    .btn.add-tag-ok { padding: 6px 14px; }
+    .btn.add-tag-cancel { padding: 6px 12px; }
     .deid-options-row { gap: 6px 14px; }
     .deid-options-row label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text); cursor: pointer; }
     /* Text-box styling does not apply to the checkbox. */
@@ -1431,16 +1409,12 @@
     /* ---- Tab panel grid placement ---- */
     /* .app is `grid-template-rows: auto 1fr`; only .main (2nd child) gets the 1fr row automatically.
        Force the other panels into row 2 so their flex:1 / overflow-y:auto scrolling works. */
-    .create-panel, .extractor-panel,
-    .val-panel, .batch-panel, .macro-panel {
+    .create-panel, .extractor-panel {
       grid-row: 2;
       overflow: hidden;
     }
 
-    /* ---- Validator tab ---- */
-    .val-panel { display:grid; grid-template-columns:1fr minmax(240px,300px); gap:16px; padding:16px 20px; overflow:hidden; min-height:0; }
-    .val-left  { display:flex; flex-direction:column; gap:10px; min-height:0; overflow:hidden; }
-    .val-sidebar { display:flex; flex-direction:column; gap:12px; overflow-y:auto; }
+    /* ---- Validator results (Overview tab) ---- */
     .val-summary { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:10px 14px; background:var(--surface); border-radius:10px; border:1px solid var(--border); flex-shrink:0; }
     .val-badge { display:flex; align-items:center; gap:6px; font:700 12px var(--mono); padding:4px 12px; border-radius:6px; cursor:pointer; border:1px solid transparent; transition:0.15s; }
     .val-badge.error   { color:var(--sev-error); background:rgba(248,113,113,0.12); }
@@ -1448,13 +1422,6 @@
     .val-badge.phi     { color:var(--sev-phi); background:rgba(250,204,21,0.12); }
     .val-badge.info    { color:var(--text-dim); background:rgba(163,163,163,0.08); }
     .val-badge.active, .val-badge:hover { border-color: currentColor; }
-    .val-results { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; min-height:0; }
-    .val-section { background:var(--surface); border-radius:10px; border:1px solid var(--border); overflow:hidden; }
-    .val-section-hdr { display:flex; align-items:center; gap:8px; padding:9px 14px; cursor:pointer; font:600 11px var(--mono); text-transform:uppercase; letter-spacing:0.08em; color:var(--accent); user-select:none; }
-    .val-section-hdr:hover { background:var(--surface-hover); }
-    .val-section-hdr .chev { margin-left:auto; transition:transform 0.2s; color:var(--text-muted); }
-    .val-section.collapsed .chev { transform:rotate(-90deg); }
-    .val-section.collapsed .val-issues { display:none; }
     /* Dense responsive grid: pack issues across the width */
     .val-issues { border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); }
     .val-issue { display:flex; align-items:flex-start; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border); border-right:1px solid var(--border); font-size:12px; }
@@ -1467,9 +1434,6 @@
     .val-issue-tag  { font:600 11px var(--mono); color:var(--text-dim); line-height:1.35; }
     .val-issue-msg  { color:var(--text-dim); margin-top:1px; font-size:11px; line-height:1.3; }
     .val-issue-val  { font:10px var(--mono); color:var(--text-muted); margin-top:1px; word-break:break-all; }
-    .val-fix-btn    { flex-shrink:0; padding:3px 9px; font-size:10px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--accent); cursor:pointer; transition:0.15s; }
-    .val-fix-btn:hover { background:rgba(234,179,8,0.1); border-color:var(--accent); }
-    .val-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:8px; color:var(--text-muted); font:13px var(--mono); }
 
     /* ---- SR viewer ---- */
     .sr-view { padding:4px 0; overflow-y:auto; font-size:12px; }
@@ -1558,7 +1522,7 @@
        and win by source order. Every panel becomes one scrolling column with the sidebar stacked
        below; inner scroll regions keep bounded heights so their scrollbars and sticky headers work. */
     @media (max-width: 1000px) {
-      .main, .create-panel, .extractor-panel, .val-panel {
+      .main, .create-panel, .extractor-panel {
         grid-template-columns: minmax(0, 1fr);
         overflow-y: auto;
         overflow-x: hidden;
@@ -1567,8 +1531,7 @@
          0px and paint its content over the sidebar. */
       .left-panel, .sidebar,
       .create-left, .create-sidebar,
-      .extractor-left, .extractor-sidebar,
-      .val-left, .val-sidebar { overflow: visible; min-height: auto; }
+      .extractor-left, .extractor-sidebar { overflow: visible; min-height: auto; }
 
       .table-wrap           { flex: none; max-height: 55vh; }
       .img-grid-wrap        { flex: none; max-height: 45vh; }

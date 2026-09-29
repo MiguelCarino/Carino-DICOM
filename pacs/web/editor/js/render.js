@@ -265,6 +265,162 @@ function seqCount(el, T) {
   return s;
 }
 
+// ---- Tag table ----
+
+// A row's compare class; '' when not comparing.
+function tableRowCmpClass(node, other) {
+  if (!other) return '';
+  if (node.valA !== null && node.valB !== null) return node.valA === node.valB ? 'cmp-match' : 'cmp-diff';
+  return node.valA !== null ? 'cmp-only-a' : 'cmp-only-b';
+}
+
+// Tally the whole file before filtering, top level only (nested values cannot be copied across).
+function tallyCompareRows(tree, other) {
+  const tally = { match: 0, diff: 0, onlyA: 0, onlyB: 0 };
+  if (other) for (const node of tree) {
+    const c = tableRowCmpClass(node, other);
+    tally[c === 'cmp-match' ? 'match' : c === 'cmp-diff' ? 'diff' : c === 'cmp-only-a' ? 'onlyA' : 'onlyB']++;
+  }
+  return tally;
+}
+
+// Category, differences-only and search filters for one row.
+function tableRowHit(node, q, other) {
+  if (activeCat !== 'all' && catFor(node.tag, node.vr) !== activeCat) return false;
+  if (other && cmpDiffOnly && tableRowCmpClass(node, other) === 'cmp-match') return false;
+  if (q && !`${fmtTag(node.tag)} ${descFor(node.tag) || ''} ${node.valA ?? ''} ${node.valB ?? ''}`.toLowerCase().includes(q)) return false;
+  return true;
+}
+
+// Sequence item header row
+function buildSeqItemRow(node, ctx) {
+  const path = node.path;
+  const tr = document.createElement('tr');
+  tr.className = 'seq-item-row';
+  tr.dataset.path = path;
+  tr.innerHTML = `<td><div class="tag-cell"><span class="seq-item-badge"></span></div></td>
+      <td><span class="desc-cell"></span></td>
+      <td></td>
+      <td></td>${ctx.other ? '<td></td><td></td>' : ''}`;
+  const cell = tr.querySelector('.tag-cell');
+  cell.style.paddingLeft = Math.min(node.depth, 4) * 14 + 'px';
+  cell.prepend(seqToggle(ctx.filtering || seqOpen.has(path), () => toggleSeq(path)));
+  tr.querySelector('.seq-item-badge').textContent = `${node.index + 1} / ${node.of}`;
+  tr.querySelector('.desc-cell').textContent = T('Sequence item');
+  return tr;
+}
+
+// Sequence row: item count and toggle, no value
+function buildSeqRowCells(tr, node, ctx) {
+  const path = node.path, elA = node.elA, elB = node.elB;
+  const open = ctx.filtering || seqOpen.has(path);
+  tr.querySelector('.tag-cell').prepend(seqToggle(open, () => {
+    // Single-item sequences (typical code sequences) open their item too.
+    if (!seqOpen.has(path) && seqItems(elA || elB).length === 1) seqOpen.add(path + '/0');
+    toggleSeq(path);
+  }));
+  tr.children[3].appendChild(seqCount(elA, T));
+  if (ctx.other) tr.children[4].appendChild(seqCount(elB, T));
+}
+
+// Mirror a window centre/width edit into the viewer controls.
+function syncWindowFromEdit(path, value) {
+  // Match the full path: a nested (0028,1050) is not the displayed window level.
+  if (editKey('00281050') === path) { const v = parseFloat(value); if (!isNaN(v) && wcSlider) { wcSlider.value = v; if (wcNum) wcNum.value = Math.round(v); if (wcDisplay) wcDisplay.textContent = Math.round(v); } }
+  if (editKey('00281051') === path) { const v = parseFloat(value); if (!isNaN(v) && wwSlider) { wwSlider.value = Math.max(1,v); if (wwNum) wwNum.value = Math.round(Math.max(1,v)); if (wwDisplay) wwDisplay.textContent = Math.round(Math.max(1,v)); } }
+}
+
+// This file's value input
+function buildValueInputA(node, frozen, binary) {
+  const path = node.path, vr = node.vr, valA = node.valA;
+  const inp = document.createElement('input');
+  inp.className = 'val-input' + (binary ? ' binary' : '');
+  inp.value = valA ?? '';
+  if (valA === null) inp.placeholder = '— not present —';
+  inp.dataset.tag = path;
+  inp.disabled = frozen || !node.elA;
+  if (!inp.disabled) {
+    inp.addEventListener('input', () => {
+      trackEditStart?.();
+      pendingEdits.set(path, { vr, valueString: inp.value });
+      syncWindowFromEdit(path, inp.value);
+      showDownload();
+      if (files.length === 1 && dict) drawPreview(dict, currentFrame);
+    });
+  }
+  return inp;
+}
+
+function cmpCopyBtn(label, title, run) {
+  const b = document.createElement('button');
+  b.className = 'cmp-copy-btn';
+  b.textContent = label;
+  b.title = title;
+  b.addEventListener('click', run);
+  return b;
+}
+
+// Compared file's value input plus the copy-across buttons.
+function appendCompareCells(tr, node, ctx, frozen, binary) {
+  const path = node.path, vr = node.vr, valA = node.valA, valB = node.valB, oPend = ctx.oPend;
+  const inpB = document.createElement('input');
+  inpB.className = 'val-input' + (binary ? ' binary' : '');
+  inpB.value = valB ?? '';
+  if (valB === null) inpB.placeholder = '— not present —';
+  inpB.disabled = frozen || !node.elB;
+  if (!inpB.disabled) {
+    inpB.addEventListener('input', () => { oPend.set(path, { vr, valueString: inpB.value }); showDownload(); });
+  }
+  tr.children[4].appendChild(inpB);
+
+  const acts = document.createElement('div');
+  acts.className = 'cmp-actions-cell';
+  if (!frozen && valA !== null) {
+    acts.appendChild(cmpCopyBtn('→', 'Copy this value to the other file', () => {
+      oPend.set(path, { vr, valueString: valA });
+      renderTable(); showDownload();
+    }));
+  }
+  if (!frozen && valB !== null) {
+    acts.appendChild(cmpCopyBtn('←', 'Copy the other file\'s value to this one', () => {
+      trackEditStart?.();
+      pendingEdits.set(path, { vr, valueString: valB });
+      renderTable(); showDownload();
+      if (files.length === 1 && dict) drawPreview(dict, currentFrame);
+    }));
+  }
+  tr.children[5].appendChild(acts);
+}
+
+// Element row: tag, description, VR, then value cells (or the sequence toggle).
+function buildTagRow(node, ctx) {
+  const other = ctx.other;
+  const path = node.path, tag = node.tag, vr = node.vr;
+  const desc = descFor(tag);
+  const cat  = catFor(tag, vr);
+  const ro   = isReadOnly(tag, vr);
+  const cls  = tableRowCmpClass(node, other);
+
+  const tr = document.createElement('tr');
+  tr.className = [ro ? 'readonly-row' : '', cls].filter(Boolean).join(' ');
+  tr.dataset.path = path;
+  tr.innerHTML = `
+      <td><div class="tag-cell"><span class="tag-cat" data-cat="${cat}"></span><span class="tag-code">${fmtTag(tag)}</span></div></td>
+      <td><span class="${desc ? 'desc-cell' : 'desc-cell desc-unknown'}">${desc || 'Unknown tag'}</span></td>
+      <td><span class="vr-badge">${vr}</span></td>
+      <td></td>${other ? '<td></td><td></td>' : ''}`;
+  tr.querySelector('.tag-cell').style.paddingLeft = Math.min(node.depth, 4) * 14 + 'px';
+
+  if (vr === 'SQ') { buildSeqRowCells(tr, node, ctx); return tr; }
+
+  const binary = (node.elA || node.elB)?.InlineBinary || isBinaryVR(vr);
+  // While comparing, nested rows are read-only: copying them would need items the other side may lack.
+  const frozen = ro || (other && node.depth > 0);
+  tr.children[3].appendChild(buildValueInputA(node, frozen, binary));
+  if (other) appendCompareCells(tr, node, ctx, frozen, binary);
+  return tr;
+}
+
 // opts.datasetsUnchanged (search box / category filter only) skips the costly UID-pattern scan
 // over every loaded file. Omitting it is always correct.
 function renderTable(opts) {
@@ -281,147 +437,11 @@ function renderTable(opts) {
   // Differences-only deliberately does not: it only filters the rows already enumerated.
   const filtering = q !== '' || activeCat !== 'all';
   const tree = rowTree(mine, theirs, '', 0, filtering, oPend);
+  const tally = tallyCompareRows(tree, other);
 
-  const tally = { match: 0, diff: 0, onlyA: 0, onlyB: 0 };
-  const clsOf = (node) => {
-    if (!other) return '';
-    if (node.valA !== null && node.valB !== null) return node.valA === node.valB ? 'cmp-match' : 'cmp-diff';
-    return node.valA !== null ? 'cmp-only-a' : 'cmp-only-b';
-  };
-  if (other) for (const node of tree) {
-    // Tally the whole file before filtering, top level only (nested values cannot be copied across).
-    const c = clsOf(node);
-    tally[c === 'cmp-match' ? 'match' : c === 'cmp-diff' ? 'diff' : c === 'cmp-only-a' ? 'onlyA' : 'onlyB']++;
-  }
-
-  const hit = (node) => {
-    if (activeCat !== 'all' && catFor(node.tag, node.vr) !== activeCat) return false;
-    if (other && cmpDiffOnly && clsOf(node) === 'cmp-match') return false;
-    if (q && !`${fmtTag(node.tag)} ${descFor(node.tag) || ''} ${node.valA ?? ''} ${node.valB ?? ''}`.toLowerCase().includes(q)) return false;
-    return true;
-  };
-
-  const rows = [];
-  for (const node of pruneRows(tree, hit, filtering)) {
-    const path = node.path;
-    const tag  = node.tag;
-
-    // Sequence item header row
-    if (node.kind === 'item') {
-      const tr = document.createElement('tr');
-      tr.className = 'seq-item-row';
-      tr.dataset.path = path;
-      tr.innerHTML = `<td><div class="tag-cell"><span class="seq-item-badge"></span></div></td>
-      <td><span class="desc-cell"></span></td>
-      <td></td>
-      <td></td>${other ? '<td></td><td></td>' : ''}`;
-      const cell = tr.querySelector('.tag-cell');
-      cell.style.paddingLeft = Math.min(node.depth, 4) * 14 + 'px';
-      cell.prepend(seqToggle(filtering || seqOpen.has(path), () => toggleSeq(path)));
-      tr.querySelector('.seq-item-badge').textContent = `${node.index + 1} / ${node.of}`;
-      tr.querySelector('.desc-cell').textContent = T('Sequence item');
-      rows.push(tr);
-      continue;
-    }
-
-    const elA = node.elA, elB = node.elB;
-    const vr   = node.vr;
-    const desc = descFor(tag);
-    const cat  = catFor(tag, vr);
-    const ro   = isReadOnly(tag, vr);
-    const valA = node.valA;
-    const valB = node.valB;
-    const cls  = clsOf(node);
-
-    const tr = document.createElement('tr');
-    tr.className = [ro ? 'readonly-row' : '', cls].filter(Boolean).join(' ');
-    tr.dataset.path = path;
-    tr.innerHTML = `
-      <td><div class="tag-cell"><span class="tag-cat" data-cat="${cat}"></span><span class="tag-code">${fmtTag(tag)}</span></div></td>
-      <td><span class="${desc ? 'desc-cell' : 'desc-cell desc-unknown'}">${desc || 'Unknown tag'}</span></td>
-      <td><span class="vr-badge">${vr}</span></td>
-      <td></td>${other ? '<td></td><td></td>' : ''}`;
-    tr.querySelector('.tag-cell').style.paddingLeft = Math.min(node.depth, 4) * 14 + 'px';
-
-    // Sequence row: item count and toggle, no value
-    if (vr === 'SQ') {
-      const open = filtering || seqOpen.has(path);
-      tr.querySelector('.tag-cell').prepend(seqToggle(open, () => {
-        // Single-item sequences (typical code sequences) open their item too.
-        if (!seqOpen.has(path) && seqItems(elA || elB).length === 1) seqOpen.add(path + '/0');
-        toggleSeq(path);
-      }));
-      tr.children[3].appendChild(seqCount(elA, T));
-      if (other) tr.children[4].appendChild(seqCount(elB, T));
-      rows.push(tr);
-      continue;
-    }
-
-    const binary = (elA || elB)?.InlineBinary || isBinaryVR(vr);
-    // While comparing, nested rows are read-only: copying them would need items the other side may lack.
-    const frozen = ro || (other && node.depth > 0);
-
-    // This file
-    const inp = document.createElement('input');
-    inp.className = 'val-input' + (binary ? ' binary' : '');
-    inp.value = valA ?? '';
-    if (valA === null) inp.placeholder = '— not present —';
-    inp.dataset.tag = path;
-    inp.disabled = frozen || !elA;
-    if (!inp.disabled) {
-      inp.addEventListener('input', () => {
-        trackEditStart?.();
-        pendingEdits.set(path, { vr, valueString: inp.value });
-        // Match the full path: a nested (0028,1050) is not the displayed window level.
-        if (editKey('00281050') === path) { const v = parseFloat(inp.value); if (!isNaN(v) && wcSlider) { wcSlider.value = v; if (wcNum) wcNum.value = Math.round(v); if (wcDisplay) wcDisplay.textContent = Math.round(v); } }
-        if (editKey('00281051') === path) { const v = parseFloat(inp.value); if (!isNaN(v) && wwSlider) { wwSlider.value = Math.max(1,v); if (wwNum) wwNum.value = Math.round(Math.max(1,v)); if (wwDisplay) wwDisplay.textContent = Math.round(Math.max(1,v)); } }
-        showDownload();
-        if (files.length === 1 && dict) drawPreview(dict, currentFrame);
-      });
-    }
-    tr.children[3].appendChild(inp);
-
-    if (!other) { rows.push(tr); continue; }
-
-    // Compared file
-    const inpB = document.createElement('input');
-    inpB.className = 'val-input' + (binary ? ' binary' : '');
-    inpB.value = valB ?? '';
-    if (valB === null) inpB.placeholder = '— not present —';
-    inpB.disabled = frozen || !elB;
-    if (!inpB.disabled) {
-      inpB.addEventListener('input', () => { oPend.set(path, { vr, valueString: inpB.value }); showDownload(); });
-    }
-    tr.children[4].appendChild(inpB);
-
-    // Copy buttons
-    const acts = document.createElement('div');
-    acts.className = 'cmp-actions-cell';
-    const copyBtn = (label, title, run) => {
-      const b = document.createElement('button');
-      b.className = 'cmp-copy-btn';
-      b.textContent = label;
-      b.title = title;
-      b.addEventListener('click', run);
-      return b;
-    };
-    if (!frozen && valA !== null) {
-      acts.appendChild(copyBtn('→', 'Copy this value to the other file', () => {
-        oPend.set(path, { vr, valueString: valA });
-        renderTable(); showDownload();
-      }));
-    }
-    if (!frozen && valB !== null) {
-      acts.appendChild(copyBtn('←', 'Copy the other file\'s value to this one', () => {
-        trackEditStart?.();
-        pendingEdits.set(path, { vr, valueString: valB });
-        renderTable(); showDownload();
-        if (files.length === 1 && dict) drawPreview(dict, currentFrame);
-      }));
-    }
-    tr.children[5].appendChild(acts);
-    rows.push(tr);
-  }
+  const ctx = { other, oPend, filtering };
+  const rows = pruneRows(tree, node => tableRowHit(node, q, other), filtering)
+    .map(node => node.kind === 'item' ? buildSeqItemRow(node, ctx) : buildTagRow(node, ctx));
 
   tagBody.replaceChildren(...rows);
   if (other) renderCompareStats(tally);

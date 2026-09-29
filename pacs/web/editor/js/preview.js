@@ -260,27 +260,149 @@ function redactionSupport(meta) {
            codec: REDACT_NO_CODEC[ts] || ts || 'unknown transfer syntax' };
 }
 
+// Image Pixel Module attributes (PS3.3 C.7.6.3) with this tool's defaults. pi is returned untrimmed.
+function readPixelModuleAttrs(d) {
+  const ba = lookupTag(d, '00280100')?.Value?.[0] || 16;
+  const bs = lookupTag(d, '00280101')?.Value?.[0] || ba;
+  return {
+    rows:   lookupTag(d, '00280010')?.Value?.[0],
+    cols:   lookupTag(d, '00280011')?.Value?.[0],
+    spp:    lookupTag(d, '00280002')?.Value?.[0] || 1,
+    pi:     lookupTag(d, '00280004')?.Value?.[0],
+    ba, bs,
+    hb:     lookupTag(d, '00280102')?.Value?.[0] || bs - 1,
+    pr:     lookupTag(d, '00280103')?.Value?.[0] || 0,
+    planar: lookupTag(d, '00280006')?.Value?.[0] || 0,
+    numFrames: parseInt(lookupTag(d, '00280008')?.Value?.[0] || '1') || 1,
+  };
+}
+
+// DICOM JSON may carry Pixel Data as InlineBinary; decode it in place so Value[0] holds the bytes.
+function inflateInlinePixelData(px) {
+  if (px && typeof px.InlineBinary === 'string' && !px.Value?.[0]) {
+    try { px.Value = [b64ToAB(px.InlineBinary)]; } catch (_) {}
+  }
+}
+
+// Raw syntaxes keep their stored layout so they can be written straight back.
+function storedRawFrames(px, ts, g) {
+  const { ba, numFrames } = g.base;
+  const bytes = new Uint8Array(concatBuffers(px.Value.map(v =>
+    ArrayBuffer.isView(v) ? v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) : v)));
+  if (ts === '1.2.840.10008.1.2.2' && ba === 16) {
+    // dcmjs writes Explicit VR LE and ensureMeta relabels the syntax, so swap big-endian samples to match.
+    for (let i = 0; i + 1 < bytes.length; i += 2) { const t = bytes[i]; bytes[i] = bytes[i + 1]; bytes[i + 1] = t; }
+  }
+  if (bytes.length < g.frameBytes * numFrames)
+    return { error: `Pixel Data holds ${bytes.length} bytes, short of the ${g.frameBytes * numFrames} this header describes.` };
+  const frames = [];
+  for (let f = 0; f < numFrames; f++)
+    frames.push(g.asSamples(bytes.buffer.slice(f * g.frameBytes, (f + 1) * g.frameBytes)));
+  return { ...g.base, frames, raw: true, swapped: ts === '1.2.840.10008.1.2.2' && ba === 16 };
+}
+
+// One encapsulated buffer per frame: usually one fragment each, but a single frame may span several,
+// so join them. Returns { perFrame } or { error }.
+function storedFrameFragments(px, numFrames) {
+  const frags = encapsulatedFragments(px);
+  let perFrame = frags;
+  if (numFrames === 1 && frags.length > 1) perFrame = [concatBuffers(frags)];
+  if (perFrame.length < numFrames)
+    return { error: `Pixel Data holds ${perFrame.length} fragment(s) for ${numFrames} frame(s).` };
+  return { perFrame: perFrame.slice(0, numFrames) };
+}
+
+function storedRleFrames(perFrame, g) {
+  const frames = [];
+  for (const frag of perFrame) {
+    try { frames.push(g.asSamples(rleToRaw(frag, g.framePixels, g.base.spp, g.bytesPerSample))); }
+    catch (e) { return { error: `RLE decode failed: ${e.message}` }; }
+  }
+  return { ...g.base, frames, planar: 0, raw: false };
+}
+
+async function storedJpegLosslessFrames(perFrame, g) {
+  let Decoder;
+  try { Decoder = await loadJpegLossless(); }
+  catch (e) { return { error: `JPEG Lossless decoder unavailable: ${e.message}` }; }
+  const frames = [];
+  for (const frag of perFrame) {
+    try {
+      const o = new Decoder().decode(frag, 0, frag.byteLength, g.base.ba === 16 ? 2 : 1);
+      frames.push(g.asSamples(o.buffer.slice(o.byteOffset, o.byteOffset + o.byteLength)));
+    } catch (e) { return { error: `JPEG Lossless decode failed: ${e.message}` }; }
+  }
+  return { ...g.base, frames, planar: 0, raw: false };
+}
+
+// JPEG 2000 / JPEG-LS: full precision and sign kept. OpenJPEG undoes the YBR_RCT/ICT transform,
+// so colour J2K is written back as RGB.
+async function storedWasmFrames(ts, perFrame, g) {
+  const { rows, cols, ba, spp, pi } = g.base;
+  const kind = REDACT_J2K_TS.has(ts) ? 'j2k' : 'jls';
+  const label = T(kind === 'j2k' ? 'JPEG 2000 decode failed' : 'JPEG-LS decode failed');
+  const frames = [];
+  for (const frag of perFrame) {
+    let dec;
+    try { dec = await wasmDecodeFrame(kind, frag); }
+    catch (e) { return { error: `${label}: ${e.message}` }; }
+    const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
+    if (bad) return { error: `${label}: ${bad}` };
+    let bytes = dec.bytes;
+    if (dec.planar === 1 && spp === 3) {
+      // applyRedaction writes (0028,0006) = 0, so re-interleave CharLS planar output.
+      const src = g.asSamples(bytes), out = new (src.constructor)(src.length);
+      for (let c = 0; c < 3; c++)
+        for (let i = 0; i < g.framePixels; i++) out[i * 3 + c] = src[c * g.framePixels + i];
+      bytes = out.buffer;
+    }
+    frames.push(g.asSamples(bytes));
+  }
+  return { ...g.base, frames, planar: 0, raw: false,
+           pi: (kind === 'j2k' && spp === 3) ? 'RGB' : pi };
+}
+
+// Baseline / extended JPEG: browser decode is 8-bit only, so 12-bit data loses depth across the
+// whole image (depthLoss; the caller must warn). No MONOCHROME1 inversion: these are stored values.
+async function storedBitmapJpegFrames(perFrame, g) {
+  const { rows, cols, spp, pi } = g.base;
+  const framePixels = g.framePixels;
+  const frames = [];
+  for (const frag of perFrame) {
+    let img;
+    try {
+      const bitmap = await createImageBitmap(new Blob([frag], { type: 'image/jpeg' }));
+      const c = document.createElement('canvas');
+      c.width = bitmap.width; c.height = bitmap.height;
+      const cx = c.getContext('2d');
+      if (!cx) { bitmap.close(); return { error: 'Canvas 2D context unavailable' }; }
+      cx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      if (c.width !== cols || c.height !== rows)
+        return { error: `The JPEG is ${c.width}x${c.height} but the header says ${cols}x${rows}.` };
+      img = cx.getImageData(0, 0, c.width, c.height).data;
+    } catch (e) { return { error: `JPEG decode failed: ${e.message}` }; }
+    const o = new Uint8Array(framePixels * (spp === 3 ? 3 : 1));
+    if (spp === 3) for (let i = 0; i < framePixels; i++) { o[i*3] = img[i*4]; o[i*3+1] = img[i*4+1]; o[i*3+2] = img[i*4+2]; }
+    else for (let i = 0; i < framePixels; i++) o[i] = img[i * 4];
+    frames.push(o);
+  }
+  // The browser converted YBR to RGB, so the written photometric interpretation must say RGB.
+  return { ...g.base, frames, ba: 8, bs: 8, hb: 7, pr: 0, planar: 0, raw: false,
+           pi: spp === 3 ? 'RGB' : pi, depthLoss: true, bitmap: true };
+}
+
 // Every frame's stored samples: interleaved little endian, except raw files keep their stored layout
 // so they can be written straight back. Returns { frames, ... } or { error }.
 async function decodeStoredFrames(d, meta) {
-  const rows = lookupTag(d, '00280010')?.Value?.[0];
-  const cols = lookupTag(d, '00280011')?.Value?.[0];
-  const spp  = lookupTag(d, '00280002')?.Value?.[0] || 1;
-  const pi   = String(lookupTag(d, '00280004')?.Value?.[0] || '').trim();
-  const ba   = lookupTag(d, '00280100')?.Value?.[0] || 16;
-  const bs   = lookupTag(d, '00280101')?.Value?.[0] || ba;
-  const hb   = lookupTag(d, '00280102')?.Value?.[0] || bs - 1;
-  const pr   = lookupTag(d, '00280103')?.Value?.[0] || 0;
-  const planar = lookupTag(d, '00280006')?.Value?.[0] || 0;
-  const numFrames = parseInt(lookupTag(d, '00280008')?.Value?.[0] || '1') || 1;
+  const { rows, cols, spp, pi: piTag, ba, bs, hb, pr, planar, numFrames } = readPixelModuleAttrs(d);
+  const pi = String(piTag || '').trim();
   if (!rows || !cols) return { error: 'This file has no Rows/Columns, so its stored pixels cannot be rewritten.' };
   // Only 8/16-bit samples can be rewritten.
   if (ba !== 8 && ba !== 16) return { error: `Bits Allocated ${ba} is not something this tool can rewrite.` };
 
   const px = lookupTag(d, '7fe00010');
-  if (px && typeof px.InlineBinary === 'string' && !px.Value?.[0]) {
-    try { px.Value = [b64ToAB(px.InlineBinary)]; } catch (_) {}
-  }
+  inflateInlinePixelData(px);
   if (!px || !px.Value?.length) return { error: 'This file has no Pixel Data to rewrite.' };
 
   const ts = metaTS(meta);
@@ -292,419 +414,370 @@ async function decodeStoredFrames(d, meta) {
     return { error: `Rewriting this image would need ${Math.round(frameBytes * numFrames / (1024 * 1024))} MB of uncompressed pixels, more than this tool will hold in a browser tab.` };
   const asSamples = (buf) => ba === 16 ? new (pr ? Int16Array : Uint16Array)(buf) : new Uint8Array(buf);
   const base = { rows, cols, spp, ba, bs, hb, pr, pi, planar, numFrames, ts };
+  // Shared by the per-syntax helpers; base is what each result spreads.
+  const g = { base, asSamples, framePixels, bytesPerSample, frameBytes };
 
-  // Raw
-  if (REDACT_RAW_TS.has(ts)) {
-    const bytes = new Uint8Array(concatBuffers(px.Value.map(v =>
-      ArrayBuffer.isView(v) ? v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) : v)));
-    if (ts === '1.2.840.10008.1.2.2' && ba === 16) {
-      // dcmjs writes Explicit VR LE and ensureMeta relabels the syntax, so swap big-endian samples to match.
-      for (let i = 0; i + 1 < bytes.length; i += 2) { const t = bytes[i]; bytes[i] = bytes[i + 1]; bytes[i + 1] = t; }
-    }
-    if (bytes.length < frameBytes * numFrames)
-      return { error: `Pixel Data holds ${bytes.length} bytes, short of the ${frameBytes * numFrames} this header describes.` };
-    const frames = [];
-    for (let f = 0; f < numFrames; f++)
-      frames.push(asSamples(bytes.buffer.slice(f * frameBytes, (f + 1) * frameBytes)));
-    return { ...base, frames, raw: true, swapped: ts === '1.2.840.10008.1.2.2' && ba === 16 };
-  }
+  if (REDACT_RAW_TS.has(ts)) return storedRawFrames(px, ts, g);
 
-  // Usually one fragment per frame; a single frame may also span several fragments, so join them.
-  const frags = encapsulatedFragments(px);
-  let perFrame = frags;
-  if (numFrames === 1 && frags.length > 1) perFrame = [concatBuffers(frags)];
-  if (perFrame.length < numFrames)
-    return { error: `Pixel Data holds ${perFrame.length} fragment(s) for ${numFrames} frame(s).` };
-  perFrame = perFrame.slice(0, numFrames);
+  const split = storedFrameFragments(px, numFrames);
+  if (split.error) return split;
+  const perFrame = split.perFrame;
 
-  // RLE Lossless
-  if (ts === REDACT_RLE_TS) {
-    const frames = [];
-    for (const frag of perFrame) {
-      try { frames.push(asSamples(rleToRaw(frag, framePixels, spp, bytesPerSample))); }
-      catch (e) { return { error: `RLE decode failed: ${e.message}` }; }
-    }
-    return { ...base, frames, planar: 0, raw: false };
-  }
-
-  // JPEG Lossless
-  if (REDACT_JPEG_LOSSLESS_TS.has(ts)) {
-    let Decoder;
-    try { Decoder = await loadJpegLossless(); }
-    catch (e) { return { error: `JPEG Lossless decoder unavailable: ${e.message}` }; }
-    const frames = [];
-    for (const frag of perFrame) {
-      try {
-        const o = new Decoder().decode(frag, 0, frag.byteLength, ba === 16 ? 2 : 1);
-        frames.push(asSamples(o.buffer.slice(o.byteOffset, o.byteOffset + o.byteLength)));
-      } catch (e) { return { error: `JPEG Lossless decode failed: ${e.message}` }; }
-    }
-    return { ...base, frames, planar: 0, raw: false };
-  }
-
-  // JPEG 2000 / JPEG-LS: full precision and sign kept. OpenJPEG undoes the YBR_RCT/ICT transform,
-  // so colour J2K is written back as RGB.
-  if (REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts)) {
-    const kind = REDACT_J2K_TS.has(ts) ? 'j2k' : 'jls';
-    const label = T(kind === 'j2k' ? 'JPEG 2000 decode failed' : 'JPEG-LS decode failed');
-    const frames = [];
-    for (const frag of perFrame) {
-      let dec;
-      try { dec = await wasmDecodeFrame(kind, frag); }
-      catch (e) { return { error: `${label}: ${e.message}` }; }
-      const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
-      if (bad) return { error: `${label}: ${bad}` };
-      let bytes = dec.bytes;
-      if (dec.planar === 1 && spp === 3) {
-        // applyRedaction writes (0028,0006) = 0, so re-interleave CharLS planar output.
-        const src = asSamples(bytes), out = new (src.constructor)(src.length);
-        for (let c = 0; c < 3; c++)
-          for (let i = 0; i < framePixels; i++) out[i * 3 + c] = src[c * framePixels + i];
-        bytes = out.buffer;
-      }
-      frames.push(asSamples(bytes));
-    }
-    return { ...base, frames, planar: 0, raw: false,
-             pi: (kind === 'j2k' && spp === 3) ? 'RGB' : pi };
-  }
-
-  // Baseline / extended JPEG: browser decode is 8-bit only, so 12-bit data loses depth across the
-  // whole image (depthLoss; the caller must warn). No MONOCHROME1 inversion: these are stored values.
-  if (REDACT_JPEG_BITMAP_TS.has(ts)) {
-    const frames = [];
-    for (const frag of perFrame) {
-      let img;
-      try {
-        const bitmap = await createImageBitmap(new Blob([frag], { type: 'image/jpeg' }));
-        const c = document.createElement('canvas');
-        c.width = bitmap.width; c.height = bitmap.height;
-        const cx = c.getContext('2d');
-        if (!cx) { bitmap.close(); return { error: 'Canvas 2D context unavailable' }; }
-        cx.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        if (c.width !== cols || c.height !== rows)
-          return { error: `The JPEG is ${c.width}x${c.height} but the header says ${cols}x${rows}.` };
-        img = cx.getImageData(0, 0, c.width, c.height).data;
-      } catch (e) { return { error: `JPEG decode failed: ${e.message}` }; }
-      const o = new Uint8Array(framePixels * (spp === 3 ? 3 : 1));
-      if (spp === 3) for (let i = 0; i < framePixels; i++) { o[i*3] = img[i*4]; o[i*3+1] = img[i*4+1]; o[i*3+2] = img[i*4+2]; }
-      else for (let i = 0; i < framePixels; i++) o[i] = img[i * 4];
-      frames.push(o);
-    }
-    // The browser converted YBR to RGB, so the written photometric interpretation must say RGB.
-    return { ...base, frames, ba: 8, bs: 8, hb: 7, pr: 0, planar: 0, raw: false,
-             pi: spp === 3 ? 'RGB' : pi, depthLoss: true, bitmap: true };
-  }
+  if (ts === REDACT_RLE_TS) return storedRleFrames(perFrame, g);
+  if (REDACT_JPEG_LOSSLESS_TS.has(ts)) return storedJpegLosslessFrames(perFrame, g);
+  if (REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts)) return storedWasmFrames(ts, perFrame, g);
+  if (REDACT_JPEG_BITMAP_TS.has(ts)) return storedBitmapJpegFrames(perFrame, g);
 
   const codec = REDACT_NO_CODEC[ts] || ts || 'unknown transfer syntax';
   return { error: T('This image cannot be redacted: its pixel data uses a compression this browser cannot decode.') + ` (${codec})` };
 }
 
 // ---- Display decoder ----
+// Transfer-syntax flags for the display decoder (same syntax sets as the stored-pixel decoder).
+// dcmjs may key the transfer syntax as camelCase or plain hex.
+function previewTransferSyntax(meta) {
+  const tsEl = meta?.['00020010'] ?? meta?.TransferSyntaxUID;
+  const ts = (tsEl?.Value?.[0] ?? '').trim();
+  return {
+    ts,
+    isRaw: REDACT_RAW_TS.has(ts),
+    // JPEG Lossless (.57/.70) shares baseline JPEG's SOI marker but needs its own decoder.
+    isJpegLossless: REDACT_JPEG_LOSSLESS_TS.has(ts),
+    isJpegLs: REDACT_JPEG_LS_TS.has(ts),
+    isJ2k: REDACT_J2K_TS.has(ts),
+    // HTJ2K (Part 15) shares J2K's magic but OpenJPEG 2.x can't decode it; refuse it by name.
+    isHtj2k: ts === '1.2.840.10008.1.2.4.201' || ts === '1.2.840.10008.1.2.4.202',
+    isRle: ts === REDACT_RLE_TS,
+    isBigEndian: ts === '1.2.840.10008.1.2.2',
+  };
+}
+
+// 'jpeg' (SOI), 'j2k' (J2K codestream or JP2 box) or null, from a buffer's first bytes.
+function sniffCodestreamMagic(buf) {
+  if (buf.byteLength < 4) return null;
+  const b = new Uint8Array(buf, 0, 4);
+  if (b[0] === 0xFF && b[1] === 0xD8) return 'jpeg';
+  if ((b[0] === 0xFF && b[1] === 0x4F) || (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x00 && b[3] === 0x0C)) return 'j2k';
+  return null;
+}
+
+// This frame's codestream. A single frame split across fragments carries its start marker (SOI/SOC)
+// only in the first fragment, so join them all.
+function previewEncapsulatedFrame(px, frames, numFrames, fi) {
+  const allFrags = encapsulatedFragments(px);
+  return (numFrames === 1 && allFrags.length > frames.length)
+    ? concatBuffers(allFrags)
+    : frames[Math.min(fi, frames.length - 1)];
+}
+
+// Regular <canvas>, not OffscreenCanvas (throws "object no longer usable" in Firefox).
+async function previewBitmapPixels(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width; canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { bitmap.close(); throw new Error('Canvas 2D context unavailable'); }
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return { imgData: ctx.getImageData(0, 0, canvas.width, canvas.height), w: canvas.width, h: canvas.height };
+}
+
+// Browser-decoded bitmaps are already RGB; only MONOCHROME1 inversion remains.
+function previewFromBitmap({ imgData, w, h }, isMono1, numFrames) {
+  const out = new Uint8ClampedArray(imgData.data.buffer.slice(0));
+  if (isMono1) {
+    for (let i = 0; i < out.length; i += 4) {
+      out[i] = 255 - out[i]; out[i + 1] = 255 - out[i + 1]; out[i + 2] = 255 - out[i + 2];
+    }
+  }
+  return { pixels: out, rows: h, cols: w, numFrames };
+}
+
+// SOI-marked frame. Lossless and JPEG-LS yield raw-layout bytes for the shared uncompressed path;
+// baseline decodes in the browser. Returns { done } (the final result) or { bytes, planar }.
+async function previewDecodeJpegFamily(buf, tsi, img) {
+  const { rows, cols, ba, spp, numFrames } = img;
+  // JPEG Lossless (1.2.840.10008.1.2.4.57 / .70)
+  if (tsi.isJpegLossless) {
+    try {
+      const LosslessDecoder = await loadJpegLossless();
+      const decoder = new LosslessDecoder();
+      // Output is interleaved raw samples, so route it through the raw path (handles colour too).
+      const decoded = decoder.decode(buf, 0, buf.byteLength, ba === 16 ? 2 : 1);
+      return { bytes: decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.byteLength), planar: null };
+    } catch (e) {
+      return { done: { error: `JPEG Lossless decode failed: ${e.message}`, numFrames } };
+    }
+  }
+  // JPEG-LS (1.2.840.10008.1.2.4.80 / .81). Its FF D8 FF F7 start put it in jpegFrames.
+  if (tsi.isJpegLs) {
+    const label = T('JPEG-LS decode failed');
+    let dec;
+    try { dec = await wasmDecodeFrame('jls', buf); }
+    catch (e) { return { done: { error: `${label}: ${e.message}`, numFrames } }; }
+    const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
+    if (bad) return { done: { error: `${label}: ${bad}`, numFrames } };
+    return { bytes: dec.bytes, planar: dec.planar };
+  }
+  // Baseline / extended JPEG: browser-native decode
+  try {
+    return { done: previewFromBitmap(await previewBitmapPixels(new Blob([buf], { type: 'image/jpeg' })), img.isMono1, numFrames) };
+  } catch (e) {
+    return { done: { error: `JPEG decode failed: ${e.message}`, numFrames } };
+  }
+}
+
+// JPEG 2000 frame. Returns { done } (an error result) or { bytes, rgb }.
+async function previewDecodeJ2k(buf, img) {
+  const { rows, cols, ba, spp, numFrames } = img;
+  const label = T('JPEG 2000 decode failed');
+  if (!buf) return { done: { error: `${label}: no pixel fragment for this frame`, numFrames } };
+  let dec;
+  try { dec = await wasmDecodeFrame('j2k', buf); }
+  catch (e) { return { done: { error: `${label}: ${e.message}`, numFrames } }; }
+  const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
+  if (bad) return { done: { error: `${label}: ${bad}`, numFrames } };
+  // OpenJPEG undoes YBR_RCT/YBR_ICT and returns interleaved RGB.
+  return { bytes: dec.bytes, rgb: dec.info.componentCount === 3 };
+}
+
+// RLE Lossless frame, decoded to raw layout. Returns { done } (an error result) or { bytes }.
+function previewDecodeRle(px, img) {
+  const { fi, framePixels, spp, ba, numFrames } = img;
+  const frags = encapsulatedFragments(px);
+  const frag = frags[Math.min(fi, frags.length - 1)];
+  if (!frag) return { done: { error: 'RLE Lossless: no pixel fragment for this frame', numFrames } };
+  try {
+    return { bytes: rleToRaw(frag, framePixels, spp, Math.ceil(ba / 8)) };
+  } catch (e) {
+    return { done: { error: `RLE decode failed: ${e.message}`, numFrames } };
+  }
+}
+
+// This frame's bytes as an ArrayBuffer: codec output, or its slice of single-value raw Pixel Data.
+// null if Pixel Data holds no usable buffer.
+function previewFrameBuffer(px, preDecoded, img) {
+  let pxBuf = preDecoded || px.Value[0];
+  if (ArrayBuffer.isView(pxBuf)) pxBuf = pxBuf.buffer.slice(pxBuf.byteOffset, pxBuf.byteOffset + pxBuf.byteLength);
+  if (!(pxBuf instanceof ArrayBuffer)) return null;
+  if (!preDecoded && img.numFrames > 1 && img.fi > 0 && px.Value.length === 1) {
+    pxBuf = pxBuf.slice(img.fi * img.frameByteSize, (img.fi + 1) * img.frameByteSize);
+  }
+  return pxBuf;
+}
+
+// Copy of buf with every 16-bit sample byte-swapped (big endian to little endian).
+function swapBytes16Copy(buf) {
+  const src = new Uint8Array(buf);
+  const dst = new Uint8Array(src.length);
+  for (let i = 0; i + 1 < src.length; i += 2) { dst[i] = src[i + 1]; dst[i + 1] = src[i]; }
+  return dst.buffer;
+}
+
+// PALETTE COLOR: one index per pixel into three LUTs
+function previewPaletteRGBA(d, pxBuf, img, isBigEndian) {
+  const { ba, framePixels, rows, cols, numFrames } = img;
+  const r = readPaletteLut(d, '00281101', '00281201', isBigEndian);
+  const g = readPaletteLut(d, '00281102', '00281202', isBigEndian);
+  const b = readPaletteLut(d, '00281103', '00281203', isBigEndian);
+  if (!r || !g || !b) return { error: 'PALETTE COLOR without a readable lookup table', numFrames };
+  const idx = ba === 16 ? new Uint16Array(pxBuf) : new Uint8Array(pxBuf);
+  const out = new Uint8ClampedArray(framePixels * 4);
+  // Out-of-range indices clamp to the first/last entry (PS3.3 C.7.6.3.1.5).
+  const pick = (t, v) => { const i = v - t.first; return t.lut[i < 0 ? 0 : i >= t.count ? t.count - 1 : i]; };
+  for (let i = 0; i < framePixels; i++) {
+    const v = idx[i], p = i * 4;
+    out[p] = pick(r, v); out[p+1] = pick(g, v); out[p+2] = pick(b, v); out[p+3] = 255;
+  }
+  return { pixels: out, rows, cols, numFrames };
+}
+
+// RGB / YBR_FULL samples to RGBA. codec = { rgb, planar } from a codec that already decoded the frame.
+function previewColorRGBA(pxBuf, img, codec) {
+  const { pi, isYBR, framePixels, pc, rows, cols, numFrames } = img;
+  // Raw subsampled YBR needs chroma upsampling (unsupported); codec-converted RGB passes.
+  if (isYBR && !codec.rgb && !/^YBR_FULL$/i.test(pi)) {
+    return { error: `${pi} is only supported inside a compressed transfer syntax`, numFrames };
+  }
+  const raw = new Uint8Array(pxBuf);
+  const out = new Uint8ClampedArray(framePixels * 4);
+  // Don't convert YBR_FULL twice if the codec already did.
+  const ycc = /^YBR_FULL$/i.test(pi) && !codec.rgb;
+  // ?? not ||: a codec's 0 (interleaved) must override the file's Planar Configuration 1.
+  const pcEff = codec.planar ?? pc;
+  for (let i = 0; i < framePixels; i++) {
+    // Planar Configuration 1 = one whole plane per channel.
+    const s0 = pcEff === 1 ? raw[i]                  : raw[i * 3];
+    const s1 = pcEff === 1 ? raw[framePixels + i]    : raw[i * 3 + 1];
+    const s2 = pcEff === 1 ? raw[framePixels * 2 + i] : raw[i * 3 + 2];
+    const p = i * 4;
+    if (ycc) {
+      // Full-range YCbCr to RGB (PS3.3 C.7.6.3.1.2); Uint8ClampedArray clips.
+      const cb = s1 - 128, cr = s2 - 128;
+      out[p]     = s0 + 1.402 * cr;
+      out[p + 1] = s0 - 0.344136 * cb - 0.714136 * cr;
+      out[p + 2] = s0 + 1.772 * cb;
+    } else {
+      out[p] = s0; out[p + 1] = s1; out[p + 2] = s2;
+    }
+    out[p + 3] = 255;
+  }
+  return { pixels: out, rows, cols, numFrames };
+}
+
+// Monochrome windowing. rawFloats are rescaled output units (same scale as the WL sliders) and are
+// returned for caching: { pixels, rawFloats, mn, mx }.
+function previewMonochromeWindow(data, img, slope, inter, wcEff, wwEff) {
+  const { ba, bs, hb, pr, framePixels, isMono1 } = img;
+  const mask  = bs < 16 ? (1 << bs) - 1 : 0xFFFF;
+  const shift = hb - bs + 1;
+  const raw   = new Float32Array(framePixels);
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < framePixels; i++) {
+    let v = data[i];
+    if (ba === 16) {
+      if (pr) {
+        // Int16Array is already signed: shift arithmetically, and re-sign only when bs < 16
+        // (at bs 16 it would sign-extend twice).
+        if (shift > 0) v >>= shift;
+        if (bs < 16) {
+          v &= mask;
+          const sb = 1 << (bs - 1);
+          if (v & sb) v -= sb << 1;
+        }
+      } else {
+        v >>>= 0;
+        if (shift > 0) v >>>= shift;
+        if (bs < 16) v &= mask;
+      }
+    }
+    if (slope !== 1 || inter !== 0) v = v * slope + inter;
+    raw[i] = v;
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+  }
+  const pixels = applyWindowToFloats(raw, framePixels, wcEff, wwEff, mn, mx, isMono1);
+  return { pixels, rawFloats: raw, mn, mx };
+}
+
+// Rescale Slope/Intercept to output units (e.g. HU) before windowing, since Window Center/Width
+// are in those units. Applied only in decodeDicomPixels so every view agrees.
+function readRescale(d) {
+  const slopeTag = parseFloat(lookupTag(d, '00281053')?.Value?.[0]);
+  const interTag = parseFloat(lookupTag(d, '00281052')?.Value?.[0]);
+  return { slope: isFinite(slopeTag) ? slopeTag : 1, inter: isFinite(interTag) ? interTag : 0 };
+}
+
+// Photometric Interpretation classes the display decoder can draw.
+function classifyPhotometric(pi, spp) {
+  // Which YBR variants can be converted depends on the transfer syntax; decided in previewColorRGBA.
+  const isYBR = /^YBR_/i.test(pi || '') && spp === 3;
+  return {
+    isMono1: /^MONOCHROME1$/i.test(pi || ''),
+    isMonochrome: /^MONOCHROME[12]$/i.test(pi || ''),
+    isPalette: /^PALETTE\s*COLOR$/i.test(pi || ''),
+    isYBR,
+    isRGB: (/^RGB$/i.test(pi || '') && spp === 3) || isYBR,
+  };
+}
+
+// Error result for compressed data no codec decoded, else null. An undeclared J2K/JP2 is reported rather
+// than guessed at; otherwise report unsupported rather than draw noise, except that a buffer of exactly
+// raw size means the syntax is mislabelled and the data is raw.
+function previewUndecodedError(pxBuf, magic, tsi, codec, img) {
+  const { frameByteSize, numFrames } = img;
+  if (magic === 'j2k') {
+    return { error: `${tsi.ts || 'This file'} contains a JPEG 2000 codestream its transfer syntax does not declare`, numFrames };
+  }
+  if (!tsi.isRaw && !codec.bytes &&
+      pxBuf.byteLength !== frameByteSize && pxBuf.byteLength !== frameByteSize * numFrames) {
+    return { error: `${tsi.ts || 'This'} is a compressed transfer syntax this viewer cannot decode`, numFrames };
+  }
+  return null;
+}
+
 // One frame as display RGBA. opts: { meta, wcOvr, wwOvr }.
 // Returns {pixels, rows, cols, numFrames, ...}, {error, numFrames}, or null.
 async function decodeDicomPixels(d, frameIndex = 0, { meta = null, wcOvr, wwOvr } = {}) {
-  const rows = lookupTag(d, '00280010')?.Value?.[0];
-  const cols = lookupTag(d, '00280011')?.Value?.[0];
-  const spp  = lookupTag(d, '00280002')?.Value?.[0] || 1;
-  const pi   = lookupTag(d, '00280004')?.Value?.[0];
-  const ba   = lookupTag(d, '00280100')?.Value?.[0] || 16;
-  const bs   = lookupTag(d, '00280101')?.Value?.[0] || ba;
-  const hb   = lookupTag(d, '00280102')?.Value?.[0] || bs - 1;
-  const pr   = lookupTag(d, '00280103')?.Value?.[0] || 0;
-  const pc   = lookupTag(d, '00280006')?.Value?.[0] || 0;
+  const { rows, cols, spp, pi, ba, bs, hb, pr, planar: pc, numFrames } = readPixelModuleAttrs(d);
   const wc   = lookupTag(d, '00281050')?.Value?.[0];
   const ww   = lookupTag(d, '00281051')?.Value?.[0];
-  const numFrames = parseInt(lookupTag(d, '00280008')?.Value?.[0] || '1') || 1;
-
-  // Rescale Slope/Intercept to output units (e.g. HU) before windowing, since Window Center/Width
-  // are in those units. Done only here so every view agrees.
-  const slopeTag = parseFloat(lookupTag(d, '00281053')?.Value?.[0]);
-  const interTag = parseFloat(lookupTag(d, '00281052')?.Value?.[0]);
-  const slope = isFinite(slopeTag) ? slopeTag : 1;
-  const inter = isFinite(interTag) ? interTag : 0;
-
-  const isMono1 = /^MONOCHROME1$/i.test(pi || '');
-  const isMonochrome = /^MONOCHROME[12]$/i.test(pi || '');
-  const isPalette = /^PALETTE\s*COLOR$/i.test(pi || '');
-  // Which YBR variants can be converted depends on the transfer syntax; decided below.
-  const isYBR = /^YBR_/i.test(pi || '') && spp === 3;
-  const isRGB = (/^RGB$/i.test(pi || '') && spp === 3) || isYBR;
+  const { slope, inter } = readRescale(d);
+  const { isMono1, isMonochrome, isPalette, isYBR, isRGB } = classifyPhotometric(pi, spp);
   if (!rows || !cols || (!isMonochrome && !isRGB && !isPalette)) return null;
 
   const px = lookupTag(d, '7fe00010');
   if (!px) return null;
-  if (typeof px.InlineBinary === 'string' && !px.Value?.[0]) {
-    try { px.Value = [b64ToAB(px.InlineBinary)]; } catch (e) {}
-  }
+  inflateInlinePixelData(px);
   if (!px.Value?.length) return null;
 
   const fi = Math.max(0, Math.min(frameIndex, numFrames - 1));
   const framePixels = rows * cols;
-  const bytesPerPixel = Math.ceil(ba / 8) * spp;
-  const frameByteSize = framePixels * bytesPerPixel;
-
-  // dcmjs may key the transfer syntax as camelCase or plain hex
-  const tsEl = meta?.['00020010'] ?? meta?.TransferSyntaxUID;
-  const ts = (tsEl?.Value?.[0] ?? '').trim();
-
-  const UNCOMPRESSED_TS = new Set([
-    '', '1.2.840.10008.1.2', '1.2.840.10008.1.2.1',
-    '1.2.840.10008.1.2.1.99', '1.2.840.10008.1.2.2',
-  ]);
-  // JPEG Lossless shares baseline JPEG's SOI marker but needs its own decoder
-  const JPEG_LOSSLESS_TS = new Set([
-    '1.2.840.10008.1.2.4.57',  // JPEG Lossless, Non-Hierarchical
-    '1.2.840.10008.1.2.4.70',  // JPEG Lossless, Non-Hierarchical, First-Order Prediction (most common)
-  ]);
-  const JPEG_LS_TS = new Set([
-    '1.2.840.10008.1.2.4.80',  // JPEG-LS Lossless
-    '1.2.840.10008.1.2.4.81',  // JPEG-LS Near-Lossless
-  ]);
-  const RLE_TS = '1.2.840.10008.1.2.5';
-  const isRawTS = UNCOMPRESSED_TS.has(ts);
-  const isJ2kTS = ts === '1.2.840.10008.1.2.4.90' || ts === '1.2.840.10008.1.2.4.91';
-  // HTJ2K (Part 15) shares J2K's magic but OpenJPEG 2.x can't decode it; refuse it by name.
-  const isHtj2kTS = ts === '1.2.840.10008.1.2.4.201' || ts === '1.2.840.10008.1.2.4.202';
+  const frameByteSize = framePixels * Math.ceil(ba / 8) * spp;
+  // Frame geometry and pixel-module values shared by the helpers above.
+  const img = { rows, cols, spp, pi, ba, bs, hb, pr, pc, numFrames, fi, framePixels, frameByteSize, isMono1, isYBR };
+  const tsi = previewTransferSyntax(meta);
 
   // Scan for encapsulated frames only when compressed: raw data starting 0xFF 0xD8 would look like JPEG.
-  const { jpeg: jpegFrames, j2k: j2kFrames } = !isRawTS
+  const { jpeg: jpegFrames, j2k: j2kFrames } = !tsi.isRaw
     ? collectEncapsulatedFrames(px)
     : { jpeg: [], j2k: [] };
 
-  // Regular <canvas>, not OffscreenCanvas (throws "object no longer usable" in Firefox).
-  async function bitmapToPixels(blob) {
-    const bitmap = await createImageBitmap(blob);
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width; canvas.height = bitmap.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { bitmap.close(); throw new Error('Canvas 2D context unavailable'); }
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    return { imgData: ctx.getImageData(0, 0, canvas.width, canvas.height), w: canvas.width, h: canvas.height };
-  }
-
-  // Browser-decoded bitmaps are already RGB; only MONOCHROME1 inversion remains.
-  function fromBitmap({ imgData, w, h }) {
-    const out = new Uint8ClampedArray(imgData.data.buffer.slice(0));
-    if (isMono1) {
-      for (let i = 0; i < out.length; i += 4) {
-        out[i] = 255 - out[i]; out[i + 1] = 255 - out[i + 1]; out[i + 2] = 255 - out[i + 2];
-      }
-    }
-    return { pixels: out, rows: h, cols: w, numFrames };
-  }
-
-  // Monochrome windowing. rawFloats are rescaled output units (same scale as the WL sliders) and are
-  // returned for caching: { pixels, rawFloats, mn, mx }.
-  function applyMonochromeWindowing(data) {
-    const mask  = bs < 16 ? (1 << bs) - 1 : 0xFFFF;
-    const shift = hb - bs + 1;
-    const raw   = new Float32Array(framePixels);
-    let mn = Infinity, mx = -Infinity;
-    for (let i = 0; i < framePixels; i++) {
-      let v = data[i];
-      if (ba === 16) {
-        if (pr) {
-          // Int16Array is already signed: shift arithmetically, and re-sign only when bs < 16
-          // (at bs 16 it would sign-extend twice).
-          if (shift > 0) v >>= shift;
-          if (bs < 16) {
-            v &= mask;
-            const sb = 1 << (bs - 1);
-            if (v & sb) v -= sb << 1;
-          }
-        } else {
-          v >>>= 0;
-          if (shift > 0) v >>>= shift;
-          if (bs < 16) v &= mask;
-        }
-      }
-      if (slope !== 1 || inter !== 0) v = v * slope + inter;
-      raw[i] = v;
-      if (v < mn) mn = v;
-      if (v > mx) mx = v;
-    }
-    const pixels = applyWindowToFloats(raw, framePixels, wcOvr ?? wc, wwOvr ?? ww, mn, mx, isMono1);
-    return { pixels, rawFloats: raw, mn, mx };
-  }
-
-  // Codecs that yield raw-layout bytes set this and continue through the shared uncompressed path.
-  let preDecoded = null;
-  // preDecodedRGB: codec already did the colour transform. preDecodedPlanar: codec's sample layout,
-  // which overrides (0028,0006).
-  let preDecodedRGB = false;
-  let preDecodedPlanar = null;
+  // Codecs that yield raw-layout bytes fill codec.bytes and continue through the shared uncompressed
+  // path. rgb: codec already did the colour transform. planar: codec's sample layout, which overrides
+  // (0028,0006).
+  const codec = { bytes: null, rgb: false, planar: null };
 
   if (jpegFrames.length) {
-    // A single frame split across fragments: only the first has SOI, so join them all.
-    const allFrags = encapsulatedFragments(px);
-    const buf = (numFrames === 1 && allFrags.length > jpegFrames.length)
-      ? concatBuffers(allFrags)
-      : jpegFrames[Math.min(fi, jpegFrames.length - 1)];
-
-    // JPEG Lossless (1.2.840.10008.1.2.4.57 / .70)
-    if (JPEG_LOSSLESS_TS.has(ts)) {
-      try {
-        const LosslessDecoder = await loadJpegLossless();
-        const decoder = new LosslessDecoder();
-        // Output is interleaved raw samples, so route it through the raw path (handles colour too).
-        const decoded = decoder.decode(buf, 0, buf.byteLength, ba === 16 ? 2 : 1);
-        preDecoded = decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.byteLength);
-      } catch (e) {
-        return { error: `JPEG Lossless decode failed: ${e.message}`, numFrames };
-      }
-    } else if (JPEG_LS_TS.has(ts)) {
-
-      // JPEG-LS (1.2.840.10008.1.2.4.80 / .81). Its FF D8 FF F7 start put it in jpegFrames.
-      const label = T('JPEG-LS decode failed');
-      let dec;
-      try { dec = await wasmDecodeFrame('jls', buf); }
-      catch (e) { return { error: `${label}: ${e.message}`, numFrames }; }
-      const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
-      if (bad) return { error: `${label}: ${bad}`, numFrames };
-      preDecoded = dec.bytes;
-      preDecodedPlanar = dec.planar;
-
-    } else {
-
-      // Baseline / extended JPEG: browser-native decode
-      try {
-        return fromBitmap(await bitmapToPixels(new Blob([buf], { type: 'image/jpeg' })));
-      } catch (e) {
-        return { error: `JPEG decode failed: ${e.message}`, numFrames };
-      }
-    }
+    const r = await previewDecodeJpegFamily(previewEncapsulatedFrame(px, jpegFrames, numFrames, fi), tsi, img);
+    if (r.done) return r.done;
+    codec.bytes = r.bytes;
+    codec.planar = r.planar;
   }
 
   // Before the J2K branch: HTJ2K has the same FF 4F FF 51 magic and is already in j2kFrames.
-  if (isHtj2kTS) {
+  if (tsi.isHtj2k) {
     return { error: T('High-Throughput JPEG 2000 (1.2.840.10008.1.2.4.201/202) is not supported'), numFrames };
   }
 
-  if (j2kFrames.length || isJ2kTS) {
-    const label = T('JPEG 2000 decode failed');
-    // Same split-frame rule as JPEG (only the first fragment has SOC).
-    const allFrags = encapsulatedFragments(px);
-    const buf = (numFrames === 1 && allFrags.length > j2kFrames.length)
-      ? concatBuffers(allFrags)
-      : j2kFrames[Math.min(fi, j2kFrames.length - 1)];
-    if (!buf) return { error: `${label}: no pixel fragment for this frame`, numFrames };
-    let dec;
-    try { dec = await wasmDecodeFrame('j2k', buf); }
-    catch (e) { return { error: `${label}: ${e.message}`, numFrames }; }
-    const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
-    if (bad) return { error: `${label}: ${bad}`, numFrames };
-    preDecoded = dec.bytes;
-    // OpenJPEG undoes YBR_RCT/YBR_ICT and returns interleaved RGB.
-    preDecodedRGB = dec.info.componentCount === 3;
-    preDecodedPlanar = 0;
+  if (j2kFrames.length || tsi.isJ2k) {
+    const r = await previewDecodeJ2k(previewEncapsulatedFrame(px, j2kFrames, numFrames, fi), img);
+    if (r.done) return r.done;
+    codec.bytes = r.bytes;
+    codec.rgb = r.rgb;
+    codec.planar = 0;
   }
 
-  // RLE Lossless: decoded to raw layout, then shares the uncompressed path.
-  if (ts === RLE_TS) {
-    const frags = encapsulatedFragments(px);
-    const frag = frags[Math.min(fi, frags.length - 1)];
-    if (!frag) return { error: 'RLE Lossless: no pixel fragment for this frame', numFrames };
-    try {
-      preDecoded = rleToRaw(frag, framePixels, spp, Math.ceil(ba / 8));
-    } catch (e) {
-      return { error: `RLE decode failed: ${e.message}`, numFrames };
-    }
+  if (tsi.isRle) {
+    const r = previewDecodeRle(px, img);
+    if (r.done) return r.done;
+    codec.bytes = r.bytes;
   }
 
   // Raw (uncompressed) pixel data
-  const isBigEndian = ts === '1.2.840.10008.1.2.2';
-
-  let pxBuf = preDecoded || px.Value[0];
-  if (ArrayBuffer.isView(pxBuf)) pxBuf = pxBuf.buffer.slice(pxBuf.byteOffset, pxBuf.byteOffset + pxBuf.byteLength);
-  if (!(pxBuf instanceof ArrayBuffer)) return null;
-
-  if (!preDecoded && numFrames > 1 && fi > 0 && px.Value.length === 1) {
-    pxBuf = pxBuf.slice(fi * frameByteSize, (fi + 1) * frameByteSize);
-  }
+  let pxBuf = previewFrameBuffer(px, codec.bytes, img);
+  if (!pxBuf) return null;
 
   // Mislabelled transfer syntax: probe for an undeclared JPEG
-  if (!isRawTS && !preDecoded && pxBuf.byteLength >= 4) {
-    const probe = new Uint8Array(pxBuf, 0, 4);
-    if (probe[0] === 0xFF && probe[1] === 0xD8) {
-      try {
-        return fromBitmap(await bitmapToPixels(new Blob([pxBuf], { type: 'image/jpeg' })));
-      } catch (_) {}
-    }
-    // Undeclared J2K/JP2: report it rather than guess at a file that misstates its encoding.
-    if ((probe[0] === 0xFF && probe[1] === 0x4F) || (probe[0] === 0x00 && probe[1] === 0x00 && probe[2] === 0x00 && probe[3] === 0x0C)) {
-      return { error: `${ts || 'This file'} contains a JPEG 2000 codestream its transfer syntax does not declare`, numFrames };
-    }
+  const magic = (!tsi.isRaw && !codec.bytes) ? sniffCodestreamMagic(pxBuf) : null;
+  if (magic === 'jpeg') {
+    try {
+      return previewFromBitmap(await previewBitmapPixels(new Blob([pxBuf], { type: 'image/jpeg' })), isMono1, numFrames);
+    } catch (_) {}
   }
+  const undecoded = previewUndecodedError(pxBuf, magic, tsi, codec, img);
+  if (undecoded) return undecoded;
 
-  // Compressed and not decoded: report unsupported rather than draw noise. Exception: a buffer of exactly
-  // raw size means the syntax is mislabelled and the data is raw.
-  if (!isRawTS && !preDecoded &&
-      pxBuf.byteLength !== frameByteSize && pxBuf.byteLength !== frameByteSize * numFrames) {
-    return { error: `${ts || 'This'} is a compressed transfer syntax this viewer cannot decode`, numFrames };
-  }
+  if (tsi.isBigEndian && ba === 16) pxBuf = swapBytes16Copy(pxBuf);
 
-  if (isBigEndian && ba === 16) {
-    const src = new Uint8Array(pxBuf);
-    const dst = new Uint8Array(src.length);
-    for (let i = 0; i + 1 < src.length; i += 2) { dst[i] = src[i + 1]; dst[i + 1] = src[i]; }
-    pxBuf = dst.buffer;
-  }
-
-  // PALETTE COLOR: one index per pixel into three LUTs
-  if (isPalette) {
-    const r = readPaletteLut(d, '00281101', '00281201', isBigEndian);
-    const g = readPaletteLut(d, '00281102', '00281202', isBigEndian);
-    const b = readPaletteLut(d, '00281103', '00281203', isBigEndian);
-    if (!r || !g || !b) return { error: 'PALETTE COLOR without a readable lookup table', numFrames };
-    const idx = ba === 16 ? new Uint16Array(pxBuf) : new Uint8Array(pxBuf);
-    const out = new Uint8ClampedArray(framePixels * 4);
-    // Out-of-range indices clamp to the first/last entry (PS3.3 C.7.6.3.1.5).
-    const pick = (t, v) => { const i = v - t.first; return t.lut[i < 0 ? 0 : i >= t.count ? t.count - 1 : i]; };
-    for (let i = 0; i < framePixels; i++) {
-      const v = idx[i], p = i * 4;
-      out[p] = pick(r, v); out[p+1] = pick(g, v); out[p+2] = pick(b, v); out[p+3] = 255;
-    }
-    return { pixels: out, rows, cols, numFrames };
-  }
-
-  if (isRGB) {
-    // Raw subsampled YBR needs chroma upsampling (unsupported); codec-converted RGB passes.
-    if (isYBR && !preDecodedRGB && !/^YBR_FULL$/i.test(pi)) {
-      return { error: `${pi} is only supported inside a compressed transfer syntax`, numFrames };
-    }
-    const raw = new Uint8Array(pxBuf);
-    const out = new Uint8ClampedArray(framePixels * 4);
-    // Don't convert YBR_FULL twice if the codec already did.
-    const ycc = /^YBR_FULL$/i.test(pi) && !preDecodedRGB;
-    // ?? not ||: a codec's 0 (interleaved) must override the file's Planar Configuration 1.
-    const pcEff = preDecodedPlanar ?? pc;
-    for (let i = 0; i < framePixels; i++) {
-      // Planar Configuration 1 = one whole plane per channel.
-      const s0 = pcEff === 1 ? raw[i]                  : raw[i * 3];
-      const s1 = pcEff === 1 ? raw[framePixels + i]    : raw[i * 3 + 1];
-      const s2 = pcEff === 1 ? raw[framePixels * 2 + i] : raw[i * 3 + 2];
-      const p = i * 4;
-      if (ycc) {
-        // Full-range YCbCr to RGB (PS3.3 C.7.6.3.1.2); Uint8ClampedArray clips.
-        const cb = s1 - 128, cr = s2 - 128;
-        out[p]     = s0 + 1.402 * cr;
-        out[p + 1] = s0 - 0.344136 * cb - 0.714136 * cr;
-        out[p + 2] = s0 + 1.772 * cb;
-      } else {
-        out[p] = s0; out[p + 1] = s1; out[p + 2] = s2;
-      }
-      out[p + 3] = 255;
-    }
-    return { pixels: out, rows, cols, numFrames };
-  }
+  if (isPalette) return previewPaletteRGBA(d, pxBuf, img, tsi.isBigEndian);
+  if (isRGB) return previewColorRGBA(pxBuf, img, codec);
 
   const data = ba === 16 ? new (pr ? Int16Array : Uint16Array)(pxBuf) :
                ba === 8  ? new Uint8Array(pxBuf) : null;
   if (!data) return null;
 
-  const { pixels, rawFloats, mn, mx } = applyMonochromeWindowing(data);
+  const { pixels, rawFloats, mn, mx } = previewMonochromeWindow(data, img, slope, inter, wcOvr ?? wc, wwOvr ?? ww);
   return { pixels, rawFloats, mn, mx, wcTag: wc, wwTag: ww, invert: isMono1, rows, cols, numFrames };
 }
 

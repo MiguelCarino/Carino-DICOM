@@ -28,6 +28,18 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   CHANGELOG.
 - Dashboard comments trimmed to the why (security, standards, ordering
   constraints); history lives in git.
+- Dashboard cleanup, no visible change: top-level code in `js/*.js` lost the
+  two-space indent left by the removed IIFE; unused code is gone (the
+  never-applied `.as-modal` pop-out styles, the `<dialog>`/action-button/
+  panel-head rules, two always-hidden ✕ buttons, the no-op `reflowActive()`
+  and the uncalled `seesPhi()`); static inline `style=""` attributes in
+  `index.html` are classes in `styles.css`.
+- Dashboard: the long functions are split into named top-level helpers, same
+  behaviour: `renderStatus()` (one renderer per service card), `loadConfig()` /
+  `collectConfig()` (a `fill*Form` / `collect*Form` pair per section) and
+  `personCard()`.
+- Bundled editor re-synced to upstream's function split and unused-CSS /
+  inline-style cleanup; see the upstream CHANGELOG.
 
 ### Fixed
 - Input during page load is held back until every script has run

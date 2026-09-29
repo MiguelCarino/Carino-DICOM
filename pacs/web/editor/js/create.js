@@ -105,7 +105,7 @@ function renderCreateGrid() {
       <div class="img-empty">
         <div class="img-empty-icon">🖼</div>
         <span>${T('Drop images here or click "+ Add Images"')}</span>
-        <span style="font-size:11px">${T('PNG · JPEG · BMP · WebP supported')}</span>
+        <span class="img-empty-hint">${T('PNG · JPEG · BMP · WebP supported')}</span>
       </div>`;
     return;
   }

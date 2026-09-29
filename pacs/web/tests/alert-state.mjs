@@ -116,18 +116,18 @@ function region(label, anchor, kind = "block") {
 }
 
 const DECLS = [
-  region("lastCreatedSeq", /^ {2}let lastCreatedSeq = .*$/m, "line"),
-  region("lastOrderCounts", /^ {2}let lastOrderCounts = .*$/m, "line"),
-  region("arrival timers", /^ {2}let arrivalClear = .*$/m, "line"),
-  region("hiddenArrivals", /^ {2}let hiddenArrivals = 0;$/m, "line"),
-  region("audio context state", /^ {2}let actx = null, audioFailed = false, beepFreeAt = 0;$/m, "line"),
-  region("monoNow", /^ {2}const monoNow = .*$/m, "line"),
-  region("beepDueBy", /^ {2}let beepDueBy = 0;$/m, "line"),
-  region("beepOwed", /^ {2}let beepOwed = 0;$/m, "line"),
-  region("armListening", /^ {2}let armListening = false;$/m, "line"),
-  region("BEEP_KEY", /^ {2}const BEEP_KEY = .*$/m, "line"),
-  region("statusReq", /^ {2}let statusReq = 0;.*$/m, "line"),
-  region("statusSeen", /^ {2}let statusSeen = 0;.*$/m, "line"),
+  region("lastCreatedSeq", /^let lastCreatedSeq = .*$/m, "line"),
+  region("lastOrderCounts", /^let lastOrderCounts = .*$/m, "line"),
+  region("arrival timers", /^let arrivalClear = .*$/m, "line"),
+  region("hiddenArrivals", /^let hiddenArrivals = 0;$/m, "line"),
+  region("audio context state", /^let actx = null, audioFailed = false, beepFreeAt = 0;$/m, "line"),
+  region("monoNow", /^const monoNow = .*$/m, "line"),
+  region("beepDueBy", /^let beepDueBy = 0;$/m, "line"),
+  region("beepOwed", /^let beepOwed = 0;$/m, "line"),
+  region("armListening", /^let armListening = false;$/m, "line"),
+  region("BEEP_KEY", /^const BEEP_KEY = .*$/m, "line"),
+  region("statusReq", /^let statusReq = 0;.*$/m, "line"),
+  region("statusSeen", /^let statusSeen = 0;.*$/m, "line"),
 ];
 
 /* The arrival decision itself is not a function — it is a stretch of
@@ -135,24 +135,24 @@ const DECLS = [
    renderStatus of this file's own, which does nothing else but count paints.
    Everything it reads (`rs`) and everything it calls (onOrderArrived) is
    supplied around it. */
-const ARRIVAL = region("the created_seq arrival decision", /^ {4}const seq = rs\.created_seq;$/m, "block");
+const ARRIVAL = region("the created_seq arrival decision", /^ {2}const seq = rs\.created_seq;$/m, "block");
 
 const FUNCS = [
-  region("announceArrival", /^ {2}function announceArrival\(n\) \{/m),
-  region("onOrderArrived", /^ {2}function onOrderArrived\(n\) \{/m),
-  region("visibilitychange", /^ {2}document\.addEventListener\("visibilitychange"/m),
-  region("audioReady", /^ {2}function audioReady\(\)/m),
-  region("armAudio", /^ {2}function armAudio\(\) \{/m),
-  region("listenForGesture", /^ {2}function listenForGesture\(on\) \{/m),
-  region("afterArm", /^ {2}function afterArm\(\) \{/m),
-  region("beepOn", /^ {2}function beepOn\(\) \{/m),
-  region("setBeepOn", /^ {2}function setBeepOn\(on\) \{/m),
-  region("beepNewOrder", /^ {2}function beepNewOrder\(\) \{/m),
-  region("emitBeep", /^ {2}function emitBeep\(\) \{/m),
-  region("dropSessionAlerts", /^ {2}function dropSessionAlerts\(\) \{/m),
-  region("showAuthGate", /^ {2}function showAuthGate\(\) \{/m),
-  region("stopPollers", /^ {2}function stopPollers\(\) \{/m),
-  region("pollStatus", /^ {2}async function pollStatus\(\) \{/m),
+  region("announceArrival", /^function announceArrival\(n\) \{/m),
+  region("onOrderArrived", /^function onOrderArrived\(n\) \{/m),
+  region("visibilitychange", /^document\.addEventListener\("visibilitychange"/m),
+  region("audioReady", /^function audioReady\(\)/m),
+  region("armAudio", /^function armAudio\(\) \{/m),
+  region("listenForGesture", /^function listenForGesture\(on\) \{/m),
+  region("afterArm", /^function afterArm\(\) \{/m),
+  region("beepOn", /^function beepOn\(\) \{/m),
+  region("setBeepOn", /^function setBeepOn\(on\) \{/m),
+  region("beepNewOrder", /^function beepNewOrder\(\) \{/m),
+  region("emitBeep", /^function emitBeep\(\) \{/m),
+  region("dropSessionAlerts", /^function dropSessionAlerts\(\) \{/m),
+  region("showAuthGate", /^function showAuthGate\(\) \{/m),
+  region("stopPollers", /^function stopPollers\(\) \{/m),
+  region("pollStatus", /^async function pollStatus\(\) \{/m),
 ];
 
 if (missing.length) {

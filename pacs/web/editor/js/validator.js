@@ -183,7 +183,12 @@ const SOP_ATTRS = {
 const PHI_TAGS = new Set(PHI.map(t => t.replace(/^x/,'')));
 
 // ---- Validation engine ----
-function validateDicom(d, meta) {
+// Dataset keys are either 'xGGGGEEEE' or bare 8-hex; anything else (e.g. _vrMap) is not an element.
+const validatorIsTagKey = t => t.startsWith('x') || /^[0-9a-f]{8}$/i.test(t);
+const validatorStripX = rawTag => rawTag.startsWith('x') ? rawTag.slice(1) : rawTag;
+
+// Shared state for one validateDicom run: the dataset, the issue list and its readers.
+function makeValidatorContext(d, meta) {
   const issues = [];
   const push = (sev, tag, msg, val, fix) =>
     issues.push({ sev, tag, desc: descFor('x'+tag.toLowerCase()) || 'Unknown', msg, val: String(val ?? ''), fix });
@@ -199,10 +204,12 @@ function validateDicom(d, meta) {
     if (Array.isArray(v) && v.some(x => x instanceof ArrayBuffer || ArrayBuffer.isView(x))) return '<binary>';
     return Array.isArray(v) ? v.map(x => typeof x === 'object' ? (x?.Alphabetic ?? '') : String(x ?? '')).join('\\') : String(v);
   };
-  const getEl  = tag => getTag(d, tag);
-  const getVR  = tag => getEl(tag)?.vr || '';
+  const getEl = tag => getTag(d, tag);
+  return { d, meta, issues, push, getVal, getEl };
+}
 
-  // 1. SOP Class conformance
+// 1. SOP Class conformance: known SOP Class, then its per-IOD Type 1/2/1C attributes.
+function validateSopConformance({ push, getVal }) {
   const sopUID = getVal('00080016')?.trim();
   const sopDef = sopUID ? SOP_ATTRS[sopUID] : null;
   if (!sopUID) {
@@ -210,22 +217,23 @@ function validateDicom(d, meta) {
   } else if (!KNOWN_SOP_UIDS.has(sopUID)) {
     push('warning','00080016',`Unknown SOP Class UID — may be proprietary or private`,sopUID,null);
   }
-  if (sopDef) {
-    for (const [rawTag, type] of Object.entries(sopDef.attrs)) {
-      const tag = rawTag.startsWith('x') ? rawTag.slice(1) : rawTag;
-      const val = getVal(tag);
-      if (type === 1) {
-        if (val === null) push('error', tag, `Missing — Type 1 required for ${sopDef.name}`, '', null);
-        else if (val === '') push('error', tag, `Empty — Type 1 must have a value in ${sopDef.name}`, '', null);
-      } else if (type === 2) {
-        if (val === null) push('warning', tag, `Missing — Type 2 should be present in ${sopDef.name}`, '', null);
-      } else if (type === '1C') {
-        if (val === null) push('info', tag, `Conditionally required — verify if applicable for ${sopDef.name}`, '', null);
-      }
+  if (!sopDef) return;
+  for (const [rawTag, type] of Object.entries(sopDef.attrs)) {
+    const tag = validatorStripX(rawTag);
+    const val = getVal(tag);
+    if (type === 1) {
+      if (val === null) push('error', tag, `Missing — Type 1 required for ${sopDef.name}`, '', null);
+      else if (val === '') push('error', tag, `Empty — Type 1 must have a value in ${sopDef.name}`, '', null);
+    } else if (type === 2) {
+      if (val === null) push('warning', tag, `Missing — Type 2 should be present in ${sopDef.name}`, '', null);
+    } else if (type === '1C') {
+      if (val === null) push('info', tag, `Conditionally required — verify if applicable for ${sopDef.name}`, '', null);
     }
   }
+}
 
-  // 2. UID format validation
+// 2. UID format validation (PS3.5 §9.1: <=64 chars, digits and dots, no leading zeros).
+function validateUidFormats({ push, getVal, getEl }) {
   for (const uTag of ['00080016','00080018','0020000d','0020000e','00200052']) {
     const val = getVal(uTag);
     if (val === null || val === '') continue;
@@ -234,71 +242,78 @@ function validateDicom(d, meta) {
     if (/\.(0\d)/.test(val)) push('warning', uTag, 'UID component has leading zero (e.g. .01)', val, null);
     if (val.endsWith('.')) push('error', uTag, 'UID must not end with a dot', val, () => { getEl(uTag).Value = [val.replace(/\.$/, '')]; });
   }
-  if (sopUID && !KNOWN_SOP_UIDS.has(sopUID) && sopUID) {/* already reported */}
+}
 
-  // 3. VR format validation
-  const isTag = t => t.startsWith('x') || /^[0-9a-f]{8}$/i.test(t);
-  for (const [rawTag, el] of Object.entries(d).filter(([t]) => isTag(t))) {
-    const tag = rawTag.startsWith('x') ? rawTag.slice(1) : rawTag;
-    const vr = el.vr || '';
-    if (!vr || el.InlineBinary || isBinaryVR(vr) || vr === 'SQ') continue;
-    const vals = Array.isArray(el.Value) ? el.Value : (el.Value != null ? [el.Value] : []);
-    for (const raw of vals) {
-      const v = typeof raw === 'object' ? (raw?.Alphabetic ?? '') : String(raw ?? '');
-      const rule = VR_RULES[vr];
-      if (!rule) continue;
-      if (rule.maxLen && v.length > rule.maxLen) {
-        push('error', tag, `${vr} value exceeds max length ${rule.maxLen} (got ${v.length})`, v,
-          () => { el.Value = el.Value.map(x => { const s=typeof x==='object'?(x?.Alphabetic??''):String(x??''); return s.slice(0,rule.maxLen); }); });
-      }
-      if (rule.re && v && !rule.re.test(v.trim())) {
-        push('warning', tag, `${vr} value "${v.trim()}" does not match expected format: ${rule.hint}`, v, null);
-      }
+// 3a. One element's VR checks: max length / format, trailing whitespace, CS defined terms.
+function validateElementVr(push, tag, el, vr) {
+  const vals = Array.isArray(el.Value) ? el.Value : (el.Value != null ? [el.Value] : []);
+  for (const raw of vals) {
+    const v = typeof raw === 'object' ? (raw?.Alphabetic ?? '') : String(raw ?? '');
+    const rule = VR_RULES[vr];
+    if (!rule) continue;
+    if (rule.maxLen && v.length > rule.maxLen) {
+      push('error', tag, `${vr} value exceeds max length ${rule.maxLen} (got ${v.length})`, v,
+        () => { el.Value = el.Value.map(x => { const s=typeof x==='object'?(x?.Alphabetic??''):String(x??''); return s.slice(0,rule.maxLen); }); });
     }
-    // Trailing spaces (common issue)
-    for (const raw of vals) {
-      const v = typeof raw === 'string' ? raw : null;
-      if (v && v !== v.trimEnd()) {
-        push('info', tag, 'Value has trailing whitespace', v,
-          () => { el.Value = el.Value.map(x => typeof x === 'string' ? x.trimEnd() : x); });
-        break;
-      }
-    }
-    // CS enumerated values
-    const k = 'x' + tag.toLowerCase();
-    if (vr === 'CS' && CS_ENUMS[k]) {
-      for (const raw of vals) {
-        const v = String(raw ?? '').trim();
-        if (v && !CS_ENUMS[k].has(v)) push('warning', tag, `"${v}" is not a defined value for this CS tag`, v, null);
-      }
+    if (rule.re && v && !rule.re.test(v.trim())) {
+      push('warning', tag, `${vr} value "${v.trim()}" does not match expected format: ${rule.hint}`, v, null);
     }
   }
+  // Trailing spaces (common issue)
+  for (const raw of vals) {
+    const v = typeof raw === 'string' ? raw : null;
+    if (v && v !== v.trimEnd()) {
+      push('info', tag, 'Value has trailing whitespace', v,
+        () => { el.Value = el.Value.map(x => typeof x === 'string' ? x.trimEnd() : x); });
+      break;
+    }
+  }
+  // CS enumerated values
+  const k = 'x' + tag.toLowerCase();
+  if (vr === 'CS' && CS_ENUMS[k]) {
+    for (const raw of vals) {
+      const v = String(raw ?? '').trim();
+      if (v && !CS_ENUMS[k].has(v)) push('warning', tag, `"${v}" is not a defined value for this CS tag`, v, null);
+    }
+  }
+}
 
-  // 4. Pixel data geometry (uncompressed only)
+// 3. VR format validation over every non-binary, non-sequence element.
+function validateVrFormats({ d, push }) {
+  for (const [rawTag, el] of Object.entries(d).filter(([t]) => validatorIsTagKey(t))) {
+    const tag = validatorStripX(rawTag);
+    const vr = el.vr || '';
+    if (!vr || el.InlineBinary || isBinaryVR(vr) || vr === 'SQ') continue;
+    validateElementVr(push, tag, el, vr);
+  }
+}
+
+// 4. Pixel data geometry (uncompressed only — encapsulated sizes are not predictable).
+function validatePixelGeometry({ d, meta, push, getVal }) {
   const tsEl = meta?.['00020010'] ?? meta?.TransferSyntaxUID;
   const ts = (tsEl?.Value?.[0] ?? '').trim();
   const UNCOMPRESSED = new Set(['','1.2.840.10008.1.2','1.2.840.10008.1.2.1','1.2.840.10008.1.2.1.99','1.2.840.10008.1.2.2']);
-  if (UNCOMPRESSED.has(ts)) {
-    const rows = Number(getVal('00280010')||0), cols = Number(getVal('00280011')||0);
-    const ba = Number(getVal('00280100')||0), spp = Number(getVal('00280002')||1);
-    const nf = Number(getVal('00280008')||1);
-    const px = lookupTag(d,'7fe00010');
-    if (rows && cols && ba && px?.Value?.[0]) {
-      let buf = px.Value[0];
-      if (ArrayBuffer.isView(buf)) buf = buf.buffer;
-      const expected = rows * cols * Math.ceil(ba/8) * spp * nf;
-      const actual   = buf instanceof ArrayBuffer ? buf.byteLength : 0;
-      if (actual && Math.abs(actual - expected) > 2) {
-        push('warning','7fe00010',
-          `Pixel buffer size mismatch — expected ${expected} bytes, got ${actual}`,
-          `${actual} vs ${expected}`, null);
-      }
-    }
+  if (!UNCOMPRESSED.has(ts)) return;
+  const rows = Number(getVal('00280010')||0), cols = Number(getVal('00280011')||0);
+  const ba = Number(getVal('00280100')||0), spp = Number(getVal('00280002')||1);
+  const nf = Number(getVal('00280008')||1);
+  const px = lookupTag(d,'7fe00010');
+  if (!(rows && cols && ba && px?.Value?.[0])) return;
+  let buf = px.Value[0];
+  if (ArrayBuffer.isView(buf)) buf = buf.buffer;
+  const expected = rows * cols * Math.ceil(ba/8) * spp * nf;
+  const actual   = buf instanceof ArrayBuffer ? buf.byteLength : 0;
+  if (actual && Math.abs(actual - expected) > 2) {
+    push('warning','7fe00010',
+      `Pixel buffer size mismatch — expected ${expected} bytes, got ${actual}`,
+      `${actual} vs ${expected}`, null);
   }
+}
 
-  // 5. PHI audit
-  for (const [rawTag, el] of Object.entries(d).filter(([t]) => isTag(t))) {
-    const tag = (rawTag.startsWith('x') ? rawTag.slice(1) : rawTag).toLowerCase();
+// 5. PHI audit — flags populated PHI tags unless they hold a known anonymised placeholder.
+function auditPhiTags({ d, push, getVal }) {
+  for (const [rawTag, el] of Object.entries(d).filter(([t]) => validatorIsTagKey(t))) {
+    const tag = validatorStripX(rawTag).toLowerCase();
     if (!PHI_TAGS.has(tag)) continue;
     if (el.InlineBinary || isBinaryVR(el.vr||'') || el.vr === 'SQ') continue;
     const val = getVal(tag);
@@ -306,7 +321,15 @@ function validateDicom(d, meta) {
       push('phi', tag, 'Contains potentially identifying information', val, null);
     }
   }
+}
 
-  return issues;
+function validateDicom(d, meta) {
+  const ctx = makeValidatorContext(d, meta);
+  validateSopConformance(ctx);
+  validateUidFormats(ctx);
+  validateVrFormats(ctx);
+  validatePixelGeometry(ctx);
+  auditPhiTags(ctx);
+  return ctx.issues;
 }
 

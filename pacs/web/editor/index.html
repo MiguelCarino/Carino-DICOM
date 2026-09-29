@@ -263,7 +263,7 @@
             <span class="uid-pattern-label" data-i18n>UID Pattern:</span>
             <input type="text" id="uidPrefixInput" placeholder="prefix..." />
             <span class="uid-pattern-value" id="uidPatternDisplay">—</span>
-            <button class="btn" id="applyPrefixBtn" style="padding:4px 10px;font-size:11px;" data-i18n>Apply</button>
+            <button class="btn btn-xs" id="applyPrefixBtn" data-i18n>Apply</button>
           </div>
         </div>
 
@@ -280,7 +280,7 @@
           <div class="actions-spacer"></div>
           <button id="downloadOneBtn" class="btn hidden" title="Download the file on screen, with this session's edits" data-i18n>⬇ This file</button>
           <button id="downloadAllBtn" class="btn primary hidden" data-i18n>⬇ Download All</button>
-          <div id="batchButtons" class="hidden" style="display:flex;align-items:center;gap:6px"></div>
+          <div id="batchButtons" class="batch-buttons hidden"></div>
         </div>
 
         <div id="fileBrowserRow" class="file-browser-row hidden"></div>
@@ -294,7 +294,7 @@
           <div class="deid-opts-note" data-i18n>Applied on top of the Basic Profile and recorded in (0012,0064) Method Code Sequence. Only attributes the standard marks "keep" are retained; ones it marks "clean" still follow the Basic Profile, because this tool does not edit free text.</div>
         </div>
         <div id="addTagRow" class="add-tag-row hidden">
-          <input id="addTagCode" placeholder="(GGGG,EEEE)" style="width:120px" />
+          <input id="addTagCode" class="add-tag-code" placeholder="(GGGG,EEEE)" />
           <select id="addTagVR">
             <option value="LO">LO – Long String</option>
             <option value="SH">SH – Short String</option>
@@ -309,9 +309,9 @@
             <option value="ST">ST – Short Text</option>
             <option value="LT">LT – Long Text</option>
           </select>
-          <input id="addTagVal" placeholder="Value" style="flex:1;min-width:120px" />
-          <button class="btn primary" id="addTagConfirm" style="padding:6px 14px" data-i18n>Add</button>
-          <button class="btn" id="addTagCancel" style="padding:6px 12px">✕</button>
+          <input id="addTagVal" class="add-tag-val" placeholder="Value" />
+          <button class="btn primary add-tag-ok" id="addTagConfirm" data-i18n>Add</button>
+          <button class="btn add-tag-cancel" id="addTagCancel">✕</button>
         </div>
         <div class="filters-row">
           <button class="filter-btn active" data-cat="all"><span class="dot"></span><span data-i18n>All</span></button>
@@ -324,7 +324,7 @@
           <button class="filter-btn" data-cat="private"><span class="dot"></span><span data-i18n>Private</span></button>
           <button class="filter-btn" data-cat="other"><span class="dot"></span><span data-i18n>Other</span></button>
           
-          <div style="flex:1"></div>
+          <div class="actions-spacer"></div>
 
           <select id="compareWith" class="cmp-select hidden" title="Show a second loaded file beside this one">
             <option value="" data-i18n>Compare with…</option>
@@ -363,12 +363,12 @@
           <table>
             <thead id="tagHead">
               <tr>
-                <th style="width:140px">Tag</th>
+                <th class="col-tag">Tag</th>
                 <th data-i18n>Description</th>
-                <th style="width:50px">VR</th>
-                <th style="width:40%" data-i18n>Value</th>
-                <th class="cmp-col hidden" style="width:40%" id="cmpHeadB"></th>
-                <th class="cmp-col hidden" style="width:56px"></th>
+                <th class="col-vr">VR</th>
+                <th class="col-val" data-i18n>Value</th>
+                <th class="col-val cmp-col hidden" id="cmpHeadB"></th>
+                <th class="col-act cmp-col hidden"></th>
               </tr>
             </thead>
             <tbody id="tagBody"></tbody>
@@ -408,12 +408,12 @@
         </div>
 
         <div class="card" id="previewCard" style="display:none">
-          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title card-title-split">
             <span data-i18n>Preview</span>
             <button class="sr-toggle-btn hidden" id="srToggleBtn" data-i18n>View Report</button>
           </div>
           <div class="preview-box visible" id="previewBox">
-            <canvas id="preview" style="width:100%;height:100%;object-fit:contain"></canvas>
+            <canvas id="preview"></canvas>
             <div class="px-hover" id="pxHover">—</div>
           </div>
           <div id="srView" class="sr-view hidden"></div>
@@ -441,8 +441,8 @@
               <span class="wl-summary" id="wlSummary">—</span>
             </button>
             <div class="wl-body" id="wlBody">
-            <div style="display:flex;gap:4px;margin-bottom:8px">
-              <select id="wlPreset" class="batch-select" style="flex:1;font-size:11px">
+            <div class="wl-preset-row">
+              <select id="wlPreset" class="batch-select wl-preset">
                 <option value="" data-i18n>— CT Preset —</option>
                 <option value="40,400" data-i18n>Soft Tissue</option>
                 <option value="40,80" data-i18n>Brain</option>
@@ -451,7 +451,7 @@
                 <option value="50,350" data-i18n>Liver</option>
                 <option value="60,360" data-i18n>Abdomen</option>
               </select>
-              <button class="btn" id="wlResetBtn" style="padding:5px 10px;font-size:11px" data-i18n>Reset</button>
+              <button class="btn btn-sm" id="wlResetBtn" data-i18n>Reset</button>
             </div>
             <div class="wl-group">
               <div class="wl-label">WC <span class="wl-value" id="wcDisplay">—</span></div>
@@ -501,7 +501,7 @@
         <div class="pill" id="createImgCount">0 images</div>
         <button class="btn" id="createAddBtn" data-i18n>+ Add Images</button>
         <input id="createFileInput" type="file" multiple accept="image/*" hidden />
-        <div style="flex:1"></div>
+        <div class="actions-spacer"></div>
         <button class="btn" id="clearCreateBtn" data-i18n>Clear All</button>
       </div>
       <div class="img-grid-wrap" id="createImgWrap">
@@ -509,7 +509,7 @@
           <div class="img-empty">
             <div class="img-empty-icon">🖼</div>
             <span data-i18n>Drop images here or click "+ Add Images"</span>
-            <span style="font-size:11px" data-i18n>PNG · JPEG · BMP · WebP supported</span>
+            <span class="img-empty-hint" data-i18n>PNG · JPEG · BMP · WebP supported</span>
           </div>
         </div>
       </div>
@@ -522,13 +522,13 @@
           <h4 data-i18n>Drop images here</h4>
           <p>PNG · JPEG · BMP · WebP</p>
         </div>
-        <button id="createSideAddBtn" class="btn" style="width:100%;margin-top:8px" data-i18n>+ Browse Files</button>
+        <button id="createSideAddBtn" class="btn btn-block" data-i18n>+ Browse Files</button>
       </div>
       <div class="card">
         <div class="card-title" data-i18n>Quick Fill</div>
-        <div style="display:flex;gap:8px">
-          <button class="btn" id="cdAnonymizeBtn" style="flex:1" data-i18n>Anonymize</button>
-          <button class="btn" id="cdRandomizeBtn" style="flex:1" data-i18n>Randomize</button>
+        <div class="btn-pair">
+          <button class="btn" id="cdAnonymizeBtn" data-i18n>Anonymize</button>
+          <button class="btn" id="cdRandomizeBtn" data-i18n>Randomize</button>
         </div>
       </div>
       <div class="card">
@@ -601,7 +601,7 @@
         <div class="pill" id="extractorCount">0 files</div>
         <button class="btn" id="extractorAddBtn" data-i18n>+ Load DCM Files</button>
         <input id="extractorFileInput" type="file" multiple hidden />
-        <div style="flex:1"></div>
+        <div class="actions-spacer"></div>
         <button class="btn" id="clearExtractorBtn" data-i18n>Clear All</button>
       </div>
       <div class="extractor-grid-wrap" id="extractorGridWrap">
@@ -609,7 +609,7 @@
           <div class="img-empty">
             <div class="img-empty-icon">🩻</div>
             <span data-i18n>Drop .dcm files here or click to browse</span>
-            <span style="font-size:11px" data-i18n>Renders DICOM pixel data as PNG images</span>
+            <span class="img-empty-hint" data-i18n>Renders DICOM pixel data as PNG images</span>
           </div>
         </div>
       </div>
@@ -629,8 +629,8 @@
       </div>
       <div class="card">
         <div class="card-title" data-i18n>Export</div>
-        <button class="btn primary" id="extractAllBtn" style="width:100%;margin-bottom:6px" data-i18n>&#8595; Extract All as PNG</button>
-        <button class="btn" id="extractSelectedBtn" style="width:100%" data-i18n>&#8595; Extract First Frames Only</button>
+        <button class="btn primary btn-block" id="extractAllBtn" data-i18n>&#8595; Extract All as PNG</button>
+        <button class="btn btn-block" id="extractSelectedBtn" data-i18n>&#8595; Extract First Frames Only</button>
       </div>
       <div class="card" id="extractorLogCard" style="display:none">
         <div class="card-title" data-i18n>Log</div>

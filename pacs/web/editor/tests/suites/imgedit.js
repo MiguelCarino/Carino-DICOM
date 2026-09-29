@@ -489,7 +489,7 @@
       // a narrow layout may move a sidebar, stack it or scroll it, but it may
       // not delete it, on any of the three tabs that have one.
       {
-        const HOMES = ['sidebar', 'create-sidebar', 'extractor-sidebar', 'val-sidebar'];
+        const HOMES = ['sidebar', 'create-sidebar', 'extractor-sidebar'];
         const offenders = [];
         for (const sheet of Array.from(document.styleSheets)) {
           let rules;

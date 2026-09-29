@@ -146,34 +146,36 @@ function selftestReportText(sum) {
   return L.join('\n');
 }
 
-function renderSelfTest(root, sum) {
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  };
-  const table = (heads) => {
-    const wrap = el('div', 'st-wrap'), tbl = el('table', 'st-table');
-    const thead = document.createElement('thead'), tr = document.createElement('tr');
-    heads.forEach(h => tr.appendChild(el('th', null, h)));
-    thead.appendChild(tr); tbl.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    tbl.appendChild(tbody); wrap.appendChild(tbl);
-    return { wrap, tbody };
-  };
-  const verdict = (row) => {
-    if (row.status === 'skip') return el('span', 'st-skip', T('Not covered'));
-    if (row.status === 'fail') return el('span', 'st-fail', '✕ ' + T('{n} assertion(s) failed').replace('{n}', row.failed.length));
-    if (row.designed) return el('span', 'st-pass', '✓ ' + T('Correctly refused'));
-    if (row.brokenCount) return el('span', 'st-pass', '✓ ' +
-      T('{n} decoded, {k} correctly refused').replace('{n}', row.decodedCount).replace('{k}', row.brokenCount));
-    return el('span', 'st-pass', '✓ ' + T('Decoded correctly'));
-  };
+// ---- Report rendering ----
+function selftestEl(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
 
-  root.replaceChildren();
-  root.classList.remove('hidden');
+function selftestTable(heads) {
+  const wrap = selftestEl('div', 'st-wrap'), tbl = selftestEl('table', 'st-table');
+  const thead = document.createElement('thead'), tr = document.createElement('tr');
+  heads.forEach(h => tr.appendChild(selftestEl('th', null, h)));
+  thead.appendChild(tr); tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  tbl.appendChild(tbody); wrap.appendChild(tbl);
+  return { wrap, tbody };
+}
 
+function selftestVerdict(row) {
+  const el = selftestEl;
+  if (row.status === 'skip') return el('span', 'st-skip', T('Not covered'));
+  if (row.status === 'fail') return el('span', 'st-fail', '✕ ' + T('{n} assertion(s) failed').replace('{n}', row.failed.length));
+  if (row.designed) return el('span', 'st-pass', '✓ ' + T('Correctly refused'));
+  if (row.brokenCount) return el('span', 'st-pass', '✓ ' +
+    T('{n} decoded, {k} correctly refused').replace('{n}', row.decodedCount).replace('{k}', row.brokenCount));
+  return el('span', 'st-pass', '✓ ' + T('Decoded correctly'));
+}
+
+function selftestRenderSummary(root, sum) {
+  const el = selftestEl;
   root.appendChild(el('div', 'st-headline',
     T('Your browser decoded {n} of {total} DICOM encodings correctly.')
       .replace('{n}', sum.good.length).replace('{total}', sum.decodable.length)));
@@ -188,79 +190,92 @@ function renderSelfTest(root, sum) {
   subs.push(T('{p} of {n} assertions passed, in {ms} ms.')
     .replace('{p}', sum.assertions - sum.failures.length).replace('{n}', sum.assertions).replace('{ms}', sum.ms));
   root.appendChild(el('div', 'st-sub', subs.join(' ')));
+}
 
-  // ---- Support matrix ----
+function selftestRenderMatrix(root, sum) {
+  const el = selftestEl;
   root.appendChild(el('div', 'st-sec', T('Transfer syntax support')));
-  {
-    const { wrap, tbody } = table([T('Transfer syntax'), T('Photometric interpretation'), T('Test files'), T('Result')]);
-    for (const r of sum.rows) {
-      const tr = document.createElement('tr');
-      const name = el('td', null, tsName(r.ts));
-      name.appendChild(el('span', 'st-uid', r.ts || '—'));
-      const files = el('td', null, String(r.specs.length));
-      files.appendChild(el('div', 'st-ids', r.specs.map(s => s.id).join(' ')));
-      const res = el('td');
-      res.appendChild(verdict(r));
-      if (r.failed.length) {
-        const ul = el('ul', 'st-fails');
-        r.failed.forEach(f => ul.appendChild(el('li', null, f.name)));
-        res.appendChild(ul);
-      }
-      tr.append(name, el('td', null, r.pi || '—'), files, res);
-      tbody.appendChild(tr);
+  const { wrap, tbody } = selftestTable([T('Transfer syntax'), T('Photometric interpretation'), T('Test files'), T('Result')]);
+  for (const r of sum.rows) {
+    const tr = document.createElement('tr');
+    const name = el('td', null, tsName(r.ts));
+    name.appendChild(el('span', 'st-uid', r.ts || '—'));
+    const files = el('td', null, String(r.specs.length));
+    files.appendChild(el('div', 'st-ids', r.specs.map(s => s.id).join(' ')));
+    const res = el('td');
+    res.appendChild(selftestVerdict(r));
+    if (r.failed.length) {
+      const ul = el('ul', 'st-fails');
+      r.failed.forEach(f => ul.appendChild(el('li', null, f.name)));
+      res.appendChild(ul);
     }
-    root.appendChild(wrap);
+    tr.append(name, el('td', null, r.pi || '—'), files, res);
+    tbody.appendChild(tr);
   }
+  root.appendChild(wrap);
+}
 
-  // ---- Per-suite results ----
+function selftestRenderSuites(root, sum) {
+  const el = selftestEl;
   root.appendChild(el('div', 'st-sec', T('Suites')));
-  {
-    const { wrap, tbody } = table([T('Suite'), T('Assertions'), T('Failures')]);
-    for (const r of sum.runs) {
-      const bad = r.lines.filter(l => l.startsWith('FAIL ::'));
-      const tr = document.createElement('tr');
-      const fails = el('td');
-      if (bad.length) {
-        const ul = el('ul', 'st-fails');
-        bad.forEach(l => ul.appendChild(el('li', null, l.slice(l.indexOf('::') + 3))));
-        fails.appendChild(ul);
-      } else {
-        fails.appendChild(el('span', 'st-pass', '—'));
-      }
-      const count = el('td');
-      count.appendChild(el('span', bad.length ? 'st-fail' : 'st-pass',
-        `${r.lines.length - bad.length} / ${r.lines.length}`));
-      count.appendChild(el('span', 'st-uid', r.ms + ' ms'));
-      tr.append(el('td', null, r.name), count, fails);
-      tbody.appendChild(tr);
+  const { wrap, tbody } = selftestTable([T('Suite'), T('Assertions'), T('Failures')]);
+  for (const r of sum.runs) {
+    const bad = r.lines.filter(l => l.startsWith('FAIL ::'));
+    const tr = document.createElement('tr');
+    const fails = el('td');
+    if (bad.length) {
+      const ul = el('ul', 'st-fails');
+      bad.forEach(l => ul.appendChild(el('li', null, l.slice(l.indexOf('::') + 3))));
+      fails.appendChild(ul);
+    } else {
+      fails.appendChild(el('span', 'st-pass', '—'));
     }
-    root.appendChild(wrap);
+    const count = el('td');
+    count.appendChild(el('span', bad.length ? 'st-fail' : 'st-pass',
+      `${r.lines.length - bad.length} / ${r.lines.length}`));
+    count.appendChild(el('span', 'st-uid', r.ms + ' ms'));
+    tr.append(el('td', null, r.name), count, fails);
+    tbody.appendChild(tr);
   }
+  root.appendChild(wrap);
+}
 
-  // ---- Report actions ----
+async function selftestCopyReport(sum) {
+  const text = selftestReportText(sum);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    // No clipboard permission or insecure context: fall back to execCommand on a hidden textarea.
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) { /* nothing left to try */ }
+    ta.remove();
+  }
+  toast?.(T('Report copied to the clipboard.'));
+}
+
+function selftestRenderActions(root, sum) {
+  const el = selftestEl;
   const acts = el('div', 'st-acts');
   const copy = el('button', 'btn primary', T('Copy report'));
   copy.id = 'stCopy';
-  copy.addEventListener('click', async () => {
-    const text = selftestReportText(sum);
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (_) {
-      // No clipboard permission or insecure context: fall back to execCommand on a hidden textarea.
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); } catch (__) { /* nothing left to try */ }
-      ta.remove();
-    }
-    toast?.(T('Report copied to the clipboard.'));
-  });
+  copy.addEventListener('click', () => selftestCopyReport(sum));
   const issue = el('a', 'btn', T('Report a problem →'));
   issue.href = 'https://github.com/MiguelCarino/Carino-DICOM-Editor/issues/new';
   issue.target = '_blank'; issue.rel = 'noopener';
   acts.append(copy, issue);
   root.appendChild(acts);
   root.appendChild(el('div', 'st-env', selftestEnv().join('\n')));
+}
+
+function renderSelfTest(root, sum) {
+  root.replaceChildren();
+  root.classList.remove('hidden');
+  selftestRenderSummary(root, sum);
+  selftestRenderMatrix(root, sum);   // transfer syntax support
+  selftestRenderSuites(root, sum);   // per-suite results
+  selftestRenderActions(root, sum);  // copy report / file an issue
 }
 
 // Route guards (testable without reloading): hash names the self-test, a PACS #load= wins,

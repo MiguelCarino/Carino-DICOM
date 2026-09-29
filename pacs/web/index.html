@@ -78,7 +78,6 @@
         <section class="panel workpanel" id="dlgOverview" hidden>
           <header class="modal-head">
             <h2><span data-i18n>Overview</span> <small data-i18n>this machine at a glance</small></h2>
-            <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
           </header>
           <div class="modal-body">
             <!-- Counting tiles are buttons onto the owning panel; Free space leads nowhere, so a plain div. -->
@@ -330,7 +329,6 @@
       <section class="panel workpanel" id="dlgOrders" hidden>
         <header class="modal-head">
           <h2><span data-i18n>RIS orders</span> <small data-i18n>RIS + manual entry</small></h2>
-          <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
         </header>
         <div class="modal-body">
           <details class="order-new" id="orderNew">
@@ -446,7 +444,7 @@
         <section class="tabpane" id="dlgPending" role="tabpanel" aria-labelledby="tab_pending" hidden>
           <p class="pane-lede" data-i18n>non-DICOM awaiting review</p>
           <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
+            <p class="hint hint-flush hint-60ch" data-i18n-html>PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
             <div class="hist-tools">
               <button class="btn ghost tiny" id="pendRefresh" data-i18n-title title="Rescan the pending folder" data-i18n>↻ Refresh</button>
             </div>
@@ -458,7 +456,7 @@
           <div class="hist-bar">
             <!-- Three ways a forward stops moving, three remedies: retrying (node exists), orphaned (name gone),
                  held (a promised scrub cannot happen). -->
-            <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.</p>
+            <p class="hint hint-flush hint-60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.</p>
             <div class="hist-tools">
               <button class="btn tiny" id="stuckRetryAll" data-i18n-title title="Clear backoff on all stuck sends" data-i18n>↻ Retry all now</button>
               <button class="btn ghost tiny" id="stuckRefresh" data-i18n-title title="Refresh" data-i18n>↻ Refresh</button>
@@ -509,14 +507,14 @@
             <p class="pane-lede" data-i18n>rules · which node gets what</p>
             <label class="check rt-enable"><input id="rtEnabled" type="checkbox" /> <span data-i18n>Route by rule — otherwise every study goes to every enabled destination</span></label>
             <!-- Pinned footer, like the other Configuration tabs: the rules list is unbounded. -->
-            <p class="hint" style="margin:0 0 14px;max-width:70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
+            <p class="hint hint-b14 hint-70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
             <div class="rt-rules" id="rtRules"></div>
             <p class="hist-empty" id="rtEmpty" hidden data-i18n>No rules yet — every study goes to every enabled destination.</p>
 
             <!-- Test: describe a study, get the decision and the per-rule trace. -->
             <section class="rt-test">
               <h3 class="rt-test-h" data-i18n>Test a study</h3>
-              <p class="hint" style="margin:0 0 10px;max-width:70ch" data-i18n>Fill in what the study would carry and see which rule wins, and why. Nothing is sent and nothing is written to the log. The SAVED rules are what gets tested, so save an edit before you test it.</p>
+              <p class="hint hint-b10 hint-70ch" data-i18n>Fill in what the study would carry and see which rule wins, and why. Nothing is sent and nothing is written to the log. The SAVED rules are what gets tested, so save an edit before you test it.</p>
               <div class="rt-test-form">
                 <label><span data-i18n>Modality</span> <input id="rtModality" maxlength="16" placeholder="CT" /></label>
                 <label><span data-i18n>Calling AE</span> <input id="rtCallingAet" maxlength="16" data-i18n-placeholder placeholder="the sending AE title" /></label>
@@ -525,7 +523,7 @@
                 <label class="wide"><span data-i18n>Study description</span> <input id="rtStudyDesc" /></label>
               </div>
               <div class="rt-test-foot">
-                <span class="hint" style="margin:0" data-i18n>Blank fields are treated as empty on the study, not as wildcards.</span>
+                <span class="hint hint-flush" data-i18n>Blank fields are treated as empty on the study, not as wildcards.</span>
                 <button class="btn tiny" id="rtTest" data-i18n>Explain route</button>
               </div>
               <div class="rt-result" id="rtResult" hidden></div>
@@ -589,7 +587,7 @@
                 <label><span data-i18n>TLS certificate (PEM)</span> <input id="prnTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
                 <label><span data-i18n>TLS private key (PEM)</span> <input id="prnTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
                 <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="prnTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
+                <p class="hint hint-t2" data-i18n-html>Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>Emergency failover</legend>
@@ -599,13 +597,13 @@
                 <label><span data-i18n>Recovery — good probes to declare back</span> <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
                 <label class="check"><input id="emgAuto" type="checkbox" /> <span data-i18n>Activate automatically (skip the prompt)</span></label>
                 <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
+                <p class="hint hint-t2" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
               </fieldset>
               <!-- Another RIS's worklist: not a service this appliance runs, an address it queries on demand
                    when diagnosing a modality that doesn't see its schedule. -->
               <fieldset>
                 <legend data-i18n>The other RIS's worklist</legend>
-                <p class="hint" style="margin:0 0 10px" data-i18n>Where the hospital's own worklist lives. Only used by <em>Test worklist</em> on a modality — this appliance never queries it on a timer.</p>
+                <p class="hint hint-b10" data-i18n>Where the hospital's own worklist lives. Only used by <em>Test worklist</em> on a modality — this appliance never queries it on a timer.</p>
                 <label><span data-i18n>Host / IP</span> <input id="wsHost" data-i18n-placeholder placeholder="blank = no probing" /></label>
                 <label><span data-i18n>Port</span> <input id="wsPort" type="number" min="1" max="65535" placeholder="105" /></label>
                 <label><span data-i18n>Its AE title</span> <input id="wsAet" maxlength="16" data-i18n-placeholder placeholder="the called AE" /></label>
@@ -622,7 +620,7 @@
                 <label><span data-i18n>TLS certificate (PEM)</span> <input id="mwlTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
                 <label><span data-i18n>TLS private key (PEM)</span> <input id="mwlTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
                 <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="mwlTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
+                <p class="hint hint-t2" data-i18n-html>Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>Emergency RIS</legend>
@@ -638,7 +636,7 @@
                 </label>
                 <label class="check"><input id="risAutoClose" type="checkbox" /> <span data-i18n>Auto-close a matched order when its study arrives</span></label>
                 <label><span data-i18n>Accept HL7 only from these hosts</span> <input id="risHosts" data-i18n-placeholder placeholder="comma-separated IPs, blank = any" /></label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
+                <p class="hint hint-t2" data-i18n-html>Point a RIS (or an HL7 test sender) at this host:port over MLLP to feed <code>ORM^O01</code> orders, or hand-key them in <em>📋 Orders</em>. Tell the tech to type the <em>Accession #</em> into the modality — that's what matches the study back to its order. Image delivery is never blocked by a missing match.</p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>Query/Retrieve (Q/R SCP)</legend>
@@ -653,8 +651,8 @@
                 <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="qrTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
                 <!-- The C-MOVE destination map (AE title -> {host, port, aet}) has no form control and is carried
                      through a save untouched. This line shows the AE title C-MOVE actually calls out with. -->
-                <p class="hint" style="margin:2px 0 0" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
-                <p class="hint" id="qrMoveDests" style="margin:6px 0 0"></p>
+                <p class="hint hint-t2" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
+                <p class="hint hint-t6" id="qrMoveDests"></p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>DICOMweb</legend>
@@ -662,8 +660,8 @@
                 <label class="check"><input id="dwStow" type="checkbox" /> <span data-i18n>Accept STOW-RS uploads (off = read-only)</span></label>
                 <label><span data-i18n>Allowed browser origins (CORS)</span> <input id="dwCors" data-i18n-placeholder placeholder="https://viewer.example.org, blank = same-origin only" /></label>
                 <label><span data-i18n>Base URL for a viewer</span> <input id="dwUrl" readonly /></label>
-                <p class="hint" style="margin:2px 0 0" data-i18n>Paste the base URL into a web viewer as its DICOMweb root. It answers out of the instance index, so keep the index on. Every request needs the API token when one is set; a browser viewer on another origin also has to be listed above.</p>
-                <p class="hint" id="dwState" style="margin:6px 0 0"></p>
+                <p class="hint hint-t2" data-i18n>Paste the base URL into a web viewer as its DICOMweb root. It answers out of the instance index, so keep the index on. Every request needs the API token when one is set; a browser viewer on another origin also has to be listed above.</p>
+                <p class="hint hint-t6" id="dwState"></p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>Instance index</legend>
@@ -682,7 +680,7 @@
                   <button class="btn ghost tiny" id="idxRescanNow" data-i18n>↻ Rescan now</button>
                   <span class="idx-note" id="idxNote"></span>
                 </div>
-                <p class="hint" style="margin:8px 0 0" data-i18n>Query/Retrieve and DICOMweb answer from this index, never by walking the disk. Rescan after copying studies into the storage folder behind the app's back — the walk runs in the background and reports in the Activity log.</p>
+                <p class="hint hint-t8" data-i18n>Query/Retrieve and DICOMweb answer from this index, never by walking the disk. Rescan after copying studies into the storage folder behind the app's back — the walk runs in the background and reports in the Activity log.</p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>De-identification</legend>
@@ -698,13 +696,13 @@
                 <label class="check"><input id="deidKeepDates" type="checkbox" /> <span data-i18n>Keep study dates unshifted</span></label>
                 <label><span data-i18n>Pseudonym prefix</span> <input id="deidPrefix" maxlength="16" placeholder="ANON" /></label>
                 <!-- Burned-in patient names look anonymous in every viewer until a human reads the pixels. -->
-                <p class="hint bad-note" style="margin:2px 0 0" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
-                <p class="hint" style="margin:6px 0 0" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
-                <p class="hint" id="deidState" style="margin:6px 0 0"></p>
+                <p class="hint bad-note hint-t2" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
+                <p class="hint hint-t6" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
+                <p class="hint hint-t6" id="deidState"></p>
               </fieldset>
               <fieldset id="authFs">
                 <legend data-i18n>API access</legend>
-                <p class="hint" id="authState" style="margin:0 0 10px"></p>
+                <p class="hint hint-b10" id="authState"></p>
                 <!-- Not a Save field: GET /api/config redacts the token and POST /api/config refuses one. It changes
                      only via POST /api/auth/token with the CURRENT token in a header (a session cookie must not be
                      enough to replace the secret that issued it). -->
@@ -718,21 +716,21 @@
                     <button class="btn ghost tiny danger" id="authClearBtn" data-i18n>Remove token</button>
                     <button class="btn ghost tiny" id="authRotateCancel" data-i18n>Cancel</button>
                   </div>
-                  <p class="hint" style="margin:6px 0 0" data-i18n>Copy the new token somewhere safe first. It takes effect the moment you apply it, signs out every browser including this one, and the dashboard can never show it again.</p>
-                  <p class="hint" id="authProofNote" style="margin:6px 0 0" data-i18n>Changing the token needs the current one typed in — a session cookie is not enough to replace the secret that issued it.</p>
+                  <p class="hint hint-t6" data-i18n>Copy the new token somewhere safe first. It takes effect the moment you apply it, signs out every browser including this one, and the dashboard can never show it again.</p>
+                  <p class="hint hint-t6" id="authProofNote" data-i18n>Changing the token needs the current one typed in — a session cookie is not enough to replace the secret that issued it.</p>
                 </div>
                 <div class="row-actions">
                   <button class="btn ghost tiny" id="authRotateBtn" data-i18n>Change token</button>
                   <button class="btn ghost tiny" id="authLogout" data-i18n>Log out</button>
                 </div>
-                <p class="hint" style="margin:8px 0 0" data-i18n>A token is mandatory whenever the dashboard is bound to anything other than this machine, so removing it is refused while that is the case. It is stored in web.auth_token in the config file.</p>
+                <p class="hint hint-t8" data-i18n>A token is mandatory whenever the dashboard is bound to anything other than this machine, so removing it is refused while that is the case. It is stored in web.auth_token in the config file.</p>
               </fieldset>
               <fieldset>
                 <legend data-i18n>Integrations</legend>
                 <label><span data-i18n>Carino DICOM Editor URL</span>
                   <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
                 </label>
-                <p class="hint" style="margin:2px 0 0" data-i18n-html>Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
+                <p class="hint hint-t2" data-i18n-html>Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
               </fieldset>
             </div>
           </div>
@@ -815,7 +813,7 @@
         <section class="tabpane" id="dlgCaught" role="tabpanel" aria-labelledby="tab_caught" hidden>
           <p class="pane-lede" data-i18n>what another RIS answered</p>
           <div class="hist-bar">
-            <p class="hint" style="margin:0;max-width:70ch" data-i18n>Take the modality off the network, then use <em>Test worklist</em> on its row under Configuration → Modalities. This asks the other RIS five questions using that modality's own AE title, relaxing one key at a time; the differences between the answers are what locate the fault.</p>
+            <p class="hint hint-flush hint-70ch" data-i18n>Take the modality off the network, then use <em>Test worklist</em> on its row under Configuration → Modalities. This asks the other RIS five questions using that modality's own AE title, relaxing one key at a time; the differences between the answers are what locate the fault.</p>
             <div class="hist-tools">
               <button class="btn ghost tiny" id="caughtRefresh" data-i18n>↻ Refresh</button>
               <button class="btn tiny danger" id="caughtClear" data-i18n>🗑 Clear</button>
@@ -1082,9 +1080,9 @@
       <td><input class="d-host" data-i18n-placeholder placeholder="host / IP" /></td>
       <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
       <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-tls" data-i18n-title title="Connect to this node over TLS" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-noris" data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
-      <td style="text-align:center"><input type="checkbox" class="d-emg" data-i18n-title title="Trigger emergency failover if this node goes offline" /></td>
+      <td class="cell-center"><input type="checkbox" class="d-tls" data-i18n-title title="Connect to this node over TLS" /></td>
+      <td class="cell-center"><input type="checkbox" class="d-noris" data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
+      <td class="cell-center"><input type="checkbox" class="d-emg" data-i18n-title title="Trigger emergency failover if this node goes offline" /></td>
       <td class="row-actions">
         <button class="btn tiny echo" data-i18n-title title="C-ECHO test" data-i18n>Echo</button>
         <button class="btn tiny danger del" data-i18n-title title="Remove">✕</button>

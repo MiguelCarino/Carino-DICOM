@@ -301,7 +301,6 @@ const I18N = {
         'De-identification settings': 'Ajustes de anonimización',
         'The rule that asks for it': 'La regla que lo pide',
         'Clear view': 'Limpiar vista',
-        'Close': 'Cerrar',
 
         // ── Emergency prompt ──
         '⚠ Primary PACS unreachable': '⚠ PACS primario inaccesible',
@@ -1065,7 +1064,6 @@ const I18N = {
         'De-identification settings': 'Configurações de anonimização',
         'The rule that asks for it': 'A regra que pede isso',
         'Clear view': 'Limpar exibição',
-        'Close': 'Fechar',
 
         '⚠ Primary PACS unreachable': '⚠ PACS primário inacessível',
         'Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.': 'Ativar inicia a <em>Modality Worklist</em> local para os técnicos continuarem examinando, e retém os estudos recebidos para encaminhar quando o primário voltar. Nada é enviado ao primário até ele se recuperar.',
@@ -1813,7 +1811,6 @@ const I18N = {
         'De-identification settings': '匿名化の設定',
         'The rule that asks for it': 'それを要求しているルール',
         'Clear view': '表示をクリア',
-        'Close': '閉じる',
 
         '⚠ Primary PACS unreachable': '⚠ プライマリPACSに到達できません',
         'Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.': '有効化すると、技師が検査を続けられるようローカルの<em>Modality Worklist</em>を起動し、受信した検査はプライマリの復旧後に転送するため保留します。復旧するまでプライマリへは何も送信しません。',
@@ -2561,7 +2558,6 @@ const I18N = {
         'De-identification settings': 'Настройки обезличивания',
         'The rule that asks for it': 'Правило, которое этого требует',
         'Clear view': 'Очистить вид',
-        'Close': 'Закрыть',
 
         '⚠ Primary PACS unreachable': '⚠ Основной PACS недоступен',
         'Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.': 'Активация запускает локальный <em>Modality Worklist</em>, чтобы лаборанты продолжали работать, и удерживает поступающие исследования для пересылки после возврата основного узла. До восстановления на него ничего не отправляется.',

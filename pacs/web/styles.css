@@ -169,11 +169,17 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 
 /* ---- Panels ---- */
 .panel { padding: 20px 22px; }
-.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
-.panel-head h2 { margin: 0; font-size: 1.05rem; }
-.panel-head small { color: var(--muted); font-weight: 400; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; margin-left: 8px; }
 .hint { color: var(--muted); font-size: .78rem; margin: 12px 2px 0; }
 .hint em { color: var(--accent); font-style: normal; }
+/* Spacing/measure variants for hints placed in markup (were inline style=""). */
+.hint.hint-flush { margin: 0; }
+.hint.hint-t2 { margin: 2px 0 0; }
+.hint.hint-t6 { margin: 6px 0 0; }
+.hint.hint-t8 { margin: 8px 0 0; }
+.hint.hint-b10 { margin: 0 0 10px; }
+.hint.hint-b14 { margin: 0 0 14px; }
+.hint.hint-60ch { max-width: 60ch; }
+.hint.hint-70ch { max-width: 70ch; }
 
 /* ---- Buttons ---- */
 .btn {
@@ -194,6 +200,7 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 .grid { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .grid th { text-align: left; color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .grid td { padding: 5px 8px; border-bottom: 1px solid #1a1a1a; }
+.grid td.cell-center { text-align: center; }
 .grid input[type="text"], .grid input:not([type]), .grid input[type="number"] {
   width: 100%; min-width: 80px; background: var(--panel-2); border: 1px solid var(--border);
   color: var(--text); border-radius: 5px; padding: 6px 8px; font-family: var(--mono); font-size: .82rem;
@@ -225,10 +232,6 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   min-width: 0; max-width: 100%; text-overflow: ellipsis;
 }
 .settings input:focus, .settings select:focus { outline: none; border-color: var(--accent); }
-.panel-actions { margin-top: 16px; display: flex; align-items: center; gap: 14px; }
-.save-note { font-size: .78rem; font-family: var(--mono); }
-.save-note.ok { color: var(--ok); }
-.save-note.bad { color: var(--bad); }
 
 /* ---- Log ---- */
 .log {
@@ -431,85 +434,34 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 }
 .cfg-warn[hidden] { display: none; }
 
-/* Amber badge variant for the ⚠ Stuck button */
-.btn.action .badge.warn { background: var(--warn); color: var(--on-accent); }
-
-/* ---- Action buttons (open popups) ---- */
-.actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn.action {
-  flex: 1; padding: 13px 14px; font-size: .92rem; font-weight: 700;
-  text-transform: none; letter-spacing: 0; color: var(--text);
-  background: linear-gradient(180deg, var(--panel), #080808);
-  border: 1px solid var(--border); border-radius: 12px;
-}
-.btn.action:hover { border-color: var(--accent); color: var(--accent); }
-/* active tab: highlighted, seam-joined to the workspace panel below */
-.btn.action.tabbtn.active {
-  border-color: var(--accent); color: var(--accent);
-  background: var(--accent-faint);
-}
-.btn.action .badge {
-  display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px;
-  font-family: var(--mono); font-size: .7rem; font-weight: 700; line-height: 20px;
-  color: var(--on-accent); background: var(--accent); border-radius: 10px; vertical-align: middle;
-}
-@media (max-width: 620px) { .btn.action { flex-basis: calc(50% - 8px); } }
-
 /* ---- Inline workspace (the selected tab renders here) ---- */
 /* Takes the leftover viewport height; the active panel scrolls its own list. */
 /* min-width:0: one nowrap line could widen the workspace past the viewport, and with body
    overflow:hidden that CLIPS (Retry now went off screen). The panels already ellipsise. */
 #workspace { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .workpanel { overflow: hidden; }
-/* .panel and .modal-body both pad 20px 22px; inline panels drop the outer one.
-   Popped-out panels (.as-modal) keep it, since there .panel is the modal shell. */
-.workpanel:not(.as-modal) { padding: 0; }
+/* .panel and .modal-body both pad 20px 22px; inline panels drop the outer one. */
+.workpanel { padding: 0; }
 .workpanel[hidden] { display: none; }
-#workspace > .workpanel:not(.as-modal):not([hidden]) {
+#workspace > .workpanel:not([hidden]) {
   flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
 }
 .workpanel .modal-head { border-bottom: 1px solid var(--border); }
 /* Inline: flex-fill and scroll the inner list, not the body. */
-.workpanel:not(.as-modal) .modal-body {
+.workpanel .modal-body {
   flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow-y: auto;
 }
-.workpanel:not(.as-modal) .modal-body .log { height: auto; flex: 1 1 auto; min-height: 0; }
-.workpanel:not(.as-modal) .modal-body .table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.workpanel .modal-body .log { height: auto; flex: 1 1 auto; min-height: 0; }
+.workpanel .modal-body .table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .workpanel .modal-foot { border-top: 1px solid var(--border); }
 .head-right { display: flex; align-items: center; gap: 10px; }
 
-/* A panel popped out to a centered overlay (.as-modal). */
-#panelBackdrop { position: fixed; inset: 0; z-index: 59;
-  background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
-#panelBackdrop[hidden] { display: none; }
-.workpanel.as-modal {
-  position: fixed; z-index: 60; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: min(900px, 94vw); max-width: 94vw;
-  box-shadow: 0 24px 60px rgba(0,0,0,.6);
-}
-.workpanel.as-modal .modal-body { max-height: 74vh; }
-/* ✕ only in popup mode. */
-.workpanel .modal-x { display: none; }
-.workpanel.as-modal .modal-x { display: inline-flex; }
-
-/* ---- Popup windows (native <dialog>) ---- */
-.modal { border: none; padding: 0; background: transparent; color: var(--text);
-  width: min(840px, 94vw); max-width: 94vw; }
-.modal::backdrop { background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
-.modal-inner {
-  background: linear-gradient(180deg, var(--panel), var(--field));
-  border: 1px solid var(--border); border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0,0,0,.6);
-  display: flex; flex-direction: column; max-height: 86vh; overflow: hidden;
-}
+/* ---- Panel chrome: head, body, foot ---- */
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 16px 22px; border-bottom: 1px solid var(--border); }
 .modal-head h2 { margin: 0; font-size: 1.1rem; }
 .modal-head small { color: var(--muted); font-weight: 400; font-size: .72rem;
   text-transform: uppercase; letter-spacing: .1em; margin-left: 8px; }
-.modal-x { background: transparent; border: none; color: var(--muted); font-size: 1.05rem;
-  cursor: pointer; padding: 4px 9px; border-radius: 6px; line-height: 1; }
-.modal-x:hover { color: var(--bad); background: rgba(239,68,68,.1); }
 .modal-body { padding: 20px 22px; overflow-y: auto; }
 .modal-body .log { height: min(56vh, 520px); }
 .modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px;
@@ -541,7 +493,6 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .hist-tools { display: flex; gap: 8px; }
 
 .hist-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
-.workpanel.as-modal .hist-list { flex: 0 1 auto; max-height: 62vh; }
 .hist-list::-webkit-scrollbar { width: 9px; }
 .hist-list::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 .hist-empty { color: var(--muted); font-family: var(--mono); font-size: .82rem; text-align: center; padding: 30px 10px; }
