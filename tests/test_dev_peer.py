@@ -780,6 +780,34 @@ def test_stopping_the_engine_deletes_the_peer_and_its_rows(tmp_path):
             srv.dev_peer.discard()
 
 
+def test_nothing_in_the_peer_folder_is_still_open_when_it_is_deleted(tmp_path, monkeypatch):
+    """Windows refuses to delete a folder with an open file, so the two tests above
+    only ever failed there. Checking the open handles at rmtree time catches the
+    same leak (the peer's index.db) on every platform."""
+    psutil = pytest.importorskip("psutil")
+    from pacs.server import PacsServer
+
+    held = []
+    real_remove = devpeer.remove_peer_dir
+
+    def spy(path, root=None):
+        base = os.path.realpath(path) + os.sep
+        held.extend(f.path for f in psutil.Process().open_files()
+                    if os.path.realpath(f.path).startswith(base))
+        return real_remove(path, root)
+
+    monkeypatch.setattr(devpeer, "remove_peer_dir", spy)
+    srv = PacsServer(_primary(tmp_path), dev_peer=True)
+    try:
+        block = srv.dev_peer.create()
+        srv.shutdown()
+        assert held == [], f"still open at delete time: {held}"
+        assert not os.path.exists(block["config_dir"])
+    finally:
+        if srv.dev_peer is not None:
+            srv.dev_peer.discard()
+
+
 def test_the_peer_config_validates_and_keeps_everything_beside_itself(tmp_path):
     """Every path in the peer's config stays relative, so Config.resolve_path
     anchors the whole archive beside the generated config — and one rmtree takes

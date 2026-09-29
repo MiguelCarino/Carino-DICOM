@@ -539,7 +539,9 @@ class PacsServer:
         if t is not None and t.is_alive() and t is not threading.current_thread():
             t.join(timeout=10)
         if idx is not None:
-            idx.stop()
+            # close(), not stop(): this thread's sqlite handle would otherwise keep
+            # index.db open, and Windows cannot delete a folder with an open file.
+            idx.close()
 
     def _rescan_run(self, idx: InstanceIndex, stop: threading.Event) -> None:
         try:

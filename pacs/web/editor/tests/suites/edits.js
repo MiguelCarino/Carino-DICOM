@@ -392,6 +392,31 @@
     }
 
     // ---- the exported tag list has to answer "why will this not render?" ----
+    // ---- a plain export of a big-endian file keeps its sample values ----
+    // The export is labelled Explicit VR Little Endian, so the 16-bit words must be
+    // swapped on the way out; 4095 used to come back as 3855.
+    {
+      const w = Forge.W, h = Forge.H, n = w * h;
+      const px = new Uint16Array(n);
+      for (let k = 0; k < n; k++) px[k] = (k * 37) & 0xFFF;
+      px[0] = 4095;
+      const file = Forge.build({ ts: '1.2.840.10008.1.2.2', rows: h, cols: w, pi: 'MONOCHROME2',
+                                 ba: 16, bs: 12, hb: 11, pr: 0, pixels: px });
+      await handleFiles([new File([file], 'big-endian.dcm')]);
+      const loadedFP = fingerprint(files[0].dict);
+      const round = DicomMessage.readFile(await buildEditedFile(files[0]).arrayBuffer());
+      normBin(round.dict);
+      const pd = lookupTag(round.dict, '7FE00010')?.Value?.[0];
+      const got = pd ? new Uint16Array(pd.slice(0, n * 2)) : null;
+      const bad = got ? px.findIndex((v, i) => got[i] !== v) : 0;
+      ok('big endian: the export is relabelled little endian',
+         metaTS(round.meta) === '1.2.840.10008.1.2.1', metaTS(round.meta));
+      ok('big endian: every sample keeps its value after a plain export',
+         bad === -1, bad >= 0 && got ? `sample ${bad}: ${got[bad]}, wanted ${px[bad]}` : 'no pixel data');
+      ok('big endian: exporting does not swap the loaded file',
+         fingerprint(files[0].dict) === loadedFP, firstDiff(loadedFP, fingerprint(files[0].dict)));
+    }
+
     switchFile(0);
     const exported = getExportRows();
     ok('the tag export carries the Transfer Syntax UID',

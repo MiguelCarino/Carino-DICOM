@@ -42,6 +42,10 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   inline-style cleanup; see the upstream CHANGELOG.
 
 ### Fixed
+- Stopping the engine now closes the index's own database handle, so the dev
+  peer's temporary folder can be deleted on Windows (it failed with the
+  folder's `index.db` still open).
+- Bundled editor: an edited export of a big-endian file keeps its pixel values.
 - Input during page load is held back until every script has run
   (`pacs/web/js/00-gate.js`, and `js/gate.js` in the bundled editor), so a
   click or drop mid-load cannot reach a handler whose helpers load later.

@@ -310,13 +310,45 @@ function assignPath(d, path, vr, valueString) {
   node[leaf] = { vr, Value: parseByVR(vr, valueString, node[leaf]?.Value?.[0]) };
 }
 
+// ---- Big-endian source ----
+// dcmjs parses numeric VRs from Explicit VR Big Endian but keeps word-sized binary values as raw
+// big-endian bytes, then writes them unchanged under ensureMeta's little-endian label (PS3.5 7.3).
+const BE_WORD_BYTES = { OW: 2, OL: 4, OF: 4, OD: 8, OV: 8 };
+
+function swapWordBytes(v, n) {
+  const src = v instanceof ArrayBuffer ? new Uint8Array(v)
+            : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : null;
+  if (!src) return v;
+  const out = new Uint8Array(src.length);
+  const whole = src.length - (src.length % n);
+  for (let i = 0; i < whole; i += n) for (let k = 0; k < n; k++) out[i + k] = src[i + n - 1 - k];
+  out.set(src.subarray(whole), whole);
+  return out.buffer;
+}
+
+// Little-endian copy of a dataset read from big endian; the loaded file is never mutated.
+function bigEndianToLE(node) {
+  const out = {};
+  for (const [t, el] of Object.entries(node)) {
+    if (!el || typeof el !== 'object' || !Array.isArray(el.Value)) { out[t] = el; continue; }
+    if (el.vr === 'SQ') {
+      out[t] = { ...el, Value: el.Value.map(it => (it && typeof it === 'object' ? bigEndianToLE(it) : it)) };
+      continue;
+    }
+    // dcmjs reads VRs it does not know (e.g. OL) as UN; the dictionary still knows the word size.
+    const n = BE_WORD_BYTES[el.vr === 'UN' ? vrForTag(t) : el.vr];
+    out[t] = n ? { ...el, Value: el.Value.map(v => swapWordBytes(v, n)) } : el;
+  }
+  return out;
+}
+
 // Encode one file with ITS OWN pending edits (not the global pendingEdits, which would
 // stamp the current file's values, e.g. SOP Instance UID, onto every file).
 function buildEditedBytes(entry) {
   // Shallow copy is safe: changed tags are replaced (never mutated) and DicomDict.write()
   // only reads its input. Guarded by 'writing a file does not disturb the file' in
   // tests/suites/edits.js, which fails if a dcmjs update starts mutating its input.
-  const d = { ...entry.dict };
+  let d = { ...entry.dict };
   pendingOf(entry).forEach(({ vr, valueString }, t) => {
     // Path keys must not reach d[t]: dcmjs parses '00081140/0/00100010' as (0008,1140)
     // and would silently replace the whole sequence with the leaf.
@@ -328,6 +360,8 @@ function buildEditedBytes(entry) {
     const hex = (t.startsWith('x') ? t.slice(1) : t).toLowerCase();
     if (hex.length === 8 && hex.slice(4) === '0000') delete d[t];
   });
+  // Redacted/rotated frames are already swapped, and their meta says LE, so this runs once.
+  if (metaTS(entry.meta) === '1.2.840.10008.1.2.2') d = bigEndianToLE(d);
   const m = ensureMeta(d, entry.meta);
   normBin(d);
   normBin(m);
