@@ -61,7 +61,7 @@ SESSION_VERSION_PROFILE = "2"
 PROTECTED_PREFIXES = ("/api", "/dicom-web")
 
 # ---- what is deliberately NOT protected ---------------------------------
-# The static dashboard (index.html, app.js, the stylesheet, the bundled
+# The static dashboard (index.html, js/*.js, the stylesheet, the bundled
 # editor) is served to anyone who asks, and that is the right answer, not an
 # oversight:
 #   * it contains no patient data and no configuration — every byte of both

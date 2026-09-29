@@ -1335,7 +1335,7 @@ function t(key) {
     const dict = I18N[currentFleetLang()];
     return (dict && dict[key]) || key;
 }
-window.t = t; // inline app code wraps its literals with (window.t||String)(...)
+window.t = t; // app code wraps its literals with T() (js/utils.js)
 
 // Static markup: elements carrying data-i18n use their original English text
 // as the key (captured on first pass so locale switches stay reversible).

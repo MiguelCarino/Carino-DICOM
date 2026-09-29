@@ -85,7 +85,7 @@ jobs:
         run: node docs/tests/check-i18n.js
 
       # The dashboard dictionaries, checked in both directions. Forward alone
-      # would not be enough: edit an English literal in app.js and all four
+      # would not be enough: edit an English literal in js/*.js and all four
       # locales still carry the old key at perfect parity while the new literal
       # is translated nowhere, so this also reports entries the source can no
       # longer reach.
@@ -94,7 +94,7 @@ jobs:
 
       # The new-order alert is the half of the emergency-RIS feature that a
       # receptionist's shift actually depends on, and all of it lives in
-      # app.js: whether an arrival is announced at all, what the live region
+      # pacs/web/js/: whether an arrival is announced at all, what the live region
       # says, whether a tone owed to a sleeping audio context is still paid
       # when it wakes, and which /api/status response is allowed to render.
       # Python cannot reach any of it, and the two gates above have nothing to

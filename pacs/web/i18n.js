@@ -9,8 +9,8 @@
 //          data-i18n-title      → title attribute
 //          data-i18n-placeholder→ placeholder attribute
 //          data-i18n-aria-label → aria-label attribute
-// Dynamic: app.js wraps its literals in T() / TF() / TN() → window.t / .tn.
-//          Template rows are cloned outside the document, so app.js calls
+// Dynamic: the dashboard (pacs/web/js/*.js) wraps its literals in T() / TF() / TN() → window.t / .tn.
+//          Template rows are cloned outside the document, so the dashboard calls
 //          window.applyI18nIn(clone) on each one.
 //
 // Deliberately NOT translated, because they are protocol identifiers a
@@ -763,7 +763,7 @@ const I18N = {
         // ── Emergency RIS: the new-order alert, the order form's modality
         //    codes, and what reception is told when the order lands ──
         //    The confirmations are engine outcomes (server.py sends a code,
-        //    app.js says the sentence): three of the four are the only place
+        //    the dashboard says the sentence): three of the four are the only place
         //    anybody is told the order is reaching no scanner, so they are
         //    translated rather than left as engine English.
         'Not stated — shows on every worklist': 'Sin especificar — aparece en todas las worklists',
@@ -1511,7 +1511,7 @@ const I18N = {
         // ── Emergency RIS: the new-order alert, the order form's modality
         //    codes, and what reception is told when the order lands ──
         //    The confirmations are engine outcomes (server.py sends a code,
-        //    app.js says the sentence): three of the four are the only place
+        //    the dashboard says the sentence): three of the four are the only place
         //    anybody is told the order is reaching no scanner, so they are
         //    translated rather than left as engine English.
         'Not stated — shows on every worklist': 'Não informado — aparece em todas as worklists',
@@ -2259,7 +2259,7 @@ const I18N = {
         // ── Emergency RIS: the new-order alert, the order form's modality
         //    codes, and what reception is told when the order lands ──
         //    The confirmations are engine outcomes (server.py sends a code,
-        //    app.js says the sentence): three of the four are the only place
+        //    the dashboard says the sentence): three of the four are the only place
         //    anybody is told the order is reaching no scanner, so they are
         //    translated rather than left as engine English.
         'Not stated — shows on every worklist': '指定なし — すべてのワークリストに表示',
@@ -3007,7 +3007,7 @@ const I18N = {
         // ── Emergency RIS: the new-order alert, the order form's modality
         //    codes, and what reception is told when the order lands ──
         //    The confirmations are engine outcomes (server.py sends a code,
-        //    app.js says the sentence): three of the four are the only place
+        //    the dashboard says the sentence): three of the four are the only place
         //    anybody is told the order is reaching no scanner, so they are
         //    translated rather than left as engine English.
         'Not stated — shows on every worklist': 'Не указано — показывается во всех рабочих списках',
@@ -3169,7 +3169,7 @@ function t(key) {
     const dict = I18N[currentFleetLang()];
     return (dict && dict[key]) || key;
 }
-window.t = t;   // app.js and carino-navbar.js wrap literals with (window.t||String)(…)
+window.t = t;   // the dashboard (js/*.js) and carino-navbar.js wrap literals with (window.t||String)(…)
 
 function tn(n, key) {
     const lang = currentFleetLang();
@@ -3219,7 +3219,7 @@ function applyI18n() {
 }
 
 // carino-lang.js is deferred and precedes this script, so CarinoLang exists by
-// DOMContentLoaded. app.js registers its own langchange handler to redraw the
+// DOMContentLoaded. The dashboard (js/*.js) registers its own langchange handler to redraw the
 // parts of the dashboard it rendered itself.
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyI18n);

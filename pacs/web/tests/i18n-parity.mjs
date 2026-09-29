@@ -3,12 +3,12 @@
  * English source strings ARE the keys, so a missing entry does not crash — it
  * silently renders English in the middle of a Japanese screen, and nobody
  * notices until an operator does. There is no build step to catch that, so this
- * is the check: every key used by index.html or app.js must be translated in
+ * is the check: every key used by index.html or js/*.js must be translated in
  * ALL FOUR locales or in none of them (a protocol identifier like 'Print SCP'
  * is deliberately left alone in every language — half a set is the bug).
  *
  * It runs in BOTH directions, because the failure that hurts is silent in the
- * forward one. Edit an English literal in app.js and the old key is still in
+ * forward one. Edit an English literal in js/*.js and the old key is still in
  * all four dictionaries — perfect parity, nothing half-translated — while the
  * new literal is in none of them, which the "all or nothing" rule reads as a
  * deliberate protocol identifier. Four languages regress and the guard reports
@@ -161,8 +161,11 @@ while ((m = tagRe.exec(html))) {
   if (/data-i18n-aria-label/.test(attrs) && (a = attrs.match(/\baria-label="([^"]*)"/))) used.add(a[1]);
 }
 
-// app.js: T("…") and TF("…", …) literals, plus TN(n, "…") against PLURALS.
-const app = read("app.js");
+// The dashboard scripts (js/*.js, in index.html load order): T("…") and
+// TF("…", …) literals, plus TN(n, "…") against PLURALS.
+const app = [...read("index.html").matchAll(/<script src="(js\/[^"]+)"><\/script>/g)]
+  .map((m) => read(m[1])).join("");
+if (!app) fail("index.html loads no js/ scripts");
 const litRe = /\b(?:T|TF)\(\s*("(?:[^"\\]|\\.)*")/g;
 while ((m = litRe.exec(app))) used.add(JSON.parse(m[1]));
 const tnRe = /\bTN\(\s*[^,]+?,\s*("(?:[^"\\]|\\.)*")\s*\)/g;
@@ -178,7 +181,7 @@ for (const key of used) {
   }
 }
 if (partial.length) partial.forEach((p) => fail("half-translated: " + p));
-else pass(used.size + " keys used by the markup and app.js, none half-translated");
+else pass(used.size + " keys used by the markup and js/*.js, none half-translated");
 
 /* A used string with no entry in any locale renders English everywhere. That is
    right for a protocol identifier and wrong for anything else, and only the
@@ -204,7 +207,7 @@ for (const k of UNTRANSLATED) {
    the new literal reads as untranslated-on-purpose, and four languages quietly
    fall back to English. An orphan is the only visible trace of that edit.
  *
- * `used` is too narrow to judge it: app.js also calls T() on values it looked up
+ * `used` is too narrow to judge it: js/*.js also calls T() on values it looked up
  * (T(svc.label), T(wx.on_success)), and carino-navbar.js calls window.t() on the
  * greeting it picked, so those keys are real but never appear inside a T("…").
  * What every one of them does have is the English string sitting somewhere in
@@ -228,7 +231,7 @@ function mentioned(key) {
 const orphans = [...dicts[base]].filter((k) => !used.has(k) && !mentioned(k));
 if (orphans.length) {
   orphans.forEach((k) => fail("orphaned: " + JSON.stringify(k) + " is translated in all four locales but "
-    + "no longer appears in index.html or app.js — the English literal was renamed or removed, "
+    + "no longer appears in index.html or js/*.js — the English literal was renamed or removed, "
     + "so those four translations are now unreachable"));
 } else {
   pass("no orphaned entries — every translated key is still reachable from the source");

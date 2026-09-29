@@ -13,12 +13,13 @@
   --warn: #eab308;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --amber: #fbbf24;       /* brighter gold: hover and attention pulses */
+  --on-accent: #050505;   /* text on gold/warn fills */
+  --field: #0a0a0a;
+  --inset: #070707;       /* input and result wells */
 }
 * { box-sizing: border-box; }
-/* Visible to a screen reader, to nothing else. The repo had no such helper
-   until #ordAlertLive needed one: an arrival that is only a flash and a beep
-   is nothing to a blind operator. clip-path (not clip) and a 1px box, so the
-   text is still laid out and still announced. */
+/* Screen-reader-only text (e.g. #ordAlertLive). clip-path keeps it laid out and announced. */
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
@@ -27,178 +28,110 @@ body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
   height: 100dvh; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
-/* The dashboard fills the viewport: fixed-height header rows (cards, net-info,
-   tab strip) and a flex workspace that takes the rest and scrolls internally —
-   so the PAGE itself never scrolls. */
-/* 1400, not 1180: the cap only binds above a 1489px viewport, and every wall
-   screen this runs on is wider than that. The number is chosen, not maximal —
-   .ov-grid takes a fourth column at a 1490px wrap and the per-locale .ov-dest
-   measurements below are written for three, so 1400 is the widest value that
-   leaves the Overview the shape it was tuned in. */
+/* The dashboard fills the viewport: fixed header rows plus a flex workspace that scrolls
+   internally, so the page itself never scrolls. */
+/* 1400px: the widest wrap that keeps .ov-grid at three columns (a fourth appears at a 1490px wrap),
+   which the per-locale .ov-dest measurements assume. */
 .wrap { width: min(1400px, 94%); margin: 0 auto; padding: 16px 0 18px; display: flex;
   flex-direction: column; gap: 14px; flex: 1 1 auto; min-height: 0; }
 
-/* ---- status cards ---- */
-/* The 260px floor was tuned before the 190px sidebar existed; inside the
-   Services panel it resolved to three ~283px cards, which left each kv cell
-   ~112px — exactly 12 monospace characters, i.e. one character short of
-   "0.0.0.0:11112". 340px gives two roomier columns instead. The min(…, 100%)
-   form also stops the track from overflowing its container on narrow screens,
-   where a bare minmax(340px, 1fr) would refuse to shrink.
-   At the 1400px wrap the body is 1132px and this resolves to THREE tracks of
-   ~365px — card content ~323px, so the kv cell is ~145px and the string that
-   forced the floor still fits with room over. Six services now read as two
-   rows of three rather than three rows of two, which is the arrangement a wall
-   screen wants. */
+/* ---- Status cards ---- */
+/* 340px floor: at 260px the kv cell was one character short of "0.0.0.0:11112".
+   min(…, 100%) lets the track shrink on narrow screens. */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 18px; }
-/* Belt and braces only: auto-fit already falls to one column below ~1022px,
-   so this never changes the outcome. It is kept for browsers that do not
-   support min() inside minmax() — do not treat it as load-bearing. */
+/* Fallback for browsers without min() in minmax(); auto-fit already gives one column here. */
 @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
 .card, .panel {
   background: linear-gradient(180deg, var(--panel), #080808);
   border: 1px solid var(--border); border-radius: 14px;
 }
-/* `container-type: inline-size` makes the card itself the query container for
-   its own kv grid (see the @container rule below the .kv block). The card's
-   width is decided by the sidebar and the panel padding, not by the viewport,
-   so a viewport media query is the wrong instrument here. */
+/* The card is its kv grid's query container: its width depends on the sidebar, not the viewport. */
 .card { padding: 18px 20px; position: relative; container-type: inline-size; }
-/* opacity:0 keeps the hint in flow, so its height is reserved permanently —
-   a hint that wrapped to three lines in one locale made that card taller than
-   its siblings at all times, not just on hover. One line, always, in every
-   language: the translations are capped to fit and the box cannot grow. */
+/* opacity:0 keeps the hint's height reserved. One line in every language (translations are
+   capped), so cards stay the same height. */
 .drop-hint { margin-top: 10px; font-family: var(--mono); font-size: .6rem; color: #555; text-align: center; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card:hover .drop-hint { opacity: .7; }
 .card.drop-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(234,179,8,.22); }
 .card.drop-active .drop-hint { opacity: 1; color: var(--accent); }
 .card.drop-active * { pointer-events: none; }  /* let the drop land on the card, not children */
-/* Card header — the title and the Start/Stop button, nothing else. The header
-   used to carry the protocol subtitle too, which is what made a long
-   translation ("IMPRESORA DE PLACAS VIRTUAL", "ВИРТУАЛЬНЫЙ ПЛЁНОЧНЫЙ ПРИНТЕР")
-   push it past the card edge; that subtitle now lives in .card-lede below, so
-   only two rules are still load-bearing: the title may shrink (min-width:0
-   defeats the min-content floor a flex item keeps by default) and the toggle —
-   the control the user actually clicks — never shrinks at all. */
+/* The title may shrink (min-width:0 defeats the flex min-content floor); the toggle never does. */
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .card-title { font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; flex: 1 1 auto; min-width: 0; }
 .card-head .btn.toggle { flex: 0 0 auto; white-space: nowrap; }
-/* ---- card lede: protocol tag + one plain sentence ----
-   Reads as a continuation of the title (8px above, 14px below), and hangs at
-   20px = the 10px dot + the title's 10px column gap, so the tag starts on the
-   same x as the service name. The whole block carries data-i18n-title: the
-   long two-sentence version is the native tooltip today and the first-boot
-   wizard body copy later, hence cursor:help to advertise it. Both lines take
-   the PROSE treatment from the kv policy above — word-break:normal plus
-   overflow-wrap:break-word, so they wrap at spaces and never cut mid-word. */
+/* ---- Card lede: protocol tag + one plain sentence ----
+   Hangs at 20px (dot + title gap) so the tag aligns with the service name. data-i18n-title holds
+   the long version as a tooltip, hence cursor:help. Prose wrapping: breaks at spaces only. */
 .card-lede { margin: 0 0 14px; padding-left: 20px; cursor: help; }
 .card-tag { margin: 0; font-family: var(--mono); font-size: .58rem; line-height: 1.25; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; word-break: normal; overflow-wrap: break-word; }
-/* One step brighter than --muted on purpose: the tag is a label, the sentence
-   is content, and that contrast is what makes the pair read as two things.
-   min-height reserves two lines (2 x 1.45 line-height) so the kv strips, the
-   drop-hint and the toggle all line up across a row of cards, and so the card
-   does not change height when the language does. Measured: en, es, pt-BR and
-   ja all fit on ONE line at the shipped 386px box — the reserve exists for ru
-   (which wraps on the printer and RIS cards) and to keep a grid row even. It
-   is a floor, not a clamp: a third line grows the block rather than truncate. */
+/* Brighter than --muted: the tag is a label, the sentence is content. min-height reserves two lines
+   (2 x 1.45) so cards in a row line up in every language (ru wraps). A floor, never a clamp. */
 .card-desc { margin: 3px 0 0; font-size: .72rem; line-height: 1.45; min-height: 2.9em; color: #9a9a9a; word-break: normal; overflow-wrap: break-word; hyphens: auto; }
-/* Translation budget for the .card-desc / data-i18n-title pair (belongs next to
-   the strings in i18n.js too): short <= 78 chars (es/pt-BR), <= 84 (ru),
-   <= 34 full-width (ja); 2 lines nominal, 3 max at a 407px card, never
-   truncate. Long <= 235 / 250 / 110 full-width, always two sentences — what it
-   does, then when to turn it on; the wizard renders them as separate steps. */
+/* Translation budget for .card-desc / data-i18n-title: short <= 78 chars (es/pt-BR), <= 84 (ru),
+   <= 34 full-width (ja), never truncated. Long <= 235 / 250 / 110 full-width, two sentences:
+   what it does, then when to turn it on (the wizard shows them as separate steps). */
 .dot { width: 10px; height: 10px; border-radius: 50%; background: #444; flex-shrink: 0; }
 .dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
 .dot.off { background: #555; }
-/* Activity blink — flicks amber like an ethernet link/activity LED. */
+/* Activity blink, like an ethernet link/activity LED. */
 .dot.act { animation: dotAct .4s ease-in-out 2; }
 @keyframes dotAct {
   0%, 100% { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
-  50%      { background: #fbbf24; box-shadow: 0 0 13px #fbbf24; }
+  50%      { background: var(--amber); box-shadow: 0 0 13px var(--amber); }
 }
-/* ---- key/value strips inside a card ----
-   Rendering policy: three classes of value, three treatments.
-     ATOMIC  (bind:port, AE titles, "HL7 / MLLP") — identifiers. A wrapped
-             identifier is a misread identifier, so they are never broken:
-             they ellipsise instead, and keep their full text in a title attr.
-     PATHS   — a full-width row (.wide) at .78rem, where breaking mid-token is
-             genuinely acceptable because a path has no other break points.
-     PROSE   (grayscale, open orders, Last, On success) — wraps at spaces.
-   `minmax(0, 1fr)` replaces the old `1fr` so the TRACK itself has no
-   min-content floor; without it a long value pushes the column wider than the
-   card instead of being contained. */
+/* ---- Key/value strips inside a card ----
+   Value policy: ATOMIC identifiers (bind:port, AE titles) never wrap; they ellipsise with a title attr.
+   PATHS take a full .wide row and may break mid-token. PROSE wraps at spaces.
+   minmax(0, 1fr) drops the track's min-content floor so long values stay contained. */
 .kv { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
 .kv > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* escape hatch for values that deserve the whole row (paths, long identifiers) */
 .kv > div.wide { grid-column: 1 / -1; }
 .kv dt { color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .06em; line-height: 1.25; }
-/* PROSE default. `break-word` (never `anywhere`) wraps at spaces and only cuts
-   a word that cannot fit a line on its own — and, unlike `anywhere`, it does
-   not shrink min-content sizing, so it cannot silently collapse a track and
-   bring the mid-word cutting back. tabular-nums keeps the live counters
-   column-aligned as they tick, even if a fallback face is used for Cyrillic. */
+/* PROSE default: break-word, never `anywhere` (which shrinks min-content and collapses tracks).
+   tabular-nums keeps live counters aligned. */
 .kv dd { margin: 0; font-family: var(--mono); font-size: .9rem; word-break: normal; overflow-wrap: break-word; hyphens: none; min-width: 0; font-variant-numeric: tabular-nums; }
-/* ATOMIC — clip, never cut. app.js should mirror the value into a title attr. */
+/* ATOMIC: clip, never cut. The dashboard mirrors the value into a title attr. */
 .kv dd.atomic { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* PATHS — the one place mid-token breaking is the right answer. */
+/* PATHS: the one place mid-token breaking is right. */
 .kv dd.path { font-size: .78rem; word-break: normal; overflow-wrap: anywhere; }
-/* Uppercase + wide tracking is a localisation hazard, not just a style:
-   all-caps Cyrillic at .1em is materially wider and harder to scan, and
-   Japanese gains nothing from uppercase while losing tracking legibility.
-   documentElement.lang is maintained by carino-lang.js and i18n.js. */
+/* All-caps with wide tracking hurts Cyrillic and does nothing for Japanese.
+   <html lang> is kept current by carino-lang.js and i18n.js. */
 html[lang="ru"] .kv dt, html[lang="ja"] .kv dt,
 html[lang="ru"] .card-tag, html[lang="ja"] .card-tag {
   text-transform: none; letter-spacing: .02em;
 }
-/* When the CARD (not the viewport) gets narrow — a stacked sidebar layout, a
-   one-column cards grid on a small window — stop trying to fit two columns of
-   label+value and let every pair own its own row. This is the condition the
-   old `@media (max-width: 720px)` could never see. */
+/* A narrow CARD (not viewport): one label+value pair per row. */
 @container (max-width: 320px) {
   .kv { grid-template-columns: 1fr; }
   .kv > div.wide { grid-column: auto; }
-  /* At this width the card is in cramped mode — the kv is already one column —
-     so 20px of measure is worth more than the optical hang under the title.
-     Dropping it gives the description ~3 more characters per line, which is
-     the difference between three and four lines in es/pt-BR. */
+  /* Cramped: drop the hang to give the description ~3 more characters per line. */
   .card-lede { padding-left: 0; }
 }
 
-/* ---- enrolled vs running: two orthogonal axes ----
-   The DOT means RUNNING (a socket is bound right now). The card HIGHLIGHT
-   means ENROLLED (the persisted enabled flag). Keeping them apart is the
-   point: it is the only way "enabled but failed to start" can be seen at all.
-   Deliberately NOT the .drop-active treatment (2px ring + 30px glow) — a
-   chosen card would look permanently mid-drag, and a folder dropped onto a
-   chosen card still has to read as a drop. Flat border, faint wash, and a 2px
-   top rule so the state does not rest on colour alone. */
+/* ---- Enrolled vs running ----
+   The DOT means RUNNING (socket bound); the card HIGHLIGHT means ENROLLED (persisted enabled flag),
+   so "enabled but failed to start" is visible. Distinct from .drop-active; the 2px top rule means
+   the state never rests on colour alone. */
 .card.chosen { border-color: var(--accent); background: linear-gradient(180deg, rgba(234, 179, 8, .05), #080808); }
 .card.chosen::before {
   content: ""; position: absolute; top: -1px; left: -1px; right: -1px; height: 2px;
   border-radius: 14px 14px 0 0; background: var(--accent); pointer-events: none;
 }
-/* Enrolled and NOT running: the operator asked for this service and it is not
-   there. An inset rule instead of a real border so the card does not shift by
-   3px the moment a port clash appears. */
+/* Enrolled but NOT running. Inset rule, not a border, so the card doesn't shift by 3px. */
 .card.stalled { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
 .card.stalled::before { background: var(--warn); }
 .card.stalled .card-warn { display: block; }
-/* Both at once: the drag feedback has to win, or dropping a folder on a
-   stalled card looks like nothing happened. */
+/* Drag feedback must win over the stalled style. */
 .card.stalled.drop-active { box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(234,179,8,.22), inset 3px 0 0 var(--warn); }
 
-/* ---- the service chooser: #dlgServices with class="setup" ----
-   Not a modal and not a second set of cards — the same five, one class. The
-   2s poll already writes into these ids, so the chooser is live for free.
-   These three elements ship in every card at all times and are revealed by
-   the state class alone, never by a `hidden` attribute: one switch, so the
-   control cannot be visible per one file and hidden per another. */
+/* ---- Service chooser: #dlgServices.setup ----
+   The same cards plus one class; the 2s poll keeps them live. These elements are revealed by the
+   state class only, never by the hidden attribute, so there is a single switch. */
 .card-pick { display: none; }
 .card-warn { display: none; margin: 0 0 12px; padding-left: 20px; font-size: .72rem; line-height: 1.4; color: var(--warn); word-break: normal; overflow-wrap: break-word; }
 .card-port { display: none; margin: 0 0 12px; padding-left: 20px; font-family: var(--mono); font-size: .68rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
 .card-port.bad { color: var(--bad); }
-/* The long lede as visible copy. Same width treatment as .card-desc, but no
-   min-height: this one is meant to be as tall as the sentence needs. */
+/* The long lede as visible copy; no min-height. */
 .card-why { display: none; margin: 3px 0 0; font-size: .74rem; line-height: 1.5; color: #9a9a9a; word-break: normal; overflow-wrap: break-word; hyphens: auto; }
 #dlgServices.setup .card-pick {
   display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; cursor: pointer;
@@ -209,38 +142,32 @@ html[lang="ru"] .card-tag, html[lang="ja"] .card-tag {
 html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setup .card-pick {
   text-transform: none; letter-spacing: .02em;
 }
-/* A real checkbox, not a styled div: focusable, space-toggles, and it reports
-   its own state to assistive tech without app.js having to mirror anything. */
+/* A real checkbox: focusable, space-toggles, reports its own state to assistive tech. */
 .pick-box { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
 .pick-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* While choosing, the checkbox REPLACES Start/Stop — two controls for one
-   decision is the thing to avoid, and the toggle handlers cannot fire
-   mid-chooser if the button is not there. */
+/* While choosing, the checkbox replaces Start/Stop: one control per decision, and the toggle
+   handlers cannot fire mid-chooser. */
 #dlgServices.setup .card-head .btn.toggle { display: none; }
 #dlgServices.setup #setupOpen { display: none; }
 #dlgServices.setup .card-port { display: block; }
-/* Swap the one-liner for the full two-sentence version, and drop the cursor
-   that advertised a tooltip nobody needs while the text is on screen. */
+/* Show the full two-sentence text; no tooltip cursor. */
 #dlgServices.setup .card-why { display: block; }
 #dlgServices.setup .card-desc { display: none; }
 #dlgServices.setup .card-lede { cursor: default; }
-/* Belt and braces: enterSetup() clears the hidden attribute itself, so this
-   only covers the frame between entering setup and the next status poll. The
-   chooser must show the two services a new operator has never seen. */
+/* Covers the frame between enterSetup() and the next poll: the chooser must show RIS and MWL. */
 #dlgServices.setup #risCard[hidden], #dlgServices.setup #mwlCard[hidden] { display: block; }
 .setup-intro { margin: 0 0 16px; }
 .setup-intro[hidden] { display: none; }
 .setup-intro h3 { margin: 0 0 5px; font-size: 1rem; }
 .setup-intro p { margin: 0; max-width: 74ch; color: var(--muted); font-size: .8rem; line-height: 1.5; word-break: normal; overflow-wrap: break-word; }
 .setup-foot[hidden] { display: none; }
-/* The count owns the left end; the generic `.modal-foot .btn.ghost` auto
-   margin would otherwise fight it for the same free space. */
+/* The count owns the left end; cancel the generic .modal-foot .btn.ghost auto margin. */
 .setup-foot .btn.ghost { margin-right: 0; }
 .setup-count { margin-right: auto; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .72rem; line-height: 1.4; word-break: normal; overflow-wrap: break-word; }
-/* Same reason, in the Settings footer: #killSvc already claims the left end. */
+/* Same in the Settings footer, where #killSvc owns the left end. */
 #setupFromSettings { margin-right: 0; }
 
-/* ---- panels ---- */
+/* ---- Panels ---- */
 .panel { padding: 20px 22px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
 .panel-head h2 { margin: 0; font-size: 1.05rem; }
@@ -248,10 +175,10 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 .hint { color: var(--muted); font-size: .78rem; margin: 12px 2px 0; }
 .hint em { color: var(--accent); font-style: normal; }
 
-/* ---- buttons ---- */
+/* ---- Buttons ---- */
 .btn {
   font-family: var(--mono); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase;
-  background: var(--accent); color: #050505; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); border-radius: 6px;
   padding: 8px 16px; cursor: pointer; transition: .15s; font-weight: 700;
 }
 .btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
@@ -262,7 +189,7 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 .btn.danger { background: transparent; color: var(--bad); border-color: transparent; }
 .btn.danger:hover { border-color: var(--bad); }
 
-/* ---- destinations table ---- */
+/* ---- Destinations table ---- */
 .table-scroll { overflow-x: auto; }
 .grid { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .grid th { text-align: left; color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
@@ -273,34 +200,18 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 }
 .grid input:focus { outline: none; border-color: var(--accent); }
 .row-actions { white-space: nowrap; display: flex; gap: 6px; }
-/* A destination the dev peer wrote. Marked, not disabled: enabling the black
-   hole here is what the manual's own demo recipe asks for, so the row has to
-   stay editable — but the `ephemeral` flag is a DELETE marker that survives a
-   Save, and an operator who edited this row into a real node would lose it at
-   the next discard with nothing on screen having said so. The title attribute
-   (set in app.js, translated) carries the sentence; this is what makes them
-   look at it. */
+/* A destination written by the dev peer. Editable (the manual's demo enables it), but its `ephemeral`
+   flag is a DELETE marker that survives Save; the rail draws the eye to the explaining title attr. */
 .grid tr.dest-ephemeral td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .grid tr.dest-ephemeral .d-name { border-color: var(--warn); }
 
-/* ---- settings ---- */
-/* auto-fit rather than a fixed 1fr 1fr: at the old 932px body this still
-   resolves to the two columns it always had, and at the 1400px wrap's 1132px
-   body it takes a third — which is the point of the wider wrap. Twelve
-   fieldsets and seventy-odd controls in two columns is six screens of scroll;
-   in three it is four, and the fields stop stretching to absurd widths (a
-   567px Port box was what a fixed 1fr 1fr produced here). */
+/* ---- Settings ---- */
+/* auto-fit: two columns at a 932px body, three at the 1400px wrap (less scrolling, sane field widths). */
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 18px; }
-/* Belt and braces, like .cards above: auto-fit already collapses to one column
-   long before this fires. Not load-bearing. */
+/* Fallback only, like .cards above. */
 @media (max-width: 720px) { .settings { grid-template-columns: 1fr; } }
-/* min-width:0 is load-bearing, not tidying. A grid item's automatic minimum is
-   its min-content width, and a <select>'s min-content is its LONGEST OPTION —
-   #deidProfile's is "Off — nothing scrubbed; de-identify routes are held", about
-   454px. At two columns the track was ~457px and it happened to fit; at the
-   three columns the wider wrap allows, the track is ~364px and the fieldset
-   was forced to 488px, overlapping the column beside it by 105px. Letting the
-   controls shrink is what keeps a fieldset inside its track at any width. */
+/* min-width:0 is load-bearing: a <select>'s min-content is its longest option (#deidProfile ~454px),
+   which would force the fieldset out of a three-column track. */
 fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
 legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; padding: 0 6px; }
 .settings label { display: flex; flex-direction: column; gap: 5px; font-size: .74rem; color: var(--muted); margin-bottom: 12px; min-width: 0; }
@@ -310,9 +221,7 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .settings input, .settings select {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: .84rem;
-  /* See the fieldset comment above: without these a long <option> sets an
-     unshrinkable floor and the whole fieldset overflows its grid track. The
-     closed select ellipsises; the open list still shows each option in full. */
+  /* Let long <option>s shrink (see fieldset); the closed select ellipsises. */
   min-width: 0; max-width: 100%; text-overflow: ellipsis;
 }
 .settings input:focus, .settings select:focus { outline: none; border-color: var(--accent); }
@@ -321,10 +230,10 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .save-note.ok { color: var(--ok); }
 .save-note.bad { color: var(--bad); }
 
-/* ---- log ---- */
+/* ---- Log ---- */
 .log {
   font-family: var(--mono); font-size: .78rem; line-height: 1.6; height: 260px; overflow-y: auto;
-  background: #070707; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  background: var(--inset); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
 }
 .log .line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
 .log .t { color: var(--muted); flex-shrink: 0; }
@@ -334,7 +243,7 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .log::-webkit-scrollbar { width: 9px; }
 .log::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 
-/* ── Network identity — compact, lives in the top navbar ────────── */
+/* ---- Network identity (top navbar) ---- */
 .net-info {
   display: flex; align-items: center; gap: 5px; white-space: nowrap;
   font-family: var(--mono); font-size: .72rem; color: var(--muted);
@@ -343,10 +252,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .net-info.offline { color: var(--bad); font-weight: 700; }
 @media (max-width: 760px) { .net-info { display: none; } }
 
-/* ── Service chips in the top navbar ─────────────────────────────
-   One chip per service, mirrored from the Services cards. Running → gold;
-   stopped → black-and-white. Clicking a chip toggles the service (it re-fires
-   the card's Start/Stop button), so navbar and cards stay in lock-step. */
+/* ---- Service chips (top navbar) ----
+   Mirror the Services cards: running = gold, stopped = grey. A click re-fires the card's Start/Stop. */
 .svc-nav {
   display: flex; align-items: center; gap: 6px;
   padding-right: 12px; margin-right: 2px; border-right: 1px solid var(--border);
@@ -357,20 +264,16 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   font-family: var(--mono); font-size: .6rem; font-weight: 700;
   letter-spacing: .06em; text-transform: uppercase; line-height: 1;
   padding: 5px 9px; border-radius: 999px; -webkit-appearance: none; appearance: none;
-  color: #cfcfcf; background: #111; border: 1px solid #333; transition: .18s;
+  color: #cfcfcf; background: var(--panel-2); border: 1px solid #333; transition: .18s;
 }
 .svc-chip:hover { border-color: var(--muted); color: #fff; transform: translateY(-1px); }
-/* `display:inline-flex` above would otherwise beat the UA [hidden] rule. */
+/* display:inline-flex would otherwise beat the UA [hidden] rule. */
 .svc-chip[hidden] { display: none; }
-/* A profile without services.control gets the chip as an INDICATOR: same dot,
-   same gold when running, no pointer, no lift, no hover. Deliberately not
-   dimmed — the state it reports is exactly as true and as worth reading for a
-   receptionist as for an administrator, and greying it out would say the
-   opposite. Only the affordance goes. */
+/* Without services.control the chip is an indicator: not dimmed (its state is just as true),
+   only the affordance goes. */
 .svc-chip:disabled { cursor: default; }
 .svc-chip:disabled:hover { border-color: #333; color: #cfcfcf; transform: none; }
-/* Higher specificity than .svc-chip.on:hover below, so a disabled running chip
-   keeps its resting gold instead of the hover's brighter #fbbf24. */
+/* Outranks .svc-chip.on:hover so a disabled running chip keeps its resting gold. */
 .svc-chip.on:disabled:hover { color: var(--accent); border-color: var(--accent); }
 .svc-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex-shrink: 0; transition: .18s; }
 /* Active → gold */
@@ -379,11 +282,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   background: var(--accent-faint); box-shadow: inset 0 0 0 1px rgba(234, 179, 8, .15);
 }
 .svc-chip.on .svc-chip-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.svc-chip.on:hover { color: #fbbf24; border-color: #fbbf24; }
-/* Data-transmit pulse: a gold ring radiates out + the dot flashes when this
-   service actually moves data (store / send / print / RIS / MWL event) — like a
-   link-activity LED, so the user can see traffic flowing. Fired from JS via the
-   `.tx` class, retriggered on each poll that saw activity. */
+.svc-chip.on:hover { color: var(--amber); border-color: var(--amber); }
+/* Transmit pulse: ring + dot flash when the service moves data. JS retriggers `.tx` on each poll that saw activity. */
 .svc-chip.tx::after {
   content: ""; position: absolute; inset: -1px; border-radius: 999px;
   pointer-events: none; animation: chipTx .8s ease-out 2;
@@ -396,7 +296,7 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 }
 @keyframes chipDotTx {
   0%, 100% { background: var(--accent); box-shadow: 0 0 8px var(--accent); transform: scale(1); }
-  50%      { background: #fff; box-shadow: 0 0 12px #fbbf24; transform: scale(1.5); }
+  50%      { background: #fff; box-shadow: 0 0 12px var(--amber); transform: scale(1.5); }
 }
 @media (prefers-reduced-motion: reduce) {
   .svc-chip.tx::after, .svc-chip.tx .svc-chip-dot { animation: none; }
@@ -405,34 +305,18 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 @media (max-width: 1180px) { .svc-chip-label { display: none; } .svc-chip { padding: 6px; } }
 @media (max-width: 720px)  { .svc-nav { display: none; } }
 
-/* ── Sidebar shell: left nav + right content pane ───────────────── */
+/* ---- Sidebar shell: left nav + content pane ---- */
 .shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
-/* 210px, up from 190: six rows can afford it, and the Studies row is the first
-   in this app to carry a label plus two badges. In ru ("Исследования", a single
-   unbreakable Cyrillic word) the old box needed ~209px and .sidebar sets only
-   overflow-y, so the overflow was horizontal and unclipped — badges painted over
-   the workspace. The label also gets min-width:0 below so it can ellipsise
-   rather than push. */
+/* 210px fits a label plus two badges, incl. ru "Исследования" (~209px); the label may ellipsise. */
 .sidebar { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto; min-height: 0; }
-/* A row is the panel button plus any count badges, which are their own buttons
-   so a keyboard can reach them. The row owns the gap; the badges do not chain
-   margins off each other, because either one may be hidden at zero and a
-   margin-left:auto on the first would strand the survivor mid-row. */
+/* Row = panel button + count badges (their own buttons, for keyboard reach). The row owns the gap:
+   either badge may be hidden at zero. */
 .navrow { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
-/* min-width is max-content, not 0, for the one row that holds two full buttons
-   rather than a button and its badges: Manual and Sign out. Sharing a sidebar
-   row leaves each about 43px of text space and they want 51 and 56, so with
-   min-width:0 both ellipsed to "Man…" and "Sig…" — at every window width, since
-   the sidebar is fixed, which is why no breakpoint ever revealed it. Refusing to
-   shrink below the label makes the pair wrap to a row each instead, and a row
-   whose buttons do fit is unaffected. */
+/* max-content for the two-button row (Manual + Sign out): they wrap to a row each instead of
+   ellipsising to "Man…" / "Sig…". */
 .navrow .navbtn { flex: 1 1 auto; min-width: max-content; }
-/* text-decoration is here for the one nav row that is an <a> rather than a
-   <button>: the Manual opens a real page in a new tab, so it has to be a link
-   for middle-click and "open in new tab" to work, and a button would have to
-   fake both. Everything else about the row is identical, so it wears the same
-   class and only the underline needs turning off. */
+/* text-decoration: the Manual row is a real <a> so middle-click / open-in-new-tab work. */
 .navbtn {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   font-family: var(--sans); font-size: .92rem; font-weight: 600; color: var(--text);
@@ -443,48 +327,35 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .navbtn:hover { border-color: var(--accent); color: var(--accent); }
 .navbtn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
 .navbtn .nav-ico { width: 1.15em; text-align: center; flex-shrink: 0; }
-/* The label is the only thing here allowed to shrink. Without min-width:0 a
-   flex item cannot go below its min-content width, and one long unbreakable
-   word would push the badges out of the box instead of ellipsising. */
+/* Only the label may shrink, so a long word ellipsises instead of pushing the badges out. */
 .navbtn > span:not(.nav-ico) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navrow .badge {
   flex: 0 0 auto; align-self: stretch; display: flex; align-items: center; gap: 3px;
   padding: 0 8px; text-align: center; cursor: pointer;
   font-family: var(--mono); font-size: .68rem; font-weight: 700;
-  color: #050505; background: var(--accent); border: 1px solid var(--accent);
+  color: var(--on-accent); background: var(--accent); border: 1px solid var(--accent);
   border-radius: 10px; transition: .15s;
 }
 .navrow .badge:hover { filter: brightness(1.15); }
 .navrow .badge.warn { background: var(--warn); border-color: var(--warn); }
-/* `display:flex` above would otherwise beat the UA [hidden] rule — the same
-   trap .navbtn[hidden] and .svc-chip[hidden] exist to close. */
+/* display:flex would otherwise beat the UA [hidden] rule (as with .navbtn / .svc-chip). */
 .navrow .badge[hidden] { display: none; }
-/* A badge whose tab the profile cannot open leads nowhere; it keeps counting
-   (the number is not privileged) and stops pretending to be a control. */
+/* A badge whose tab is forbidden keeps counting (not privileged) but stops acting as a control. */
 .navrow .badge[data-forbidden="1"] { cursor: default; }
 .navrow .badge[data-forbidden="1"]:hover { filter: none; }
-/* A new order arrived. Same ambient-alert idiom as .svc-chip.tx above — a
-   short retriggerable border pulse, fired from JS by removing the class,
-   forcing a reflow and re-adding it. BOTH the nav button and its badge carry
-   it: the badge is hidden at zero on purpose, so an order created and matched
-   inside one 2s poll would otherwise leave nothing on screen. No new
-   vocabulary — the amber is the same #fbbf24 chipDotTx flashes to. */
+/* New order: retriggerable pulse (JS removes the class, reflows, re-adds). Both the button and its
+   badge carry it: the badge hides at zero, so an order matched within one poll would leave nothing. */
 .navbtn.alert, .navrow .badge.alert { animation: ordAlert .6s ease-in-out 3; }
 @keyframes ordAlert {
   0%, 100% { border-color: var(--accent); }
-  50%      { border-color: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+  50%      { border-color: var(--amber); box-shadow: 0 0 10px var(--amber); }
 }
-/* Reduced motion is not "no alert": the pulse is the VISIBLE half of an
-   arrival, and switching it off left a receptionist who has asked for less
-   motion with nothing but a beep they may have muted. Same amber, same
-   duration, held steady instead of flashing — steps(1, end) holds the first
-   keyframe for the whole run and then drops back, so nothing moves and nothing
-   is lost. */
+/* Reduced motion still alerts: the same amber is held steady (steps(1, end)) rather than removed. */
 @media (prefers-reduced-motion: reduce) {
   .navbtn.alert, .navrow .badge.alert { animation: ordAlertHold 1.8s steps(1, end) 1; }
 }
 @keyframes ordAlertHold {
-  0%   { border-color: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+  0%   { border-color: var(--amber); box-shadow: 0 0 10px var(--amber); }
   100% { border-color: var(--accent); }
 }
 @media (max-width: 640px) {
@@ -494,38 +365,28 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   .navbtn { width: auto; flex: 1 1 auto; }
 }
 
-/* ── Tab strips inside a merged panel ───────────────────────────── */
-/* .modal-body already owns the fill/scroll chain; .tabbed adds nothing but a
-   name so the strip and panes below can be scoped without leaking into the
-   untabbed panels. */
+/* ---- Tab strips inside a merged panel ---- */
+/* .tabbed only scopes the strip and panes; .modal-body owns fill/scroll. */
 .modal-body.tabbed { gap: 0; }
 .panel-tabs { margin-bottom: 14px; flex: 0 0 auto; }
-/* A pane is a flex column for exactly the reason a .workpanel is: .hist-list,
-   .log and .table-scroll below all say `flex:1 1 auto; min-height:0`, and every
-   link in that chain has to be a flex container or the scroll silently becomes
-   auto-height and the tools row is pushed off screen. */
+/* Flex column so the fill chain (.hist-list, .log, .table-scroll: flex 1, min-height 0) still
+   scrolls instead of growing and pushing the tools row off screen. */
 .tabpane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .tabpane[hidden] { display: none; }
-/* Panes with a pinned footer scroll their body instead of the pane. Also a flex
-   column, so the same descendant fill rules keep working one level deeper. */
+/* Panes with a pinned footer scroll their body; also a flex column for the same fill chain. */
 .pane-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-/* Same trap again: a tab given display:flex would outrank the UA [hidden] rule,
-   and capability-hiding a tab would silently stop working. */
+/* display:flex would outrank the UA [hidden] rule and break capability-hiding. */
 .hist-tab[hidden] { display: none; }
-/* The strip wraps rather than overflows — three uppercase mono tabs in ru or
-   pt-BR are wider than .hist-tabs was ever asked to hold. */
+/* Wrap: three uppercase tabs in ru / pt-BR are too wide. */
 .panel-tabs .hist-tabs { flex-wrap: wrap; }
-/* Second-level strip (History's Received / Sent). Outlined rather than filled,
-   so it cannot be mistaken for the panel-level strip 14px above it. */
+/* Second-level strip (History Received / Sent): outlined, unlike the panel-level strip. */
 .hist-tabs.sub .hist-tab.active {
   background: transparent; color: var(--accent); border-color: var(--accent);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
-/* The tabs a profile can actually open, listed under the panel title. Written
-   by app.js from the VISIBLE tabs, so it never promises one that is hidden. */
+/* Openable tabs listed under the panel title; built from VISIBLE tabs by js/13-panels.js. */
 .tab-sub { color: var(--muted); }
-/* One probe round: the four questions and what each answered. Monospace and
-   tight — read as a table of differences, not as prose. */
+/* One probe round: four questions and their answers, read as a table of differences. */
 .caught-round { border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
   padding: 12px 14px; margin-bottom: 10px; }
 .caught-head { font-family: var(--mono); font-size: .7rem; color: var(--accent);
@@ -539,12 +400,10 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .caught-a.good { color: var(--ok); }
 .caught-a.bad { color: var(--bad); }
 
-/* The two jumps on a held-back row. Small and quiet: the engine's sentence
-   above them is the message, these are just the doors it names. */
+/* The two jumps on a held-back row; the engine's sentence above is the message. */
 .held-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .held-jump [hidden] { display: none; }
-/* The descriptive line each absorbed panel used to carry in its header. The tab
-   label says what the pane is; this says what it means. */
+/* Absorbed panel's descriptive line: the tab says what the pane is, this says what it means. */
 .pane-lede {
   margin: 0 0 12px; flex: 0 0 auto;
   font-family: var(--mono); font-size: .72rem; color: var(--muted);
@@ -554,21 +413,16 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 /* Services panel: let the cards grid flow and scroll normally */
 #dlgServices .modal-body { display: block; overflow-y: auto; }
 
-/* ── Low-disk warning banner ────────────────────────────────────── */
+/* ---- Low-disk warning banner ---- */
 .disk-warn {
   font-family: var(--mono); font-size: .8rem; font-weight: 700;
   color: var(--bad); border: 1px solid var(--bad); border-radius: 10px;
   background: rgba(239, 68, 68, .07); padding: 12px 16px; text-align: center;
 }
 
-/* ── "this config would be refused" banner ──────────────────────
-   Same place and the same weight as the low-disk banner — both are facts about
-   the whole install, not about the panel that happens to be open — but PROSE,
-   not a headline: it carries the engine's validation sentence and a file path,
-   so it wraps at spaces, is left-aligned, and is bounded so a long message
-   cannot stretch the page. Amber rather than red: the PACS is running and
-   receiving; what is broken is that a Save will not go through and some part of
-   the configuration is not doing what the file says. */
+/* ---- "This config would be refused" banner ----
+   Install-wide like the low-disk banner, but prose (engine sentence + path) and amber: the PACS
+   still runs, but a Save will not go through. */
 .cfg-warn {
   font-size: .8rem; line-height: 1.5; color: var(--warn);
   border: 1px solid var(--warn); border-radius: 10px;
@@ -578,9 +432,9 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .cfg-warn[hidden] { display: none; }
 
 /* Amber badge variant for the ⚠ Stuck button */
-.btn.action .badge.warn { background: var(--warn); color: #050505; }
+.btn.action .badge.warn { background: var(--warn); color: var(--on-accent); }
 
-/* ── Three action buttons (open popups) ─────────────────────────── */
+/* ---- Action buttons (open popups) ---- */
 .actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn.action {
   flex: 1; padding: 13px 14px; font-size: .92rem; font-weight: 700;
@@ -597,36 +451,25 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .btn.action .badge {
   display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px;
   font-family: var(--mono); font-size: .7rem; font-weight: 700; line-height: 20px;
-  color: #050505; background: var(--accent); border-radius: 10px; vertical-align: middle;
+  color: var(--on-accent); background: var(--accent); border-radius: 10px; vertical-align: middle;
 }
 @media (max-width: 620px) { .btn.action { flex-basis: calc(50% - 8px); } }
 
-/* ── Inline workspace (the selected tab renders here) ───────────── */
-/* The workspace takes all leftover viewport height; the active inline panel
-   fills it and scrolls its own list, so the page body never scrolls. */
-/* min-width: 0 for the same reason `minmax(0, 1fr)` replaces `1fr` in the .kv
-   tracks: a flex item defaults to `min-width: auto` and refuses to shrink below
-   its own min-content width. One nowrap line inside a panel — a stuck send's
-   .stuck-err, a history row's .hist-meta — was enough to widen the workspace
-   past the viewport at ~800px, and because body is `overflow: hidden` that
-   overflow does not scroll, it CLIPS: the .stuck-actions column, Retry now
-   included, left the screen with no way to reach it. The panels already know
-   how to be narrow (every one of those lines ellipsises); they were never
-   allowed to try. */
+/* ---- Inline workspace (the selected tab renders here) ---- */
+/* Takes the leftover viewport height; the active panel scrolls its own list. */
+/* min-width:0: one nowrap line could widen the workspace past the viewport, and with body
+   overflow:hidden that CLIPS (Retry now went off screen). The panels already ellipsise. */
 #workspace { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .workpanel { overflow: hidden; }
-/* Every inline work panel is `.panel.workpanel > .modal-head + .modal-body`,
-   and both .panel and .modal-body carry `padding: 20px 22px` — so the panel
-   paid for the same inset twice, 88px of the 976px workspace. The head and
-   body supply their own padding, so the outer one is pure loss. Popped-out
-   panels (.as-modal) keep it, since there the .panel box IS the modal shell. */
+/* .panel and .modal-body both pad 20px 22px; inline panels drop the outer one.
+   Popped-out panels (.as-modal) keep it, since there .panel is the modal shell. */
 .workpanel:not(.as-modal) { padding: 0; }
 .workpanel[hidden] { display: none; }
 #workspace > .workpanel:not(.as-modal):not([hidden]) {
   flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
 }
 .workpanel .modal-head { border-bottom: 1px solid var(--border); }
-/* inline: flex-fill + scroll the inner list, not the body */
+/* Inline: flex-fill and scroll the inner list, not the body. */
 .workpanel:not(.as-modal) .modal-body {
   flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow-y: auto;
 }
@@ -635,8 +478,7 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .workpanel .modal-foot { border-top: 1px solid var(--border); }
 .head-right { display: flex; align-items: center; gap: 10px; }
 
-/* A panel pops out to a centered overlay: always for Settings, and for the
-   others only when their content is too tall to fit inline (see app.js). */
+/* A panel popped out to a centered overlay (.as-modal). */
 #panelBackdrop { position: fixed; inset: 0; z-index: 59;
   background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
 #panelBackdrop[hidden] { display: none; }
@@ -646,16 +488,16 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   box-shadow: 0 24px 60px rgba(0,0,0,.6);
 }
 .workpanel.as-modal .modal-body { max-height: 74vh; }
-/* the ✕ only makes sense when the panel is a popup */
+/* ✕ only in popup mode. */
 .workpanel .modal-x { display: none; }
 .workpanel.as-modal .modal-x { display: inline-flex; }
 
-/* ── Popup windows (native <dialog>) ────────────────────────────── */
+/* ---- Popup windows (native <dialog>) ---- */
 .modal { border: none; padding: 0; background: transparent; color: var(--text);
   width: min(840px, 94vw); max-width: 94vw; }
 .modal::backdrop { background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
 .modal-inner {
-  background: linear-gradient(180deg, var(--panel), #0a0a0a);
+  background: linear-gradient(180deg, var(--panel), var(--field));
   border: 1px solid var(--border); border-radius: 16px;
   box-shadow: 0 24px 60px rgba(0,0,0,.6);
   display: flex; flex-direction: column; max-height: 86vh; overflow: hidden;
@@ -674,10 +516,10 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   padding: 14px 22px; border-top: 1px solid var(--border); }
 .modal-foot .btn.ghost { margin-right: auto; }
 
-/* ── Toast (global, above modals) ───────────────────────────────── */
+/* ---- Toast (global, above modals) ---- */
 .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
   z-index: 2147483647; font-family: var(--mono); font-size: .82rem; padding: 11px 18px;
-  border-radius: 8px; border: 1px solid var(--border); background: #111;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
   box-shadow: 0 12px 34px rgba(0,0,0,.55); max-width: 92vw; }
 .toast.ok { border-color: var(--ok); color: var(--ok); }
 .toast.bad { border-color: var(--bad); color: var(--bad); }
@@ -686,7 +528,7 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .btn.kill { background: transparent; color: var(--bad); border-color: var(--bad); margin-right: auto; }
 .btn.kill:hover { background: var(--bad); color: #fff; filter: none; transform: translateY(-1px); }
 
-/* ── Transaction history ────────────────────────────────────────── */
+/* ---- Transaction history ---- */
 .hist-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .hist-tabs { display: flex; gap: 8px; }
 .hist-tab {
@@ -695,7 +537,7 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   border-radius: 6px; padding: 7px 14px; cursor: pointer; transition: .15s;
 }
 .hist-tab:hover { color: var(--accent); border-color: var(--accent); }
-.hist-tab.active { background: var(--accent); color: #050505; border-color: var(--accent); font-weight: 700; }
+.hist-tab.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 700; }
 .hist-tools { display: flex; gap: 8px; }
 
 .hist-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
@@ -714,7 +556,7 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
 .hist-meta { color: var(--muted); font-family: var(--mono); font-size: .72rem; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-series { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .hist-chip {
-  font-family: var(--mono); font-size: .62rem; color: var(--muted); background: #0a0a0a;
+  font-family: var(--mono); font-size: .62rem; color: var(--muted); background: var(--field);
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; white-space: nowrap;
 }
 .hist-chip.more { color: var(--accent); border-color: var(--accent); }
@@ -724,7 +566,7 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   .hist-actions { justify-content: flex-end; flex-wrap: wrap; }
 }
 
-/* ── Stuck sends (failing forwards) ─────────────────────────────── */
+/* ---- Stuck sends (failing forwards) ---- */
 .stuck-row {
   display: flex; align-items: center; justify-content: space-between; gap: 14px;
   background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--warn);
@@ -744,34 +586,27 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   .stuck-actions { justify-content: space-between; }
   .stuck-err { max-width: none; }
 }
-/* The ⚠ badge counts FILES, and the two sections below count rows per
-   destination, so the summary prints the badge's own number and says out loud
-   when the sections overlap — otherwise the arithmetic on screen looks wrong on
-   exactly the day a study is both backing off and orphaned. */
+/* The ⚠ badge counts FILES while the sections count rows per destination, so the summary shows
+   the badge's number and says when sections overlap. */
 .stuck-summary {
   background: var(--accent-faint); border: 1px solid var(--border); border-left: 3px solid var(--warn);
   border-radius: 10px; padding: 9px 13px;
 }
 .stuck-summary-n { font-family: var(--mono); font-size: .8rem; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
-/* PROSE, per the rendering policy at the top of this file. */
+/* PROSE (see the value policy near the top). */
 .stuck-summary-sub { margin-top: 3px; font-size: .72rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
 
-/* Section headers. Drawn whenever their section has rows — including when it is
-   the only section — because the header is what says which of the two remedies
-   the rows under it are asking for, and a label that appears only when a
-   sibling happens to exist teaches nothing on the day one of them does not. */
+/* Section headers show even for a lone section: they name the remedy its rows need. */
 .stuck-group { margin-top: 6px; }
 .stuck-group:first-child { margin-top: 0; }
 .stuck-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .stuck-group-t { font-family: var(--mono); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--warn); }
 .stuck-group.orphan .stuck-group-t { color: var(--bad); }
 .stuck-group-n { font-family: var(--mono); font-size: .68rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* PROSE — these two sentences are the whole difference between "wait" and
-   "act", so they wrap at spaces and are never clipped. */
+/* PROSE: these say "wait" vs "act", so they are never clipped. */
 .stuck-group-sub { margin-top: 3px; font-size: .72rem; color: var(--muted); max-width: 68ch; word-break: normal; overflow-wrap: break-word; }
 
-/* Orphaned rows: red rail instead of amber, and no actions column at all —
-   there is no node to dial, so there is no button that could tell the truth. */
+/* Orphaned rows: red rail and no actions (there is no node to dial). */
 .orphan-row { border-left-color: var(--bad); align-items: flex-start; }
 .orphan-row .stuck-dest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .orphan-pin {
@@ -780,37 +615,29 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   border-radius: 4px; padding: 1px 6px; white-space: nowrap;
 }
 .orphan-files, .held-files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-/* ATOMIC — a file name is an identifier, so it clips and keeps its full text in
-   a title attr (app.js sets it); it is never broken mid-token. */
+/* ATOMIC: file names clip with a title attr (js/09-studies.js), never break mid-token. */
 .orphan-files .hist-chip, .held-files .hist-chip { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
-/* PROSE, and the engine's own sentence: it carries the remedy. */
+/* PROSE: the engine's own sentence, which carries the remedy. */
 .orphan-msg, .held-msg { margin-top: 7px; font-size: .74rem; color: var(--muted); max-width: 68ch; line-height: 1.45; word-break: normal; overflow-wrap: break-word; }
 
-/* Held rows: nothing failed and nothing is missing — a scrub a rule asked for
-   cannot happen, so the engine is holding these back on purpose. Amber and red
-   both read as "something broke"; the accent rail says "withheld, and waiting
-   on you", which is what a hold is. Like the orphan row it has no actions
-   column: the remedy is a config edit, and no button here performs one. */
+/* Held rows: withheld on purpose (a scrub a rule asked for cannot happen). Accent rail, not
+   amber/red; no actions, since the remedy is a config edit. */
 .held-row { border-left-color: var(--accent); align-items: flex-start; }
 .held-row .stuck-dest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
-/* WHICH hold. The two causes take opposite remedies — one says turn the profile
-   on, the other says a profile that is already on has nothing behind it — and
-   the sentence that carries them is four lines long, so the row wears its cause
-   next to the destination name. ATOMIC-ish: two or three words that must not be
-   split, sized like the orphan pin so the two tags read as one family. */
+/* Which hold: the two causes need opposite remedies, so the cause is tagged beside the name
+   (sized like .orphan-pin). */
 .held-cause {
   font-family: var(--mono); font-size: .58rem; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent);
   border-radius: 4px; padding: 1px 6px; white-space: nowrap;
 }
 .stuck-group.held .stuck-group-t { color: var(--accent); }
-/* Same localisation hazard as the .kv labels: all-caps Cyrillic at .06em is
-   wider and harder to scan, and Japanese gains nothing from either. */
+/* Same all-caps localisation fix as the .kv labels. */
 html[lang="ru"] .stuck-group-t, html[lang="ja"] .stuck-group-t,
 html[lang="ru"] .orphan-pin, html[lang="ja"] .orphan-pin,
 html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none; letter-spacing: .02em; }
 
-/* ── Pending imports (non-DICOM review queue) ───────────────────── */
+/* ---- Pending imports (non-DICOM review queue) ---- */
 .pend-row {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px 14px; display: flex; flex-direction: column; gap: 11px;
@@ -832,7 +659,7 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 .pend-fields label { display: flex; flex-direction: column; gap: 3px;
   font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .pend-fields label.wide { grid-column: 1 / -1; }
-.pend-fields input { background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px;
+.pend-fields input { background: var(--field); border: 1px solid var(--border); border-radius: 6px;
   padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit; }
 .pend-fields input:focus { outline: none; border-color: var(--accent); }
 .pend-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -841,8 +668,8 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 .pend-actions { display: flex; gap: 6px; flex-shrink: 0; }
 @media (max-width: 620px) { .pend-fields { grid-template-columns: 1fr; } }
 
-/* RIS orders: new-order form + order rows */
-.order-new { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; background: #0a0a0a; }
+/* ---- RIS orders: new-order form + order rows ---- */
+.order-new { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; background: var(--field); }
 .order-new > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono); font-size: .72rem;
   text-transform: uppercase; letter-spacing: .05em; color: var(--accent); user-select: none; }
 .order-new[open] > summary { border-bottom: 1px solid var(--border); }
@@ -850,54 +677,45 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 .order-form label { display: flex; flex-direction: column; gap: 3px;
   font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .order-form label.wide { grid-column: 1 / -1; }
-/* `select` alongside `input`: without it a select falls back to the user
-   agent's control, which on this dark panel is a white box with black text.
-   The Sex field has looked like that since it was written; the target-modality
-   field would have made it two. */
+/* Style selects too, or they fall back to the UA's white control. */
 .order-form input, .order-form select { background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
   padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit;
   min-width: 0; max-width: 100%; }
 .order-form select { color-scheme: dark; }     /* dark option list, not white */
 .order-form input:focus, .order-form select:focus { outline: none; border-color: var(--accent); }
-/* Render the native date/time pickers (calendar glyph + popup) dark, so they
-   match the panel instead of a dark-on-dark, invisible calendar icon. */
+/* Dark native date/time pickers, so the calendar icon stays visible. */
 .order-form input[type="date"], .order-form input[type="datetime-local"] { color-scheme: dark; }
 .order-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px 14px; }
 .order-form-foot .hint { margin: 0; max-width: 52ch; }
 @media (max-width: 620px) { .order-form { grid-template-columns: 1fr; } }
 .order-acc { font-family: var(--mono); font-size: .78rem; color: var(--accent); }
 .order-acc.order-noacc { color: var(--warn); }
-/* Where the order came from, which is also who may end it. Quiet by default —
-   a RIS order is the ordinary case — and loud for a generated one, because a
-   test order on a screen full of real ones during an outage is the single
-   worst thing this panel could be unclear about. */
+/* Order origin (also who may end it): quiet for RIS, loud for a generated test order among real ones. */
 .order-origin {
   font-family: var(--mono); font-size: .6rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .1em;
   padding: 2px 7px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); border: 1px solid var(--border);
 }
-.order-origin.test { color: #050505; background: var(--warn); border-color: var(--warn); }
-/* A field the Test-order tick filled in and locked. Visibly not-yours rather
-   than merely read-only: the operator has to be able to tell at a glance which
-   two fields are still theirs to set. */
+.order-origin.test { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
+/* A field the Test-order tick filled and locked: visibly not the operator's. */
 .autofilled { opacity: .62; font-style: italic; border-style: dashed !important; }
 .order-origin[hidden] { display: none; }
 html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: none; letter-spacing: 0; }
 .order-patient { font-weight: 700; }
 .order-sub { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 3px; }
 
-/* Emergency-failover banner + activation pop-up */
+/* ---- Emergency-failover banner + activation pop-up ---- */
 .emg-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 11px 16px; border-radius: 8px; font-weight: 600; border: 1px solid; }
 .emg-banner[hidden] { display: none; }
 .emg-banner .emg-text { min-width: 0; }
 .emg-banner .emg-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .emg-banner.triggered { background: rgba(234,179,8,.12); border-color: var(--warn); color: var(--warn); }
-.emg-banner.active { background: rgba(239,68,68,.14); border-color: #ef4444; color: #f87171;
+.emg-banner.active { background: rgba(239,68,68,.14); border-color: var(--bad); color: #f87171;
   animation: emgpulse 2s ease-in-out infinite; }
 .emg-banner.recovering { background: rgba(34,197,94,.12); border-color: #22c55e; color: #4ade80; }
-@keyframes emgpulse { 0%,100% { border-color: #ef4444; } 50% { border-color: #7f1d1d; } }
+@keyframes emgpulse { 0%,100% { border-color: var(--bad); } 50% { border-color: #7f1d1d; } }
 
 .emg-modal { position: fixed; inset: 0; z-index: 2147483000; display: flex;
   align-items: center; justify-content: center; padding: 24px;
@@ -909,39 +727,14 @@ html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: n
 .emg-modal-card p { margin: 0 0 12px; }
 .emg-modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 
-/* ── Overview ────────────────────────────────────────────────────
-   Its own .ov-* namespace on purpose: .card / .kv / .card-head carry the
-   service-card policy (container queries, reserved hint height, a two-column
-   kv) and reusing them here would drag all of it in. The value policy is the
-   same one the kv block documents, restated in .ov-* terms:
-     .ov-atomic  identifiers — nowrap + ellipsis, app.js mirrors into title
-     .ov-path    paths on a full-width .ov-wide row — overflow-wrap: anywhere
-     everything else is prose — word-break: normal + overflow-wrap: break-word
-   Breaking a value at any character is banned here as it is everywhere else. */
+/* ---- Overview ----
+   Own .ov-* namespace so it doesn't inherit the service-card policy. Same value policy as .kv:
+   .ov-atomic (nowrap + ellipsis, title mirrored), .ov-path (anywhere, full row), else prose. */
 #dlgOverview .modal-body { display: block; overflow-y: auto; }
 
-/* Counters. Every tile that counts something is a button onto the panel that
-   owns it (app.js wires the click); Free space is a plain div because it
-   counts nothing and leads nowhere.
-   The sizing is set by that one tile, because it is the only value here that is
-   a measurement and not a count: #ovFree is round(free / 1024^3, 1) + " GB", so
-   9 characters ("3725.9 GB") is an ordinary 4 TB volume and 10 ("18626.4 GB") a
-   20 TB one — and it carries no title mirror, so whatever the box cannot hold
-   is lost with no way to recover it. The measure, at the 932px body:
-     tracks   7 tiles want 7 columns, and the widest floor that still fits 7 is
-              (932 - 6x10) / 7 = 124.5px → 124px. Derive against the FLOOR, not
-              against the 124.57px this layout happens to hand out: auto-fit's
-              worst case is a track sitting exactly on its floor, which is what
-              a narrower window produces.
-     content  124 - 22 padding - 2 border = 100px.
-     value    IBM Plex Mono advances exactly 0.6em (measured, all subsets), so
-              1rem = 9.6px per character and 10 characters = 96px. The old
-              1.3rem was 12.48px per character against 96.6px of content, i.e.
-              "999.9 GB" (99.8px) already overflowed — every volume from 100 GB
-              up was ellipsised, usually eating the unit that makes the number
-              mean anything.
-   min(…, 100%) for the reason .cards and .ov-grid carry it: a bare minmax(124px,
-   …) refuses to shrink and overflows a container narrower than one track. */
+/* Counter tiles are buttons onto the owning panel; Free space is a plain div. Sized for #ovFree
+   (up to "18626.4 GB", 10 chars, no title fallback): 7 tracks at 932px -> 124px floor -> 100px
+   content; IBM Plex Mono advances 0.6em, so 1rem = 96px for 10 chars. */
 .ov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(124px, 100%), 1fr)); gap: 10px; }
 .ov-tile {
   display: flex; flex-direction: column; gap: 3px; min-width: 0; text-align: left;
@@ -952,11 +745,7 @@ button.ov-tile { cursor: pointer; transition: .15s; }
 button.ov-tile:hover { border-color: var(--accent); }
 button.ov-tile:hover .ov-tile-k { color: var(--accent); }
 button.ov-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* A tile whose panel this profile cannot hold. The number is not privileged and
-   still counts; only the affordance goes, so it reads like Free space — which
-   is already a plain div here for the same reason: it counts something and
-   leads nowhere. A button that silently does nothing reads as broken software
-   to somebody working an outage. */
+/* Forbidden panel: the tile still counts but loses the affordance (a dead button reads as broken). */
 button.ov-tile.ov-inert, .ov-ticker.ov-inert { cursor: default; }
 button.ov-tile.ov-inert:hover { border-color: var(--border); }
 button.ov-tile.ov-inert:hover .ov-tile-k { color: var(--muted); }
@@ -964,8 +753,7 @@ button.ov-tile.ov-inert:hover .ov-tile-k { color: var(--muted); }
   font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-tile-k { min-width: 0; color: var(--muted); font-size: .64rem; line-height: 1.3;
   text-transform: uppercase; letter-spacing: .06em; word-break: normal; overflow-wrap: break-word; }
-/* Counters belong to this run of the engine — a config save restarts the
-   receiver — so the "since" line is never optional. */
+/* Counters reset with the engine run (a config save restarts the receiver), so "since" always shows. */
 .ov-since { margin: 10px 2px 0; color: var(--muted); font-family: var(--mono); font-size: .68rem;
   word-break: normal; overflow-wrap: break-word; }
 .ov-note { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 0;
@@ -978,25 +766,15 @@ button.ov-tile.ov-inert:hover .ov-tile-k { color: var(--muted); }
 .ov-box { min-width: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .ov-box-h { margin: 0 0 10px; color: var(--accent); font-family: var(--mono); font-size: .64rem;
   font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
-/* Label OVER value, never a fixed label column: a two-column grid confines
-   every value to whatever the longest label leaves it, and "Configuración" or
-   "Конфигурационный файл" leaves a path almost nothing. */
-/* 300px floor, not 150px: the .ov-dest stacking below is measured per locale
-   against a one-column list (state 70.9–90.3px, note 147.8–190.1px). A 150px
-   floor took a second column as soon as the wrap widened, and two ~162px
-   tracks cannot hold either string. The floor is what keeps this list one
-   column until the box could genuinely fit two of them. */
+/* Label OVER value, so a long label ("Конфигурационный файл") never squeezes a path. */
+/* 300px floor keeps this one column, which the per-locale .ov-dest measurements assume. */
 .ov-list { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 9px 16px; }
 .ov-list > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ov-list > div.ov-wide { grid-column: 1 / -1; }
 .ov-list dt { color: var(--muted); font-size: .6rem; line-height: 1.25; text-transform: uppercase; letter-spacing: .06em; }
 .ov-list dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: .82rem;
   word-break: normal; overflow-wrap: break-word; hyphens: none; }
-/* Same localisation hazard as the kv labels: all-caps Cyrillic at wide
-   tracking is harder to scan, and Japanese gains nothing from either. The
-   destination state belongs in this list as much as any label does: "НЕ
-   ПРОВЕРЯЛСЯ" is both the hardest to read and, at 83.8px against 80.0px in
-   sentence case, the widest thing competing with the node name beside it. */
+/* Same all-caps localisation fix; includes the destination state (ru "НЕ ПРОВЕРЯЛСЯ" is widest). */
 html[lang="ru"] .ov-list dt, html[lang="ja"] .ov-list dt,
 html[lang="ru"] .ov-tile-k, html[lang="ja"] .ov-tile-k,
 html[lang="ru"] .ov-box-h, html[lang="ja"] .ov-box-h,
@@ -1005,49 +783,19 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 }
 .ov-atomic { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-path { font-size: .74rem; word-break: normal; overflow-wrap: anywhere; }
-/* The desktop shell's "a newer release exists" suffix, and the only link in
-   this list. Written here rather than borrowed from .linkish because .linkish
-   is button chrome in accent amber at the sans face: on this row every one of
-   those declarations would have to be overridden, and amber underlined is the
-   loudest inline treatment the dashboard has — wrong for a notice nobody asked
-   for. Muted and mono keeps it on the value's own line as an aside, and amber
-   arrives on hover, which is how everything else in this file answers a
-   pointer. It shares the row's prose wrapping deliberately: this must never be
-   ellipsised away, and .ov-atomic is where that would start. */
+/* Desktop shell's "newer release" link: a muted mono aside, amber on hover. Wraps as prose,
+   never ellipsised. */
 .ov-upd { margin-left: 6px; color: var(--muted); font-family: var(--mono); font-size: .74rem; }
 .ov-upd:hover, .ov-upd:focus-visible { color: var(--accent); }
 .ov-upd[hidden] { display: none; }
 
-/* Destinations. The state span carries a word as well as a colour, and it is
-   only ever green when a timestamped probe says so — an unprobed node reads
-   "Not checked", which is the truth.
-   A row is a small STACK, not one line of four columns, because the two parts
-   that cannot shrink already own the box. Measured at the shipped 267px
-   (.ov-grid → 3 tracks of 301.33px, minus 32px padding and 2px border):
-     state  70.9px "NOT CHECKED", 83.8 es, 90.3 pt-BR, 80.0 ru, 40.5 ja
-     note   171.1px "checked 2026-08-05 14:30:02" — CarinoClock.format() renders
-            date AND time, so the stamp is 27-30 characters, not the 8 a bare
-            clock would be: 190.1 es/pt-BR, 183.7 ru, 147.8 ja
-   Those two plus the gaps came to 242.0px of the 243.3px a single line had, so
-   the node name and the address were splitting 1.3px in en and OVERFLOWING in
-   es/pt-BR (-17.7px) and ru (-1.9px) — where the clipped tail was the timestamp
-   itself. The name is the identifier the operator recognises, so it cannot be
-   the thing that pays. Stacked, each part gets a measure of its own:
-     row 1  state + name — the name takes 267.33 - state - 8, i.e. 169px in
-            pt-BR (the worst locale) up to 219px in ja: 26+ characters
-     row 2  address, the whole 267.33px = 38 monospace characters, so the usual
-            "192.168.1.50:104 · REMOTE_AE" (28) lands whole. It stays .ov-atomic
-            for the pathological case, but giving it a full row is deliberate:
-            a mid-truncated dotted quad reads as a shorter VALID address, which
-            is the one truncation in this panel worse than an extra line.
-     row 3  the stamp, at most 190.1px of 267.33px, and empty on an unprobed
-            node — an empty grid item is zero high, so those rows stay at two
-            lines and the "Not checked" case costs nothing. */
+/* Destinations: state is a word plus colour, green only after a timestamped probe. Stacked because
+   one line overflowed in es/pt-BR/ru at the 267px box: row 1 state + name, row 2 address (a full row:
+   a truncated dotted quad reads as a valid shorter one), row 3 probe stamp (empty if unprobed). */
 .ov-dests { display: flex; flex-direction: column; gap: 7px; }
 .ov-dest { display: grid; grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; overflow: hidden; font-size: .8rem; }
-/* Node names come from the config and can be in any script; isolate keeps an
-   RTL one from reordering the row around it. */
+/* isolate: a node name in an RTL script cannot reorder the row. */
 .ov-dest > span { unicode-bidi: isolate; }
 .ov-dest-state { grid-area: 1 / 1; white-space: nowrap; font-family: var(--mono); font-size: .62rem;
   text-transform: uppercase; letter-spacing: .05em; }
@@ -1056,21 +804,16 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .ov-dest-state.warn { color: var(--warn); }   /* answered our probe, but its sends are backed up */
 .ov-dest-state.unknown { color: var(--muted); }
 .ov-dest-name { grid-area: 1 / 2; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The two full-width rows keep min-width:0 for the reason the kv block gives,
-   and one more here: they span the `auto` track, so without it their content
-   would be free to widen the very column that track exists to size. */
+/* min-width:0: these span the `auto` track and would otherwise widen it. */
 .ov-dest-addr { grid-area: 2 / 1 / 3 / -1; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .72rem; }
-/* Prose, not an identifier: on its own row it fits in every locale, and if a
-   narrow window ever forces it to fold it folds at a space, which no one can
-   misread — where nowrap would have clipped digits off a timestamp. */
+/* Prose: folds at a space rather than clipping timestamp digits. */
 .ov-dest-note { grid-area: 3 / 1 / 4 / -1; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: .66rem;
   word-break: normal; overflow-wrap: break-word; }
 
 .ov-empty { margin: 0; color: var(--muted); font-family: var(--mono); font-size: .74rem;
   word-break: normal; overflow-wrap: break-word; }
 .ov-empty[hidden] { display: none; }
-/* One fact per line. app.js blanks a line when its source is null, and an
-   empty line takes no room — so a half-known box has no gaps in it. */
+/* One fact per line; js/04-services-overview.js blanks unknown ones and :empty takes no room. */
 .ov-line { min-width: 0; font-size: .8rem; line-height: 1.5; unicode-bidi: isolate;
   word-break: normal; overflow-wrap: break-word; }
 .ov-line:empty { display: none; }
@@ -1078,15 +821,12 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .ov-dim { color: var(--muted); font-family: var(--mono); font-size: .7rem; }
 .ov-bad { color: var(--bad); font-family: var(--mono); font-size: .7rem; }
 
-/* The log ticker is the one element whose content this app does not author: an
-   engine line in the server's language, arbitrary length, often carrying a
-   patient name in a script we never see. One line, always, in every language —
-   the row clips and cannot grow or push the panel, and isolate stops an RTL
-   name from reordering the timestamp and the text around it. */
+/* Log ticker: engine text of any length or script (may include patient names). One clipped line;
+   isolate stops an RTL name reordering the row. */
 .ov-ticker {
   display: flex; align-items: baseline; gap: 10px; width: 100%; min-width: 0; overflow: hidden;
   margin-top: 16px; padding: 10px 14px; text-align: left; cursor: pointer; transition: .15s;
-  background: #070707; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--inset); border: 1px solid var(--border); border-radius: 10px;
   font-family: var(--mono); font-size: .74rem; color: var(--text);
 }
 .ov-ticker:hover { border-color: var(--accent); }
@@ -1102,11 +842,9 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .stopped-overlay h2 { margin: 0 0 10px; color: var(--accent); }
 .stopped-overlay p { margin: 0; color: var(--muted); max-width: 420px; }
 
-/* ── Token gate ──────────────────────────────────────────────────
-   Opaque, not translucent: it is shown before the first /api call succeeds
-   and again the moment one 401s, and a dashboard dimly readable behind it
-   would be a dashboard still showing whatever patient line it last drew.
-   Above .stopped-overlay is deliberate — a shutdown notice outranks it. */
+/* ---- Token gate ----
+   Opaque so no patient data shows behind it. z-index just below .stopped-overlay: a shutdown
+   notice outranks it. */
 .auth-gate {
   position: fixed; inset: 0; z-index: 2147483646; display: flex;
   align-items: center; justify-content: center; padding: 24px;
@@ -1119,12 +857,12 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 }
 .auth-card h2 { margin: 0 0 10px; font-size: 1.15rem; color: var(--accent);
   word-break: normal; overflow-wrap: break-word; }
-/* PROSE, per the rendering policy at the top of this file. */
+/* PROSE (see the value policy near the top). */
 .auth-lede { margin: 0 0 18px; color: var(--muted); font-size: .82rem; line-height: 1.55;
   word-break: normal; overflow-wrap: break-word; }
 .auth-field { display: flex; flex-direction: column; gap: 6px; font-size: .74rem; color: var(--muted); }
 .auth-field input {
-  background: #070707; border: 1px solid var(--border); color: var(--text);
+  background: var(--inset); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 10px 12px; font-family: var(--mono); font-size: .86rem;
   min-width: 0;
 }
@@ -1138,21 +876,18 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .auth-help { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--border);
   color: var(--muted); font-size: .72rem; line-height: 1.55;
   word-break: normal; overflow-wrap: break-word; }
-/* ---- profile picker at the gate ----
-   Buttons rather than a <select>: this is a touch screen at a front desk as
-   often as it is a keyboard, and a name you tap is faster and harder to get
-   wrong than a name you scroll to. */
+/* ---- Profile picker at the gate ----
+   Buttons, not a <select>: faster and harder to get wrong on a front-desk touch screen. */
 .auth-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .person {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; position: relative;
-  background: #070707; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--inset); border: 1px solid var(--border); border-radius: 9px;
   padding: 12px 30px 12px 13px; cursor: pointer; text-align: left; color: var(--text);
   font-family: var(--sans); font-size: .88rem; transition: .14s; min-width: 0;
 }
 .person:hover { border-color: var(--accent); }
 .person.chosen { border-color: var(--accent); background: var(--accent-faint); }
-/* A person's name is PROSE and wraps at spaces; it is never broken mid-word,
-   because a name cut in half is a name read wrong. */
+/* Names wrap at spaces, never mid-word. */
 .person b { font-weight: 600; word-break: normal; overflow-wrap: break-word; }
 .person-role { font-size: .7rem; color: var(--muted); text-transform: lowercase;
   word-break: normal; overflow-wrap: break-word; }
@@ -1169,7 +904,7 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 }
 #authPickWrap #authPwWrap { margin-top: 4px; }
 
-/* ---- who is signed in, in the nav ---- */
+/* ---- Who is signed in (nav) ---- */
 .whoami {
   margin-top: auto; padding: 10px 11px 4px; font-size: .74rem; color: var(--accent);
   border-top: 1px solid var(--border); word-break: normal; overflow-wrap: break-word;
@@ -1189,7 +924,7 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .person-card.off { opacity: .58; }
 .person-head { display: flex; gap: 10px; flex-wrap: wrap; }
 .person-head input, .person-meta input, .person-pw input {
-  background: #070707; border: 1px solid var(--border); color: var(--text);
+  background: var(--inset); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 7px 10px; font-size: .84rem; min-width: 0;
 }
 .person-name { flex: 2 1 180px; font-weight: 600; }
@@ -1217,8 +952,7 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .sub-note.warn { color: var(--warn); }
 
 /* ---- Audit panel ----
-   A grid, because the columns have to line up to be scannable — the whole use
-   of this screen is running an eye down the actor column. */
+   A grid, so the actor column can be scanned. */
 .audit-state { font-size: .8rem; color: var(--muted); margin: 0 0 10px;
   word-break: normal; overflow-wrap: break-word; }
 .audit-state.bad { color: var(--bad); }
@@ -1226,7 +960,7 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .audit-row {
   display: grid; grid-template-columns: 145px 130px 150px 1fr 74px; gap: 10px;
   padding: 6px 8px; border-radius: 5px; font-size: .76rem; align-items: baseline;
-  border-left: 2px solid transparent; background: #070707;
+  border-left: 2px solid transparent; background: var(--inset);
 }
 .audit-row.denied { border-left-color: var(--warn); }
 .audit-row.failed { border-left-color: var(--bad); }
@@ -1234,16 +968,14 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .audit-who { color: var(--text); word-break: normal; overflow-wrap: break-word; }
 .audit-act { font-family: var(--mono); color: var(--accent); font-size: .72rem;
   overflow-wrap: anywhere; }
-/* PATHS: a target is a study path or an id, which carries no spaces to break
-   at and would otherwise push this grid sideways. The one class allowed to
-   break mid-token. */
+/* PATHS: a target has no spaces to break at; the one class allowed to break mid-token. */
 .audit-target { color: #b0b0b0; overflow-wrap: anywhere; min-width: 0; }
 @media (max-width: 780px) {
   .audit-row { grid-template-columns: 1fr 1fr; gap: 2px 10px; }
   .audit-target { grid-column: 1 / -1; }
 }
 
-/* ---- emergency modal, role-aware ---- */
+/* ---- Emergency modal, role-aware ---- */
 .emg-role {
   margin: 10px 0; padding: 10px 12px; border-left: 2px solid var(--accent);
   background: var(--accent-faint); font-size: .84rem; line-height: 1.55; color: var(--text);
@@ -1256,25 +988,18 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 /* Rotation lives in Settings and is never a pre-filled field — see index.html. */
 .auth-rotate { margin: 0 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .auth-rotate[hidden] { display: none; }
-/* `.settings label { display: flex }` outranks the user agent's
-   `[hidden] { display: none }`, so a label hidden from JS would stay on screen
-   — which for the "current token" proof field means asking for a token that
-   does not exist yet. Author-level rule, or the attribute does nothing. */
+/* `.settings label {display:flex}` outranks the UA [hidden] rule; needed so the token-proof field can hide. */
 .settings label[hidden] { display: none; }
 .auth-rotate label { margin-bottom: 8px; }
 .hint.bad-note { color: #f8a5a5; }
 .hint.warn-note { color: var(--warn); }
-/* The site-key line inside #deidState. Its own line, and its own colour when no
-   key is set: a missing key does not stop a forward, it quietly makes the
-   pseudonyms reversible, so it has to be visible without being an alarm.
-   PROSE — it is a sentence, and #deidState is amber when the rules disagree, so
-   this span sets its own colour rather than inheriting a warning it is not part of. */
+/* Site-key line in #deidState: a missing key makes pseudonyms reversible, so warn-coloured but not
+   an alarm. Sets its own colour rather than inheriting #deidState's amber. */
 .deid-key { display: block; margin-top: 4px; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
 .deid-key.warn { color: var(--warn); }
 
-/* ── Instance-index readout (inside its Settings fieldset) ───────
-   Same three-class policy as .kv: counters are prose-safe numbers, the
-   database location is a path and gets the whole row. */
+/* ---- Instance-index readout (Settings fieldset) ----
+   Same policy as .kv: counters as prose, the database path gets the whole row. */
 .idx-stats { margin: 4px 0 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
 .idx-stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .idx-stats > div.wide { grid-column: 1 / -1; }
@@ -1287,9 +1012,8 @@ html[lang="ru"] .idx-stats dt, html[lang="ja"] .idx-stats dt { text-transform: n
   word-break: normal; overflow-wrap: break-word; }
 .idx-note.bad { color: var(--bad); }
 
-/* ── Routing rules ───────────────────────────────────────────────
-   The rule card is its own query container: the field grid folds on the
-   PANEL's width, which the sidebar decides, not the viewport's. */
+/* ---- Routing rules ----
+   Each rule card is a query container: the field grid folds on the panel width, not the viewport. */
 .rt-enable { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: .8rem; color: var(--muted); }
 .rt-enable input { width: 15px; height: 15px; accent-color: var(--accent); }
 .rt-rules { display: flex; flex-direction: column; gap: 12px; }
@@ -1300,7 +1024,7 @@ html[lang="ru"] .idx-stats dt, html[lang="ja"] .idx-stats dt { text-transform: n
 .rt-rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .rt-rule-n { flex: 0 0 auto; font-family: var(--mono); font-size: .72rem; color: var(--accent); font-weight: 700; }
 .rt-name {
-  flex: 1 1 auto; min-width: 0; background: #070707; border: 1px solid var(--border);
+  flex: 1 1 auto; min-width: 0; background: var(--inset); border: 1px solid var(--border);
   color: var(--text); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: .82rem;
 }
 .rt-name:focus { outline: none; border-color: var(--accent); }
@@ -1309,7 +1033,7 @@ html[lang="ru"] .idx-stats dt, html[lang="ja"] .idx-stats dt { text-transform: n
 .rt-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .68rem; color: var(--muted); min-width: 0; }
 .rt-grid label.wide { grid-column: 1 / -1; }
 .rt-grid input {
-  background: #070707; border: 1px solid var(--border); color: var(--text); min-width: 0;
+  background: var(--inset); border: 1px solid var(--border); color: var(--text); min-width: 0;
   border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: .8rem;
 }
 .rt-grid input:focus { outline: none; border-color: var(--accent); }
@@ -1324,12 +1048,9 @@ html[lang="ru"] .rt-dests-h, html[lang="ja"] .rt-dests-h { text-transform: none;
 .rt-dests { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .rt-dest { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: .76rem; }
 .rt-dest input { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; }
-/* ATOMIC: a destination name is an identifier and the join key for routing,
-   send state and the archive gate. Clip it, never cut it — app.js mirrors the
-   full name into title=. */
+/* ATOMIC: a destination name is the routing/send-state join key; clip it, with a title (js/11-routing.js). */
 .rt-dest span { min-width: 0; max-width: 22ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A rule naming a node that is gone or disabled. Kept, checked and flagged:
-   dropping it silently is how a study stops going where it was configured. */
+/* A rule naming a gone/disabled node stays checked and flagged, never silently dropped. */
 .rt-dest.missing span { color: var(--bad); text-decoration: line-through; }
 .rt-dests-empty { color: var(--muted); font-family: var(--mono); font-size: .72rem; }
 .rt-rule-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; }
@@ -1339,22 +1060,21 @@ html[lang="ru"] .rt-dests-h, html[lang="ja"] .rt-dests-h { text-transform: none;
   word-break: normal; overflow-wrap: break-word; }
 .rt-warn:empty { display: none; }
 
-/* ── Routing test ────────────────────────────────────────────────
-   The explain view. Every line names a rule and says what it did, in the
-   router's own vocabulary, because that is the string the log also uses. */
+/* ---- Routing test ----
+   Explain view: each line names a rule and what it did, in the router's (and the log's) vocabulary. */
 .rt-test { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
 .rt-test-h { margin: 0 0 6px; font-size: .95rem; }
 .rt-test-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px 14px; }
 .rt-test-form label { display: flex; flex-direction: column; gap: 4px; font-size: .68rem; color: var(--muted); min-width: 0; }
 .rt-test-form label.wide { grid-column: 1 / -1; }
 .rt-test-form input {
-  background: #070707; border: 1px solid var(--border); color: var(--text); min-width: 0;
+  background: var(--inset); border: 1px solid var(--border); color: var(--text); min-width: 0;
   border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: .8rem;
 }
 .rt-test-form input:focus { outline: none; border-color: var(--accent); }
 .rt-test-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .rt-test-foot .btn { margin-left: auto; }
-.rt-result { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #070707; }
+.rt-result { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--inset); }
 .rt-result[hidden] { display: none; }
 .rt-decision { font-size: .84rem; line-height: 1.5; word-break: normal; overflow-wrap: break-word; }
 .rt-decision.fallback { color: var(--warn); }
@@ -1372,11 +1092,8 @@ html[lang="ru"] .rt-dests-h, html[lang="ja"] .rt-dests-h { text-transform: none;
 .rt-trace-why:empty, .rt-trace-act:empty { display: none; }
 .rt-trace.hit .rt-trace-name { color: var(--ok); font-weight: 700; }
 .rt-trace.skip .rt-trace-name { color: var(--warn); }
-/* A rule that matched but whose delivery is HELD (it asks for de-identification
-   while the profile is off). Deliberately not `.hit` green: the study is not
-   going there, and a matched-and-green row is exactly the reassurance that let
-   an identified study leave believing it had been scrubbed. PROSE, so the held
-   line wraps on words like every other sentence here. */
+/* Matched but HELD (asks for de-identification while the profile is off): red, never .hit green,
+   since the study is not going there. Prose. */
 .rt-trace.held .rt-trace-name { color: var(--bad); font-weight: 700; }
 .rt-held { color: var(--bad); font-family: inherit; font-size: .8rem;
   word-break: normal; overflow-wrap: break-word; }

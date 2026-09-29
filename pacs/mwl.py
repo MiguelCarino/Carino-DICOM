@@ -1027,7 +1027,7 @@ def build_worklist_item(order: dict, query=None, report=None):
     #
     # That is why the repair for a mistyped modality had to be upstream, and is:
     # the intake field is no longer free text but a select of codes built from a
-    # constant (fillModalityChoices in app.js), whose blank first choice is the
+    # constant (fillModalityChoices in pacs/web/js/07-config.js), whose blank first choice is the
     # one that shows on every worklist, so reception can no longer submit a
     # value that selection would hide. What still reaches this line unconstrained
     # is text from somewhere we do not own — an HL7 OBR-24 off a feed, or a

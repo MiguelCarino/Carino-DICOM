@@ -9,8 +9,8 @@
 //
 // So this suite asserts the arrangement itself, and the two ways of undoing it
 // that look like tidying: putting them back in <head>, or adding `defer` to make
-// them non-blocking there. `defer` would run all three *after* the inline app
-// script, which destructures dcmjs.data at top level — the page would die on the
+// them non-blocking there. `defer` would run all three *after* the app
+// scripts (js/*.js), which destructure dcmjs.data at top level — the page would die on the
 // first line of the app with a bare "dcmjs is not defined".
 (window.SUITES || (window.SUITES = {})).boot = async () => {
   const out = [];
@@ -20,12 +20,12 @@
     const LIBS = ['vendor/dcmjs.min.js', 'deid-profile.js', 'dicom-dictionary.js'];
     const all = [...document.querySelectorAll('script')];
     const bySrc = s => all.find(el => el.getAttribute('src') === s);
-    // The app script is the inline one that opens the tag dictionary. The test
-    // runner injects its own <script src> tags after it, so "the last script"
-    // would be the wrong thing to look for.
-    const app = all.find(el => !el.src && /EXTENDED TAG DICTIONARY/.test(el.textContent));
+    // The app starts with js/dictionary.js, the first of the js/ files, which
+    // opens the tag dictionary. The test runner injects its own <script src> tags
+    // after the app, so "the last script" would be the wrong thing to look for.
+    const app = bySrc('js/dictionary.js');
 
-    ok('the inline app script is where it was', !!app);
+    ok('the app script is where it was', !!app);
 
     // ---- the libraries arrived, in a form the app can use --------------------
     ok('dcmjs loaded', typeof dcmjs === 'object' && !!dcmjs.data);

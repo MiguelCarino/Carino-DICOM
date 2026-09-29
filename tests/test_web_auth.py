@@ -717,7 +717,7 @@ def test_a_save_with_no_version_still_behaves_exactly_as_before():
 def test_the_version_is_a_header_never_a_config_field():
     """It rides in the ETag and nowhere else. A field in the document would have
     made every client that posts back what GET handed it (both e2e suites here,
-    and app.js in spirit) conflict with itself the day it shipped — and a field
+    and the dashboard in spirit) conflict with itself the day it shipped — and a field
     the server accepted but did not check would be a client believing its Save
     is guarded when nothing is guarding it. So the key is refused out loud, the
     way a token posted to this endpoint already is, and never reaches the file."""
@@ -803,7 +803,7 @@ def test_a_scaffolded_config_starts_at_0600_too():
 # ---------------------------------------------------------------- static tree
 def test_static_shell_stays_anonymous_so_the_prompt_can_render():
     _, _, c = make(_tmp(), token=TOKEN)
-    for url in ("/", "/app.js", "/styles.css", "/editor/"):
+    for url in ("/", "/js/01-core.js", "/styles.css", "/editor/"):
         r = c.get(url)
         assert r.status_code == 200, (url, r.status_code)
 

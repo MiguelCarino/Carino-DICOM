@@ -5,7 +5,7 @@
  * and imaging staff have to be TOLD, or the order sits on a list nobody opens
  * until somebody asks why the patient is still in the corridor. The decision to
  * tell them — and, just as important, the decision to stay quiet — lives
- * entirely in app.js: the created_seq diff, the live region, the deferred tone,
+ * entirely in js/*.js: the created_seq diff, the live region, the deferred tone,
  * the in-flight watermark on the status poll. Every one of those is a repair
  * for a failure that was found by driving it, and until this file existed not
  * one of them was asserted anywhere. Three of the repairs could be reverted at
@@ -17,7 +17,7 @@
  * So this is the browser half's regression gate. It does not launch a browser —
  * the arrival decision needs no rendering, only a clock, a store and a speaker,
  * and a headless Chromium would make the one gate that must run everywhere the
- * one gate that needs a binary. Instead it reads app.js, cuts out the regions
+ * one gate that needs a binary. Instead it reads js/*.js, cuts out the regions
  * that make the decision, and runs THOSE — not a paraphrase of them, which is
  * the trap a hand-written model of this logic would fall into: a model agrees
  * with the source on the day it is written and silently stops agreeing on the
@@ -25,7 +25,7 @@
  * If a region cannot be found, or the extracted text no longer assembles, that
  * is a failure and not a skip.
  *
- * What the fakes supply is everything app.js does not own: a clock whose
+ * What the fakes supply is everything js/*.js does not own: a clock whose
  * timers fire only when the test says so, an AudioContext that records what it
  * was asked to play instead of playing it, a localStorage, a DOM thin enough to
  * hold a live region's textContent. The wall clock and the monotonic clock are
@@ -44,14 +44,19 @@ import { fileURLToPath } from "url";
 const WEB = process.argv[2]
   ? path.resolve(process.argv[2])
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const APP_SRC = fs.readFileSync(path.join(WEB, "app.js"), "utf8");
+// The dashboard is a run of classic scripts; read them all, in the order
+// index.html loads them.
+const APP_SRC = [...fs.readFileSync(path.join(WEB, "index.html"), "utf8")
+  .matchAll(/<script src="(js\/[^"]+)"><\/script>/g)]
+  .map((m) => fs.readFileSync(path.join(WEB, m[1]), "utf8")).join("");
+if (!APP_SRC) { console.log("  FAIL  index.html loads no js/ scripts"); process.exit(1); }
 
 let failures = 0;
 const ok = (m) => console.log("  ok    " + m);
 const bad = (m) => { failures += 1; console.log("  FAIL  " + m); };
 const check = (cond, m) => (cond ? ok(m) : bad(m));
 
-/* ── Cutting the decision out of app.js ──────────────────────────────
+/* ── Cutting the decision out of js/*.js ──────────────────────────────
    A brace counter is enough to lift a function out of a file, but only if it
    knows what a brace is: `TN(total, "{n} new orders")` is one of the strings
    this very feature added, and a naive counter closes announceArrival() in the
@@ -151,14 +156,14 @@ const FUNCS = [
 ];
 
 if (missing.length) {
-  missing.forEach((m) => bad("could not extract from app.js: " + m
+  missing.forEach((m) => bad("could not extract from the dashboard scripts (js/*.js): " + m
     + " — the alert moved or was renamed, and this gate is now testing nothing"));
   console.log("\n" + failures + " FAILURE(S)");
   process.exit(1);
 }
-ok("all " + (DECLS.length + FUNCS.length + 1) + " alert regions extracted from app.js");
+ok("all " + (DECLS.length + FUNCS.length + 1) + " alert regions extracted from the dashboard scripts (js/*.js)");
 
-/* ── The world app.js thinks it is running in ────────────────────────
+/* ── The world js/*.js thinks it is running in ────────────────────────
    Named stubs, not a framework: every one of them is something the extracted
    code calls and this file has an opinion about. The ones that record (pulse,
    TN, the oscillators) are the assertions' only windows into a decision that

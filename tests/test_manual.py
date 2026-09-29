@@ -142,12 +142,13 @@ def test_the_manual_needs_no_credential(tmp_path):
 
 def test_the_dashboard_offers_the_manual():
     """A bundled manual nothing links to is a bundled manual nobody reads. The
-    link is hidden until app.js probes for it, so both halves have to exist."""
+    link is hidden until js/02-auth.js probes for it, so both halves have to exist."""
     web_dir = os.path.join(os.path.dirname(MANUAL_DIR), "..", "pacs", "web")
     web_dir = os.path.normpath(web_dir)
     index = open(os.path.join(web_dir, "index.html"), encoding="utf-8").read()
     assert 'id="manualLink"' in index
-    app_js = open(os.path.join(web_dir, "app.js"), encoding="utf-8").read()
+    from dashboard_js import read_dashboard_js
+    app_js = read_dashboard_js(web_dir)
     assert "probeManual" in app_js
 
 

@@ -107,7 +107,7 @@ PROFILES = ("off", "basic", "strict")
 PROFILE_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "web", "editor", "deid-profile.js")
 
-# Deliberate differences from pacs/web/editor (index.html anonymize()):
+# Deliberate differences from pacs/web/editor (js/image-edits.js anonymize()):
 #   * the editor invents a random culture-appropriate fake name and a random
 #     2.25 UID per run; we derive both from a keyed hash so two sends of the
 #     same study match. A gateway that randomised would multiply one study into

@@ -5,7 +5,7 @@
    from 127.0.0.1, and it has to keep working there, so nothing below may be
    something the page depends on. It publishes one fact the shell knows and a
    served page cannot — whether a newer release of the app exists — plus the
-   single action that fact needs. app.js feature-detects window.carinoDesktop
+   single action that fact needs. The dashboard feature-detects window.carinoDesktop
    and, finding nothing, draws exactly what it drew before.
 
    Deliberately NOT exposed: ipcRenderer itself, require, anything from node,

@@ -349,7 +349,7 @@ extension-agnostic) and `safe_within()`; and the `ssl.SSLContext` builders for
 DICOM-TLS on both the server and client sides.
 
 **`pacs/web/`** — the dashboard front end. Vanilla JS, no build step, no bundler,
-no framework, nothing from a CDN. `index.html`, `app.js`, `styles.css`,
+no framework, nothing from a CDN. `index.html`, `js/*.js`, `styles.css`,
 `i18n.js`, plus the shared fleet scripts (`carino-navbar.js`, `carino-lang.js`,
 `carino-bridge.js`) and the bundled Carino DICOM Editor under `web/editor/`. That
 editor is a vendored copy of its upstream repository,
@@ -361,6 +361,14 @@ development scaffolding here: `dicom-forge.js` builds the sample studies the emp
 offers, and `tests/suites/*.js` are what `/editor/#selftest` runs to report
 which DICOM encodings the browser on this workstation decodes correctly.
 `pacs/web/editor/vendor/README.md` says what may and may not be copied over.
+
+The dashboard script is split by section into `js/01-core.js` … `js/14-boot.js`:
+plain classic scripts, each `"use strict"`, loaded in the order `index.html` lists
+them and sharing one global scope. A top-level name must therefore be unique
+across all of them (and must not collide with `i18n.js` or a `window` property),
+and code that runs at load may only call what an earlier file — or the same
+one — declares. Comments that say `app.js` mean these files; it was one file
+until the split.
 
 **`desktop/`** — the Electron tray app. **`packaging/`** — the PyInstaller spec
 and entry point, the systemd unit and installer for a from-source Linux service
@@ -457,7 +465,7 @@ dashboard's key/value strips, and it is a correctness rule, not a taste one:
 - **ATOMIC** — identifiers a human matches character-for-character against a
   modality's configuration: `bind:port`, AE titles, `HL7 / MLLP`. **A wrapped
   identifier is a misread identifier.** These never break: they ellipsise
-  (`white-space: nowrap; overflow: hidden; text-overflow: ellipsis`) and `app.js`
+  (`white-space: nowrap; overflow: hidden; text-overflow: ellipsis`) and the dashboard JS
   mirrors the full value into a `title` attribute.
 - **PATHS** — get the whole row (`.wide`) at a smaller size, and are the *one*
   place where breaking mid-token is the right answer, because a filesystem path
@@ -504,7 +512,7 @@ stay at parity. If you add a user-visible string:
    only thing that will, because every one of those still renders.
 
 Markup uses `data-i18n` (textContent), `data-i18n-html`, `data-i18n-title`,
-`data-i18n-placeholder`, `data-i18n-aria-label`. Dynamic strings in `app.js` go
+`data-i18n-placeholder`, `data-i18n-aria-label`. Dynamic strings in `js/*.js` go
 through `T()` / `TF()` / `TN()`. Rows cloned from a `<template>` are built
 outside the document, so call `window.applyI18nIn(clone)` on each one.
 
@@ -549,7 +557,7 @@ This one bites everybody once. `apply_config()` merges the posted config over
 default.** The dashboard's Save collects values from form fields, so a key with
 no form field would be wiped on every Save.
 
-`pacs/web/app.js` solves this by keeping a snapshot of each loaded section —
+The dashboard (`pacs/web/js/`) solves this by keeping a snapshot of each loaded section —
 `loadedScp`, `loadedScu`, `loadedPrint`, `loadedRis`, `loadedMwl`, `loadedQr`,
 `loadedEmg`, `loadedWeb`, `loadedDicomweb`, `loadedIndex`, `loadedRouting`,
 `loadedDeid`, plus the top-level `loadedSetup` and `loadedLogsDir` — and

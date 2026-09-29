@@ -3,6 +3,37 @@
 All notable changes to Carino DICOM. Versions follow [Semantic Versioning](https://semver.org/).
 Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
+## [Unreleased]
+
+### Changed
+- `pacs/web/app.js` is gone: the dashboard is split into fourteen plain classic
+  scripts, `pacs/web/js/01-core.js` … `14-boot.js`, loaded by `index.html` in
+  the original order with no build step. The code is moved verbatim; the only
+  thing removed is the wrapping IIFE, so the top-level names now share the
+  page's global scope. Adding code therefore means a unique top-level name and
+  respecting load order. `tests/dashboard_js.py` and the node harnesses read
+  the scripts in the order `index.html` loads them.
+- The bundled editor (`pacs/web/editor/`) is re-synced to the split upstream
+  (`index.html` + `app.css` + `js/`). This is **not** only a mechanical move:
+  the copy here had drifted behind upstream, and the re-sync also brings in the
+  upstream tall-screen hero CSS (the `--tall` token and the top-anchored
+  `.ov-empty` front door), so the bundled editor looks different on tall
+  screens.
+- Comments that named `app.js` now name the dashboard scripts (`js/*.js`).
+- Dashboard: repeated colours in `styles.css` are tokens (`--amber`,
+  `--on-accent`, `--field`, `--inset`), with identical rendered values, and the
+  remaining `document.getElementById(` calls use the `$()` helper.
+- Bundled editor re-synced again: tag names now follow the PS3.6 dictionary
+  (the old hand-written table mislabelled about 40 tags); see the upstream
+  CHANGELOG.
+- Dashboard comments trimmed to the why (security, standards, ordering
+  constraints); history lives in git.
+
+### Fixed
+- Input during page load is held back until every script has run
+  (`pacs/web/js/00-gate.js`, and `js/gate.js` in the bundled editor), so a
+  click or drop mid-load cannot reach a handler whose helpers load later.
+
 ## [1.1.0] — 2026-08-30
 
 Everything added on top of the upstream **1.0.0** store-and-forward baseline.

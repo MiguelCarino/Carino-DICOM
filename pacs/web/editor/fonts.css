@@ -1,5 +1,5 @@
 /* Self-hosted fonts (was Google Fonts) — IBM Plex Sans/Mono + Red Hat Text + Red Hat Display (brand).
-   Liberation Sans is used as a system fallback via the font stacks in index.html. */
+   Liberation Sans is used as a system fallback via the font stacks in app.css. */
 
 @font-face {
   font-family: 'IBM Plex Mono';

@@ -284,13 +284,13 @@ def create_app(server: PacsServer) -> Flask:
         storage path, every destination's host/port/AE and the config file
         location — it is the single most disclosive endpoint in the app. The
         dashboard shell renders anonymously, but every tile stays empty until
-        the operator logs in; app.js must call GET /api/auth first and prompt.
+        the operator logs in; the dashboard must call GET /api/auth first and prompt.
 
         Composed per profile rather than filtered in the browser. That is not a
         preference: this one payload carries the last patient's name and ID, the
         last order's accession, every storage path and every destination's
         host, port and AE title, and it is what fills all ten panels. Hiding a
-        nav button in app.js would leave all of it sitting in the receptionist's
+        nav button in the dashboard would leave all of it sitting in the receptionist's
         browser, one devtools tab away. So the parts a profile has no capability
         for are never assembled into the response at all."""
         body = _status_for(guard.identify(headers=request.headers,
@@ -530,7 +530,7 @@ def create_app(server: PacsServer) -> Flask:
     # client that believes its Save is guarded while nothing is guarding it.
     # A header is opt-in, explicit, and cannot be sent by accident.
     #
-    # For app.js to opt in: keep `res.headers.get("ETag")` from the GET in
+    # For the dashboard (pacs/web/js/) to opt in: keep `res.headers.get("ETag")` from the GET in
     # loadConfig(), send it as `If-Match` on the POST in saveConfig(), and treat
     # 409 as "reload and reapply" — never as a retry, which would re-apply the
     # stale document the check just refused. An ETag does not survive an engine

@@ -1384,9 +1384,9 @@ def test_every_confirmation_reaches_reception_in_a_language_they_read():
     The engine therefore sends a machine-readable ``code`` and the dashboard
     says the sentence. That is a handoff across three files, and the half that
     silently rots is the far end: rename a code in server.py, or add a fifth
-    outcome, and add_order still answers, app.js still renders *something* (its
+    outcome, and add_order still answers, the dashboard still renders *something* (its
     default falls back to the engine's English), i18n-parity still passes
-    because the literal it checks is still in app.js, and nobody finds out
+    because the literal it checks is still in the dashboard, and nobody finds out
     until a Japanese front desk reads an English safety warning. Nothing else
     in the repository looks at all three files at once, so this does.
     """
@@ -1395,7 +1395,8 @@ def test_every_confirmation_reaches_reception_in_a_language_they_read():
     from pacs.server import PacsServer
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    app = open(os.path.join(here, "pacs/web/app.js"), encoding="utf-8").read()
+    from dashboard_js import read_dashboard_js
+    app = read_dashboard_js()
     i18n = open(os.path.join(here, "pacs/web/i18n.js"), encoding="utf-8").read()
     msgs = PacsServer.ORDER_QUEUED_MESSAGES
 
@@ -1422,7 +1423,7 @@ def test_every_confirmation_reaches_reception_in_a_language_they_read():
         check(found == 4,
               f"…and it is translated in all four locales, not {found} [{code}]")
 
-    # The other direction: a case in app.js for a code the engine can no longer
+    # The other direction: a case in the dashboard for a code the engine can no longer
     # emit is dead text that a translator will keep maintaining for ever.
     for code in re.findall(r'case "((?:test_)?order_queued_\w+)":', app):
         check(code in msgs, f"the dashboard case {code} is still a code the engine sends")
@@ -1935,8 +1936,8 @@ def test_every_outcome_code_the_engine_can_return_is_one_the_dashboard_knows():
     check(len(msgs) == 2 * len(reals),
           f"every sentence is one of a pair: {len(msgs)} for {len(reals)} outcome(s)")
 
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    app = open(os.path.join(here, "pacs/web/app.js"), encoding="utf-8").read()
+    from dashboard_js import read_dashboard_js
+    app = read_dashboard_js()
 
     # The source-derived half proves the dict is complete. This half proves the
     # product agrees, by asking it: every state add_order can be called in, and
@@ -1975,7 +1976,7 @@ def test_the_station_list_reaches_the_profile_that_types_the_orders():
     This is a contract between three files and no one of them can keep it
     alone. ``PacsServer.station_list()`` builds the rooms; ``web.py`` publishes
     them under **orders.read** — on the status payload and on
-    ``GET /api/ris/orders/stations`` — and ``app.js`` reads
+    ``GET /api/ris/orders/stations`` — and the dashboard (``pacs/web/js/*.js``) reads
     ``status.modalities`` into ``statusModalities`` and builds
     ``#ordStationSel`` out of it. Break any one link and nothing raises:
     the panel quietly falls back to the free-text AE title it used to be, and
@@ -2001,7 +2002,8 @@ def test_the_station_list_reaches_the_profile_that_types_the_orders():
     from pacs.web import create_app
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    app_js = open(os.path.join(here, "pacs/web/app.js"), encoding="utf-8").read()
+    from dashboard_js import read_dashboard_js
+    app_js = read_dashboard_js()
     html = open(os.path.join(here, "pacs/web/index.html"), encoding="utf-8").read()
 
     d = tempfile.mkdtemp(prefix="carino-emg-station-handoff-")
@@ -2063,10 +2065,10 @@ def test_the_station_list_reaches_the_profile_that_types_the_orders():
         srv.shutdown()
 
     # The browser half of the same contract, read out of the source. pytest
-    # cannot run app.js and i18n-parity.mjs cannot see a server gate, so the
+    # cannot run the dashboard and i18n-parity.mjs cannot see a server gate, so the
     # join between them is checked here or nowhere.
     check("s.modalities" in app_js,
-          "app.js reads the rooms off the status payload — the copy reception "
+          "the dashboard reads the rooms off the status payload — the copy reception "
           "is allowed to have — and not only out of /api/config")
     check("statusModalities" in app_js and "knownModalities" in app_js,
           "…through the one accessor both targeting fields ask, so the picker "

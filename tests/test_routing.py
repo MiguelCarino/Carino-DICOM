@@ -2777,13 +2777,12 @@ def test_the_servers_watcher_router_reads_the_live_deid_profile():
 # stayed the ordinary muted note colour in the dangerous one (rules asking for
 # scrubbing, profile off, deliveries held). This runs the shipped function.
 
-APP_JS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "pacs", "web", "app.js")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dashboard_js import read_dashboard_js              # noqa: E402
 
 
-def _js_function(path: str, name: str) -> str:
-    """The source of one function out of a file, by brace matching."""
-    src = open(path, encoding="utf-8").read()
+def _js_function(src: str, name: str) -> str:
+    """The source of one function out of a source text, by brace matching."""
     start = src.index("function %s(" % name)
     depth, i = 0, src.index("{", start)
     while True:
@@ -2838,7 +2837,7 @@ for (const dd of __PAYLOADS__) {
 }
 console.log(JSON.stringify(out));
 """
-    script = (harness.replace("__FN__", _js_function(APP_JS, "renderDeidState"))
+    script = (harness.replace("__FN__", _js_function(read_dashboard_js(), "renderDeidState"))
                      .replace("__PAYLOADS__", json.dumps(payloads)))
     with tempfile.TemporaryDirectory() as tmp:
         fp = os.path.join(tmp, "render.mjs")

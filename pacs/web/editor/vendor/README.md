@@ -13,7 +13,7 @@ So the rule for this directory is absolute, and it is worth stating rather than
 assuming: **no reference in `pacs/web/editor/` may resolve off-origin.** Not a
 `<script src>`, not a `@import`, not a web font, not a worker URL, not a source
 map, not a `fetch()` to anything but a path the operator's own engine serves.
-The two `fetch()` calls in `index.html` that take a URL are the PACS deep-link
+The two `fetch()` calls in `js/deeplink.js` that take a URL are the PACS deep-link
 manifest handler; the URL there comes from the operator's own `#load=` link and
 points at their own engine.
 
@@ -149,7 +149,7 @@ was:
   already in, which handles both and is covered by `tests/suites/edits.js`
   there as well as by the suite above here.
 
-**One thing is new, and it is not optional.** `index.html` now loads
+**One thing is new, and it is not optional.** The editor now loads
 `tests/dicom-forge.js` for the sample studies on the empty state, and
 `tests/suites/*.js` for the in-browser self-test at `/editor/#selftest`. Both
 are lazy, so pruning `tests/` does not break loading a study — the buttons

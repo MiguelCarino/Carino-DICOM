@@ -182,7 +182,7 @@ patient less visible, not more, and the only order that reached every console wa
 the one where nobody typed a modality at all. That is not a rule a receptionist
 mid-outage can be expected to know, so the field no longer lets her express it.
 
-`#ordMod` is **a closed list of DICOM modality codes** — built in `app.js`
+`#ordMod` is **a closed list of DICOM modality codes** — built in `js/07-config.js`
 (`modalityChoices()` / `fillModalityChoices()`), not written into the HTML,
 because the codes are DICOM's and are never translated while the words naming
 each exam are. Every value the panel can submit is a code a scanner can ask for.
@@ -222,7 +222,7 @@ them "an X-ray" to the person booking one, and exactly one of them is what a
 given department's X-ray room answers to. Picking the other is a legal DICOM
 code, a legal element, and an order no console pulls. So the dashboard checks
 the chosen code against the department's own registry
-(`modalityReachGap()` / `configuredModalityCodes()` in `app.js`, built from the
+(`modalityReachGap()` in `js/10-orders.js` / `configuredModalityCodes()` in `js/07-config.js`, built from the
 station list described below) and replaces "the Modality Worklist is serving it"
 with a sentence naming the code nothing here answers to. It is **silent when the
 registry is unknown and when the field was left blank** — an empty registry is

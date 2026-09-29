@@ -1984,5 +1984,5 @@ implicit.
 - Whether anything outside this process — a systemd unit, the Electron shell, a
   container restart policy — restarts a dead engine. `pacs/` does not supervise its
   own worker threads, and only `pacs/` was read for this document.
-- The dashboard front end (`pacs/web/app.js`) was not read. Everything here about
+- The dashboard front end (`pacs/web/js/`) was not read. Everything here about
   the dashboard is what the API returns, not what the UI renders with it.

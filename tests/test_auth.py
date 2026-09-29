@@ -219,7 +219,7 @@ def test_only_api_and_dicomweb_are_protected():
     for p in ("/api", "/api/status", "/api/studies/file", "/api/shutdown",
               "/dicom-web", "/dicom-web/studies"):
         assert path_is_protected(p), p
-    for p in ("/", "/app.js", "/style.css", "/editor/", "/editor/app.js",
+    for p in ("/", "/js/01-core.js", "/style.css", "/editor/", "/editor/app.js",
               "/apibogus", "/dicom-webhook"):
         assert not path_is_protected(p), p
 
@@ -303,7 +303,7 @@ def test_options_preflight_is_never_blocked():
 
 def test_static_dashboard_is_reachable_without_a_credential():
     g = guard()
-    for p in ("/", "/app.js", "/style.css", "/editor/"):
+    for p in ("/", "/js/01-core.js", "/style.css", "/editor/"):
         assert check(g, p).ok, p
 
 

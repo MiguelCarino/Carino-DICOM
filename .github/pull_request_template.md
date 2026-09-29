@@ -48,7 +48,7 @@ Delete any that do not apply:
 - [ ] **New config key** — added to `DEFAULTS` in `pacs/config.py`, to
       `config.example.json`, and validated in `validate()`.
 - [ ] **New config key with no dashboard form field** — carried through a
-      `loadedX` snapshot in `pacs/web/app.js`, so a Settings Save does not
+      `loadedX` snapshot in `pacs/web/js/`, so a Settings Save does not
       silently reset it.
 - [ ] **New user-visible string** — added to all four locales (`es`, `pt-BR`,
       `ja`, `ru`) in `pacs/web/i18n.js`, and `desktop/i18n.js` if it is in the

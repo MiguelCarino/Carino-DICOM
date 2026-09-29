@@ -12,8 +12,7 @@
 <body>
   <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
   <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
-  <!-- Fleet language preference + switcher, then this app's dictionary. Both
-       deferred and in this order: i18n.js reads window.CarinoLang. -->
+  <!-- Deferred, in this order: i18n.js reads window.CarinoLang. -->
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
   <div class="net-info" id="netInfo" data-carino-actions>Checking network…</div>
@@ -30,28 +29,10 @@
     <div class="shell">
       <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
       <nav class="sidebar" id="sidebar">
-        <!-- Six rows, not twelve. Nine of the old twelve were three questions
-             about one pile of files, four things you set at commissioning, and
-             two ledgers — so they are three panels with tab strips, and the
-             nouns that used to be here are the tab labels.
-
-             Overview is first in the list but NOT the landing panel: Services
-             keeps `active` because it is what an unattended screen shows all
-             day, and Overview may put a patient name on the wall.
-
-             data-cap is a space-separated OR-list on the merged rows: the row
-             appears if the profile holds ANY of the capabilities its tabs need,
-             and each tab is then gated on its own. Reception holds none of
-             config.read / routing.read / auth.manage, so Configuration is
-             absent for them entirely.
-
-             The count badges are their own <button>s beside the row rather than
-             <span>s inside it. A span cannot take focus and a nested <button>
-             is invalid HTML, so the old shape made "one click to Stuck" true
-             for a mouse and false for a keyboard. Each carries its own glyph
-             and its own accessible name, because "Studies 2" cannot say whether
-             two studies are waiting or two forwards are dead — and colour alone
-             would be the only other clue. -->
+        <!-- Six rows; merged areas are panels with tab strips. Services (not Overview) is the landing
+             panel: an unattended screen must not show a patient name. data-cap is a space-separated OR-list;
+             each tab is gated on its own. Count badges are sibling <button>s (keyboard-reachable), each with
+             its own glyph and accessible name. -->
         <div class="navrow">
           <button class="navbtn" data-panel="dlgOverview"><span class="nav-ico">📊</span> <span data-i18n>Overview</span></button>
         </div>
@@ -73,29 +54,17 @@
         <div class="navrow">
           <button class="navbtn" data-panel="dlgActivity" data-cap="logs.read audit.read"><span class="nav-ico">📄</span> <span data-i18n>Activity</span></button>
         </div>
-        <!-- A seventh row, and deliberately not an operational one: it exists
-             only in a process started with --dev-peer, so on every shipped
-             build this row is not there at all. The six-row argument above
-             still holds — this is a bench tool borrowing the nav, not a new
-             area of the appliance. Hidden by BOTH the capability and the launch
-             flag; see applyCapabilities() in app.js. `hidden` in the markup so
-             the row cannot flash before the first status poll answers. -->
+        <!-- Dev-peer bench tool: exists only with --dev-peer. Hidden by both the capability and the launch
+             flag (applyCapabilities()); `hidden` in markup so it cannot flash before the first poll. -->
         <div class="navrow">
           <button class="navbtn" data-panel="dlgDevPeer" data-cap="devpeer.manage" hidden><span class="nav-ico">🧪</span> <span data-i18n>Dev peer</span></button>
         </div>
-        <!-- Who this browser is signed in as. On a shared front-desk machine
-             the most expensive mistake is acting under somebody else's name
-             without noticing, so it sits in the nav where it is always on
-             screen, not behind a menu. -->
+        <!-- Who is signed in, always on screen: on a shared front-desk machine, acting under someone else's
+             name is the costliest mistake. -->
         <div class="whoami" id="whoami" hidden></div>
         <div class="navrow">
-          <!-- Served by this appliance, not fetched from the internet: a box on
-               an isolated clinical VLAN is exactly where somebody needs the page
-               that explains what a held study is. Opens in a new tab so a
-               half-finished configuration is not lost to reading the manual
-               about it. Hidden until app.js confirms this build carries it —
-               the container and the desktop app do, a bare source checkout of
-               only pacs/ would not, and a dead link is worse than no link. -->
+          <!-- Manual served by the appliance (works on an isolated VLAN), new tab so config isn't lost.
+               Hidden until the dashboard confirms this build ships it; a dead link is worse than none. -->
           <a class="navbtn" id="manualLink" href="manual/" target="_blank"
              rel="noopener" hidden><span class="nav-ico">📖</span> <span data-i18n>Manual</span></a>
           <button class="navbtn signout" id="signOut" hidden><span class="nav-ico">⎋</span> <span data-i18n>Sign out</span></button>
@@ -104,21 +73,15 @@
 
       <div id="workspace">
 
-        <!-- Overview — this machine at a glance. Everything here comes from the
-             /api/status poll that already runs every 2s and from the last log
-             line pollLog() drew, so the panel adds no request of its own. The
-             .ov-* namespace is deliberate: .card / .kv / .card-head carry the
-             service-card rendering policy and would drag it in here. -->
+        <!-- Overview: built from the 2s /api/status poll and the last log line pollLog() drew; no requests
+             of its own. Own .ov-* namespace to avoid the service-card styles. -->
         <section class="panel workpanel" id="dlgOverview" hidden>
           <header class="modal-head">
             <h2><span data-i18n>Overview</span> <small data-i18n>this machine at a glance</small></h2>
             <button class="modal-x" data-demote data-i18n-aria-label aria-label="Close">✕</button>
           </header>
           <div class="modal-body">
-            <!-- Each counting tile is a button on the panel that owns the thing
-                 it counts (app.js wires the click); Free space counts nothing
-                 and leads nowhere, so it stays a plain div rather than a button
-                 that does not act. -->
+            <!-- Counting tiles are buttons onto the owning panel; Free space leads nowhere, so a plain div. -->
             <div class="ov-tiles">
               <button type="button" class="ov-tile" data-panel="dlgServices" data-cap="services.control"><span class="ov-tile-v" id="ovServices">—</span><span class="ov-tile-k" data-i18n>Services on</span></button>
               <button type="button" class="ov-tile" data-panel="dlgStudies" data-tab="received" data-cap="studies.read"><span class="ov-tile-v" id="ovReceived">—</span><span class="ov-tile-k" data-i18n>Received</span></button>
@@ -128,10 +91,8 @@
               <button type="button" class="ov-tile" data-panel="dlgOrders" data-cap="orders.read"><span class="ov-tile-v" id="ovOpenOrders">—</span><span class="ov-tile-k" data-i18n>Open orders</span></button>
               <div class="ov-tile"><span class="ov-tile-v" id="ovFree">—</span><span class="ov-tile-k" data-i18n>Free space</span></div>
             </div>
-            <!-- Scoped to Received and Sent: they are the only windowed
-                 counters in the row (Stuck, Pending, Open orders and Free space
-                 are current-state figures). Their two origins differ, because a
-                 config save rebuilds the receiver but not the watcher. -->
+            <!-- Only Received/Sent are windowed counters; their origins differ because a config save rebuilds
+                 the receiver but not the watcher. -->
             <p class="ov-since" id="ovSince"></p>
             <p class="ov-note" id="ovSetupNote" hidden>
               <span data-i18n>Not set up yet — pick the services this PC should run.</span>
@@ -143,12 +104,8 @@
                 <dl class="ov-list">
                   <div><dt data-i18n>Address</dt><dd id="ovIp" class="ov-atomic">—</dd></div>
                   <div><dt data-i18n>Receiver</dt><dd id="ovAetPort" class="ov-atomic">—</dd></div>
-                  <!-- The desktop shell appends "· 1.2.0 available ↗" here when a newer release
-                       exists (app.js, behind a window.carinoDesktop feature test). The suffix is a
-                       SIBLING of the value rather than a child of it, because the status poll
-                       rewrites the value through textContent twice a second and would erase any
-                       child on the next tick. Hidden as served, so a browser never shows it and the
-                       row is the one line it has always been. -->
+                  <!-- The desktop shell appends "· 1.2.0 available ↗" here (window.carinoDesktop feature test). A
+                       SIBLING of the value, because the poll rewrites the value via textContent. Hidden as served. -->
                   <div><dt data-i18n>Version</dt><dd id="ovVersion"><span id="ovVersionV">—</span><a id="ovVersionUpd" class="ov-upd" hidden target="_blank" rel="noopener" href="https://github.com/MiguelCarino/Carino-DICOM/releases/latest"></a></dd></div>
                   <div class="ov-wide"><dt data-i18n>Config file</dt><dd id="ovConfigPath" class="ov-path">—</dd></div>
                   <div class="ov-wide"><dt data-i18n>Storage folder</dt><dd id="ovStorageDir" class="ov-path">—</dd></div>
@@ -191,7 +148,7 @@
           </div>
         </section>
 
-        <!-- Services (default) — live status cards -->
+        <!-- Services (default): live status cards -->
         <section class="panel workpanel" id="dlgServices">
           <header class="modal-head">
             <h2><span data-i18n>Services</span> <small data-i18n>receive · send · worklist</small></h2>
@@ -200,9 +157,7 @@
             </div>
           </header>
           <div class="modal-body">
-            <!-- The chooser is this same panel with class="setup" on it: the
-                 same five cards, the same ids renderStatus() already writes to
-                 every 2s, so the cards stay live while the operator picks. -->
+            <!-- The chooser is this panel with class="setup": same cards and ids, so they stay live. -->
             <div class="setup-intro" id="setupIntro" hidden>
               <h3 data-i18n>Choose the services this PC should run</h3>
               <p data-i18n>Tick what this machine should do. You can change it later in Services or Settings; nothing starts until you apply.</p>
@@ -212,20 +167,12 @@
         <header class="card-head">
           <div class="card-title"><span class="dot" id="rxDot"></span> <span data-i18n>Receiver</span></div>
           <button class="btn toggle" id="rxToggle" data-on="false" data-i18n>Start</button>
-          <!-- Chooser control. It lives in the markup at all times and is
-               revealed by CSS in the setup state, never by a `hidden` attribute
-               — one switch (the state class), so the control cannot end up
-               visible in one file's opinion and hidden in another's. -->
+          <!-- Chooser control: always in the markup, revealed only by the setup state class. -->
           <label class="card-pick"><input type="checkbox" class="pick-box" id="pickRx" data-svc="receiver" /> <span data-i18n>Use this</span></label>
         </header>
-        <!-- Lede: protocol tag + one plain sentence. The data-i18n-title value IS
-             the i18n key (applyI18nIn keeps a pre-filled data-i18n-title and
-             writes t(key) into title), so the same string serves the tooltip now
-             and the first-boot wizard later. .card-why repeats that same key as
-             visible copy — data-i18n takes its key from the text, so this costs
-             no new string and no JS: in the setup state the long version shows
-             and the one-liner hides, because a tooltip is invisible on touch and
-             to the keyboard, and this is the moment the text matters most. -->
+        <!-- Lede: protocol tag + one sentence. The data-i18n-title value IS the i18n key (tooltip);
+             .card-why reuses it as visible copy in the setup state, since tooltips are invisible on touch
+             and to the keyboard. -->
         <div class="card-lede" data-i18n-title="Studies a modality or another PACS send here are saved straight to a folder on this PC. Leave it on: it is what makes this machine a destination other equipment can send to.">
           <p class="card-tag" data-i18n>Storage SCP</p>
           <p class="card-desc" data-i18n>Studies a modality sends here are saved on this PC.</p>
@@ -256,8 +203,7 @@
           <p class="card-why" data-i18n>Files put in the watched folder are forwarded to every enabled destination and retried until each one accepts, so nothing is dropped. Turn it on when studies must move onward.</p>
         </div>
         <p class="card-warn" data-i18n>Enabled but not running — check the port and the log.</p>
-        <!-- No .card-port here: the watcher binds nothing, so there is no port
-             to probe and an empty line would only invite a guess. -->
+        <!-- No .card-port: the watcher binds no port. -->
         <dl class="kv">
           <div class="wide"><dt data-i18n>Watching</dt><dd id="wxDir" class="path">—</dd></div>
           <div><dt data-i18n>Calling AE</dt><dd id="wxAet" class="atomic">—</dd></div>
@@ -341,9 +287,7 @@
         <div class="drop-hint" data-i18n>point a modality here — it pulls open orders by C-FIND</div>
       </article>
 
-      <!-- Query/Retrieve. Always visible, unlike the RIS and Worklist cards:
-           answering C-FIND/C-MOVE is a primary PACS service, not an emergency
-           one, and a service with no card is a service nobody turns on. -->
+      <!-- Query/Retrieve: always visible (a primary PACS service, not an emergency one). -->
       <article class="card" id="qrCard">
         <header class="card-head">
           <div class="card-title"><span class="dot" id="qrDot"></span> <span data-i18n>Query/Retrieve</span></div>
@@ -367,16 +311,12 @@
           <div><dt data-i18n>Errors</dt><dd id="qrErr">0</dd></div>
           <div><dt data-i18n>Security</dt><dd id="qrTls">—</dd></div>
         </dl>
-        <!-- The single most common Q/R failure in the field, said where the
-             operator is looking when they configure it. -->
+        <!-- The most common Q/R failure in the field, shown where it is configured. -->
         <div class="drop-hint" data-i18n>C-MOVE calls out as CARINOQR — allow that AE there</div>
       </article>
             </section>
           </div>
-          <!-- Chooser footer: hidden until the setup state. "Turn these on" is
-               allowed with nothing ticked — applying zero services is a real
-               answer (it stops everything and records the choice), not an
-               error to block. -->
+          <!-- Chooser footer. Applying zero services is valid: it stops everything and records the choice. -->
           <footer class="modal-foot setup-foot" id="setupFoot" hidden>
             <span class="setup-count" id="setupCount"></span>
             <button class="btn ghost" id="setupCancel" data-i18n>Not now</button>
@@ -397,22 +337,9 @@
             <summary data-i18n>➕ New order (manual entry)</summary>
             <div class="order-form">
               <label><span data-i18n>Accession #</span>
-                <!-- Deliberately WITHOUT maxlength, unlike the AE title field
-                     below, and the difference is not an oversight.
-                     A Modality Worklist carries this in an SH element, sixteen
-                     characters, and a longer one cannot go out as typed. But
-                     maxlength enforces that by dropping the tail in silence:
-                     paste a twenty-character barcode, or let a scanner gun type
-                     one, and the box quietly holds the first sixteen. That is
-                     the worst of the three outcomes, because accession is the
-                     key the returning study is reconciled against — a shortened
-                     one names a DIFFERENT order, or none, and nothing anywhere
-                     says so.
-                     So the box takes whatever is typed and app.js refuses the
-                     order on submit with a sentence naming the rule (addOrder →
-                     unrepresentableOrderId). Reception is told while they are
-                     still looking at the value, which is the only moment in the
-                     whole path where fixing it is cheap. -->
+                <!-- No maxlength on purpose: the MWL carries accession as SH (16 chars), but maxlength silently
+                     truncates, and a shortened accession names a DIFFERENT order. js/10-orders.js refuses it on
+                     submit instead (addOrder -> unrepresentableOrderId). -->
                 <input id="ordAcc" data-i18n-placeholder placeholder="the value the tech types into the modality" data-i18n-title title="At most 16 characters, and no backslash — that is all a Modality Worklist can carry. Leave it blank if the department's accession will not fit." /></label>
               <label><span data-i18n>Patient name</span> <input id="ordPatient" data-i18n-placeholder placeholder="e.g. Jane Doe" /></label>
               <label><span data-i18n>Patient ID</span> <input id="ordPid" /></label>
@@ -426,45 +353,18 @@
                 </select>
               </label>
               <label><span data-i18n>Modality</span>
-                <!-- A closed list of DICOM modality codes, never free text. A
-                     console asks the worklist for its own code and the match is
-                     exact, so "ct head", "Ultrasound" or "TAC" typed here is not
-                     a code any scanner asks for: the order is accepted, the
-                     receptionist is told the worklist is serving it, and it
-                     reaches no modality-filtered console at all. The blank
-                     choice stays and stays first — a modality nobody stated is
-                     matched leniently and shows up on every worklist, which is
-                     the right answer when reception does not know the room.
-                     app.js fills the rest in fillModalityChoices(), because the
-                     words naming each exam are translated and the codes beside
-                     them are not. -->
+                <!-- Closed list of DICOM modality codes: consoles match their own code exactly, so free text
+                     reaches no modality-filtered console. Blank stays first (matches every worklist). Filled by
+                     fillModalityChoices() (exam names are translated, codes are not). -->
                 <select id="ordMod" data-i18n-title title="A worklist matches this code exactly. Leave it blank and the order shows on every worklist.">
                   <option value="" data-i18n>Not stated — shows on every worklist</option>
                 </select>
               </label>
               <label><span data-i18n>Target modality</span>
-                <!-- The same closed list as the field above, in the mirror.
-                     ScheduledStationAETitle is matched on the wire by exact
-                     string, so a room's NAME typed here — "SALA CT", "CT room
-                     1", "Somatom" — is not an AE title any console asks for:
-                     the order is accepted, reception is told the Modality
-                     Worklist is serving it, and every station-filtered query
-                     misses it. So the choices are the AE titles this department
-                     actually registered, and the blank one stays first, because
-                     an order addressed to nobody shows on every worklist —
-                     which is the right answer when reception does not know
-                     which room the patient is going to.
-                     app.js fills it in fillStationChoices(), from the station
-                     list on the /api/status payload rather than from the
-                     configuration: reception holds orders.read and not
-                     config.read, and a picker only administrators could see
-                     would leave exactly the person who types these orders with
-                     the free text that caused the trouble.
-                     The input below stays as the fallback for an appliance with
-                     no modalities registered, and for one whose status payload
-                     predates that list: with no registry to choose from, an
-                     order that cannot be aimed at all is worse than one aimed
-                     at a typo. -->
+                <!-- Closed list of registered AE titles: ScheduledStationAETitle is matched exactly, so a typed
+                     room name misses every station-filtered query. Blank stays first (shows everywhere).
+                     fillStationChoices() fills it from /api/status (reception lacks config.read). The input below
+                     is the fallback when no registry is available. -->
                 <select id="ordStationSel" data-i18n-title title="A worklist matches this AE title exactly. Leave it unset and the order shows on every worklist." hidden></select>
                 <input id="ordStation" data-i18n-placeholder placeholder="Scheduled Station AE (worklist filter)" maxlength="16" />
               </label>
@@ -479,26 +379,16 @@
             </div>
           </details>
           <div class="hist-bar">
-            <!-- A filter, but it behaves and is announced as a tab strip, so it
-                 wears the same idiom as the Studies / Configuration / Activity
-                 strips above: role=tab + aria-selected + a roving tabindex, and
-                 one shared pane (#ordersList) named by aria-controls. It is
-                 keyed on data-ostatus rather than data-tab so the generic
-                 .panel-tabs handlers keep ignoring it — app.js owns
-                 aria-selected and tabIndex here, exactly as selectTab() does
-                 for the panel strips. -->
+            <!-- A filter announced as a tab strip (role=tab, aria-selected, roving tabindex, one shared pane).
+                 Keyed on data-ostatus, not data-tab, so the generic .panel-tabs handlers ignore it;
+                 js/10-orders.js owns its ARIA state. -->
             <div class="hist-tabs" role="tablist">
               <button class="hist-tab active" id="tab_ordOpen" data-ostatus="open" role="tab" aria-selected="true" tabindex="0" aria-controls="ordersList" data-i18n>🟢 Open</button>
               <button class="hist-tab" id="tab_ordClosed" data-ostatus="closed" role="tab" aria-selected="false" tabindex="-1" aria-controls="ordersList" data-i18n>✓ Closed</button>
             </div>
             <div class="hist-tools">
-              <!-- The arrival beep is a per-workstation preference held in
-                   localStorage, not in the server config: neither Reception nor
-                   the Radiologist holds config.read, so a web.* toggle would be
-                   unreachable by exactly the people the alert is for. Label,
-                   title and aria-label are all state-dependent, so they ship
-                   empty and paintBeepBtn() writes them with T(); aria-pressed
-                   mirrors the MUTED state. -->
+              <!-- The arrival beep is a per-workstation localStorage preference: the people it is for lack
+                   config.read. Label/title/aria-label ship empty (paintBeepBtn() writes them); aria-pressed = MUTED. -->
               <button class="btn ghost tiny" id="ordBeep" aria-pressed="false"></button>
               <button class="btn ghost tiny" id="ordRefresh" data-i18n-title title="Reload orders" data-i18n>↻ Refresh</button>
               <button class="btn tiny danger" id="ordPurge" data-i18n-title title="Delete all closed orders" hidden data-i18n>🗑 Purge closed</button>
@@ -514,31 +404,19 @@
 
       <!-- Destinations -->
 
-      <!-- Conditional routing — which destinations does a received study go to?
-           The rules live in config (routing.rules), so this panel edits them and
-           saves through the same POST /api/config every other setting uses. The
-           test box is not a nicety: a wrong rule sends images to the wrong
-           hospital, and /api/routing/test is the only way to see the decision
-           before a modality proves it at 3am. -->
+      <!-- Conditional routing: edits routing.rules via POST /api/config. The test box (/api/routing/test)
+           shows the decision before a wrong rule sends images to the wrong hospital. -->
 
       <!-- Settings -->
 
       <!-- Logs -->
 
-      <!-- People. The administrator's editor for who may use this appliance.
-           Every control here is a rendering of what the server enforces; none
-           of it is the access control itself. -->
+      <!-- People: renders what the server enforces; none of it is the access control itself. -->
 
-      <!-- Audit trail. Deliberately its own panel and not part of Activity:
-           the log answers "what is this box doing", this answers "who did
-           that", and conflating them is how the second question stops being
-           answerable. -->
+      <!-- Audit trail: "who did that", kept apart from the log ("what is this box doing"). -->
 
-      <!-- Studies — everything that arrived and what became of it. Three
-           tabs because they are three questions about one pile of files: what
-           is here (History), what is waiting for a human (Pending), and what is
-           not moving (Stuck). The pane ids are the ids the three panels used to
-           carry, so #dlgStuck in a manual or a bookmark still lands here. -->
+      <!-- Studies: History (what is here), Pending (waiting for a human), Stuck (not moving). Pane ids
+           keep the old panel ids, so #dlgStuck bookmarks still land. -->
       <section class="panel workpanel" id="dlgStudies" hidden>
         <header class="modal-head">
           <h2><span data-i18n>Studies</span> <small class="tab-sub" id="studiesSub"></small></h2>
@@ -578,12 +456,8 @@
         <section class="tabpane" id="dlgStuck" role="tabpanel" aria-labelledby="tab_stuck" hidden>
           <p class="pane-lede" data-i18n>forwards that are not moving</p>
           <div class="hist-bar">
-            <!-- Three sentences because there are three ways a forward stops
-                 moving and three different remedies, and the panel used to
-                 describe only the first: "nothing is dropped, it keeps
-                 retrying" is true of a node that still exists, false of a name
-                 that does not, and false again of a destination being held back
-                 because a scrub it was promised cannot happen. -->
+            <!-- Three ways a forward stops moving, three remedies: retrying (node exists), orphaned (name gone),
+                 held (a promised scrub cannot happen). -->
             <p class="hint" style="margin:0;max-width:60ch" data-i18n-html>Studies keep retrying with backoff until every enabled destination accepts them. Fix the node, then <em>Retry now</em> to attempt immediately. Files routed to a name that is no longer an enabled destination are listed separately: nothing retries those, and each row says what becomes of them. Destinations a rule asks to de-identify for, while no copy can be scrubbed, are listed last: those are held back rather than sent identified, and one edit releases them.</p>
             <div class="hist-tools">
               <button class="btn tiny" id="stuckRetryAll" data-i18n-title title="Clear backoff on all stuck sends" data-i18n>↻ Retry all now</button>
@@ -595,15 +469,9 @@
         </div>
       </section>
 
-      <!-- Configuration — the four things you set when the appliance is
-           commissioned and rarely touch again. One nav row, but each tab keeps
-           its own capability: Destinations and Routing answer to routing.read,
-           Settings to config.read, People to auth.manage. The row appears if a
-           profile holds ANY of them and the tabs it may not hold stay hidden,
-           which is why the tab strip is load-bearing here rather than cosmetic.
-           Destinations is first deliberately: Settings holds the shutdown
-           control and the API token, and should be somewhere you went, not
-           somewhere you arrived. -->
+      <!-- Configuration: each tab keeps its own capability (Destinations/Routing: routing.read, Settings:
+           config.read, People: auth.manage); the row shows if ANY is held. Destinations is first: Settings
+           holds the shutdown control and API token. -->
       <section class="panel workpanel" id="dlgConfig" hidden>
         <header class="modal-head">
           <h2><span data-i18n>Configuration</span> <small class="tab-sub" id="configSub"></small></h2>
@@ -640,10 +508,7 @@
           <div class="pane-scroll">
             <p class="pane-lede" data-i18n>rules · which node gets what</p>
             <label class="check rt-enable"><input id="rtEnabled" type="checkbox" /> <span data-i18n>Route by rule — otherwise every study goes to every enabled destination</span></label>
-            <!-- Add rule / Save rules moved to this pane's pinned footer, where
-                 the other three Configuration tabs keep their save. The rules
-                 list has no upper bound, and a Save that scrolls away with it is
-                 the failure the tabs were introduced to prevent. -->
+            <!-- Pinned footer, like the other Configuration tabs: the rules list is unbounded. -->
             <p class="hint" style="margin:0 0 14px;max-width:70ch" data-i18n>Rules are read top to bottom. A rule with no destination is a filter and falls through; a rule whose destinations are all missing or disabled falls through too. If nothing matches, the study goes to every enabled destination — a study is never sent nowhere. The one exception: while the de-identification profile is off, a destination a rule asks to de-identify for is held rather than sent identified.</p>
             <div class="rt-rules" id="rtRules"></div>
             <p class="hist-empty" id="rtEmpty" hidden data-i18n>No rules yet — every study goes to every enabled destination.</p>
@@ -736,9 +601,8 @@
                 <label class="check"><input id="emgHold" type="checkbox" /> <span data-i18n-html>Hold &amp; forward — queue received studies for the primary while active</span></label>
                 <p class="hint" style="margin:2px 0 0" data-i18n-html>Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
               </fieldset>
-              <!-- The other RIS's worklist. Not a service this appliance runs —
-                   an address it asks, on demand, when somebody is diagnosing a
-                   modality that is not seeing its schedule. -->
+              <!-- Another RIS's worklist: not a service this appliance runs, an address it queries on demand
+                   when diagnosing a modality that doesn't see its schedule. -->
               <fieldset>
                 <legend data-i18n>The other RIS's worklist</legend>
                 <p class="hint" style="margin:0 0 10px" data-i18n>Where the hospital's own worklist lives. Only used by <em>Test worklist</em> on a modality — this appliance never queries it on a timer.</p>
@@ -787,11 +651,8 @@
                 <label><span data-i18n>TLS certificate (PEM)</span> <input id="qrTlsCert" data-i18n-placeholder placeholder="path to server.crt" /></label>
                 <label><span data-i18n>TLS private key (PEM)</span> <input id="qrTlsKey" data-i18n-placeholder placeholder="path to server.key" /></label>
                 <label><span data-i18n>Client-cert CA — mutual TLS</span> <input id="qrTlsCa" data-i18n-placeholder placeholder="blank = don't require client certs" /></label>
-                <!-- The C-MOVE destination map has no form control on purpose: it
-                     is AE title -> {host, port, aet} and is carried through a save
-                     untouched. This line is where an operator learns the AE title
-                     a C-MOVE actually calls out with, which is not the one they
-                     configured for auto-send. -->
+                <!-- The C-MOVE destination map (AE title -> {host, port, aet}) has no form control and is carried
+                     through a save untouched. This line shows the AE title C-MOVE actually calls out with. -->
                 <p class="hint" style="margin:2px 0 0" data-i18n>Answers C-FIND, C-MOVE and C-GET out of the instance index, so keep the index on. A C-MOVE opens a NEW association to the receiving node and calls out with the Q/R AE title (CARINOQR), not the auto-send one — a node that filters on calling AE title must allow it, or every C-MOVE is rejected. C-MOVE destinations are resolved from qr.move_destinations in the config file.</p>
                 <p class="hint" id="qrMoveDests" style="margin:6px 0 0"></p>
               </fieldset>
@@ -826,11 +687,7 @@
               <fieldset>
                 <legend data-i18n>De-identification</legend>
                 <label><span data-i18n>Profile</span>
-                  <!-- "off" is not "forward untouched". With any deidentify rule
-                       in play it means those destinations are HELD, and this is
-                       the control an operator reaches for to stop scrubbing for
-                       an afternoon — a label promising a send is the one thing it
-                       must not say. The hint below carries the rest. -->
+                  <!-- "off" is NOT "forward untouched": with a deidentify rule, those destinations are HELD. -->
                   <select id="deidProfile">
                     <option value="off" data-i18n>Off — nothing scrubbed; de-identify routes are held</option>
                     <option value="basic" data-i18n>Basic — remove patient identity</option>
@@ -840,9 +697,7 @@
                 <label class="check"><input id="deidKeepPrivate" type="checkbox" /> <span data-i18n>Keep private tags (they routinely carry identifiers)</span></label>
                 <label class="check"><input id="deidKeepDates" type="checkbox" /> <span data-i18n>Keep study dates unshifted</span></label>
                 <label><span data-i18n>Pseudonym prefix</span> <input id="deidPrefix" maxlength="16" placeholder="ANON" /></label>
-                <!-- Said plainly, because the failure is invisible: a scrubbed
-                     header with the patient's name burned into the pixels looks
-                     anonymous in every viewer until a human reads the image. -->
+                <!-- Burned-in patient names look anonymous in every viewer until a human reads the pixels. -->
                 <p class="hint bad-note" style="margin:2px 0 0" data-i18n>⚠ Burned-in annotation is NOT removed. Text drawn into the pixels — ultrasound and screen-capture images especially — still carries the patient's name after any profile here.</p>
                 <p class="hint" style="margin:6px 0 0" data-i18n>A profile only applies where a routing rule asks for it, so nothing is scrubbed until a rule with de-identify on sends to a node. With the profile off such a rule never sends an identified copy: that destination is held instead — the studies wait in the outgoing folder, nothing is deleted, and every other destination still gets them. Turn a profile on, or take de-identify off the rule, to release them.</p>
                 <p class="hint" id="deidState" style="margin:6px 0 0"></p>
@@ -850,12 +705,9 @@
               <fieldset id="authFs">
                 <legend data-i18n>API access</legend>
                 <p class="hint" id="authState" style="margin:0 0 10px"></p>
-                <!-- Not a plain field, and not part of a Save: GET /api/config
-                     redacts the token, and POST /api/config refuses one outright.
-                     The token changes only through POST /api/auth/token, which
-                     wants the CURRENT token in a header — a session cookie must
-                     not be enough to replace the secret that issued it, so the
-                     operator types it. This dashboard does not have it to send. -->
+                <!-- Not a Save field: GET /api/config redacts the token and POST /api/config refuses one. It changes
+                     only via POST /api/auth/token with the CURRENT token in a header (a session cookie must not be
+                     enough to replace the secret that issued it). -->
                 <div class="auth-rotate" id="authRotate" hidden>
                   <label id="authProofWrap"><span data-i18n>Current token</span> <input id="authCurToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="the token this PACS uses now" /></label>
                   <label><span data-i18n>New API token</span> <input id="authNewToken" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="paste or generate a token" /></label>
@@ -890,13 +742,8 @@
             <button class="btn" id="saveCfg" data-i18n>Save configuration</button>
           </footer>
         </section>
-        <!-- The equipment on this department's side of the wire: what pulls a
-             worklist and pushes studies back. Deliberately not the same list as
-             Destinations, which is where studies are forwarded ON to. An order
-             picks its target from here rather than having an AE title typed
-             into it, because the worklist matches that title exactly and a
-             typo fails two different ways depending on how the modality
-             queries. -->
+        <!-- Modalities on this department's side (pull worklist, push studies), not Destinations (forward ON).
+             Orders pick a target from here: the worklist matches AE titles exactly. -->
         <section class="tabpane" id="dlgModalities" role="tabpanel" aria-labelledby="tab_modalities" hidden>
           <div class="pane-scroll">
             <p class="pane-lede" data-i18n>the equipment that pulls a worklist</p>
@@ -941,14 +788,8 @@
         </div>
       </section>
 
-      <!-- Activity — what this box is doing, and who asked it to.
-           The two remain deliberately separate PANES, not one merged stream:
-           the log answers "what is this box doing", the audit trail answers
-           "who did that", and conflating them is how the second question stops
-           being answerable. A shared nav row costs the distinction nothing —
-           each still has its own name, its own tab and its own capability.
-           Named Activity, not Records: in a hospital "records" means medical
-           records, and this is the one label a clinical user would misread. -->
+      <!-- Activity: log ("what is this box doing") and audit ("who did that") stay separate panes.
+           Not named "Records": clinicians read that as medical records. -->
       <section class="panel workpanel" id="dlgActivity" hidden>
         <header class="modal-head">
           <h2><span data-i18n>Activity</span> <small class="tab-sub" id="activitySub"></small></h2>
@@ -969,10 +810,8 @@
         <section class="tabpane" id="dlgLogs" role="tabpanel" aria-labelledby="tab_logs">
           <div class="log" id="log"></div>
         </section>
-        <!-- What another RIS answered when this appliance asked it as one of
-             our modalities. A record, never a queue: these orders are not
-             served on any worklist and this appliance owns none of them. See
-             pacs/caught.py for why they are kept in their own store. -->
+        <!-- What another RIS answered when queried as one of our modalities. A record, never a queue; see
+             pacs/caught.py. -->
         <section class="tabpane" id="dlgCaught" role="tabpanel" aria-labelledby="tab_caught" hidden>
           <p class="pane-lede" data-i18n>what another RIS answered</p>
           <div class="hist-bar">
@@ -992,10 +831,8 @@
         </div>
       </section>
 
-      <!-- The disposable second archive. Reachable only in a process started
-           with --dev-peer: the engine drops the whole dev_peer status block
-           otherwise, and app.js keeps the nav row hidden while it is absent. No
-           ✕/data-demote button — the merged panels dropped it. -->
+      <!-- Disposable second archive, only with --dev-peer: the engine omits the dev_peer status block
+           otherwise and the nav row stays hidden. -->
       <section class="panel workpanel" id="dlgDevPeer" hidden>
         <header class="modal-head">
           <h2><span data-i18n>Dev peer</span> <small data-i18n>a disposable second archive</small></h2>
@@ -1013,8 +850,7 @@
           <div class="hist-bar">
             <div class="hist-tools">
               <button class="btn tiny" id="dpCreate" data-i18n-title title="Start a second archive on this machine and point a destination at it" data-i18n>Create peer</button>
-              <!-- hidden until the first render says a peer exists, for the same reason
-                   the nav row is: an offer that does nothing reads as broken software. -->
+              <!-- Hidden until the first render says a peer exists (a dead offer reads as broken). -->
               <button class="btn tiny danger" id="dpDiscard" hidden data-i18n-title title="Stop the peer and delete everything it stored" data-i18n>🗑 Discard</button>
             </div>
           </div>
@@ -1026,44 +862,28 @@
     </div>
   </main>
 
-  <!-- Global toast. It ships with NO role: a routine confirmation that fades
-       after five seconds is noise to a screen reader, and most of what lands
-       here is one. flashNote() puts role="alert" on it for the exception —
-       the sentence that says an order is reaching no modality — because that
-       one has to interrupt #ordAlertLive below, which is politely announcing
-       "1 new order" about the very same order at the very same moment. -->
+  <!-- Global toast. No role by default (routine confirmations are noise to a screen reader);
+       flashNote() adds role="alert" for no-modality warnings so they interrupt #ordAlertLive. -->
   <div class="toast" id="toast" hidden></div>
 
-  <!-- New-order announcement for a screen reader: a flash and a beep are
-       nothing to one. Body level on purpose — a [hidden] panel is outside the
-       accessibility tree and would announce nothing. Ships EMPTY and carries no
-       data-i18n, so the language pass cannot write stale text over a live
-       announcement (the #ovTickerMsg trap). app.js fills it with
-       TN(n, "{n} new orders") and clears it ~5s later. -->
+  <!-- Screen-reader new-order announcement. Body level (a [hidden] panel announces nothing). Ships
+       EMPTY with no data-i18n so the language pass can't overwrite a live announcement.
+       js/05-order-alert.js fills it with TN(n, "{n} new orders") and clears it ~5s later. -->
   <span id="ordAlertLive" class="sr-only" role="status" aria-live="polite"></span>
 
-  <!-- API token prompt. The engine serves this shell to anyone (see auth.py:
-       a login form the browser was not allowed to download is an outage), but
-       every /api route answers 401 until a credential arrives. So the gate is
-       rendered INSTEAD of the dashboard on boot, and again on any later 401 —
-       a service restart drops every session by design, and that has to read as
-       "sign in again", not as a fault. -->
+  <!-- API token prompt. The shell is public (see auth.py) but /api answers 401 without a credential,
+       so the gate replaces the dashboard on boot and on any later 401 (a restart drops every session). -->
   <div class="auth-gate" id="authGate" hidden>
     <div class="auth-card">
       <h2 id="authTitle" data-i18n>This PACS needs its access token</h2>
       <p class="auth-lede" id="authLede" data-i18n>Nothing is shown until you sign in. The dashboard reads and writes patient studies, storage paths and the shutdown control, so it is not served to an unauthenticated browser.</p>
 
-      <!-- Profile picker. Present only when the appliance runs with profiles
-           AND the operator left users.list_profiles on — publishing the staff
-           list to anyone who can reach the port is a real disclosure, and it is
-           their call, so this whole block is absent rather than empty when they
-           turn it off. -->
+      <!-- Profile picker: only with profiles AND users.list_profiles on (publishing the staff list is a
+           disclosure), otherwise absent rather than empty. -->
       <div id="authPickWrap" hidden>
         <div class="auth-people" id="authPeople"></div>
-        <!-- Shown after picking somebody who has a password. The name is
-             repeated above the field because on a shared front-desk machine the
-             most common mistake is typing your own password at a colleague's
-             button. -->
+        <!-- The name is repeated above the field: typing your own password at a colleague's button is the
+             common mistake. -->
         <div id="authPwWrap" hidden>
           <p class="auth-who"><span data-i18n>Signing in as</span> <b id="authPwName"></b>
             <button class="linkish" id="authPwBack" data-i18n>change</button></p>
@@ -1090,11 +910,8 @@
       <div class="auth-actions">
         <button class="btn" id="authLogin" data-i18n>Sign in</button>
       </div>
-      <!-- The token still works, and still authenticates as an administrator,
-           so an appliance that has switched to profiles keeps a way in for the
-           person holding it. Folded away rather than removed: it is the
-           recovery path when somebody has locked themselves out of a profile,
-           and it should not be the first thing anyone reaches for. -->
+      <!-- The token still signs in as administrator: the folded-away recovery path when a profile is
+           locked out. -->
       <p class="auth-alt" id="authAltWrap" hidden>
         <button class="linkish" id="authUseToken" data-i18n>Sign in with the access token instead</button>
       </p>
@@ -1107,13 +924,10 @@
     <div class="emg-modal-card">
       <h2 data-i18n>⚠ Primary PACS unreachable</h2>
       <p id="emgPromptMsg"></p>
-      <!-- What THIS person should do about it. Filled from their role, because
-           reception, radiology and IT are being asked three different
-           questions about one outage. -->
+      <!-- What THIS person should do, by role (reception, radiology and IT have different questions). -->
       <p class="emg-role" id="emgRoleHint" hidden></p>
       <p class="hint" data-i18n-html>Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
-      <!-- Shown instead of the Activate button to somebody the administrator
-           did not designate: who to go to, rather than a button that fails. -->
+      <!-- Shown instead of Activate to a non-designated user: who to go to. -->
       <p class="emg-who" id="emgWhoCan" hidden></p>
       <div class="emg-modal-actions">
         <button class="btn" id="emgActivate" data-i18n>Activate emergency RIS</button>
@@ -1122,10 +936,8 @@
     </div>
   </div>
 
-  <!-- Row template for a study in the history list.
-       Template content is inert to document.querySelectorAll, so app.js runs
-       window.applyI18nIn() on each clone. The Send button's label is set by
-       app.js (Send / Resend), so it carries no data-i18n. -->
+  <!-- Row template: a study in the history list. Template content is inert, so each clone gets
+       window.applyI18nIn(). The Send button label (Send / Resend) is set in JS, so no data-i18n. -->
   <template id="histRowTpl">
     <div class="hist-row">
       <div class="hist-main">
@@ -1158,13 +970,9 @@
     </div>
   </template>
 
-  <!-- Row template for an ORPHANED route: files routed to a name that is no
-       longer an enabled destination and never reached it. Deliberately without
-       a Retry button — POST /api/stuck/retry only clears a backoff timer, and
-       there is no node left to dial, so the button would be a lie next to the
-       one list where nothing is coming to the rescue. The remedy lives in
-       .orphan-msg, which carries the ENGINE's sentence verbatim (it is the copy
-       that knows whether these were pinned) so the two cannot drift apart. -->
+  <!-- Row template: an ORPHANED route (destination name no longer enabled). No Retry: /api/stuck/retry
+       only clears a backoff timer and there is no node to dial. .orphan-msg carries the ENGINE's
+       sentence verbatim. -->
   <template id="orphanRowTpl">
     <div class="stuck-row orphan-row">
       <div class="stuck-main">
@@ -1179,15 +987,9 @@
     </div>
   </template>
 
-  <!-- Row template for a HELD destination: a routing rule asks for a
-       de-identified copy and no copy can be scrubbed, so nothing is sent there
-       at all rather than sent identified. No Retry button either, and for a
-       different reason than the orphan row above: there IS a node to dial and
-       it is answering — what is holding these is not a timer, so clearing one
-       would change nothing while looking like the fix. The remedy is one config
-       edit and it lives in .held-msg, which carries the ENGINE's sentence
-       verbatim (reason and remedy both) so no copy here can drift away from the
-       profile the engine is actually reading. -->
+  <!-- Row template: a HELD destination (a rule wants a de-identified copy that cannot be scrubbed, so
+       nothing is sent). No Retry: no timer is holding it. .held-msg carries the ENGINE's sentence
+       (reason and remedy) verbatim. -->
   <template id="heldRowTpl">
     <div class="stuck-row held-row">
       <div class="stuck-main">
@@ -1195,11 +997,8 @@
         <div class="stuck-meta"></div>
         <div class="held-files"></div>
         <div class="held-msg"></div>
-        <!-- The remedy is one config edit in one of two places, and both used
-             to be sidebar rows a click away. They are tabs now, so the row
-             carries the jumps itself — which makes the repair loop shorter than
-             it was before the merge, not longer. Same data-panel/data-tab the
-             nav badges and Overview tiles use, so one handler serves them all. -->
+        <!-- Jumps to the two config tabs holding the remedy; same data-panel/data-tab as nav badges and
+             Overview tiles, so one handler serves all. -->
         <div class="held-jump">
           <button class="btn ghost tiny" data-panel="dlgConfig" data-tab="settings" data-cap="config.read" data-i18n>De-identification settings</button>
           <button class="btn ghost tiny" data-panel="dlgConfig" data-tab="routing" data-cap="routing.read" data-i18n>The rule that asks for it</button>
@@ -1250,10 +1049,8 @@
     </div>
   </template>
 
-  <!-- Row template for a destination line in Overview. The state span carries a
-       WORD as well as a colour (Reachable / Unreachable / Not checked): a node
-       is only ever green when a timestamped probe says so, and "Not checked" is
-       the honest answer for every node the failover is not watching. -->
+  <!-- Row template: a destination in Overview. The state carries a WORD and a colour; green only
+       after a timestamped probe, else "Not checked". -->
   <template id="ovDestRowTpl">
     <div class="ov-dest">
       <span class="ov-dest-state"></span>
@@ -1295,11 +1092,8 @@
     </tr>
   </template>
 
-  <!-- Row template for one routing rule. Destinations are checkboxes rather
-       than a multi-select: a rule that names a node which no longer exists must
-       stay visible and stay checked (app.js marks it), because silently
-       dropping it from the list is how a study stops going somewhere it was
-       configured to go. -->
+  <!-- Row template: one routing rule. Destinations are checkboxes so a rule naming a vanished node
+       stays visible and checked (flagged in JS) instead of silently dropping it. -->
   <template id="rtRuleTpl">
     <article class="rt-rule">
       <header class="rt-rule-head">
@@ -1341,6 +1135,20 @@
   </template>
 
   <script src="carino-bridge.js"></script>
-  <script src="app.js"></script>
+  <script src="js/00-gate.js"></script>
+  <script src="js/01-core.js"></script>
+  <script src="js/02-auth.js"></script>
+  <script src="js/03-status.js"></script>
+  <script src="js/04-services-overview.js"></script>
+  <script src="js/05-order-alert.js"></script>
+  <script src="js/06-logs.js"></script>
+  <script src="js/07-config.js"></script>
+  <script src="js/08-actions.js"></script>
+  <script src="js/09-studies.js"></script>
+  <script src="js/10-orders.js"></script>
+  <script src="js/11-routing.js"></script>
+  <script src="js/12-people-audit.js"></script>
+  <script src="js/13-panels.js"></script>
+  <script src="js/14-boot.js"></script>
 </body>
 </html>

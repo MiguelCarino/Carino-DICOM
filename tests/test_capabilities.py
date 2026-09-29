@@ -5,7 +5,7 @@ Runs under pytest, or standalone: python3 tests/test_capabilities.py
 This is the suite that matters most, because it tests the thing a browser
 cannot be trusted to do. Every check here is about the SERVER: what it refuses,
 and — the half that is easy to forget — what it never sends in the first place.
-A panel hidden in app.js while its data still arrives is not access control, it
+A panel hidden in the dashboard while its data still arrives is not access control, it
 is a cosmetic that reads like one.
 
 Two classes of test:

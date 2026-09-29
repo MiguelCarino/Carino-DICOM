@@ -268,10 +268,10 @@ def test_a_restart_mid_outage_announces_the_orders_typed_around_it():
     existed in the arithmetic between the two: the store was always right about
     how many orders it held, and the client still heard nothing.
 
-    The three lines below RESTATE pacs/web/app.js's arrival branch — baseline on
+    The three lines below RESTATE the dashboard's arrival branch (pacs/web/js/03-status.js) — baseline on
     the first value seen, adopt a value that went backwards, announce the
     difference when it rises. They are not that branch: the real one is cut out
-    of app.js and driven in pacs/web/tests/alert-state.mjs, which is where a
+    of the dashboard scripts and driven in pacs/web/tests/alert-state.mjs, which is where a
     change to the branch itself is caught. Nothing else about the browser is
     simulated here; what is under test is that the sequence of values this store
     hands that branch no longer contains a backwards step that a real arrival is
@@ -420,10 +420,10 @@ def test_the_status_block_ships_the_tick_and_the_origin_with_the_listener_stoppe
 #     that answers the SIGN-IN PROMPT, because showAuthGate() drops the two
 #     visual deferrals and not the audible one.
 #
-# Both repairs are in app.js, and the assertions for them are in
+# Both repairs are in the dashboard (pacs/web/js/*.js), and the assertions for them are in
 # pacs/web/tests/alert-state.mjs — a standalone node harness that cuts the
 # arrival decision, the live region, the deferred tone and the poll watermark
-# out of app.js and drives them as a state machine against a clock, a speaker
+# out of the dashboard scripts and drives them as a state machine against a clock, a speaker
 # and a store it controls. This comment used to say the repairs were "asserted
 # where JavaScript can be run", which was true of nowhere: all three could be
 # reverted at once with pytest, i18n-parity and `node --check` still green, and
