@@ -578,8 +578,8 @@
         const one = () => document.getElementById('downloadOneBtn');
         const shown = (el) => !el.classList.contains('hidden');
 
-        await handleFiles([]);          // nothing loaded
-        files.length = 0; showDownload();
+        resetStudyState();              // nothing loaded
+        showDownload();
         ok('no files: neither download button is offered', !shown(all()) && !shown(one()));
 
         await install(geoBytes(), 'dl-one.dcm');

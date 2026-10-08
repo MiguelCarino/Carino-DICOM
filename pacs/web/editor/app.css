@@ -77,6 +77,9 @@
     .app {
       display: grid;
       grid-template-rows: auto 1fr;
+      /* minmax(0,…): an implicit auto column grows to the widest child (659px at a 390px screen),
+         and html/body overflow:hidden leaves the overflow unreachable. */
+      grid-template-columns: minmax(0, 1fr);
       height: 100vh;
       overflow: hidden;
     }
@@ -155,6 +158,14 @@
     .diag-link:hover { color: var(--accent); }
     @media (max-width: 1150px) { .header-clock { display: none; } }
     @media (max-width: 820px) { .app-tag, .status-toggle span { display: none; } }
+    /* Phone: brand and controls share the first row, the tabs take a full-width second row.
+       700, not 640: on one row ru's tabs (the widest) are clipped up to ~685px with a study open. */
+    @media (max-width: 700px) {
+      .header.top-header { flex-wrap: wrap; row-gap: 8px; }
+      .header.top-header .tab-nav { order: 3; flex: 1 1 100%; min-width: 0; }
+    }
+    /* 320-375px: a full row still clips ru/es/pt-BR/en tabs at 16px side padding. */
+    @media (max-width: 380px) { .header.top-header .tab-nav > .tab-btn { padding: 6px 8px; } }
 
     /* ---- Overview tab ---- */
     .ov-main { min-height: 0; overflow-y: auto; padding: 24px; background: var(--bg); }
@@ -704,7 +715,7 @@
     #previewCard > * { flex: 0 0 auto; }
     #previewCard > .sr-view { flex: 1 1 auto; min-height: 0; }
     /* align-self stops stretching, so aspect-ratio derives width from height and the box stays square. */
-    #previewCard > .preview-box {
+    #previewCard .preview-box {
       flex: 1 1 auto;
       align-self: center;
       width: auto;
@@ -1185,6 +1196,10 @@
       transition: all 0.2s;
     }
     .dcm-card:hover { border-color: var(--accent); box-shadow: 0 0 15px var(--accent-glow); }
+    /* A separately added copy, shown beside the open study: it misses the study's edits. */
+    .dcm-card-added { border-style: dashed; }
+    .extractor-source { font-size: 12px; color: var(--text-dim); }
+    #clearExtractorBtn[hidden] { display: none; }
     .dcm-card canvas { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; background: #000; }
     .dcm-card-info {
       padding: 5px 8px;
@@ -1312,17 +1327,29 @@
       font: 700 12px var(--mono); cursor: pointer; line-height: 1.4;
     }
     .cmp-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
-    /* ---- Mini preview in sidebar ---- */
+    /* ---- Preview card while comparing: A | B ---- */
+    /* Not comparing, the wrappers are display: contents, so the lone preview keeps its own sizing. */
+    .cmp-previews, .cmp-cell { display: contents; }
+    .cmp-previews:not(.on) #previewBWrap,
+    .cmp-previews:not(.on) .cmp-file-badge { display: none; }
+    /* Comparing, the pictures stay square and the card does not shrink below them: shrunk to fit a short
+       window they were letterboxed strips. The Log gives up its height first, then the sidebar scrolls. */
+    #previewCard:has(> .cmp-previews.on) { flex-shrink: 0; }
+    #previewCard > .cmp-previews.on { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+    .cmp-previews.on .cmp-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    #previewCard .cmp-previews.on .preview-box,
     .cmp-preview-mini {
-      width: 100%; aspect-ratio: 1;
-      background: #000; border-radius: 4px;
-      overflow: hidden; display: none; margin-top: 8px;
+      flex: none; align-self: stretch;
+      width: 100%; max-width: none; aspect-ratio: 1; min-height: 0;
     }
+    /* The report replaces this file's picture; a name over an empty cell is not worth keeping. */
+    #previewCard > .cmp-previews.on:has(#previewBox.hidden) { display: none; }
+    .cmp-preview-mini { background: #000; border-radius: 8px; overflow: hidden; }
     .cmp-preview-mini canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
     .cmp-file-badge {
+      flex: none;
       font: 600 10px var(--mono); color: var(--text-muted);
       text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
-      margin-top: 6px;
     }
     /* ---- Compare table copy buttons ---- */
     .cmp-actions-cell { display: flex; gap: 3px; justify-content: center; }
@@ -1398,13 +1425,13 @@
     .add-tag-val { flex: 1; min-width: 120px; }
     .btn.add-tag-ok { padding: 6px 14px; }
     .btn.add-tag-cancel { padding: 6px 12px; }
-    .deid-options-row { gap: 6px 14px; }
+    .deid-options-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 6px 14px; }
     .deid-options-row label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text); cursor: pointer; }
     /* Text-box styling does not apply to the checkbox. */
     .deid-options-row input[type="checkbox"] { padding: 0; background: none; border: none; accent-color: var(--accent); cursor: pointer; }
     #deidOptsBtn.active { background: var(--accent-faint); border-color: var(--accent); color: var(--accent); }
-    .deid-opts-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .deid-opts-note { flex-basis: 100%; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+    .deid-opts-title { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .deid-opts-note { grid-column: 1 / -1; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
 
     /* ---- Tab panel grid placement ---- */
     /* .app is `grid-template-rows: auto 1fr`; only .main (2nd child) gets the 1fr row automatically.
@@ -1459,7 +1486,7 @@
     .preview-nav-info { font:11px var(--mono); color:var(--text-muted); text-align:center; flex:1; }
 
     /* ---- Toast ---- */
-    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 18px; font: 600 13px var(--font); color: var(--text); z-index: 3000; pointer-events: none; animation: toast-slide 0.2s ease; }
+    .toast { position: fixed; bottom: 24px; right: 24px; max-width: calc(100vw - 48px); background: var(--surface); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 18px; font: 600 13px var(--font); color: var(--text); z-index: 3000; pointer-events: none; animation: toast-slide 0.2s ease; }
     @keyframes toast-slide { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 
     /* ---- Loading overlay ---- */
@@ -1540,7 +1567,7 @@
       /* Stacked, the page scrolls: the sidebar is a plain stack again and the preview is sized by width. */
       .sidebar, .sidebar-rest { flex: none; overflow: visible; }
       #imgEditCard, #previewCard { flex: none; }
-      #previewCard > .preview-box {
+      #previewCard .preview-box {
         flex: none;
         align-self: auto;
         width: 100%;
@@ -1548,4 +1575,28 @@
         max-width: min(560px, 45vh);
       }
       #previewCard > .sr-view { flex: none; }
+      /* Each compared picture gets the lone preview's cap, the labels staying over their pictures. */
+      #previewCard > .cmp-previews.on { width: 100%; max-width: calc(2 * min(560px, 45vh) + 8px); margin-inline: auto; }
+
+      /* One column narrower than the UID box's 200px input: it wraps instead of pushing Apply past the
+         clipped right edge. */
+      .uid-pattern { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+      .uid-pattern input { flex: 1 1 120px; min-width: 0; width: auto; }
+      .uid-pattern-value { min-width: 0; overflow-wrap: anywhere; }
+    }
+    /* Stacked, the tag table drops its 640px floor so Value fits beside the other three columns.
+       Description breaks anywhere, or its longest word would take Value's room; its min-width stops a
+       short header (ja) letting it shrink to a letter per line. Under 360px Value would be a sliver,
+       so the 640px table and its sideways scroll stay; compare's six columns keep them too. */
+    @media (max-width: 1000px) and (min-width: 360px) {
+      #tableWrap table:has(#cmpHeadB.hidden) { min-width: 0; }
+      .desc-cell { display: inline-block; min-width: 78px; overflow-wrap: anywhere; }
+    }
+    /* Phone: the cell padding, Tag's fixed 140px and its chip's spacing are the width Value needs. */
+    @media (max-width: 640px) {
+      tbody td { padding: 8px 6px; }
+      thead th { padding: 10px 6px; }
+      .col-tag { width: auto; }
+      .tag-cell { gap: 4px; }
+      .tag-code { padding: 3px 4px; }
     }

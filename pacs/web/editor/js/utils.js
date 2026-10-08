@@ -2,6 +2,8 @@
 // ---- Elements ----
 const $ = (id) => document.getElementById(id);
 const T = (s) => (window.t || String)(s);   // i18n.js loads deferred, so resolve per call
+// The pill keeps its count so i18n.js can redo the text on a language switch.
+const setCountPill = (el, n) => { el.dataset.i18nN = n; el.textContent = T(el.dataset.i18nKey).replace('{n}', n); };
 const body = document.body;
 const dropZone = $('dropZone');
 const fileInput = $('fileInput');
@@ -229,12 +231,15 @@ function log(msg, type = 'info') {
 }
 
 // ---- UID prefix detection ----
+// SOP Class, Transfer Syntax and coding-scheme UIDs name what the data is, so a new root must never touch them.
+const isStandardUID = s => s.startsWith('1.2.840.10008.');
+
 function detectUIDPattern() {
   const uids = [];
   for (const f of files) {
     walkEls(f.dict, (t, el) => {
       if (el.vr === 'UI' && el.Value) {
-        el.Value.forEach(v => { if (v) uids.push(String(v)); });
+        el.Value.forEach(v => { if (v && !isStandardUID(String(v))) uids.push(String(v)); });
       }
     });
   }
@@ -252,7 +257,7 @@ function detectUIDPattern() {
     if (!p) break;
   }
   const k = p.lastIndexOf('.');
-  sharedUIDPrefix = k > 0 ? p.slice(0, k) : p;
+  sharedUIDPrefix = k > 0 ? p.slice(0, k) : '';   // no full component in common: no shared root
   
   if (sharedUIDPrefix && uids.length > 0) {
     const suffixes = uids.map(u => u.slice(sharedUIDPrefix.length)).filter(s => s);
@@ -267,25 +272,48 @@ function detectUIDPattern() {
 }
 
 function applyPrefixToAll(newP) {
-  if (!/^[0-9]+(\.[0-9]+)*$/.test(newP)) { alert(T('Invalid UID prefix')); return; }
+  if (!/^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*$/.test(newP) || isStandardUID(newP + '.')) {
+    alert(T('Invalid UID prefix')); return;
+  }
   const oldP = sharedUIDPrefix;
+  // Only UIDs under the detected root move; anything else keeps its value, so two UIDs never merge.
+  const rewrite = v => {
+    const s = String(v || '');
+    return oldP && !isStandardUID(s) && s.startsWith(oldP + '.') ? newP + s.slice(oldP.length) : s;
+  };
+  const moved = new Set();
+  let m = 0;
   for (const f of files) {
+    let hit = false;
     walkEls(f.dict, (t, el) => {
       if (el.vr !== 'UI' || !el.Value) return;
-      el.Value = el.Value.map(v => {
-        const s = String(v || '');
-        if (!s) return s;
-        if (oldP && s.startsWith(oldP + '.')) return newP + s.slice(oldP.length);
-        const c = s.lastIndexOf('.');
-        return c > 0 ? newP + s.slice(c) : newP;
-      });
+      el.Value.forEach(v => { if (rewrite(v) !== String(v || '')) { moved.add(String(v)); hit = true; } });
     });
+    if (hit) m++;
   }
-  reseedAllPending();
-  sharedUIDPrefix = newP;
-  uidPrefixInput.value = newP;
-  uidPatternDisplay.textContent = `${newP}.*`;
-  renderTable();
-  log(`Applied UID prefix: ${newP}`);
+  const n = moved.size;
+  if (!n) return;
+  const tooLong = [...moved].filter(v => rewrite(v).length > 64).length;
+  if (tooLong) { alert(T('{n} UIDs would be longer than the 64 characters DICOM allows.').replace('{n}', tooLong)); return; }
+  confirmDanger(T('Rewrite {n} UIDs in {m} files to start with {p}? This cannot be undone.').replace('{n}', n).replace('{m}', m).replace('{p}', newP), () => {
+    // Undo only restores the open file's pending edits, so any undo step across this rewrite
+    // would put that one file back on the old root and split the study.
+    editHistory = []; editFuture = []; datasetDirty = true;
+    clearTimeout(editDebounceTimer); preEditSnapshot = null;
+    updateHistoryBtns();
+    try { renderTechRow(); } catch (_) {}
+    for (const f of files) {
+      walkEls(f.dict, (t, el) => { if (el.vr === 'UI' && el.Value) el.Value = el.Value.map(rewrite); });
+      // Keep the shown File Meta copy of the SOP Instance UID in step; export rebuilds it anyway.
+      const mi = f.meta?.['00020003'];
+      if (mi?.Value) mi.Value = mi.Value.map(rewrite);
+    }
+    reseedAllPending();
+    sharedUIDPrefix = newP;
+    uidPrefixInput.value = newP;
+    uidPatternDisplay.textContent = `${newP}.*`;
+    renderTable();
+    log(`Applied UID prefix: ${newP}`);
+  }, 'Rewrite UIDs');
 }
 

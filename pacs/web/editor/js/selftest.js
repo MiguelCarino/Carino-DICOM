@@ -5,7 +5,7 @@
 
 // Must match tests/suites (a browser cannot glob it); tests/suites/selftest.js checks this.
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
-const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'render',
+const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'render', 'phone',
                          'sequences', 'series', 'edits', 'imgedit', 'compare', 'deid',
                          'redact', 'samples', 'zip'];
 
@@ -347,6 +347,6 @@ window.__selftest = {
   render: renderSelfTest, describe: selftestDescribe, mentions: selftestMentions,
   wanted: selftestWanted, tsName, suites: SELFTEST_SUITES,
   // Indirect so the suite can stub it; location.reload itself cannot be replaced.
-  reload: () => { location.hash = 'selftest'; location.reload(); },
+  reload: () => { unloadConfirmed = true; location.hash = 'selftest'; location.reload(); },
 };
 

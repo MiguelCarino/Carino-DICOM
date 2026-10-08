@@ -99,7 +99,7 @@ function removeSeries(id) {
 }
 
 function renderCreateGrid() {
-  createImgCount.textContent = `${createImages.length} image${createImages.length !== 1 ? 's' : ''}`;
+  setCountPill(createImgCount, createImages.length);
   if (!createImages.length) {
     createImgGrid.innerHTML = `
       <div class="img-empty">

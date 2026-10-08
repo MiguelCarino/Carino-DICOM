@@ -102,13 +102,63 @@
     // DOM cannot show us, so an entry missing from the markup is not evidence it
     // is dead. What the number does catch is drift — a dictionary growing while
     // the page does not, which is what happens when controls are rewritten and
-    // their old entries are left behind. It was 107 when this was written.
+    // their old entries are left behind. It was 107 when this was written, 129
+    // once the load-failure toasts arrived, 137 with the translated
+    // Anonymize/Randomize confirms, 150 once every confirm and toast went
+    // through t().
     const jsOwned = new Set(ATTR_I18N.map(([, , k]) => k));
     const unseen = Object.keys(I18N.es).filter(k => !keys.has(k) && !jsOwned.has(k));
     ok('the dictionaries have not drifted far ahead of the page',
-       unseen.length < 125, `${unseen.length} keys reached from JS or no longer reached at all`);
+       unseen.length < 156, `${unseen.length} keys reached from JS or no longer reached at all`);
   } catch (e) {
     ok('the i18n audit ran', false, (e && e.message) || String(e));
+  }
+
+  // ---- under ?lang=ja, a confirm is not asked in English ---------------------
+  // An irreversible overwrite approved through an English body is the failure.
+  // confirmDanger and toast run their text through t() themselves, so a caller
+  // that hands them the English key still reaches the reader's language; the
+  // count pills keep their count across the switch. CarinoLang.set stores the
+  // choice, so put the visitor's back afterwards.
+  const prevLang = CarinoLang.mode === 'manual' ? CarinoLang.current : 'auto';
+  const pillWas = createImgCount.dataset.i18nN;
+  try {
+    const LOCALES = ['es', 'pt-BR', 'ja', 'ru'];
+    const JS_KEYS = ['Copy every differing value onto {name}? This overwrites its values.',
+      'Copy every differing value from {name} onto this file? This overwrites its values.',
+      '{host} wants to open {n} file(s) in this editor.', 'Loaded {n} image(s) from {from}',
+      'Nothing from {from} could be read as DICOM', 'Tag {tag} added', 'Images: {n}', 'Files: {n}',
+      'Copy →', 'Copy ←', 'Cleared the added files', 'Cleared all images', 'PACS hand-off failed:',
+      'PACS deep-link failed:', 'No response from Carino DICOM'];
+    for (const loc of LOCALES) {
+      const bad = JS_KEYS.filter(k => !I18N[loc]?.[k] ||
+        (k.match(/\{\w+\}/g) || []).some(p => I18N[loc][k].split(p).length !== 2));
+      ok(`confirm/toast/pill keys reach ${loc} with each placeholder once`, bad.length === 0, bad.join(' | '));
+    }
+
+    CarinoLang.set('ja');
+    const KEY = 'The self-test loads test files of its own. The study you have open, and any edits you have not exported, will be discarded.';
+    confirmDanger(KEY, () => {}, 'Copy →');
+    const msg = $('confirmMsg').textContent;
+    ok('?lang=ja: #confirmMsg is not English', msg === I18N.ja[KEY] && !/[a-z]{4}/i.test(msg), msg.slice(0, 60));
+    ok('?lang=ja: and neither is its OK button', $('confirmOk').textContent === I18N.ja['Copy →'], $('confirmOk').textContent);
+    $('confirmCancel').click();
+    toast('Cleared the added files');
+    const toastText = document.querySelector('.toast')?.textContent;
+    ok('?lang=ja: a toast given the English key is shown in Japanese', toastText === I18N.ja['Cleared the added files'], toastText);
+    document.querySelector('.toast')?.remove();
+
+    setCountPill(createImgCount, 3);
+    ok('?lang=ja: a count pill is Japanese', createImgCount.textContent === I18N.ja['Images: {n}'].replace('{n}', 3),
+       createImgCount.textContent);
+    CarinoLang.set('en');
+    ok('and switching back keeps its count', createImgCount.textContent === 'Images: 3', createImgCount.textContent);
+  } catch (e) {
+    ok('the ?lang=ja confirm check ran', false, (e && e.message) || String(e));
+  } finally {
+    try { $('confirmCancel').click(); } catch (_) { /* already closed */ }
+    CarinoLang.set(prevLang);
+    if (pillWas !== undefined) setCountPill(createImgCount, pillWas);
   }
 
   return out;

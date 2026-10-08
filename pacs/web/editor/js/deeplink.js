@@ -19,21 +19,22 @@ window.addEventListener('load', () => {
       clearTimeout(giveUp);
       showLoading?.(false);       // the spinner has nothing to say over a question
       confirmDanger(
-        `${new URL(origin).host} wants to open ${count} file(s) in this editor.`,
+        T('{host} wants to open {n} file(s) in this editor.').replace('{host}', new URL(origin).host).replace('{n}', count),
         () => resolve(true), 'Load files', () => resolve(false));
     }),
     onFiles: async (incoming, info) => {
       clearTimeout(giveUp);
       showLoading?.(true, 'Copying study from Carino DICOM…');
       try {
-        await handleFiles(incoming);        // shows its own per-image progress
+        const n = await handleFiles(incoming);   // shows its own per-image progress
         // Label by actual origin: a user-approved origin is still not the bundled PACS.
         const from = info.origin === location.origin ? 'Carino DICOM' : new URL(info.origin).host;
-        // Count parsed files, not received ones; handleFiles already reports the failures.
-        if (!files.length) { toast?.(`Nothing from ${from} could be read as DICOM`); return; }
+        // Count parsed files, not received ones (files[] may still hold the previous
+        // study); handleFiles already reports the failures.
+        if (!n) { toast?.(T('Nothing from {from} could be read as DICOM').replace('{from}', from)); return; }
         switchTab('editor');
-        toast?.(`Loaded ${files.length} image(s) from ${from}`);
-      } catch (err) { showLoading?.(false); toast?.('PACS hand-off failed: ' + (err.message || err)); }
+        toast?.(T('Loaded {n} image(s) from {from}').replace('{n}', n).replace('{from}', from));
+      } catch (err) { showLoading?.(false); toast?.(T('PACS hand-off failed:') + ' ' + (err.message || err)); }
     },
   });
   if (armed) {
@@ -91,12 +92,13 @@ window.addEventListener('load', () => {
         } catch { /* skip a file that won't fetch */ }
       }
       if (!loaded.length) throw new Error('could not fetch any DICOM file');
-      await handleFiles(loaded);
+      const n = await handleFiles(loaded);
+      if (!n) throw new Error('no file could be read as DICOM');
       switchTab('editor');
-      toast?.(`Loaded ${loaded.length} image(s) from Carino DICOM`);
+      toast?.(T('Loaded {n} image(s) from {from}').replace('{n}', n).replace('{from}', 'Carino DICOM'));
     } catch (err) {
       showLoading?.(false);
-      toast?.('PACS deep-link failed: ' + (err.message || err));
+      toast?.(T('PACS deep-link failed:') + ' ' + (err.message || err));
     }
   })();
 });

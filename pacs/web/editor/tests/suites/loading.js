@@ -152,14 +152,78 @@
        (errorBanner.textContent || '').split('\n')[0]);
 
     // ---- the degenerate lists -------------------------------------------------
-    await handleFiles([fake('only.dcm', bufs[7])]);
+    ok('handleFiles returns how many files it loaded', (await handleFiles([fake('only.dcm', bufs[7])])) === 1);
     ok('a single file still loads', files.length === 1 && tag(files[0].dict, '00080018').endsWith('.8'),
        tag(files[0].dict, '00080018'));
 
     // The read-ahead is primed before the loop, so the empty list is the case
     // where it has to prime nothing and the loop has to not run at all.
-    await handleFiles([]);
-    ok('an empty list loads nothing and throws nothing', files.length === 0, String(files.length));
+    const open = files[0];
+    ok('an empty list loads nothing and throws nothing', (await handleFiles([])) === 0);
+    ok('and leaves the open study alone', files.length === 1 && files[0] === open, String(files.length));
+
+    // ---- a drop that holds nothing readable --------------------------------------
+    // The study used to be wiped before the first parse, so a stray JPEG dropped
+    // on the page threw away the study, its edits and the undo history, and on
+    // Overview (the banner lives on Edit) nothing said so.
+    {
+      pendingEdits.set('00100010', { vr: 'PN', valueString: 'Kept^Edit' });
+      editHistory.push(new Map());
+      document.querySelector('.toast')?.remove();
+      const jpeg = fake('photo.JPG', new Uint8Array([0xFF, 0xD8, 0xFF, 0xE0]).buffer);
+      const realToast = window.toast;
+      let toastMs;
+      window.toast = (msg, ms) => { toastMs = ms; return realToast(msg, ms); };
+      let n;
+      try { n = await handleFiles([jpeg]); } finally { window.toast = realToast; }
+      ok('nothing parsed: handleFiles returns 0', n === 0, String(n));
+      ok('and the open study is still the one on screen', files.length === 1 && files[0] === open && dict === open.dict);
+      ok('with its edits', pendingEdits.get('00100010')?.valueString === 'Kept^Edit');
+      ok('and its undo history', editHistory.length === 1, String(editHistory.length));
+      const t = document.querySelector('.toast')?.textContent || '';
+      ok('a toast says so on any tab', /photo\.JPG could not be read as DICOM/.test(t) && /open study is unchanged/.test(t), t);
+      ok('and points images at Create', /Create/.test(t), t);
+      // Three sentences can't be read in the default 2.4 s.
+      ok('and stays up long enough to read', toastMs >= 6000, String(toastMs));
+      ok('the banner names the image and the Create tab',
+         errorBanner.className === 'error-banner' && /photo\.JPG: an image, not DICOM: use Create/.test(errorBanner.textContent),
+         errorBanner.textContent);
+      ok('and says the study under it is unchanged', /open study is unchanged/.test(errorBanner.textContent), errorBanner.textContent);
+      // Named by MIME alone: a pasted image has no useful extension.
+      const pasted = fake('clipboard', new Uint8Array(8).buffer);
+      pasted.file.type = 'image/png';
+      await handleFiles([pasted, fake('junk.bin', new Uint8Array(8).buffer)]);
+      const t2 = document.querySelector('.toast')?.textContent || '';
+      ok('several unreadable files are counted', /None of the 2 files could be read/.test(t2), t2);
+      ok('an image is known by its MIME type too', /clipboard: an image, not DICOM/.test(errorBanner.textContent)
+         && !/junk\.bin: an image/.test(errorBanner.textContent), errorBanner.textContent);
+      ok('and the study still stands', files[0] === open);
+      editHistory.length = 0;
+    }
+
+    // ---- one good file among bad ones -------------------------------------------
+    {
+      const n = await handleFiles([fake('bad.png', new Uint8Array(8).buffer), fake('good.dcm', bufs[2])]);
+      ok('the good file replaces the study', n === 1 && files.length === 1 && files[0].name === 'good.dcm', String(n));
+      ok('and the edits that belonged to the old one go with it', !editHistory.length && pendingEdits === files[0].pending);
+      const t = document.querySelector('.toast')?.textContent || '';
+      ok('the toast counts the failure', /1 of 2 files could not be read/.test(t) && !/unchanged/.test(t), t);
+      ok('and the banner does not claim the study is unchanged', !/unchanged/.test(errorBanner.textContent), errorBanner.textContent);
+    }
+
+    const NEW_STRINGS = [
+      'an image, not DICOM: use Create →',
+      '{n} of {m} files could not be read as DICOM.',
+      '{name} could not be read as DICOM.',
+      'None of the {n} files could be read as DICOM.',
+      'Images go in Create →, which turns them into DICOM.',
+      'The open study is unchanged.',
+    ];
+    for (const loc of ['es', 'pt-BR', 'ja', 'ru']) {
+      const missing = NEW_STRINGS.filter(s => !I18N[loc] || !I18N[loc][s]);
+      ok(`i18n: every load-failure string is translated into ${loc}`, missing.length === 0,
+         missing.join(' | ').slice(0, 160));
+    }
   } catch (e) {
     restore();
     ok('suite ran to completion', false, (e && e.stack ? e.stack.split('\n')[0] : String(e)));

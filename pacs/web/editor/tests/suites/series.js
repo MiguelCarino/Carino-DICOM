@@ -74,6 +74,15 @@
       ok('one study groups as one study', groupStudies().length === 1, String(groupStudies().length));
     }
 
+    // ---- counts say "Images: 3", which needs no plural in any locale -------
+    {
+      const T = window.t || String;
+      const idle = $('fileBrowserRow').querySelector('.series-tile:not(.active) .st-count')?.textContent;
+      ok('an idle series tile counts its images', idle === T('Images: {n}').replace('{n}', 3), idle);
+      ok('the count pill counts the files', fileCountPill.textContent === T('Files: {n}').replace('{n}', 6),
+         fileCountPill.textContent);
+    }
+
     // ---- the study-aware counter -------------------------------------------
     {
       // Through t(), not against the English: this suite also runs inside

@@ -154,12 +154,13 @@ function renderCompareUI() {
 
   const head  = $('cmpHeadB');
   const title = $('cmpBarTitle');
-  const wrap  = $('previewBWrap');
-  const badge = $('previewBBadge');
   if (head)  head.textContent = on ? files[compareIdx].name : '';
   if (title) title.textContent = on ? `${files[currentFileIdx]?.name || ''} ↔ ${files[compareIdx].name}` : '';
-  if (wrap)  wrap.style.display = on ? 'block' : 'none';
-  if (badge) { badge.classList.toggle('hidden', !on); badge.textContent = on ? files[compareIdx].name : ''; }
+  $('cmpPreviews')?.classList.toggle('on', on);
+  [['previewABadge', currentFileIdx], ['previewBBadge', compareIdx]].forEach(([id, i]) => {
+    const badge = $(id);
+    if (badge) badge.textContent = badge.title = on ? files[i]?.name || '' : '';
+  });
   if (on) drawCompareThumb();
 }
 

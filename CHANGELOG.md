@@ -28,6 +28,13 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   CHANGELOG.
 - Dashboard comments trimmed to the why (security, standards, ordering
   constraints); history lives in git.
+- Bundled editor re-synced to upstream `988e444`. Operator-visible: the UID
+  Pattern no longer rewrites standard `1.2.840.10008.*` UIDs and asks first;
+  a drop that holds no DICOM keeps the open study; opening files over unsaved
+  edits asks; Extract exports the open study with its edits; the phone layout
+  fits the screen; every confirm and toast is translated. The PACS hand-off now
+  counts only files that actually parsed. New self-test suite `phone.js`. See
+  the upstream CHANGELOG.
 - Dashboard cleanup, no visible change: top-level code in `js/*.js` lost the
   two-space indent left by the removed IIFE; unused code is gone (the
   never-applied `.as-modal` pop-out styles, the `<dialog>`/action-button/

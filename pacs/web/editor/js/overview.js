@@ -445,7 +445,7 @@
     ovDrop.addEventListener('dragleave', () => ovDrop.classList.remove('drag'));
     // stopPropagation: otherwise the window drop handler loads it again and the two
     // handleFiles runs race, doubling the study.
-    ovDrop.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); ovDrop.classList.remove('drag'); collectDropped(e.dataTransfer)?.then(loadStudy); });
+    ovDrop.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); ovDrop.classList.remove('drag'); collectDropped(e.dataTransfer)?.then(openStudy); });
   }
 
   // ---- Sample studies ----
@@ -512,7 +512,7 @@
     ovContent.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); ovContent.classList.add('ov-dragover'); });
     ovContent.addEventListener('dragleave', e => { if (!ovContent.contains(e.relatedTarget)) ovContent.classList.remove('ov-dragover'); });
     // stopPropagation prevents a double load by the window drop handler.
-    ovContent.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); ovContent.classList.remove('ov-dragover'); collectDropped(e.dataTransfer)?.then(loadStudy); });
+    ovContent.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); ovContent.classList.remove('ov-dragover'); collectDropped(e.dataTransfer)?.then(openStudy); });
   }
 
   // ---- Print / export as PDF ----

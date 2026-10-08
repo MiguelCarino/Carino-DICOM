@@ -257,7 +257,7 @@
       <div class="left-panel">
         <div class="top-bar" id="topBar">
           <div class="pill" id="fileNamePill">No file loaded</div>
-          <div class="pill" id="fileCountPill">0 files</div>
+          <div class="pill" id="fileCountPill" data-i18n data-i18n-key="Files: {n}" data-i18n-n="0">Files: 0</div>
           
           <div class="uid-pattern" id="uidPattern" style="display:none">
             <span class="uid-pattern-label" data-i18n>UID Pattern:</span>
@@ -268,9 +268,9 @@
         </div>
 
         <div class="actions-row">
-          <button id="anonymizeBtn" class="btn" data-i18n>Anonymize All</button>
-          <button id="deidOptsBtn" class="btn" title="PS3.15 de-identification options" aria-label="PS3.15 de-identification options">⚙</button>
-          <button id="randomizeBtn" class="btn" data-i18n>Randomize All</button>
+          <button id="anonymizeBtn" class="btn" title="De-identify every loaded file with the DICOM PS3.15 Basic Profile, plus any options ticked under ⚙" data-i18n>Anonymize (PS3.15)</button>
+          <button id="deidOptsBtn" class="btn" title="PS3.15 de-identification options">⚙ <span data-i18n>Options</span><span id="deidOptsCount"></span></button>
+          <button id="randomizeBtn" class="btn" title="Give every loaded file a made-up patient, for test data. This is not de-identification." data-i18n>Fake patient (test data)</button>
           <button id="undoBtn" class="btn" disabled title="Undo (Ctrl+Z)">↩</button>
           <button id="redoBtn" class="btn" disabled title="Redo (Ctrl+Y)">↪</button>
           <button id="addTagBtn" class="btn" title="Add a new tag to this file" data-i18n>+ Tag</button>
@@ -412,15 +412,21 @@
             <span data-i18n>Preview</span>
             <button class="sr-toggle-btn hidden" id="srToggleBtn" data-i18n>View Report</button>
           </div>
-          <div class="preview-box visible" id="previewBox">
-            <canvas id="preview"></canvas>
-            <div class="px-hover" id="pxHover">—</div>
+          <!-- Comparing turns this into two named columns (.on); otherwise it lays out as if absent. -->
+          <div class="cmp-previews" id="cmpPreviews">
+            <div class="cmp-cell">
+              <div class="cmp-file-badge" id="previewABadge"></div>
+              <div class="preview-box visible" id="previewBox">
+                <canvas id="preview"></canvas>
+                <div class="px-hover" id="pxHover">—</div>
+              </div>
+            </div>
+            <div class="cmp-cell" id="previewBWrap">
+              <div class="cmp-file-badge" id="previewBBadge"></div>
+              <div class="cmp-preview-mini"><canvas id="previewB"></canvas></div>
+            </div>
           </div>
           <div id="srView" class="sr-view hidden"></div>
-          <div class="cmp-preview-mini" id="previewBWrap">
-            <canvas id="previewB"></canvas>
-          </div>
-          <div class="cmp-file-badge hidden" id="previewBBadge"></div>
           <div class="preview-nav hidden" id="previewNav">
             <button class="preview-nav-btn" id="prevFileBtn" disabled>◀</button>
             <span class="preview-nav-info" id="previewNavInfo"></span>
@@ -498,7 +504,7 @@
   <div class="create-panel" id="createTab" style="display:none">
     <div class="create-left">
       <div class="top-bar">
-        <div class="pill" id="createImgCount">0 images</div>
+        <div class="pill" id="createImgCount" data-i18n data-i18n-key="Images: {n}" data-i18n-n="0">Images: 0</div>
         <button class="btn" id="createAddBtn" data-i18n>+ Add Images</button>
         <input id="createFileInput" type="file" multiple accept="image/*" hidden />
         <div class="actions-spacer"></div>
@@ -598,11 +604,12 @@
   <div class="extractor-panel" id="extractorTab" style="display:none">
     <div class="extractor-left">
       <div class="top-bar">
-        <div class="pill" id="extractorCount">0 files</div>
-        <button class="btn" id="extractorAddBtn" data-i18n>+ Load DCM Files</button>
+        <div class="pill" id="extractorCount" data-i18n data-i18n-key="Files: {n}" data-i18n-n="0">Files: 0</div>
+        <span class="extractor-source" id="extractorSource" hidden></span>
+        <button class="btn" id="extractorAddBtn" data-i18n>+ Add other files</button>
         <input id="extractorFileInput" type="file" multiple hidden />
         <div class="actions-spacer"></div>
-        <button class="btn" id="clearExtractorBtn" data-i18n>Clear All</button>
+        <button class="btn" id="clearExtractorBtn" data-i18n hidden>Clear added files</button>
       </div>
       <div class="extractor-grid-wrap" id="extractorGridWrap">
         <div id="extractorGrid">

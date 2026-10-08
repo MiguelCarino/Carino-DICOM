@@ -11,12 +11,16 @@ window.addEventListener('drop', e => {
   if (!r) return;
   if (activeTab === 'create') r.then(res => addCreateImages(res.items.map(it => it.file)));
   else if (activeTab === 'extractor') r.then(res => addExtractorFiles(res.items));
-  else r.then(loadStudy);
+  else r.then(openStudy);
 });
 
 dropZone.addEventListener('click', () => fileInput.click());
 // Reset value so picking the same file twice still fires change.
-fileInput.addEventListener('change', e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ''; });
+fileInput.addEventListener('change', e => {
+  const items = Array.from(e.target.files || []);
+  e.target.value = '';
+  openStudy({ items, fromFolder: false });
+});
 
 // One hidden webkitdirectory input serves all folder buttons, so remember which opened it.
 // (webkitdirectory rather than showDirectoryPicker: it recurses and works in every engine.)
@@ -27,7 +31,7 @@ folderInput.addEventListener('change', e => {
   e.target.value = '';
   if (!items.length) return;
   if (folderTarget === 'extract') addExtractorFiles(items);
-  else loadStudy({ items, fromFolder: true, truncated: false });
+  else openStudy({ items, fromFolder: true, truncated: false });
 });
 // These buttons sit inside drop zones that open the file picker on click; stop propagation.
 $('filesBtn')?.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
@@ -38,12 +42,16 @@ downloadAllBtn.addEventListener('click', () => downloadRange(0, files.length));
 
 applyPrefixBtn.addEventListener('click', () => {
   const p = uidPrefixInput.value.trim();
-  if (p && p !== sharedUIDPrefix) { pushHistory?.(); applyPrefixToAll(p); }
+  if (p && p !== sharedUIDPrefix) applyPrefixToAll(p);
 });
 
 anonymizeBtn.addEventListener('click', () => {
   if (!files.length) return;
-  confirmDanger(`Anonymize all ${files.length} loaded file${files.length>1?'s':''}? This overwrites patient identifiers and remaps UIDs.`, () => {
+  // Read the box, not deidOptions: that is only refreshed once the user confirms.
+  const keepUIDs = document.querySelector('#deidOptionsRow [data-opt="rtnUIDsOpt"]')?.checked;
+  confirmDanger(T(keepUIDs
+    ? 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers. UIDs are kept (Retain UIDs).'
+    : 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers and remaps UIDs.').replace('{n}', files.length), () => {
     pushHistory?.();
     if (!window.DEID_PROFILE) log('⚠ deid-profile.js failed to load — only private tags and core identifiers will be removed.');
     readDeidOptions();
@@ -61,21 +69,22 @@ anonymizeBtn.addEventListener('click', () => {
         + (opts.length ? ` + ${opts.join(' + ')}` : ''));
     toast?.(burned.length
       ? T('Burned In Annotation = YES — identity may be burned into the pixels. Use Redact in the Edit tab.')
-      : 'All files anonymized');
+      : T('All files anonymized'));
   }, 'Anonymize');
 });
 
 randomizeBtn.addEventListener('click', () => {
   if (!files.length) return;
-  confirmDanger(`Randomize all ${files.length} loaded file${files.length>1?'s':''}? This replaces identifying tags with random values.`, () => {
+  // randomize() touches only the patient block, dates and two IDs; say what it leaves.
+  confirmDanger(T('Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.').replace('{n}', files.length), () => {
     pushHistory?.();
     files.forEach(f => randomize(f.dict));
     remapUIDs();
     reseedAllPending();
     syncToUI();
     log('Randomized all files');
-    toast?.('All files randomized');
-  }, 'Randomize');
+    toast?.(T('All files given a fake patient'));
+  }, 'Make fake patient');
 });
 
 
@@ -98,12 +107,13 @@ $('cmpDownloadB')?.addEventListener('click', () => {
 });
 $('cmpApplyToB')?.addEventListener('click', () => {
   const other = compareEntry(); if (!other) return;
-  confirmDanger(`Copy every differing value onto ${other.name}? This overwrites its values.`,
+  // A function replacement, so a '$&' in a file name is not read as a pattern.
+  confirmDanger(T('Copy every differing value onto {name}? This overwrites its values.').replace('{name}', () => other.name),
                 () => cmpApplyAll(true), 'Copy →');
 });
 $('cmpApplyToA')?.addEventListener('click', () => {
   const other = compareEntry(); if (!other) return;
-  confirmDanger(`Copy every differing value from ${other.name} onto this file? This overwrites its values.`,
+  confirmDanger(T('Copy every differing value from {name} onto this file? This overwrites its values.').replace('{name}', () => other.name),
                 () => cmpApplyAll(false), 'Copy ←');
 });
 
@@ -163,6 +173,8 @@ function switchTab(tab) {
   if (tab !== 'overview' && typeof ovStopCine === 'function') ovStopCine();
   // Wheel-paging in Overview deliberately left the tag table stale; refresh it now.
   if (tab === 'editor' && dict && editorStale) { editorStale = false; syncEditorUI(); }
+  // Extract shows the open study as it stands now, edits included.
+  if (tab === 'extractor' && typeof renderExtractorGrid === 'function') renderExtractorGrid();
 }
 
 for (const [id, btn] of ALL_TABS) btn.addEventListener('click', () => switchTab(id));

@@ -182,6 +182,87 @@
          boxes().every(cb => !cb.checked));
     }
 
+    // ---- the two buttons say which one de-identifies ------------------------
+    // Randomize leaves institution, device, physician and private tags alone, so
+    // a label or confirm that reads like de-identification is a false claim.
+    // Through T(), not the English words in it: this suite also runs inside
+    // index.html#selftest, in the visitor's own language.
+    {
+      const anon = $('anonymizeBtn'), rand = $('randomizeBtn'), gear = $('deidOptsBtn');
+      const says = (el, key) => (el.dataset.i18nKey || el.textContent.trim()) === key && el.textContent.trim() === T(key);
+      const ANON_TITLE = 'De-identify every loaded file with the DICOM PS3.15 Basic Profile, plus any options ticked under ⚙';
+      const RAND_TITLE = 'Give every loaded file a made-up patient, for test data. This is not de-identification.';
+      const ANON_REMAP = 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers and remaps UIDs.';
+      const ANON_KEEP = 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers. UIDs are kept (Retain UIDs).';
+      const RAND_MSG = 'Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.';
+      ok('Anonymize names the standard it applies', says(anon, 'Anonymize (PS3.15)'), anon.textContent);
+      ok('Randomize is labelled as test data', says(rand, 'Fake patient (test data)'), rand.textContent);
+      ok('and its title says it is not de-identification', /not de-identification/.test(RAND_TITLE) && rand.title === T(RAND_TITLE), rand.title);
+      ok('Anonymize has a title too', /PS3\.15 Basic Profile/.test(ANON_TITLE) && anon.title === T(ANON_TITLE), anon.title);
+      ok('i18n: both titles are in ATTR_I18N',
+         ['anonymizeBtn', 'randomizeBtn'].every(id => ATTR_I18N.some(([i, attr]) => i === id && attr === 'title')));
+
+      const count = () => $('deidOptsCount').textContent;
+      const gearText = () => gear.textContent.replace(/\s+/g, ' ').trim();
+      ok('⚙ says Options and shows no count with nothing ticked', gearText() === `⚙ ${T('Options')}` && count() === '', gear.textContent);
+      const byOpt = (o) => boxes().find(cb => cb.dataset.opt === o);
+      byOpt('rtnUIDsOpt').click(); byOpt('rtnDevIdOpt').click();
+      ok('ticking two options shows "· 2" on ⚙', count() === ' · 2', JSON.stringify(count()));
+      ok('so the button reads "⚙ Options · 2"', gearText() === `⚙ ${T('Options')} · 2`, gear.textContent);
+      ok('without an aria-label hiding the count from screen readers', !gear.hasAttribute('aria-label'));
+
+      // Spy on t(): T() resolves window.t per call, so this sees every lookup.
+      const realT = window.t, asked = [];
+      window.t = (k) => { asked.push(k); return realT ? realT(k) : k; };
+      const filled = (k) => T(k).replace('{n}', files.length);
+      try {
+        await handleFiles([new File([subject()], 'subject.dcm')]);
+        anon.click();
+        const msgKeep = $('confirmMsg').textContent;
+        $('confirmCancel').click();
+        ok('with Retain UIDs ticked the Anonymize confirm says UIDs are kept, with the count filled in',
+           files.length === 1 && msgKeep === filled(ANON_KEEP), msgKeep);
+        byOpt('rtnUIDsOpt').click(); byOpt('rtnDevIdOpt').click();
+        ok('unticking clears the count', count() === '', JSON.stringify(count()));
+        anon.click();
+        const msgRemap = $('confirmMsg').textContent;
+        $('confirmCancel').click();
+        ok('without it the confirm says UIDs are remapped', msgRemap === filled(ANON_REMAP), msgRemap);
+
+        rand.click();
+        const msgRand = $('confirmMsg').textContent;
+        ok('the Randomize confirm is the one that says it is NOT de-identification', msgRand === filled(RAND_MSG), msgRand);
+        ok('and names what it keeps', /NOT de-identification/.test(RAND_MSG) &&
+           ['institution', 'device', 'physician', 'private tags', 'burned-in text'].every(w => RAND_MSG.includes(w)));
+        ok('its OK button no longer says Randomize', $('confirmOk').textContent === T('Make fake patient'), $('confirmOk').textContent);
+        const inst = str(files[0].dict, '00080080');
+        $('confirmOk').click();
+        ok('which is true: the institution survives Randomize', inst && str(files[0].dict, '00080080') === inst, `${inst} → ${str(files[0].dict, '00080080')}`);
+        const toastEl = document.querySelector('.toast');
+        ok('Randomize toasts in the new wording', toastEl && toastEl.textContent === T('All files given a fake patient'), toastEl && toastEl.textContent);
+
+        const KEYS = [ANON_REMAP, ANON_KEEP, RAND_MSG, 'Make fake patient', 'All files given a fake patient'];
+        ok('confirms and toasts go through T()', KEYS.every(k => asked.includes(k)),
+           KEYS.filter(k => !asked.includes(k)).join(' | ').slice(0, 160));
+      } finally { window.t = realT; }
+
+      const NEW_STRINGS = [
+        'Anonymize (PS3.15)', 'Fake patient (test data)', 'Options', 'All files anonymized',
+        ANON_TITLE, RAND_TITLE, ANON_REMAP, ANON_KEEP, RAND_MSG,
+        'Make fake patient', 'All files given a fake patient',
+      ];
+      for (const loc of ['es', 'pt-BR', 'ja', 'ru']) {
+        const missing = NEW_STRINGS.filter(s => !I18N[loc] || !I18N[loc][s] || (s.includes('{n}') && !I18N[loc][s].includes('{n}')));
+        ok(`i18n: every Anonymize/Randomize string is translated into ${loc}`, missing.length === 0,
+           missing.join(' | ').slice(0, 160));
+      }
+      gear.click();
+      ok('the open options panel lays its checkboxes out as a grid', getComputedStyle($('deidOptionsRow')).display === 'grid',
+         getComputedStyle($('deidOptionsRow')).display);
+      gear.click();
+      ok('and the closed one stays hidden', getComputedStyle($('deidOptionsRow')).display === 'none');
+    }
+
     // ---- no options: today's behaviour, unchanged ---------------------------
     {
       const d = await run([]);

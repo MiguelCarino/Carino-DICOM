@@ -1,6 +1,9 @@
 // Extractor tab: render DICOM files to PNG images.
 // ---- Extractor ----
+// Files dropped here. The open study is not copied in: extractorItems() reads it fresh, so its
+// redactions and pending tag edits (a saved window, a photometric fix) reach the PNG.
 let extractorFiles = [];
+let extractorRenderGen = 0;
 
 const extractorAddBtn    = $('extractorAddBtn');
 const extractorFileInput = $('extractorFileInput');
@@ -14,6 +17,14 @@ const extractorSideAddBtn   = $('extractorSideAddBtn');
 const extractorDropZone     = $('extractorDropZone');
 const extractorLogCard      = $('extractorLogCard');
 const extractorLogArea      = $('extractorLogArea');
+const extractorSource       = $('extractorSource');
+
+function extractorItems() {
+  const study = (typeof files !== 'undefined' ? files : []).map(f => ({
+    name: f.name, path: f.path || f.name, dict: withPendingEdits(f), meta: f.meta || {}, fromStudy: true,
+  }));
+  return study.concat(extractorFiles);
+}
 
 function extractorLog(msg) {
   extractorLogCard.style.display = 'block';
@@ -30,7 +41,7 @@ clearExtractorBtn.addEventListener('click', () => {
   extractorLogCard.style.display = 'none';
   extractorLogArea.textContent = '';
   renderExtractorGrid();
-  toast?.('Cleared all files');
+  toast?.('Cleared the added files');
 });
 
 // Sidebar drop zone
@@ -126,9 +137,17 @@ async function renderDcmToCanvas(dict, canvas, meta = null) {
   return true;
 }
 
+// Re-run on every visit to the tab; a newer call abandons an older one mid-loop, so two quick
+// visits never leave the grid with every card twice.
 async function renderExtractorGrid() {
-  extractorCount.textContent = `${extractorFiles.length} file${extractorFiles.length !== 1 ? 's' : ''}`;
-  if (extractorFiles.length === 0) {
+  const gen = ++extractorRenderGen;
+  const items = extractorItems();
+  const nStudy = items.length - extractorFiles.length;
+  setCountPill(extractorCount, items.length);
+  extractorSource.hidden = !nStudy;
+  extractorSource.textContent = T('Includes the open study ({n}), with your edits').replace('{n}', nStudy);
+  clearExtractorBtn.hidden = !extractorFiles.length;
+  if (items.length === 0) {
     extractorGrid.className = '';
     extractorGridWrap.classList.remove('has-files');
     extractorGrid.innerHTML = `<div class="img-empty"><div class="img-empty-icon">🩻</div><span>${T('Drop .dcm files here or click to browse')}</span><span class="img-empty-hint">${T('Renders DICOM pixel data as PNG images')}</span></div>`;
@@ -137,12 +156,18 @@ async function renderExtractorGrid() {
   extractorGrid.className = 'extractor-grid';
   extractorGridWrap.classList.add('has-files');
   extractorGrid.innerHTML = '';
-  for (const item of extractorFiles) {
+  for (const item of items) {
     const card = document.createElement('div');
     card.className = 'dcm-card';
+    // Only worth saying when both kinds are on screen.
+    if (!item.fromStudy && nStudy) {
+      card.classList.add('dcm-card-added');
+      card.title = T('Added here: edits made in the Edit tab do not apply to this copy');
+    }
 
     const canvas = document.createElement('canvas');
     const ok = await renderDcmToCanvas(item.dict, canvas, item.meta || null);
+    if (gen !== extractorRenderGen) return;
     if (!ok && canvas.width === 0) {
       canvas.width = 160; canvas.height = 160;
       const ctx = canvas.getContext('2d');
@@ -181,17 +206,18 @@ async function renderExtractorGrid() {
 }
 
 extractAllBtn.addEventListener('click', async () => {
-  if (!extractorFiles.length) return;
+  const items = extractorItems();
+  if (!items.length) return;
   const pngs = [];
-  showLoading?.(true, 'Extracting frames…', 0, `0 / ${extractorFiles.length}`);
+  showLoading?.(true, 'Extracting frames…', 0, `0 / ${items.length}`);
   try {
-    for (let idx = 0; idx < extractorFiles.length; idx++) {
-      const item = extractorFiles[idx];
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
       const nf = parseInt(lookupTag(item.dict, '00280008')?.Value?.[0] || '1') || 1;
       const base = extractorZipBase(item);
       for (let fi = 0; fi < nf; fi++) {
         showLoading?.(true, `Extracting: ${item.name} [${fi + 1}/${nf}]`,
-                      (idx + (fi + 1) / nf) / extractorFiles.length, `${idx + 1} / ${extractorFiles.length}`);
+                      (idx + (fi + 1) / nf) / items.length, `${idx + 1} / ${items.length}`);
         const result = await decodeDicomPixels(item.dict, fi, { meta: item.meta || null });
         if (!result || result.error) continue;
         const { pixels, rows, cols } = result;
@@ -216,13 +242,14 @@ extractAllBtn.addEventListener('click', async () => {
 });
 
 extractSelectedBtn.addEventListener('click', async () => {
-  if (!extractorFiles.length) return;
+  const items = extractorItems();
+  if (!items.length) return;
   const pngs = [];
-  showLoading?.(true, 'Extracting frame 1 of each file…', 0, `0 / ${extractorFiles.length}`);
+  showLoading?.(true, 'Extracting frame 1 of each file…', 0, `0 / ${items.length}`);
   try {
-    for (let idx = 0; idx < extractorFiles.length; idx++) {
-      const item = extractorFiles[idx];
-      showLoading?.(true, `Extracting: ${item.name}`, (idx + 1) / extractorFiles.length, `${idx + 1} / ${extractorFiles.length}`);
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
+      showLoading?.(true, `Extracting: ${item.name}`, (idx + 1) / items.length, `${idx + 1} / ${items.length}`);
       const result = await decodeDicomPixels(item.dict, 0, { meta: item.meta || null });
       if (!result || result.error) { extractorLog(`✗ ${item.name}: ${result?.error ?? 'no image data'}`); continue; }
       const { pixels, rows, cols } = result;

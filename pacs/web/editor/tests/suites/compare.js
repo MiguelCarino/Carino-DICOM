@@ -10,7 +10,25 @@
   const $ = (id) => document.getElementById(id);
   const rowFor = (tag8) => [...tagBody.querySelectorAll('tr')].find(
     tr => tr.querySelector('.tag-code')?.textContent === fmtTag(tag8));
+  // B used to be a full-width square under A: at 1280x720 it ran over Load Files and squeezed A to its floor.
+  // Shrunk to fit instead, a short window left both as letterboxed strips (197x76 at 1366x657).
+  const previewsSideBySide = (doc, size) => {
+    const box = sel => doc.querySelector(sel).getBoundingClientRect();
+    const card = box('#previewCard'), a = box('#previewBox'), b = box('#previewBWrap .cmp-preview-mini');
+    const at = r => `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    ok(`${size}: the compared picture sits beside this one`,
+       Math.abs(a.top - b.top) < 1 && b.left >= a.right, `A ${at(a)} B ${at(b)}`);
+    ok(`${size}: both stay square, and no smaller than the lone preview's 120px floor`,
+       [a, b].every(r => Math.abs(r.width - r.height) < 1 && r.height >= 120), `A ${at(a)} B ${at(b)}`);
+    ok(`${size}: both stay inside the Preview card`, Math.max(a.bottom, b.bottom) <= card.bottom + 0.5,
+       `A ${Math.round(a.bottom)} B ${Math.round(b.bottom)} card ${Math.round(card.bottom)}`);
+    ok(`${size}: and get the same width`, Math.abs(a.width - b.width) <= 0.1 * Math.max(a.width, b.width),
+       `${Math.round(a.width)} vs ${Math.round(b.width)}`);
+    const names = ['previewABadge', 'previewBBadge'].map(id => doc.getElementById(id).textContent).join(' | ');
+    ok(`${size}: each picture is named after its file`, names === 'first.dcm | second.dcm', names);
+  };
 
+  let frame = null;
   try {
     const n = Forge.W * Forge.H;
     const px = new Uint16Array(n);
@@ -56,6 +74,22 @@
     ok('a row is now six cells wide', rowFor('00100020')?.children.length === 6,
        String(rowFor('00100020')?.children.length));
 
+    // ---- the two pictures share the Preview card ------------------------------
+    switchTab('editor');
+    previewsSideBySide(document, `${innerWidth}x${innerHeight}`);
+    // Stacked, a full-width square would be a screen and a half of black; each gets the lone preview's cap.
+    if (innerWidth <= 1000) {
+      const cap = Math.min(560, 0.45 * innerHeight), w = $('previewBox').getBoundingClientRect().width;
+      ok('stacked, each picture keeps the lone preview\'s cap', w <= cap + 0.5, `${Math.round(w)} > ${Math.round(cap)}`);
+    }
+
+    // The report replaces this file's picture: no name left over an empty cell.
+    $('srToggleBtn').click();
+    ok('the report view hides both pictures and their names',
+       !$('cmpPreviews').getClientRects().length && !$('srView').classList.contains('hidden'));
+    $('srToggleBtn').click();
+    ok('and leaving it brings them back', $('previewBWrap').getClientRects().length > 0 && !srMode);
+
     // ---- the four states -----------------------------------------------------
     ok('an identical tag reads as a match',
        rowFor('00100020')?.classList.contains('cmp-match'), rowFor('00100020')?.className);
@@ -79,6 +113,17 @@
        new RegExp(`[123] ${T('differ')}`).test(stats), stats);
     ok('the bar counts one tag on each side alone',
        stats.includes(`1 ${T('only here')}`) && stats.includes(`1 ${T('only there')}`), stats);
+
+    // Both copy-all confirms overwrite a whole file, so they must name it in the reader's language.
+    for (const [btn, key, label] of [
+      ['cmpApplyToB', 'Copy every differing value onto {name}? This overwrites its values.', 'Copy →'],
+      ['cmpApplyToA', 'Copy every differing value from {name} onto this file? This overwrites its values.', 'Copy ←']]) {
+      $(btn).click();
+      ok(`#${btn} asks through t(), naming the other file`,
+         $('confirmMsg').textContent === T(key).replace('{name}', 'second.dcm'), $('confirmMsg').textContent);
+      ok(`#${btn}'s OK button is translated too`, $('confirmOk').textContent === T(label), $('confirmOk').textContent);
+      $('confirmCancel').click();
+    }
 
     // ---- the editor's own filters still rule the table ------------------------
     searchQuery = 'Carino Systems';         // a value that exists only in the other file
@@ -141,6 +186,8 @@
        [...document.querySelectorAll('.cmp-col')].every(el => el.classList.contains('hidden')));
     ok('and the rows are four cells wide once more', rowFor('00100020')?.children.length === 4,
        String(rowFor('00100020')?.children.length));
+    ok('the compared picture and both names go too',
+       ['previewBWrap', 'previewABadge', 'previewBBadge'].every(id => !$(id).getClientRects().length));
 
     // ---- the Overview launcher opens this same mode -------------------------
     // Compare stopped being a tab of its own, so its launcher has to land in the
@@ -162,8 +209,33 @@
     ok('the picker now offers the file we came from',
        [...$('compareWith').options].map(o => o.textContent).join(',') === `${T('Compare with…')},first.dcm`,
        [...$('compareWith').options].map(o => o.textContent).join(','));
+
+    // ---- the same at desktop windows, where the sidebar is height-bound ----
+    // run.sh's window stacks the sidebar under the table, which hides the overflow this is about.
+    // 1280x600 cannot fit both squares: the sidebar scrolls rather than the pictures shrinking.
+    for (const [w, h] of [[1280, 720], [1280, 600]]) {
+      frame = document.createElement('iframe');
+      frame.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;border:0;visibility:hidden`;
+      await new Promise((res, rej) => { frame.onload = res; frame.onerror = rej; frame.src = 'index.html'; document.body.appendChild(frame); });
+      const win = frame.contentWindow, doc = frame.contentDocument;
+      await win.handleFiles([new win.File([a], 'first.dcm'), new win.File([b], 'second.dcm')]);
+      win.switchTab('editor');
+      doc.getElementById('compareWith').value = '1';
+      doc.getElementById('compareWith').dispatchEvent(new win.Event('change'));
+      previewsSideBySide(doc, `${w}x${h}`);
+      const pv = doc.getElementById('previewCard').getBoundingClientRect().bottom;
+      const lf = doc.getElementById('loadFilesCard').getBoundingClientRect().top;
+      ok(`${w}x${h}: Load Files starts below the Preview card`, lf >= pv - 0.5, `${Math.round(lf)} < ${Math.round(pv)}`);
+      const side = doc.querySelector('.sidebar');
+      if (h === 600) ok('1280x600: the sidebar scrolls to reach it', side.scrollHeight > side.clientHeight,
+                        `${side.scrollHeight}/${side.clientHeight}`);
+      frame.remove();
+      frame = null;
+    }
   } catch (e) {
     ok('suite ran to completion', false, (e && e.stack ? e.stack.split('\n')[0] : String(e)));
+  } finally {
+    frame?.remove();
   }
 
   return out;

@@ -265,6 +265,8 @@
     // Same bug, same fix: it used to click once per frame with a 40ms pause,
     // which measured 30 of 60 delivered.
     {
+      // Extract also exports the open study; close it so only these three count.
+      resetStudyState();
       extractorFiles = [];
       await addExtractorFiles([
         { file: new File([slice(0)], 'IM000001'), path: 'study/SER001/IM000001' },
