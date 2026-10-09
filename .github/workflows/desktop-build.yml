@@ -209,6 +209,28 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $missing
 
+      # The check that would have caught 1.2.0: an unsigned macOS bundle whose
+      # Electron signature no longer matched what electron-builder had changed.
+      # codesign --strict fails on that; the launch catches anything the
+      # verifier passes and the kernel still refuses (SIGKILL at exec).
+      - name: Verify the macOS app is signed and starts
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(ls -d desktop/dist/mac*/Carino-DICOM.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -E "Signature|Identifier|Format"
+          "$app/Contents/Resources/engine/pacs-engine/pacs-engine" --version
+          "$app/Contents/MacOS/Carino-DICOM" & pid=$!
+          sleep 20
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "app still running after 20 s"
+            kill "$pid"
+          else
+            st=0; wait "$pid" || st=$?; echo "app exited early with status $st"; exit 1
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

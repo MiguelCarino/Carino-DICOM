@@ -19,6 +19,7 @@
   "build": {
     "appId": "systems.carino.dicom",
     "productName": "Carino-DICOM",
+    "afterPack": "build/adhoc-sign.js",
     "afterSign": "build/notarize.js",
     "beforeBuild": "build/before-build.js",
     "files": ["main.js", "preload.js", "i18n.js", "loading.html", "assets/**/*"],
