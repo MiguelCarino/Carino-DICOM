@@ -28,6 +28,9 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   audited.
 
 ### Changed
+- Bundled editor re-synced to upstream `da90b6b`: Create → Modality offers all 79
+  Modality defined terms, code first (`US - Ultrasound`), and no longer offers
+  `SC`, which is not a Modality value. See the upstream CHANGELOG.
 - **Every DICOM modality code is offered.** The order form's Modality list holds all
   79 Defined Terms of Modality (0008,0060) from PS3.3 C.7.3.1.1.1 (it had 16), written
   code first (`US - Ultrasound`) with the description translated. The Modalities tab
