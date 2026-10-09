@@ -62,40 +62,40 @@ jobs:
             os: ubuntu-24.04
             eb: "--linux --x64"
             expect: |
-              Carino-DICOM-1.1.0.AppImage
-              carino-dicom-desktop-1.1.0.x86_64.rpm
-              carino-dicom-desktop_1.1.0_amd64.deb
+              Carino-DICOM-1.2.0.AppImage
+              carino-dicom-desktop-1.2.0.x86_64.rpm
+              carino-dicom-desktop_1.2.0_amd64.deb
           - id: linux-arm64
             os: ubuntu-24.04-arm
             eb: "--linux --arm64"
             experimental: true
             expect: |
-              Carino-DICOM-1.1.0-arm64.AppImage
-              carino-dicom-desktop-1.1.0.aarch64.rpm
-              carino-dicom-desktop_1.1.0_arm64.deb
+              Carino-DICOM-1.2.0-arm64.AppImage
+              carino-dicom-desktop-1.2.0.aarch64.rpm
+              carino-dicom-desktop_1.2.0_arm64.deb
           - id: mac-x64
             os: macos-15-intel
             eb: "--mac --x64"
             expect: |
-              Carino-DICOM-1.1.0.dmg
-              Carino-DICOM-1.1.0-mac.zip
+              Carino-DICOM-1.2.0.dmg
+              Carino-DICOM-1.2.0-mac.zip
           - id: mac-arm64
             os: macos-15
             eb: "--mac --arm64"
             expect: |
-              Carino-DICOM-1.1.0-arm64.dmg
-              Carino-DICOM-1.1.0-arm64-mac.zip
+              Carino-DICOM-1.2.0-arm64.dmg
+              Carino-DICOM-1.2.0-arm64-mac.zip
           - id: win-x64
             os: windows-2025
             eb: "--win --x64"
             expect: |
-              Carino-DICOM-Setup-1.1.0-x64.exe
+              Carino-DICOM-Setup-1.2.0-x64.exe
           - id: win-arm64
             os: windows-11-arm
             eb: "--win --arm64"
             experimental: true
             expect: |
-              Carino-DICOM-Setup-1.1.0-arm64.exe
+              Carino-DICOM-Setup-1.2.0-arm64.exe
     runs-on: ${{ matrix.os }}
     # The two arm64 legs are new and have not gone green yet, so they are allowed
     # to fail a manual smoke run without taking the run down with them. A tag build

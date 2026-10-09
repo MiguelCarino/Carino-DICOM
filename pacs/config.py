@@ -483,6 +483,25 @@ def _replace(src: str, dst: str) -> None:
             time.sleep(0.01)
 
 
+def _read_text(path: str) -> str:
+    """open().read(), waited out briefly while Windows says the file is busy.
+
+    The reader's side of _replace(): while a save is renaming over the config,
+    Windows refuses an open() of it with a sharing violation — which is how
+    `pacs serve` starting up during a dashboard Save used to stop on "cannot be
+    read". Same bound, same rule: a real permission problem still raises.
+    """
+    deadline = time.monotonic() + _REPLACE_RETRY_SEC
+    while True:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return fh.read()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def _fsync_dir(directory: str) -> None:
     """Make the rename itself survive a power cut, where the platform allows it.
 
@@ -556,8 +575,7 @@ class Config:
         # missing-file case is exactly what FileNotFoundError already says.
         with self._lock:
             try:
-                with open(self.path, "r", encoding="utf-8") as fh:
-                    text = fh.read()
+                text = _read_text(self.path)
             except FileNotFoundError:
                 self.data = copy.deepcopy(DEFAULTS)
                 return self

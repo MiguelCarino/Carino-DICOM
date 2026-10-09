@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pacs import auth                                    # noqa: E402
 from pacs.audit import AuditLog                          # noqa: E402
-from pacs.config import Config                           # noqa: E402
+from pacs.config import Config, _read_text               # noqa: E402
 from pacs.index import InstanceIndex                     # noqa: E402
 from pacs.web import create_app                          # noqa: E402
 
@@ -2026,8 +2026,8 @@ def test_a_token_rotation_is_never_reverted_by_a_concurrent_save():
                     # flight when the rotation landed get to finish here.
                     time.sleep(0.01)
                     stored = srv.cfg.web.get("auth_token")
-                    with open(srv.cfg.path, encoding="utf-8") as fh:
-                        on_disk = json.load(fh).get("web", {}).get("auth_token")
+                    on_disk = json.loads(_read_text(srv.cfg.path)) \
+                        .get("web", {}).get("auth_token")
                     if stored != minted or on_disk != minted:
                         reverted.append((i, "memory" if stored != minted else "disk"))
                     # Nothing else rotates, so the previous token must now be

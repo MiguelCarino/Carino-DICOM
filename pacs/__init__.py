@@ -23,5 +23,5 @@ Copyright (C) 2026 Miguel Carino.
 Licensed under the GNU Affero General Public License v3.0 or later; see LICENSE.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 APP_NAME = "Carino DICOM"

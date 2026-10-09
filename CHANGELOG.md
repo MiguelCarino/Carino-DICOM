@@ -5,6 +5,8 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-09
+
 ### Added
 - **Test from the dashboard.** Every listener card has a Test button
   (`POST /api/selftest`): the engine calls its own receiver, print receiver,
@@ -113,6 +115,14 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   inline-style cleanup; see the upstream CHANGELOG.
 
 ### Fixed
+- **Windows: a refused connection is called refused.** The diagnostic connect
+  behind a failed send gave up after two seconds, which is about how long
+  Windows takes to report a closed port, so every refusal read "no reply — the
+  host is off". It now waits four seconds on Windows.
+- **Windows: reading the config during a Save no longer fails.** While a save
+  renames over `config.json`, Windows refuses to open it; `pacs serve` starting
+  at that moment stopped on "cannot be read". The read now waits out the rename
+  for up to half a second, as the write already did.
 - **Desktop app: no false "engine may have failed to start" once people sign in.**
   The window waited for `/api/status` to answer 200, but that endpoint needs a
   signed-in profile, so on any install with profiles it answered 401 for good and

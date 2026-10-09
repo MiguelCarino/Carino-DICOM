@@ -11,7 +11,7 @@
   var REPO = "MiguelCarino/Carino-DICOM";
   var RELEASES = "https://github.com/" + REPO + "/releases";
 
-  // Pinned v1.1.0 assets — the default links, and the only ones a reader with
+  // Pinned v1.2.0 assets — the default links, and the only ones a reader with
   // no JS, no network or a rate-limited API ever sees. They are transcribed from
   // the `expect` manifests in .github/workflows/desktop-build.yml rather than
   // guessed, which is why they do not all look alike: only the nsis target
@@ -30,11 +30,11 @@
   // macOS ships two builds and this line holds one. arm64 is the pin because it
   // is what every Mac sold since 2020 is; the note under the buttons names the
   // Intel build, and the fetch below turns that chip into two links.
-  var PINNED_TAG = "v1.1.0";
+  var PINNED_TAG = "v1.2.0";
   var PINNED = {
-    windows: RELEASES + "/download/v1.1.0/Carino-DICOM-Setup-1.1.0-x64.exe",
-    macos: RELEASES + "/download/v1.1.0/Carino-DICOM-1.1.0-arm64.dmg",
-    linux: RELEASES + "/download/v1.1.0/Carino-DICOM-1.1.0.AppImage",
+    windows: RELEASES + "/download/v1.2.0/Carino-DICOM-Setup-1.2.0-x64.exe",
+    macos: RELEASES + "/download/v1.2.0/Carino-DICOM-1.2.0-arm64.dmg",
+    linux: RELEASES + "/download/v1.2.0/Carino-DICOM-1.2.0.AppImage",
   };
 
   var cards = {

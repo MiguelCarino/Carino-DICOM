@@ -33,7 +33,7 @@ from pacs.auth import (
     path_is_protected,
     token_from_headers,
 )
-from pacs.config import DEFAULTS, Config, auth_token_of, validate
+from pacs.config import DEFAULTS, Config, _read_text, auth_token_of, validate
 
 TOKEN = "s3cr3t-token-value_ABCdef-0123456789"
 
@@ -725,8 +725,7 @@ def test_concurrent_saves_never_corrupt_the_config():
     def reader() -> None:
         while not stop.is_set():
             try:
-                with open(cfg.path, "r", encoding="utf-8") as fh:
-                    raw = fh.read()
+                raw = _read_text(cfg.path)
             except FileNotFoundError:
                 torn.append("config.json vanished")
                 continue

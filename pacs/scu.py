@@ -8,6 +8,7 @@ store fails loudly rather than silently corrupting data.
 
 from __future__ import annotations
 
+import os
 import socket
 import ssl
 import threading
@@ -84,7 +85,10 @@ def _associate(ae: AE, dest: "Destination", tls_context):
 # this each of those failures paid a second connect timeout on top of the
 # association's own, purely to word the error.
 _DIAG_TTL = 30.0
-_DIAG_TIMEOUT = 2.0
+# Windows reports a connect to a closed port only after retrying the SYN for
+# about two seconds, so a two-second budget there turned every refusal into
+# "no reply" — the wrong half of the two fixes.
+_DIAG_TIMEOUT = 4.0 if os.name == "nt" else 2.0
 _diag_cache: dict = {}
 _diag_lock = threading.Lock()
 

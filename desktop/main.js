@@ -227,8 +227,8 @@ function waitForServer(timeoutMs = 40000) {
    "you are up to date" — the one failure this feature must not have.
 
    /releases/latest is the right endpoint precisely because it excludes
-   prereleases. Today this build is 1.1.0 while the newest STABLE release is
-   v1.0.0, so a correct implementation shows NOTHING; a "the tag differs, say
+   prereleases. When 1.1.0 was built the newest STABLE release was
+   v1.0.0, so a correct implementation showed NOTHING; a "the tag differs, say
    so" version would invite a 1.1.0 user to go and install 1.0.0. */
 // owner/repo, together, in ONE constant. They were two, and the API path was
 // built from the repo half alone — /repos/Carino-DICOM/releases/latest, which

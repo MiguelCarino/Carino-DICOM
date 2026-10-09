@@ -47,7 +47,7 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 ARG PUID=1000
 ARG PGID=1000
 # Bump alongside pacs/__init__.py when cutting a release.
-ARG VERSION=1.1.0
+ARG VERSION=1.2.0
 
 LABEL org.opencontainers.image.title="Carino DICOM" \
       org.opencontainers.image.description="Self-hosted DICOM gateway and continuity appliance" \
