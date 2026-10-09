@@ -342,6 +342,7 @@ def create_app(server: PacsServer) -> Flask:
         # may not see an order has no business enumerating the equipment).
         # GET /api/ris/orders/stations serves the same list on its own.
         "modalities":     "orders.read",
+        "site_modalities": "orders.read",  # the codes the order form offers
         "editor_url":     "studies.read",
         "audit":          "audit.read",
         # Carries the SMTP host and whether a signing key is set. Not secrets,
@@ -1107,7 +1108,10 @@ def create_app(server: PacsServer) -> Flask:
             # Start/Stop restarting the same ones at the same moment can leave
             # a service down that both meant to have up.
             with _save_lock:
-                res = server.apply_setup(d.get("services") or {})
+                mods = d.get("modalities")
+                if mods is not None and not isinstance(mods, list):
+                    raise ValueError("modalities must be a list of modality codes")
+                res = server.apply_setup(d.get("services") or {}, mods)
         except ValueError as exc:          # invalid candidate config
             return jsonify(error=str(exc)), 400
         except OSError as exc:             # e.g. config file unwritable
@@ -1232,6 +1236,24 @@ def create_app(server: PacsServer) -> Flask:
                 return denied
         res = server.emergency_action(action, _profile_or_none())
         return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/update-check")
+    def api_update_check():
+        """Turn the opt-in update check on or off, or ask again now."""
+        denied = guard.deny("config.write")
+        if denied:
+            return denied
+        action = (request.get_json(silent=True) or {}).get("action")
+        if action in ("enable", "disable"):
+            try:
+                return jsonify(ok=True, update=server.set_update_check(action == "enable"))
+            except (OSError, ValueError) as exc:
+                return jsonify(error=f"could not save the setting: {exc}"), 400
+        if action == "check":
+            on = server.update_enabled()
+            server.update_check.maybe_check(on, force=True)
+            return jsonify(ok=True, update=server.update_check.status(on))
+        return jsonify(error="action must be enable, disable or check"), 400
 
     @app.post("/api/mwl")
     def api_mwl():
@@ -2241,6 +2263,7 @@ def create_app(server: PacsServer) -> Flask:
         "/api/profiles/delete":     audit.PROFILE_DELETED,
         "/api/profiles/seed":       audit.PROFILE_CREATED,
         "/api/profiles/listing":    audit.CONFIG_CHANGED,
+        "/api/update-check":        audit.CONFIG_CHANGED,
     }
 
     # Handlers that write their own, more specific record when they succeed

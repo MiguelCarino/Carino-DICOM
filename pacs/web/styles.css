@@ -857,6 +857,11 @@ html[lang="ru"] .ov-dest-state, html[lang="ja"] .ov-dest-state {
 .ov-upd { margin-left: 6px; color: var(--muted); font-family: var(--mono); font-size: .74rem; }
 .ov-upd:hover, .ov-upd:focus-visible { color: var(--accent); }
 .ov-upd[hidden] { display: none; }
+.ov-upd-box { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.ov-upd-box[hidden] { display: none; }
+.ov-upd-note { color: var(--muted); font-family: var(--mono); font-size: .74rem; }
+.ov-upd-note.ov-upd-new { color: var(--accent); }
+.ov-upd-note.ov-upd-warn { color: var(--warn, var(--muted)); }
 
 /* Destinations: state is a word plus colour, green only after a timestamped probe. Stacked because
    one line overflowed in es/pt-BR/ru at the 267px box: row 1 state + name, row 2 address (a full row:
@@ -1289,3 +1294,18 @@ body.contact-lost .kv dd { opacity: .35; filter: grayscale(1); }
    "CT ·" is not left alone on a line above it. */
 #ovServices { white-space: normal; overflow-wrap: anywhere; }
 #ovRxMeta { word-break: break-all; }
+
+/* Destinations: a row aimed at a port that does not store images (js/07-config.js checkDestPorts). */
+tr.dest-suspect .d-host, tr.dest-suspect .d-port { border-color: var(--warn); }
+.dest-warn-note { color: var(--warn); white-space: pre-line; }
+
+/* "Modalities at this site" picker (Settings → Worklist and orders, and the setup chooser). */
+.mod-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0; }
+.mod-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: .8rem; white-space: nowrap; }
+.mod-more > summary { cursor: pointer; color: var(--muted); font-size: .8rem; margin-top: 6px; }
+.setup-mods { margin: 16px 0 0; }
+.setup-mods h3 { margin: 0 0 4px; font-size: 1rem; }
+tr.mod-suspect .m-mod { border-color: var(--warn); }
+.settings fieldset.wide-set { grid-column: 1 / -1; }
+.settings label.mod-chip { flex-direction: row; margin: 0; gap: 6px; color: var(--text); font-size: .8rem; }
+.settings label.mod-chip input[type="checkbox"] { flex: 0 0 auto; }

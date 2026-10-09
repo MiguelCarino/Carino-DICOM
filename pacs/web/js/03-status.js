@@ -235,6 +235,8 @@ function offerFirstRunSetup(s) {
   }
 }
 
+let lastSiteModSig = "";
+
 function renderStatus(s) {
   const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
   const qr = s.qr || {};
@@ -250,6 +252,13 @@ function renderStatus(s) {
      Rebuilt only on change, so a <select> is never refilled under an operator using it. */
   if (Array.isArray(s.modalities)) statusModalities = s.modalities;
   if (registryChanged()) refreshTargetChoices();
+  // Same rule for "Modalities at this site": the order form and the room checks follow the saved list.
+  const siteSig = JSON.stringify(s.site_modalities || []);
+  if (siteSig !== lastSiteModSig) {
+    lastSiteModSig = siteSig;
+    fillModalityChoices();
+    document.querySelectorAll("#modBody tr").forEach(flagModRow);
+  }
 
   // Gated sections are dropped (not blanked) for profiles without the capability, so absent
   // means "off or not yours"; applyCapabilities only runs when `me` changes, so redraw here.

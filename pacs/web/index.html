@@ -112,7 +112,7 @@
                   <div><dt data-i18n>Failover</dt><dd id="ovFailover">—</dd></div>
                   <!-- The desktop shell appends "· 1.2.0 available ↗" here (window.carinoDesktop feature test). A
                        SIBLING of the value, because the poll rewrites the value via textContent. Hidden as served. -->
-                  <div><dt data-i18n>Version</dt><dd id="ovVersion"><span id="ovVersionV">—</span><a id="ovVersionUpd" class="ov-upd" hidden target="_blank" rel="noopener" href="https://github.com/MiguelCarino/Carino-DICOM/releases/latest"></a></dd></div>
+                  <div><dt data-i18n>Version</dt><dd id="ovVersion"><span id="ovVersionV">—</span><a id="ovVersionUpd" class="ov-upd" hidden target="_blank" rel="noopener" href="https://github.com/MiguelCarino/Carino-DICOM/releases/latest"></a><span id="ovUpdBox" class="ov-upd-box" hidden></span></dd></div>
                   <div class="ov-wide"><dt data-i18n>Config file</dt><dd id="ovConfigPath" class="ov-path">—</dd></div>
                   <div class="ov-wide"><dt data-i18n>Storage folder</dt><dd id="ovStorageDir" class="ov-path">—</dd></div>
                   <div class="ov-wide"><dt data-i18n>Log folder</dt><dd id="ovLogsDir" class="ov-path">—</dd></div>
@@ -369,6 +369,12 @@
       </article>
             </section>
           </div>
+          <!-- Asked only when Worklist or Order intake is picked: what this site can actually scan. -->
+          <section class="setup-mods" id="setupMods" hidden>
+            <h3 data-i18n>Which modalities does this site have?</h3>
+            <p class="hint" data-i18n>Orders can only be made for these, and the rooms you register are checked against them. Leave everything unticked to allow all of them.</p>
+            <div class="mod-picker" id="setupModPicker"></div>
+          </section>
           <!-- Chooser footer. Applying zero services is valid: it stops everything and records the choice. -->
           <footer class="modal-foot setup-foot" id="setupFoot" hidden>
             <span class="setup-count" id="setupCount"></span>
@@ -576,6 +582,7 @@
                 <tbody id="destBody"></tbody>
               </table>
             </div>
+            <p class="hint dest-warn-note" id="destWarn" role="status" hidden></p>
             <p class="hint" data-i18n-html>New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
             <!-- Visible legend: the two column tooltips do not exist on touch. -->
             <p class="hint" data-i18n-html><em>No RIS</em> — that PACS has no RIS of its own, so this PC runs the worklist for it permanently. <em>Failover</em> — watch that node and offer the emergency worklist if it goes offline.</p>
@@ -669,6 +676,11 @@
             <details class="set-group" id="sgWorklist">
               <summary><span class="set-title" data-i18n>Worklist and orders</span> <span class="set-state" id="sgWorklistState"></span></summary>
               <div class="settings">
+              <fieldset class="wide-set">
+                <legend data-i18n>Modalities at this site</legend>
+                <div class="mod-picker" id="risModPicker"></div>
+                <p class="hint hint-t2" data-i18n>The order form offers only these, and a registered room with any other code is flagged. Orders from the hospital RIS for another modality are still accepted, with a warning in the log. Nothing ticked means every modality is allowed.</p>
+              </fieldset>
               <fieldset>
                 <legend data-i18n>Modality Worklist (MWL)</legend>
                 <label class="check"><input id="mwlEnabled" type="checkbox" /> <span data-i18n>Run this service (also at startup)</span></label>
@@ -877,6 +889,8 @@
                   <input id="webEditorUrl" data-i18n-placeholder placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
                 </label>
                 <p class="hint hint-t2" data-i18n-html>Set this to where you serve <em>Carino DICOM Editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor. An editor served from another address asks you to approve this server the first time.</p>
+                <label class="check"><input id="webUpdateCheck" type="checkbox" /> <span data-i18n>Check for new versions</span></label>
+                <p class="hint hint-t2" data-i18n>Off unless you turn it on. Once a day this server asks GitHub for the number of the latest release, and Overview shows whether this one is current. Nothing about this machine, its studies or its users is sent, and nothing is downloaded.</p>
               </fieldset>
               </div>
             </details>
@@ -1280,7 +1294,7 @@
       <td><input type="checkbox" class="m-en" data-i18n-aria-label aria-label="On" /></td>
       <td><input class="m-name" data-i18n-placeholder placeholder="e.g. CT in the ER" data-i18n-aria-label aria-label="Name" /></td>
       <td><input class="m-aet" maxlength="16" placeholder="CT_ER_01" data-i18n-title title="Scheduled Station AE Title. 16 characters, no spaces — the worklist matches it exactly." data-i18n-aria-label aria-label="AE title" /></td>
-      <td><input class="m-mod" maxlength="16" placeholder="CT" data-i18n-title title="CT, MR, US, CR… used to prefill an order aimed at this room" data-i18n-aria-label aria-label="Modality" /></td>
+      <td><input class="m-mod" list="modalityCodes" maxlength="16" placeholder="CT" data-i18n-title title="CT, MR, US, CR… used to prefill an order aimed at this room" data-i18n-aria-label aria-label="Modality" /></td>
       <td><input class="m-station" data-i18n-placeholder placeholder="optional" data-i18n-aria-label aria-label="Station name" /></td>
       <td class="row-actions">
         <button class="btn tiny probe" data-i18n-title title="Ask the other RIS what it would give this modality. Take the modality off the network first — this borrows its AE title." data-i18n>Test worklist</button>
@@ -1300,7 +1314,7 @@
       <td class="cell-center"><input type="checkbox" class="d-noris" data-i18n-title title="This PACS has no RIS — Carino runs the worklist for it permanently" data-i18n-aria-label aria-label="No RIS" /></td>
       <td class="cell-center"><input type="checkbox" class="d-emg" data-i18n-title title="Trigger emergency failover if this node goes offline" data-i18n-aria-label aria-label="Failover" /></td>
       <td class="row-actions">
-        <button class="btn tiny echo" data-i18n-title title="C-ECHO test" data-i18n>Echo</button>
+        <button class="btn tiny echo" data-i18n-title title="Checks that it answers and accepts images" data-i18n>Test</button>
         <button class="btn tiny danger del" data-i18n-title title="Remove" data-i18n-aria-label aria-label="Remove this row">✕</button>
       </td>
     </tr>
@@ -1364,5 +1378,6 @@
   <script src="js/12-people-audit.js"></script>
   <script src="js/13-panels.js"></script>
   <script src="js/14-boot.js"></script>
+  <datalist id="modalityCodes"></datalist>
 </body>
 </html>

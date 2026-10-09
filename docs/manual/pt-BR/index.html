@@ -605,14 +605,14 @@ openssl rand -base64 32</code></pre>
         nenhum: sem analytics, sem relato de erros, sem contadores de uso, sem scripts de terceiros
         carregados em tempo de execução. Suas únicas conexões de saída são as associações DICOM e os ACKs
         HL7 que você configurou, para os pares que você nomeou — e uma instalação com Docker, Podman ou
-        systemd é isso e nada mais, que é a frase que importa, porque é essa a forma que fica no setor de
+        systemd é isso e nada mais, a menos que um administrador ligue a verificação de versão descrita abaixo, que é a frase que importa, porque é essa a forma que fica no setor de
         imagem com os dados dos pacientes em cima. O app de desktop pode, além disso, verificar se saiu
         uma versão mais nova, e só se você tiver dito sim à pergunta que ele faz uma vez, na primeira
         execução; vem desligado e a bandeja do sistema desliga de novo. Essa verificação é uma única
         requisição HTTPS por dia à lista de releases do GitHub, levando um User-Agent e nada mais — sem
         identificador, sem contador, sem configuração, sem dados de paciente —, de modo que o que o
         GitHub fica sabendo é o endereço IP desta máquina e mais ou menos quando o app foi aberto, e é
-        só isso. Nada é baixado e nada se instala sozinho. Uma mudança que enviasse mais do que isso, ou
+        só isso. Nada é baixado e nada se instala sozinho. O painel oferece a mesma verificação a partir do próprio servidor, para instalações sem o app de desktop: fica desligada até que um administrador a ligue, pelo botão ao lado da versão na Visão geral ou em Configurações → Integrações; envia exatamente essa requisição, do servidor e não do seu navegador; e a Visão geral passa a mostrar se esta versão está atualizada, com um botão Atualizar que abre este site. Uma mudança que enviasse mais do que isso, ou
         que enviasse algo que ninguém tivesse aceitado, seria tratada como vulnerabilidade.</p>
     </div>
 

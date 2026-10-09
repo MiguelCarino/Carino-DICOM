@@ -71,6 +71,7 @@ function fillRisForm(ri) {
   $("risMatch").value = ri.match_on === "accession_or_patient" ? "accession_or_patient" : "accession";
   $("risAutoClose").checked = ri.auto_close !== false;
   $("risHosts").value = (ri.allowed_hosts || []).join(", ");
+  buildModalityPicker($("risModPicker"), ri.modalities || []);
 }
 
 function fillMwlForm(mi) {
@@ -136,6 +137,7 @@ async function loadConfig() {
   rememberLoadedSections(c);
   readWebSection(c.web || {});
   $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
+  $("webUpdateCheck").checked = !!(c.web && c.web.update_check === true);
   fillScpForm(c.scp);
   fillScuForm(c.scu);
   fillPrintForm(c.print || {});
@@ -244,9 +246,69 @@ function addDestRow(d) {
     tr.querySelector(".d-name").title = why;
     tr.querySelector(".d-host").title = why;
   }
-  tr.querySelector(".del").addEventListener("click", () => tr.remove());
+  tr.querySelector(".del").addEventListener("click", () => { tr.remove(); checkDestPorts(); });
   tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
+  [".d-name", ".d-host", ".d-port", ".d-aet", ".d-en"].forEach((sel) =>
+    tr.querySelector(sel).addEventListener("input", checkDestPorts));
   $("destBody").appendChild(tr);
+  checkDestPorts();
+}
+
+/* A destination receives images. A worklist, Q/R, print or HL7 port answers on the network too, and
+   a worklist even answers C-ECHO, so a row aimed at one looks fine until every study sent there
+   fails. Flag the rows whose host:port is one of those, while they are being typed. */
+const LOCAL_HOSTS = ["127.0.0.1", "localhost", "::1", "0.0.0.0"];
+function destPortProblem(host, port) {
+  if (!host || !port) return "";
+  const h = host.trim().toLowerCase();
+  const here = LOCAL_HOSTS.includes(h) || (lastStatus ? hostIps(lastStatus) : []).includes(h);
+  const ours = [
+    [loadedMwl.port, T("this PC's worklist")],
+    [loadedQr.port, T("this PC's Query/Retrieve")],
+    [loadedPrint.port, T("this PC's print receiver")],
+    [loadedRis.port, T("this PC's HL7 order intake")],
+  ];
+  if (here) {
+    const hit = ours.find(([p]) => Number(p) === port);
+    if (hit) return hit[1];
+  }
+  const ws = loadedWorklistSource || {};
+  if (ws.host && ws.host.trim().toLowerCase() === h && Number(ws.port) === port) return T("the hospital worklist");
+  if (port === 2575) return T("the usual HL7 port");
+  // Another Carino DICOM keeps these defaults unless someone changed them — the case that started this.
+  if (port === 11114) return T("Carino DICOM's default worklist port");
+  if (port === 11115) return T("Carino DICOM's default Query/Retrieve port");
+  if (port === 11113) return T("Carino DICOM's default print port");
+  return "";
+}
+function checkDestPorts() {
+  const out = [];
+  document.querySelectorAll("#destBody tr").forEach((tr) => {
+    const host = tr.querySelector(".d-host").value;
+    const port = parseInt(tr.querySelector(".d-port").value, 10);
+    const what = destPortProblem(host, port);
+    tr.classList.toggle("dest-suspect", !!what);
+    if (what) {
+      const name = tr.querySelector(".d-name").value.trim() || host + ":" + port;
+      out.push(TF("{name}: {host}:{port} is {what}, which does not store images. Studies sent there will fail — use the PACS's storage port (often 104 or 11112).",
+        { name, host: host.trim(), port, what }));
+    }
+  });
+  const note = $("destWarn");
+  if (!note) return;
+  note.hidden = !out.length;
+  note.textContent = out.join("\n");
+}
+// A room registered under a code the site does not have: its orders cannot be made from the form.
+function flagModRow(tr) {
+  const input = tr.querySelector(".m-mod");
+  const code = input.value.trim().toUpperCase();
+  const site = siteModalities();
+  const off = !!code && site.size > 0 && !site.has(code);
+  tr.classList.toggle("mod-suspect", off);
+  input.title = off
+    ? TF("{code} is not one of this site's modalities, so no order can be made for this room. Add it in Settings → Worklist and orders, or fix the code.", { code })
+    : T("CT, MR, US, CR… used to prefill an order aimed at this room");
 }
 // ---- Modality registry ----
 // Same shape as the destinations table, but these peers pull a worklist; destinations receive studies.
@@ -265,6 +327,8 @@ function addModRow(m) {
   tr.querySelector(".m-aet").value = m.aet || "";
   tr.querySelector(".m-mod").value = m.modality || "";
   tr.querySelector(".m-station").value = m.station_name || "";
+  tr.querySelector(".m-mod").addEventListener("input", () => flagModRow(tr));
+  flagModRow(tr);
   tr.querySelector(".del").addEventListener("click", () => tr.remove());
   const probe = tr.querySelector(".probe");
   if (probe) probe.addEventListener("click", () => probeModality(tr, probe));
@@ -440,27 +504,138 @@ function fillStationChoices() {
 }
 
 /* Order-form modality as a closed list of DICOM codes: worklist matching is exact, so free text
-   ("ct head") reaches no modality-filtered console. Codes are never translated; the exam words are.
-   A constant, so reception (no config.read) gets it too; anything else is OT. */
+   ("ct head") reaches no modality-filtered console. Every Defined Term of Modality (0008,0060) in
+   PS3.3 C.7.3.1.1.1, in the standard's order and with its own wording; codes are never translated,
+   the descriptions are. A constant, so reception (no config.read) gets it too. */
 function modalityChoices() {
   return [
-    ["CT", T("Computed tomography")],
-    ["MR", T("Magnetic resonance")],
-    ["US", T("Ultrasound")],
-    ["CR", T("Computed radiography (X-ray)")],
-    ["DX", T("Digital radiography (X-ray)")],
-    ["XA", T("Angiography")],
-    ["RF", T("Fluoroscopy")],
-    ["MG", T("Mammography")],
-    ["NM", T("Nuclear medicine")],
-    ["PT", T("Positron emission tomography")],
-    ["BMD", T("Bone density")],
+    ["ANN", T("Annotation")],
+    ["AR", T("Autorefraction")],
+    ["ASMT", T("Content Assessment Results")],
+    ["AU", T("Audio")],
+    ["BDUS", T("Bone Densitometry (ultrasound)")],
+    ["BI", T("Biomagnetic imaging")],
+    ["BMD", T("Bone Densitometry (X-Ray)")],
+    ["CFM", T("Confocal Microscopy")],
+    ["CR", T("Computed Radiography")],
+    ["CT", T("Computed Tomography")],
+    ["CTPROTOCOL", T("CT Protocol (Performed)")],
+    ["DMS", T("Dermoscopy")],
+    ["DG", T("Diaphanography")],
+    ["DOC", T("Document")],
+    ["DX", T("Digital Radiography")],
+    ["ECG", T("Electrocardiography")],
+    ["EEG", T("Electroencephalography")],
+    ["EMG", T("Electromyography")],
+    ["EOG", T("Electrooculography")],
+    ["EPS", T("Cardiac Electrophysiology")],
     ["ES", T("Endoscopy")],
-    ["OP", T("Eye photography")],
-    ["PX", T("Panoramic dental X-ray")],
-    ["ECG", T("Electrocardiogram")],
-    ["OT", T("Other — anything not on this list")],
+    ["FID", T("Fiducials")],
+    ["GM", T("General Microscopy")],
+    ["HC", T("Hard Copy")],
+    ["HD", T("Hemodynamic")],
+    ["IO", T("Intra-Oral Radiography")],
+    ["IOL", T("Intraocular Lens Data")],
+    ["IVOCT", T("Intravascular Optical Coherence Tomography")],
+    ["IVUS", T("Intravascular Ultrasound")],
+    ["KER", T("Keratometry")],
+    ["KO", T("Key Object Selection")],
+    ["LEN", T("Lensometry")],
+    ["LS", T("Laser surface scan")],
+    ["MG", T("Mammography")],
+    ["MR", T("Magnetic Resonance")],
+    ["M3D", T("Model for 3D Manufacturing")],
+    ["NM", T("Nuclear Medicine")],
+    ["OAM", T("Ophthalmic Axial Measurements")],
+    ["OCT", T("Optical Coherence Tomography (non-Ophthalmic)")],
+    ["OP", T("Ophthalmic Photography")],
+    ["OPM", T("Ophthalmic Mapping")],
+    ["OPT", T("Ophthalmic Tomography")],
+    ["OPTBSV", T("Ophthalmic Tomography B-scan Volume Analysis")],
+    ["OPTENF", T("Ophthalmic Tomography En Face")],
+    ["OPV", T("Ophthalmic Visual Field")],
+    ["OSS", T("Optical Surface Scan")],
+    ["OT", T("Other")],
+    ["PA", T("Photoacoustic")],
+    ["PLAN", T("Plan")],
+    ["POS", T("Position Sensor")],
+    ["PR", T("Presentation State")],
+    ["PT", T("Positron emission tomography (PET)")],
+    ["PX", T("Panoramic X-Ray")],
+    ["REG", T("Registration")],
+    ["RESP", T("Respiratory")],
+    ["RF", T("Radio Fluoroscopy")],
+    ["RG", T("Radiographic imaging (conventional film/screen)")],
+    ["RTDOSE", T("Radiotherapy Dose")],
+    ["RTIMAGE", T("Radiotherapy Image")],
+    ["RTINTENT", T("Radiotherapy Intent")],
+    ["RTPLAN", T("Radiotherapy Plan")],
+    ["RTRAD", T("RT Radiation")],
+    ["RTRECORD", T("RT Treatment Record")],
+    ["RTSEGANN", T("Radiotherapy Segment Annotation")],
+    ["RTSTRUCT", T("Radiotherapy Structure Set")],
+    ["RWV", T("Real World Value Map")],
+    ["SEG", T("Segmentation")],
+    ["SM", T("Slide Microscopy")],
+    ["SMR", T("Stereometric Relationship")],
+    ["SR", T("SR Document")],
+    ["SRF", T("Subjective Refraction")],
+    ["STAIN", T("Automated Slide Stainer")],
+    ["TEXTUREMAP", T("Texture Map")],
+    ["TG", T("Thermography")],
+    ["US", T("Ultrasound")],
+    ["VA", T("Visual Acuity")],
+    ["XA", T("X-Ray Angiography")],
+    ["XAPROTOCOL", T("XA Protocol (Performed)")],
+    ["XC", T("External-camera Photography")],
   ];
+}
+// "US - Ultrasound": the code first, because it is what the console and the worklist match on.
+const modalityLabel = (code, label) => (label ? code + " - " + label : code);
+
+/* "Modalities at this site" (ris.modalities): [] means every code. Read from /api/status, so the
+   reception profile (orders.read, no config.read) gets the same narrowed order form. */
+function siteModalities() {
+  const list = lastStatus && Array.isArray(lastStatus.site_modalities) ? lastStatus.site_modalities : [];
+  return new Set(list.map((c) => String(c).toUpperCase()));
+}
+// The usual imaging rooms first; the rest of the 79 sit behind "Show all codes".
+const COMMON_MODALITIES = ["US", "CT", "MR", "CR", "DX", "MG", "XA", "RF", "NM", "PT"];
+function buildModalityPicker(el, selected) {
+  if (!el) return;
+  const chosen = new Set((selected || []).map((c) => String(c).toUpperCase()));
+  el.textContent = "";
+  const all = modalityChoices();
+  const box = ([code, label]) => {
+    const l = document.createElement("label");
+    l.className = "mod-chip";
+    l.title = label;
+    const i = document.createElement("input");
+    i.type = "checkbox";
+    i.value = code;
+    i.checked = chosen.has(code);
+    l.append(i, " " + modalityLabel(code, label));
+    return l;
+  };
+  const common = document.createElement("div");
+  common.className = "mod-chips";
+  all.filter(([c]) => COMMON_MODALITIES.includes(c)).forEach((m) => common.appendChild(box(m)));
+  const more = document.createElement("details");
+  more.className = "mod-more";
+  const sum = document.createElement("summary");
+  sum.textContent = T("Show all codes");
+  const rest = document.createElement("div");
+  rest.className = "mod-chips";
+  all.filter(([c]) => !COMMON_MODALITIES.includes(c)).forEach((m) => rest.appendChild(box(m)));
+  // A saved code from the long list is open on arrival, so nobody saves over it unseen.
+  more.open = [...chosen].some((c) => !COMMON_MODALITIES.includes(c));
+  more.append(sum, rest);
+  el.append(common, more);
+}
+function pickerValue(el) {
+  if (!el) return [];
+  const on = new Set([...el.querySelectorAll("input:checked")].map((i) => i.value));
+  return modalityChoices().map(([c]) => c).filter((c) => on.has(c));   // standard order, stable diffs
 }
 function fillModalityChoices() {
   const sel = $("ordMod");
@@ -474,28 +649,52 @@ function fillModalityChoices() {
   const add = (parent, code, label) => {
     const o = document.createElement("option");
     o.value = code;
-    o.textContent = label ? label + " · " + code : code;
+    o.textContent = modalityLabel(code, label);
     parent.appendChild(o);
   };
   /* With a known registry, group registered codes ahead of the rest (e.g. CR vs DX for one X-ray room).
      Marks, never removes: an unregistered code stays choosable and addOrder() warns. Unknown registry = flat list. */
+  // Narrowed to the site's own codes when Settings names them. A code the order being edited already
+  // carries stays offered, or opening that order would silently change its modality.
+  const site = siteModalities();
+  const allowed = (rows) => !site.size ? rows : rows.filter(([c]) => site.has(c) || c === chosen);
+  const choices = allowed(modalityChoices());
   const here = configuredModalityCodes();
   if (here.size) {
     const mine = document.createElement("optgroup");
     mine.label = T("Registered here — a console asks for these");
     const rest = document.createElement("optgroup");
     rest.label = T("Not registered here — no console asks for these");
-    modalityChoices().forEach(([code, label]) => add(here.has(code) ? mine : rest, code, label));
+    choices.forEach(([code, label]) => add(here.has(code) ? mine : rest, code, label));
     // Registered codes outside the built-in list are offered too, as the bare code.
+    // A vendor's private code is offered as the bare code, unless the site list leaves it out.
     const named = new Set(modalityChoices().map(([code]) => code));
-    [...here].filter((code) => !named.has(code)).sort().forEach((code) => add(mine, code, ""));
+    [...here].filter((code) => !named.has(code) && (!site.size || site.has(code)))
+      .sort().forEach((code) => add(mine, code, ""));
     if (mine.children.length) sel.appendChild(mine);
     if (rest.children.length) sel.appendChild(rest);
   } else {
-    modalityChoices().forEach(([code, label]) => add(sel, code, label));
+    choices.forEach(([code, label]) => add(sel, code, label));
   }
   // select.options is flat across optgroups, so grouping does not affect this.
   if (chosen && [...sel.options].some((o) => o.value === chosen)) sel.value = chosen;
+  // One modality at this site: it is the answer, so it is chosen already.
+  else if (site.size === 1 && choices.length === 1) sel.value = choices[0][0];
+  fillModalityCodeList();
+}
+// The same codes as suggestions on the Modalities tab, whose field stays free text: a vendor's
+// private code has to remain typeable.
+function fillModalityCodeList() {
+  const list = $("modalityCodes");
+  if (!list) return;
+  list.textContent = "";
+  const site = siteModalities();
+  modalityChoices().filter(([c]) => !site.size || site.has(c)).forEach(([code, label]) => {
+    const o = document.createElement("option");
+    o.value = code;
+    o.label = modalityLabel(code, label);
+    list.appendChild(o);
+  });
 }
 
 // "Test order" fills a fixed invented patient (recognisable among real orders); the operator
@@ -672,6 +871,7 @@ function collectRisForm() {
     match_on: $("risMatch").value,
     auto_close: $("risAutoClose").checked,
     allowed_hosts: csv("risHosts"),
+    modalities: pickerValue($("risModPicker")),
   };
 }
 
@@ -805,14 +1005,14 @@ const FIELD_INPUT = {
   "print.tls_key": "prnTlsKey", "print.tls_ca": "prnTlsCa",
   "mwl.aet": "mwlAet", "mwl.bind": "mwlBind", "mwl.port": "mwlPort", "mwl.allowed_aets": "mwlAllowed",
   "mwl.tls": "mwlTls", "mwl.tls_cert": "mwlTlsCert", "mwl.tls_key": "mwlTlsKey", "mwl.tls_ca": "mwlTlsCa",
-  "ris.bind": "risBind", "ris.port": "risPort", "ris.store_dir": "risDir", "ris.allowed_hosts": "risHosts",
+  "ris.bind": "risBind", "ris.port": "risPort", "ris.store_dir": "risDir", "ris.allowed_hosts": "risHosts", "ris.modalities": "risModPicker",
   "qr.aet": "qrAetIn", "qr.bind": "qrBind", "qr.port": "qrPort", "qr.allowed_aets": "qrAllowed",
   "qr.tls": "qrTlsIn", "qr.tls_cert": "qrTlsCert", "qr.tls_key": "qrTlsKey", "qr.tls_ca": "qrTlsCa",
   "emergency.probe_interval_sec": "emgProbe", "emergency.offline_threshold_sec": "emgThreshold",
   "emergency.recovery_successes": "emgRecovery",
   "worklist_source.host": "wsHost", "worklist_source.port": "wsPort", "worklist_source.aet": "wsAet",
   "dicomweb.cors_origins": "dwCors", "index.path": "idxPath", "deid.prefix": "deidPrefix",
-  "deid.profile": "deidProfile", "web.editor_url": "webEditorUrl",
+  "deid.profile": "deidProfile", "web.editor_url": "webEditorUrl", "web.update_check": "webUpdateCheck",
 };
 const FIELD_TAB = { destinations: "destinations", routing: "routing", modalities: "modalities" };
 function problemForField(field, msg) {

@@ -615,7 +615,7 @@ openssl rand -base64 32</code></pre>
         parte: ni analítica, ni informes de errores, ni contadores de uso, ni scripts de terceros
         cargados en tiempo de ejecución. Sus únicas conexiones salientes son las asociaciones DICOM y los
         ACK HL7 que tú configuraste, hacia los pares que tú nombraste — y un despliegue con Docker,
-        Podman o systemd es eso y nada más, que es la frase que importa, porque esa es la forma que está
+        Podman o systemd es eso y nada más salvo que un administrador active la comprobación de versión descrita abajo, que es la frase que importa, porque esa es la forma que está
         en el servicio de imagen con los datos de los pacientes encima. La app de escritorio puede además
         comprobar si se ha publicado una versión más nueva, y solo si dijiste que sí a la pregunta que
         hace una vez, en el primer arranque; viene desactivada y la bandeja del sistema vuelve a
@@ -623,7 +623,7 @@ openssl rand -base64 32</code></pre>
         GitHub, con un User-Agent y nada más — sin identificadores, sin contadores, sin configuración,
         sin datos de pacientes —, de modo que lo que GitHub llega a saber es la dirección IP de esta
         máquina y aproximadamente cuándo se abrió la app, y eso es todo. No se descarga nada ni se
-        instala nada solo. Un cambio que enviara algo más, o que enviara algo que nadie hubiera
+        instala nada solo. El panel ofrece la misma comprobación desde el propio servidor, para instalaciones sin la app de escritorio: está desactivada hasta que un administrador la activa, desde el botón junto a la versión en Resumen o desde Ajustes → Integraciones; envía exactamente esa petición, desde el servidor y no desde tu navegador; y Resumen muestra entonces si esta versión está al día, con un botón Actualizar que abre este sitio. Un cambio que enviara algo más, o que enviara algo que nadie hubiera
         aceptado, se trataría como una vulnerabilidad.</p>
     </div>
 

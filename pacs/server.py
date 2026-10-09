@@ -21,6 +21,7 @@ from .index import InstanceIndex
 from .logbuf import LogBuffer
 from . import mwl
 from .mwl import MwlSCP
+from .updates import UpdateCheck
 from .notify import Notifier
 from .print_scp import PrintSCP
 from .qr import QrSCP
@@ -386,6 +387,7 @@ class PacsServer:
         # When this process started: the origin for uptime and for the counters
         # of objects that outlive a save (the watcher is built once, here).
         self.started_at = time.time()
+        self.update_check = UpdateCheck(__version__)
         # Counter origins for the services this object REBUILDS on a Start or
         # on a save that changes them (RIS/worklist): their tallies zero with
         # the new object, so each is stamped where it is constructed and
@@ -486,6 +488,7 @@ class PacsServer:
             store_dir=cfg.resolved("ris", "store_dir"),
             log=self.log,
             match_on=cfg.ris.get("match_on", "accession"),
+            site_modalities=lambda: list(self.cfg.ris.get("modalities") or []),
         )
         # Deliberately NOT the order store. mwl.py serves every open order in
         # that one, so a caught item filed there would be handed back out to
@@ -1536,7 +1539,7 @@ class PacsServer:
             except Exception as exc:  # bad cert/key/CA path
                 self.log.warn(f"C-ECHO {d.name}: TLS config error: {exc}", kind="echo")
                 return SendResult(False, f"TLS config error: {exc}")
-        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx)
+        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx, check_storage=True)
         (self.log.info if res.ok else self.log.warn)(
             f"C-ECHO {d.name}: {res.message}", kind="echo"
         )
@@ -2669,7 +2672,7 @@ class PacsServer:
                 rows.append({"service": name, "action": action, "ok": False, "error": str(exc)})
         return rows
 
-    def apply_setup(self, picks: dict) -> dict:
+    def apply_setup(self, picks: dict, modalities: Optional[list] = None) -> dict:
         """Finish the setup chooser: write the five enabled flags plus the
         completion marker in ONE save, then sync the services to them.
 
@@ -2690,6 +2693,10 @@ class PacsServer:
                 if key in picks:   # an absent key leaves that service's flag alone
                     doc[section]["enabled"] = bool(picks[key])
             doc["setup_completed"] = _utc_stamp()
+            # The chooser's "modalities at this site", when it asked. None leaves
+            # the stored list alone; validation refuses a malformed one.
+            if modalities is not None:
+                doc["ris"]["modalities"] = modalities
             return doc
 
         # Through `edit` rather than a document snapshotted here: this is a
@@ -2786,6 +2793,37 @@ class PacsServer:
             "config_path": self.cfg.path,
             "config_exists": os.path.exists(self.cfg.path),
         }
+
+    # ---- opt-in update check ----------------------------------------------
+    def update_enabled(self) -> bool:
+        return (self.cfg.data.get("web") or {}).get("update_check") is True
+
+    def update_state(self) -> dict:
+        """The Overview's version line. Starts a check only when one is due and
+        the operator turned it on; with it off nothing ever leaves the machine."""
+        on = self.update_enabled()
+        self.update_check.maybe_check(on)
+        return self.update_check.status(on)
+
+    def set_update_check(self, on: bool) -> dict:
+        """Write web.update_check alone, like a service's enabled flag: no
+        service restarts for it, and a config that is invalid elsewhere must
+        not stop the operator from turning it off."""
+        with self.cfg.mutate():
+            web = self.cfg.data.get("web")
+            if not isinstance(web, dict):
+                raise ValueError("'web' must be an object")
+            if web.get("update_check") is not on:
+                before = web.get("update_check", False)
+                web["update_check"] = on
+                try:
+                    self.cfg.save()
+                except Exception:
+                    web["update_check"] = before
+                    raise
+                self.log.info("Update check turned " + ("on" if on else "off"), kind="config")
+        self.update_check.maybe_check(on, force=on)
+        return self.update_check.status(on)
 
     # ---- status ------------------------------------------------------------
     @staticmethod
@@ -3467,6 +3505,7 @@ class PacsServer:
             # the argument was made for loses anything; see order_stations(),
             # which is the same list served on its own for the order form.
             "modalities": self.station_list(),
+            "site_modalities": list(self.cfg.ris.get("modalities") or []),
             "ris": {
                 "enabled": bool(rcfg.get("enabled", False)),
                 "running": bool(ris and ris.running),
@@ -3657,6 +3696,7 @@ class PacsServer:
             "started_at": int(self.started_at),
             "uptime_sec": int(time.time() - self.started_at),
             "setup": self.setup_state(),
+            "update": self.update_state(),
             # Published, not merely logged. A trail that stopped recording looks
             # exactly like a quiet week, and the dashboard has to be able to say
             # which it is. Carries `head` too, which is the digest an external

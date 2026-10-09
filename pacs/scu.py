@@ -146,14 +146,31 @@ def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) 
     if getattr(assoc, "is_aborted", False):
         if prim is not None and getattr(prim, "result", None) == 0:
             return (f"{scheme}association with {where} accepted but nothing we proposed was "
-                    f"(no common presentation context), so it was aborted")
+                    f"(no common presentation context), so it was aborted — it does not take this "
+                    f"kind of object. If {dest.port} is a worklist or query port rather than its "
+                    f"storage port, fix the destination")
         return (f"{scheme}association aborted by {where} — it took the connection and then "
                 f"dropped it{' (often a TLS mismatch)' if not dest.tls else ''}")
     return (f"no answer to the association request from {where} within {timeout}s")
 
 
+# What "can it take images?" is asked with: the storage classes a department
+# actually sends, under the transfer syntaxes pynetdicom proposes by default.
+# Any one of them accepted means the node stores images; none means it is
+# something else that also answers C-ECHO — a worklist or a query service.
+_PROBE_STORAGE = (
+    "1.2.840.10008.5.1.4.1.1.2",      # CT Image Storage
+    "1.2.840.10008.5.1.4.1.1.4",      # MR Image Storage
+    "1.2.840.10008.5.1.4.1.1.6.1",    # Ultrasound Image Storage
+    "1.2.840.10008.5.1.4.1.1.1",      # Computed Radiography Image Storage
+    "1.2.840.10008.5.1.4.1.1.1.1",    # Digital X-Ray Image Storage - For Presentation
+    "1.2.840.10008.5.1.4.1.1.7",      # Secondary Capture Image Storage
+)
+
+
 def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
-           tls_context: Optional[ssl.SSLContext] = None) -> SendResult:
+           tls_context: Optional[ssl.SSLContext] = None,
+           check_storage: bool = False) -> SendResult:
     """C-ECHO *dest* and report whether it answered, as a SendResult.
 
     Refusal, timeout, a TLS handshake that fails and a host that is simply off
@@ -162,9 +179,18 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     dashboard button and from the emergency health monitor's polling loop
     alike, and to that loop a node being down is ordinary input rather than an
     error it should have to survive.
+
+    With *check_storage* the same association also offers the common image
+    storage classes, and a node that answers C-ECHO but accepts none of them is
+    reported as a failure: it is a worklist or a query port, not somewhere a
+    study can be sent. The destination Test uses this; the failover monitor's
+    reachability probe does not.
     """
     ae = AE(ae_title=calling_aet)
     ae.add_requested_context(Verification)
+    if check_storage:
+        for uid in _PROBE_STORAGE:
+            ae.add_requested_context(uid)
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
@@ -177,7 +203,14 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     try:
         status = assoc.send_c_echo()
         if status and status.Status == 0x0000:
-            return SendResult(True, "verification OK")
+            if check_storage and not any(
+                    str(c.abstract_syntax) in _PROBE_STORAGE for c in assoc.accepted_contexts):
+                return SendResult(False, (
+                    f"{dest.aet} at {dest.host}:{dest.port} answers C-ECHO but accepts none of the "
+                    f"image types offered (CT, MR, US, CR, DX, Secondary Capture). It is probably a "
+                    f"worklist or query port, not a storage port — studies sent here will fail. "
+                    f"Check the port: a PACS usually stores on 104 or 11112."))
+            return SendResult(True, "verification OK" + (" · accepts images" if check_storage else ""))
         code = f"0x{status.Status:04X}" if status else "no response"
         return SendResult(False, f"C-ECHO failed ({code})")
     finally:

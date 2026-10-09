@@ -172,7 +172,8 @@
     "host": "127.0.0.1",
     "port": 8042,
     "editor_url": "/editor/",
-    "auth_token": ""
+    "auth_token": "",
+    "update_check": false
   },
   "logs_dir": "./logs",
   "setup_completed": ""

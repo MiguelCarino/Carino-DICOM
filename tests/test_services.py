@@ -173,7 +173,7 @@ def test_setup_waits_for_a_card_start_stop_in_progress():
             time.sleep(0.4)
             windows.append(("card", t0, time.monotonic()))
 
-        def fake_setup(picks):
+        def fake_setup(picks, modalities=None):
             t0 = time.monotonic()
             windows.append(("setup", t0, time.monotonic()))
             return {"ok": True}
@@ -313,6 +313,28 @@ def test_received_file_records_the_sending_ae():
 
 
 # ------------------------------------------------------------ C5 scu reasons
+def test_destination_test_tells_a_worklist_from_a_pacs():
+    """A worklist answers C-ECHO like a PACS does, so a ping alone tested green
+    on a destination aimed at a worklist port, and every study sent there then
+    failed. The destination Test now asks whether images are accepted."""
+    srv, client, tmp = _pacs(mwl={"enabled": True})
+    try:
+        srv.sync_services()
+        store = {"name": "R", "host": "127.0.0.1", "port": srv.cfg.scp["port"],
+                 "aet": srv.cfg.scp["aet"]}
+        mwl = {"name": "W", "host": "127.0.0.1", "port": srv.cfg.mwl["port"],
+               "aet": srv.cfg.mwl["aet"]}
+        r = client.post("/api/echo", json=store, headers=_H).get_json()
+        assert r["ok"] and "accepts images" in r["message"], r
+        r = client.post("/api/echo", json=mwl, headers=_H).get_json()
+        assert not r["ok"] and "worklist or query port" in r["message"], r
+        # The failover monitor's plain reachability probe is unchanged.
+        assert c_echo(Destination("W", "127.0.0.1", srv.cfg.mwl["port"], srv.cfg.mwl["aet"]),
+                      "CT01", timeout=5).ok
+    finally:
+        _done(srv, tmp)
+
+
 def test_sender_says_why_an_association_failed():
     srv, client, tmp = _pacs(scp={"allowed_aets": ["CT01"]})
     try:
@@ -437,6 +459,42 @@ def test_held_remaining_only_during_an_emergency():
     finally:
         _done(srv, tmp)
 
+
+
+# ------------------------------------------------------------ site modalities
+def test_site_modalities_are_validated_saved_by_setup_and_published():
+    srv, client, tmp = _pacs()
+    try:
+        assert srv.status()["site_modalities"] == []
+        r = client.post("/api/setup", json={"services": {"ris": True}, "modalities": ["US"]}, headers=_H)
+        assert r.status_code == 200, r.get_json()
+        assert _on_disk(srv)["ris"]["modalities"] == ["US"]
+        assert client.get("/api/status").get_json()["site_modalities"] == ["US"]
+        # Lower case, a non-list, an over-long code: refused with the key named.
+        for bad in (["us"], "US", ["TOOLONGMODALITYCODE"]):
+            r = client.post("/api/setup", json={"services": {}, "modalities": bad}, headers=_H)
+            assert r.status_code == 400, (bad, r.get_json())
+        assert _on_disk(srv)["ris"]["modalities"] == ["US"]
+        # A setup run that does not ask leaves the list alone.
+        client.post("/api/setup", json={"services": {"ris": True}}, headers=_H)
+        assert _on_disk(srv)["ris"]["modalities"] == ["US"]
+    finally:
+        _done(srv, tmp)
+
+
+def test_an_order_for_another_modality_is_queued_with_a_warning():
+    srv, client, tmp = _pacs(ris={"modalities": ["US"]})
+    try:
+        ok = srv.orders.add({"patient": "Test^Order", "accession": "A1", "modality": "US"}, source="hl7")
+        odd = srv.orders.add({"patient": "Test^Order", "accession": "A2", "modality": "CT"}, source="hl7")
+        assert {o["id"] for o in srv.orders.list("open")} >= {ok["id"], odd["id"]}
+        warns = [e["message"] for e in srv.log.tail(50) if e["level"] == "warn" and e.get("kind") == "ris"]
+        assert any(odd["id"] in m and "CT" in m for m in warns), warns
+        assert not any(ok["id"] in m for m in warns), warns
+        # The warning names the order by id, never the patient.
+        assert not any("Test^Order" in m for m in warns)
+    finally:
+        _done(srv, tmp)
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

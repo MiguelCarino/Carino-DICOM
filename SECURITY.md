@@ -492,8 +492,19 @@ like that is the machine's IP address and roughly when the app was started, and
 that is the actual privacy cost of turning it on. Nothing is downloaded and
 nothing installs itself: a newer version becomes a line in the tray menu and
 beside the version on the Overview panel, and following it opens the release page
-in the operator's browser. It is a notice, not an updater. None of this exists in
-the engine, so no container or systemd deployment has it to switch on.
+in the operator's browser. It is a notice, not an updater.
+
+The **engine** has the same check for deployments without the desktop app, under
+the same rules: `web.update_check`, **off by default**, changeable only with
+`config.write` (from the button beside the version on Overview, or Settings →
+Integrations), and recorded in the audit trail when it changes. When it is on,
+the server sends the same single GET at most once a day, with the User-Agent
+`Carino-DICOM/<version>` and nothing else, and Overview shows whether this
+version is current with a link to the project website. The server makes the
+request rather than the browser on purpose: a cross-origin fetch from the
+dashboard would carry an `Origin` header naming the appliance's own address. A
+failed check is shown on Overview and otherwise silent — no retry loop, no log
+line. With it off, a container or systemd deployment sends nothing at all.
 
 This is a deliberate property of the project, and it is treated as a security
 guarantee rather than a preference: patient data never leaves the machines you

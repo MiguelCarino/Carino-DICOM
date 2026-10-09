@@ -578,14 +578,14 @@ openssl rand -base64 32</code></pre>
         anywhere: no analytics, no crash reporting, no usage counters, no third-party scripts fetched at
         runtime. Its only outbound connections are the DICOM associations and HL7 acknowledgements you
         configured, to the peers you named — and a Docker, Podman or systemd deployment is that and
-        nothing more, which is the sentence that matters, because that is the shape sitting in the
+        nothing more unless an administrator turns on the version check below, which is the sentence that matters, because that is the shape sitting in the
         imaging department with the patient data on it. The desktop app can additionally check whether a
         newer version has been published, and only if you said yes to the question it asks once on first
         run; it is off by default and the tray menu turns it off again. That check is one HTTPS request a
         day to GitHub's list of releases, carrying a User-Agent that names the app and nothing else — no
         identifier, no counter, no configuration, no patient data — so what GitHub learns is this
         machine's IP address and roughly when the app was started, and that is the whole of it. Nothing
-        is downloaded and nothing installs itself. A change that sent more than that, or that sent
+        is downloaded and nothing installs itself. The dashboard offers the same check from the server itself, for deployments without the desktop app: it is off until an administrator turns it on, from the button beside the version on Overview or from Settings → Integrations; it sends exactly that request, from the server rather than from your browser; and Overview then shows whether this version is current, with an Update button that opens this website. A change that sent more than that, or that sent
         anything nobody had agreed to, would be treated as a vulnerability.</p>
     </div>
 

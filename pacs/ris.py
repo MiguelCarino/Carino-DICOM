@@ -317,9 +317,14 @@ class OrderStore:
     """
 
     def __init__(self, store_dir: str, log: Optional[LogBuffer] = None,
-                 match_on: str = "accession", now: Callable[[], str] | None = None):
+                 match_on: str = "accession", now: Callable[[], str] | None = None,
+                 site_modalities: Callable[[], list] | None = None):
         self.store_dir = store_dir
         self.log = log
+        # ris.modalities, read live: the codes this site has. An order for any
+        # other code is still queued — refusing it would lose an order the RIS
+        # believes was delivered — but it is logged as a warning.
+        self._site_modalities = site_modalities or (lambda: [])
         # "accession" (exact accession only) | "accession_or_patient" (fall back
         # to Patient ID when the study carries no accession the tech typed in).
         self.match_on = match_on if match_on in ("accession", "accession_or_patient") else "accession"
@@ -446,6 +451,17 @@ class OrderStore:
             f"(via {source})",
             kind="ris",
         )
+        mod = str(order.get("modality") or "").strip().upper()
+        allowed = [str(m).upper() for m in (self._site_modalities() or [])]
+        if mod and allowed and mod not in allowed:
+            # By id and code only: a warn line becomes the RIS card's "last
+            # problem", which per-field redaction does not reach.
+            self.log.warn(
+                f"RIS order {order.get('id') or '?'} is for {mod}, which is not one of this "
+                f"site's modalities ({', '.join(allowed)}). It is queued anyway, but no room "
+                f"here should be asking for it — check the order or Settings → Worklist and orders",
+                kind="ris",
+            )
 
     # ---- identity ----------------------------------------------------------
     def _find_identity_locked(self, fields: dict) -> Optional[dict]:

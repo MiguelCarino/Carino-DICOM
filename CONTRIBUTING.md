@@ -41,11 +41,14 @@ It is deliberately **not**:
   bundled asset fetched from a CDN at runtime: everything the dashboard needs is
   vendored in the repo.
 
-  The Electron tray app has exactly one exception and it is meant to stay exactly
-  one: an **opt-in version check** — asked once on first run, off unless somebody
-  said yes, off again from a tray checkbox — which is a single HTTPS GET a day to
-  GitHub's releases API carrying a `User-Agent` and nothing else, downloads
-  nothing and installs nothing. Do not widen it. A patch that made it default to
+  There is exactly one exception and it is meant to stay exactly one: an
+  **opt-in version check** — a single HTTPS GET a day to GitHub's releases API
+  carrying a `User-Agent` and nothing else, which downloads nothing and installs
+  nothing. It exists in two places with the same rules: the Electron tray app
+  (asked once on first run, off unless somebody said yes, off again from a tray
+  checkbox) and the engine (`web.update_check`, `pacs/updates.py`: off until an
+  administrator turns it on, and made by the server so the browser never sends
+  GitHub the dashboard's address). Do not widen it. A patch that made it default to
   on, that removed the question, that added an identifier, a counter or a version
   string of anything but the app itself, or that turned the notice into an
   installer, is the same rejection as the paragraph above.

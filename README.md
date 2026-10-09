@@ -230,10 +230,16 @@ and AE/host allow-lists.
 
 **The engine collects and sends nothing.** It has no analytics, no crash
 reporting and no runtime CDN, and every font and script is vendored. The only
-outbound connections are the DICOM and HL7 peers you configure. The desktop app
-can check GitHub once a day for a new release, but only if you agree when it
-asks on first run. That check sends one plain HTTPS GET and downloads nothing.
-Any other outbound call would be treated as a vulnerability.
+outbound connections are the DICOM and HL7 peers you configure.
+
+The one exception is an **opt-in version check**, off until you turn it on. An
+administrator can enable it from the button beside the version on Overview, or
+in Settings → Integrations (`web.update_check`); the desktop app asks once on
+first run. When it is on, the server asks GitHub once a day for the latest
+release number: one plain HTTPS GET with a User-Agent and nothing else. Overview
+then shows whether this version is current, with an **Update** button that opens
+[dicom.carino.systems](https://dicom.carino.systems). Nothing is downloaded or
+installed. Any other outbound call would be treated as a vulnerability.
 
 ## Licence
 

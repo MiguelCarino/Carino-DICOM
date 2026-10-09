@@ -849,6 +849,26 @@ list the Modality Worklist serves, so the exam keeps appearing on the modality's
 schedule after it has been performed. Turn it off only if somebody is closing
 orders by hand.
 
+### `ris.modalities`
+
+`list of strings` · default `[]` (every modality)
+
+The modality codes this site has, e.g. `["US"]` for an ultrasound-only clinic. Set it
+from *Settings → Worklist and orders → Modalities at this site*, or from the setup
+chooser, which asks when Worklist or Order intake is picked. It narrows rather than
+refuses:
+
+- the order form offers only these codes, and preselects the one when there is one;
+- the Modalities tab suggests only these, and flags a registered room with another code;
+- an order that arrives from the hospital RIS for another code is **still queued** — a
+  refused HL7 order is one the RIS believes was delivered — and logged as a warning
+  naming the order id and the code, never the patient.
+
+Each entry must be a DICOM code: capital letters and digits, at most 16
+(`ris.modalities must be a list of modality codes…`). It is published to the dashboard
+as `site_modalities` in `/api/status`, gated on `orders.read`, so the profile that types
+orders gets the same list.
+
 ### `ris.allowed_hosts`
 
 `list of strings` · default `[]` (any host)
@@ -2332,6 +2352,19 @@ listeners and `ris`, which are checked against one another — it is not compare
 so a config in which the dashboard and the receiver claim the same number saves cleanly and
 fails at bind time. `pacs serve` reads it as `int(...)`, so a value `int()` cannot parse
 raises out of the command rather than being reported as a config problem.
+
+### `web.update_check`
+
+`boolean` · default `false`
+
+Opt-in check for a newer release. When `true`, the engine asks GitHub's releases API for
+the latest stable tag at most once a day (one HTTPS GET, User-Agent
+`Carino-DICOM/<version>`, nothing else), and Overview shows *up to date* or the newer
+version with an **Update** button that opens the website. Nothing is downloaded or
+installed. Set it from the button beside the version on Overview or from Settings →
+Integrations; both need `config.write`, and `POST /api/update-check`
+(`{"action": "enable" | "disable" | "check"}`) is the API behind them. A failed check is
+shown on Overview and is not logged. Anything but `true` or `false` is refused.
 
 ### `web.editor_url`
 

@@ -18,6 +18,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -120,6 +121,7 @@ DEFAULTS: dict[str, Any] = {
         "match_on": "accession",  # accession | accession_or_patient (Patient-ID fallback)
         "auto_close": True,     # close+archive a matched order automatically on study receipt
         "allowed_hosts": [],    # source IPs allowed to send HL7 (blank = any)
+        "modalities": [],       # modality codes this site has (e.g. ["US"]); [] = all. Narrows the order form, never refuses an order
     },
     "qr": {                     # Query/Retrieve SCP — C-FIND, C-MOVE, C-GET over the index
         "enabled": False,       # opt-in — off by default
@@ -255,6 +257,7 @@ DEFAULTS: dict[str, Any] = {
         "port": 8042,
         "editor_url": "/editor/",   # DICOM-editor for ✎ Edit; "/editor/" = the bundled same-origin copy, or a full URL, or "" to hide
         "auth_token": "",       # "" = no auth, allowed ONLY while host is loopback; non-empty = required on every /api call
+        "update_check": False,  # opt-in: ask GitHub once a day whether a newer release exists (pacs/updates.py)
     },
     "logs_dir": "./logs",       # dated log files (one per day) live here
     "setup_completed": "",      # UTC stamp of the run that finished the service chooser; "" = never, so the chooser is offered
@@ -1122,6 +1125,11 @@ def validate(data: dict) -> None:
             raise ValueError("ris.match_on must be 'accession' or 'accession_or_patient'")
         if not isinstance(ris.get("allowed_hosts", []), list):
             raise ValueError("ris.allowed_hosts must be a list")
+        mods = ris.get("modalities", [])
+        if not isinstance(mods, list) or not all(
+                isinstance(m, str) and re.fullmatch(r"[A-Z0-9]{1,16}", m) for m in mods):
+            raise ValueError("ris.modalities must be a list of modality codes such as [\"US\", \"CT\"] "
+                             "(capital letters and digits, at most 16)")
 
     qr = data.get("qr")
     if qr is not None:
@@ -1271,6 +1279,8 @@ def validate(data: dict) -> None:
     # normalised away, because a config carrying `"auth_token": 0` looks to the
     # operator like a token is set: every reader must agree it is not, and the
     # operator has to be told which it is.
+    if not isinstance(data["web"].get("update_check", False), bool):
+        raise ValueError("web.update_check must be true or false")
     if not isinstance(data["web"].get("auth_token", ""), str):
         raise ValueError(
             "web.auth_token must be a string. A JSON number, true/false or null is not a token — "

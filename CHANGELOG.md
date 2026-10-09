@@ -5,6 +5,34 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Added
+- **Modalities at this site** (`ris.modalities`). Pick the codes this site has (only
+  US, say) in *Settings → Worklist and orders* or in the setup chooser, which now
+  asks when Worklist or Order intake is picked. The order form offers only those,
+  and preselects a single one. The Modalities tab suggests only those and flags a
+  room registered under another code. An HL7 order for another modality is still
+  queued, with a warning in the log.
+- **Destinations warn about ports that do not store images.** A row aimed at this
+  PC's worklist, Q/R, print or HL7 port, at the hospital worklist, at 2575, or at
+  Carino DICOM's default worklist/Q/R/print ports is flagged while it is typed.
+  The row's **Test** (was *Echo*) now also asks whether the node accepts images: a
+  worklist answers C-ECHO, so it used to test green and then fail every send. The
+  send error for that case now says to check the port.
+- **Opt-in update check on Overview.** Beside the version, an administrator can
+  turn on a daily check for a newer release (`web.update_check`, off by default,
+  also in Settings → Integrations). The server asks GitHub's releases API — one
+  GET with a User-Agent and nothing else, never from the browser, so the
+  dashboard's address is not sent — and Overview shows *up to date* or the newer
+  version with an **Update** button that opens dicom.carino.systems. Nothing is
+  downloaded or installed. `POST /api/update-check` needs `config.write` and is
+  audited.
+
+### Changed
+- **Every DICOM modality code is offered.** The order form's Modality list holds all
+  79 Defined Terms of Modality (0008,0060) from PS3.3 C.7.3.1.1.1 (it had 16), written
+  code first (`US - Ultrasound`) with the description translated. The Modalities tab
+  suggests the same codes and still accepts any other.
+
 ### Fixed
 - **macOS: the unsigned desktop app runs on Apple Silicon.** Without a Developer
   ID, electron-builder skipped signing after it had already changed the bundle,

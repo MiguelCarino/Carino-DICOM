@@ -68,7 +68,7 @@ function dismissNote() {
 }
 
 function webSection() {
-  return { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() };
+  return { ...loadedWeb, editor_url: $("webEditorUrl").value.trim(), update_check: $("webUpdateCheck").checked };
 }
 
 // ---- Access token: state line and rotation ----

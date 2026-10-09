@@ -64,6 +64,8 @@ function exitSetup(later) {
   const intro = $("setupIntro"), foot = $("setupFoot");
   if (intro) intro.hidden = true;
   if (foot) foot.hidden = true;
+  const mods = $("setupMods");
+  if (mods) mods.hidden = true;
   pollStatus();             // the poll is the truth: it repaints highlights and card visibility
 }
 
@@ -80,6 +82,7 @@ function seedSetup(s) {
     const card = $(c.card);
     if (card) card.classList.toggle("chosen", on);
   });
+  buildModalityPicker($("setupModPicker"), s.site_modalities || []);
   updateSetupCount();
   probePorts(s);
 }
@@ -97,6 +100,9 @@ function updateSetupCount() {
   const n = Object.keys(picks).filter((k) => picks[k]).length;
   // Zero is a valid choice (stops everything, still records the answer).
   el.textContent = n ? TN(n, "{n} selected") : T("Nothing selected — this PC will not receive or send anything.");
+  // Orders only make sense with a list of what this site can scan, so the question comes with them.
+  const mods = $("setupMods");
+  if (mods) mods.hidden = !(setupActive && (picks.mwl || picks.ris));
 }
 
 // validate() only checks range/uniqueness; this asks the server if ports are free. Once per chooser entry.
@@ -143,7 +149,10 @@ async function applySetup(btn) {
   const n = Object.keys(picks).filter((k) => picks[k]).length;
   btn.disabled = true;
   try {
-    const res = await post("/api/setup", { services: picks });
+    const mods = $("setupMods");
+    const body = { services: picks };
+    if (mods && !mods.hidden) body.modalities = pickerValue($("setupModPicker"));
+    const res = await post("/api/setup", body);
     // Re-read the config: every later POST /api/config re-asserts the loaded snapshot
     // (see collectConfig), so a stale one would undo this enrolment. Unsaved Settings edits are dropped.
     let resyncErr = null;
@@ -238,6 +247,7 @@ function renderOverview(s) {
 
   renderOvDicomweb(s.dicomweb || {});
   renderOvFailover(s.emergency);
+  renderOvUpdate(s.update);
   renderOvDests(s);
   renderOvLast(s);
 }
@@ -269,6 +279,73 @@ function renderOvFailover(emg) {
   const last = probes.length ? Math.max.apply(null, probes) : 0;
   dd.textContent = TF("Armed · watching {n}", { n: dests.length })
     + (last ? " · " + TF("last probe {ts}", { ts: fmtLogTs(last) }) : "");
+}
+
+// ---- Opt-in update check (engine side) ----
+/* The engine asks GitHub, never the browser: a cross-origin fetch would hand GitHub the
+   dashboard's own address in its Origin header. Off until someone with config.write turns it on.
+   Inside the desktop shell this stays hidden, because the shell has its own opt-in notice. */
+let ovUpdSig = "";
+
+function renderOvUpdate(u) {
+  const box = $("ovUpdBox");
+  if (!box) return;
+  const shell = window.carinoDesktop && typeof window.carinoDesktop.onUpdate === "function";
+  const sig = JSON.stringify([u || null, !!shell, can("config.write"), document.documentElement.lang]);
+  if (sig === ovUpdSig) return;   // rebuilt only on change, so a 2 s poll never eats a click
+  ovUpdSig = sig;
+  box.textContent = "";
+  box.hidden = !u || shell;
+  if (box.hidden) return;
+  const note = (text, cls) => {
+    const sp = document.createElement("span");
+    sp.className = "ov-upd-note" + (cls ? " " + cls : "");
+    sp.textContent = text;
+    box.appendChild(sp);
+  };
+  if (!u.enabled) {
+    if (!can("config.write")) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn tiny";
+    b.textContent = T("Check for updates");
+    b.addEventListener("click", () => setUpdateCheck(true));
+    box.appendChild(b);
+    return;
+  }
+  if (u.newer) {
+    note("· " + TF("{v} available", { v: String(u.latest).replace(/^v/, "") }), "ov-upd-new");
+    const a = document.createElement("a");
+    a.className = "btn tiny primary";
+    a.href = u.website;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = T("Update ↗");
+    a.title = T("Opens the Carino DICOM website, where the new version can be downloaded");
+    box.appendChild(a);
+  } else if (u.reachable === false) {
+    note("· " + T("could not check — GitHub is unreachable from this server"), "ov-upd-warn");
+  } else if (u.reachable) {
+    note("· " + T("up to date"));
+  } else {
+    note("· " + T("checking…"));
+  }
+}
+
+async function setUpdateCheck(on) {
+  if (on && !confirm(T("Check for new versions? Once a day this server asks GitHub for the number of the latest release. Nothing about this machine, its studies or its users is sent, and nothing is downloaded. You can turn it off in Settings → Integrations."))) return;
+  try {
+    const r = await post("/api/update-check", { action: on ? "enable" : "disable" });
+    // Mirror into the Settings form and its snapshot, or the next Settings save would undo this.
+    loadedWeb = { ...loadedWeb, update_check: on };
+    const box = $("webUpdateCheck");
+    if (box) box.checked = on;
+    renderOvUpdate(r.update);
+    flashNote(on ? T("Update check turned on") : T("Update check turned off"), true);
+    pollStatus();
+  } catch (e) {
+    flashNote(e.message, false);
+  }
 }
 
 // ---- Desktop shell update notice ----
