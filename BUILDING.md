@@ -255,17 +255,31 @@ you cut a release they simply point at the Releases page — so publish a `v*` t
 > The page loads its own local `carino-navbar.js` + `carino-clock.js` (no CDN). If
 > you set a custom domain later, add a `docs/CNAME` file with the hostname.
 
-## macOS "damaged and can't be opened"
+## Opening the unsigned macOS app
 
-This is Gatekeeper on an **unsigned** app that was downloaded (a quarantine
-attribute), not a real corruption. Clear it (recursive, on the installed `.app`):
+Without an Apple Developer ID the app is **ad-hoc signed** by
+[`desktop/build/adhoc-sign.js`](desktop/build/adhoc-sign.js). That signature
+makes the bundle valid, so it runs on Apple Silicon, but it does not say who made
+it, and Gatekeeper still blocks the first launch of a downloaded copy:
+
+1. Open the app once and dismiss the warning.
+2. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+Right-click → **Open** no longer gets past the warning on macOS 15 and later. If
+there is no Open Anyway button, or macOS says the app is "damaged", clear the
+download quarantine in Terminal (recursive, on the installed `.app`):
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app
 ```
 
-Right-click → **Open** → **Open** also works when macOS offers it. The permanent
-fix is signing + notarization (below) — then no quarantine prompt at all.
+**1.2.0 and earlier were not signed at all**, and their bundle no longer matched
+the signature Electron ships with, so on Apple Silicon macOS can refuse them even
+with the quarantine cleared. Use 1.2.1 or later. Every macOS build in CI now checks the signature
+with `codesign --verify --strict` and starts the app before it is uploaded.
+
+The permanent fix is signing + notarization (below), which removes the warning
+altogether.
 
 ## Signing (optional — removes the "unknown developer" warnings)
 

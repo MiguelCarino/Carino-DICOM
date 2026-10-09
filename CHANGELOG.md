@@ -5,6 +5,16 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Fixed
+- **macOS: the unsigned desktop app runs on Apple Silicon.** Without a Developer
+  ID, electron-builder skipped signing after it had already changed the bundle,
+  so the app no longer matched Electron's signature and macOS refused it, even
+  with the quarantine attribute cleared. It is now ad-hoc signed
+  (`desktop/build/adhoc-sign.js`), engine binaries included, and every macOS CI
+  build verifies the signature and starts the app before uploading it. The
+  first-launch steps now use *System Settings → Privacy & Security → Open
+  Anyway*, since right-click → Open no longer works on macOS 15.
+
 ## [1.2.0] — 2026-10-09
 
 ### Added

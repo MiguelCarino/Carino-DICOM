@@ -351,10 +351,10 @@ const RICH = {
         ru: '<strong>Windows:</strong> <em>Подробнее</em> → <em>Выполнить в любом случае</em>.',
     },
     '#fr-mac': {
-        es: '<strong>macOS:</strong> clic derecho en la app → <em>Abrir</em> → <em>Abrir</em>. Si dice <em>«está dañada y no se puede abrir»</em>, quita la cuarentena de descarga: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        'pt-BR': '<strong>macOS:</strong> clique com o botão direito no app → <em>Abrir</em> → <em>Abrir</em>. Se disser <em>"está danificado e não pode ser aberto"</em>, remova a quarentena do download: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        ja: '<strong>macOS:</strong> アプリを右クリック → <em>開く</em> → <em>開く</em>。<em>「壊れているため開けません」</em>と表示される場合は、ダウンロードの隔離属性を解除してください: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        ru: '<strong>macOS:</strong> щёлкните приложение правой кнопкой → <em>Открыть</em> → <em>Открыть</em>. Если пишет <em>«повреждено и не может быть открыто»</em>, снимите карантин загрузки: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
+        es: '<strong>macOS:</strong> abre la app una vez y cierra el aviso; luego ve a <em>Ajustes del Sistema → Privacidad y seguridad</em> y pulsa <em>Abrir igualmente</em>. Si no aparece esa opción, o si dice que está <em>«dañada»</em>, ejecuta en Terminal: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
+        'pt-BR': '<strong>macOS:</strong> abra o app uma vez e feche o aviso; depois vá em <em>Ajustes do Sistema → Privacidade e Segurança</em> e clique em <em>Abrir Mesmo Assim</em>. Se essa opção não aparecer, ou se disser que está <em>"danificado"</em>, execute no Terminal: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
+        ja: '<strong>macOS:</strong> アプリを一度開いて警告を閉じ、<em>システム設定 → プライバシーとセキュリティ</em>で<em>このまま開く</em>をクリックしてください。表示されない場合や<em>「壊れている」</em>と表示される場合は、ターミナルで次を実行してください: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
+        ru: '<strong>macOS:</strong> откройте приложение один раз и закройте предупреждение, затем в <em>Системных настройках → Конфиденциальность и безопасность</em> нажмите <em>Всё равно открыть</em>. Если этой кнопки нет или пишет <em>«повреждено»</em>, выполните в Терминале: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
     },
     '#fr-linux': {
         es: '<strong>Linux:</strong> lo más fácil es el <code>.rpm</code> (Fedora/RHEL) o el <code>.deb</code> (Debian/Ubuntu) de los <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>. El <code>.AppImage</code> necesita FUSE — <code>sudo dnf install fuse-libs</code> (Fedora) / <code>sudo apt install libfuse2</code> (Debian), o ejecútalo con <code>--appimage-extract-and-run</code>.',
