@@ -2,27 +2,32 @@
 "use strict";
 // ---- Wire up ----
 document.addEventListener("DOMContentLoaded", () => {
+  // bind() tolerates missing elements, since some builds omit parts of the markup.
+  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   mountServiceChips();      // navbar has self-injected by now (renderStatus re-tries if not)
   $("killSvc").addEventListener("click", killService);
-  $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
-  $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));
-  $("pxToggle").addEventListener("click", (e) => {
-    // Starting from a card also sets its "start on launch" flag (toggle() saves config first).
-    if (e.target.dataset.on !== "true") $("prnEnabled").checked = true;
-    toggle("printer", e.target);
+  // Start/Stop: the engine persists the flag (one model); the Settings tick follows from the answer.
+  $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.currentTarget));
+  $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.currentTarget));
+  $("pxToggle").addEventListener("click", (e) => toggle("printer", e.currentTarget));
+  $("rsToggle").addEventListener("click", (e) => toggle("ris", e.currentTarget));
+  $("mwToggle").addEventListener("click", (e) => toggle("mwl", e.currentTarget));
+  $("qrToggle").addEventListener("click", (e) => toggle("qr", e.currentTarget));
+  document.querySelectorAll(".card-test[data-svc]").forEach((b) =>
+    b.addEventListener("click", () => selfTest(b.dataset.svc, b, false)));
+  const testPrint = $("pxTestPrint");
+  if (testPrint) testPrint.addEventListener("click", () => selfTest("printer", testPrint, true));
+  // Card-level jumps: copy a connect line, open a Settings group, open the log filtered to a service.
+  document.addEventListener("click", (e) => {
+    const cp = e.target.closest("[data-copy]");
+    if (cp) { const line = $(cp.dataset.copy); if (line && line.dataset.copyText) copyText(line.dataset.copyText); return; }
+    const sg = e.target.closest("[data-settings-group]");
+    if (sg) { openSettingsGroup(sg.dataset.settingsGroup); return; }
+    const lk = e.target.closest("[data-log-kind]");
+    if (lk) openLogs(lk.dataset.logKind);
   });
-  $("rsToggle").addEventListener("click", (e) => {
-    if (e.target.dataset.on !== "true") $("risEnabled").checked = true;
-    toggle("ris", e.target);
-  });
-  $("mwToggle").addEventListener("click", (e) => {
-    if (e.target.dataset.on !== "true") $("mwlEnabled").checked = true;
-    toggle("mwl", e.target);
-  });
-  $("qrToggle").addEventListener("click", (e) => {
-    if (e.target.dataset.on !== "true") $("qrEnabled").checked = true;
-    toggle("qr", e.target);
-  });
+  const setupDoneClose = $("setupDoneClose");
+  if (setupDoneClose) setupDoneClose.addEventListener("click", () => { $("setupDone").hidden = true; });
   $("emgActivate").addEventListener("click", () => emergencyAction("activate"));
   $("emgDismiss").addEventListener("click", () => emergencyAction("dismiss"));
   $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
@@ -30,11 +35,41 @@ document.addEventListener("DOMContentLoaded", () => {
   $("saveDests").addEventListener("click", async () => {
     if (await saveConfig()) refreshRuleDests();   // a renamed node must show up in the rules
   });
-  $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
+  const staleReload = $("cfgStaleReload");
+  if (staleReload) staleReload.addEventListener("click", () =>
+    loadConfig().then(() => flashNote(T("Reloaded — the configuration on screen is the current one."), true))
+                .catch((e) => flashNote(TF("Load failed: {err}", { err: e.message }), false)));
+  // Settings: TLS path fields follow their box; any edit marks the form as unsaved.
+  document.querySelectorAll(".tls-fields[data-tls-for]").forEach((box) => {
+    const cb = $(box.dataset.tlsFor);
+    if (cb) cb.addEventListener("change", syncTlsFields);
+  });
+  const settingsPane = $("dlgSettings");
+  if (settingsPane) ["input", "change"].forEach((ev) =>
+    settingsPane.addEventListener(ev, (e) => { if (e.target.matches("input, select")) settingsDirty = true; }));
+  // De-identification site key.
+  bind("deidKeySet", "click", () => applyDeidKey("set"));
+  bind("deidKeyClear", "click", () => applyDeidKey("clear"));
+  bind("deidKeyGen", "click", () => {
+    const k = generateToken();
+    const f = $("deidKeyNew");
+    if (!k || !f) { flashNote(T("This browser cannot generate a key — paste one instead."), false); return; }
+    f.value = k;
+    f.type = "text";                  // readable once, so it can be written down before it is set
+    flashNote(T("Write the key down now — it is never shown again once it is set."), true);
+  });
+
+  // Logs toolbar.
+  $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; applyLogFilter(); });
+  $("log").addEventListener("scroll", logScrolled, { passive: true });
+  buildLogKinds();
+  bind("logErrOnly", "change", (e) => setLogFilter({ errOnly: e.currentTarget.checked }));
+  bind("logQuery", "input", (e) => setLogFilter({ q: e.currentTarget.value }));
+  bind("logCopy", "click", copyVisibleLog);
+  bind("logDownload", "click", downloadLogDay);
   wireDropZones();
 
-  // Sign-in gate. bind() tolerates missing elements, since some builds omit parts of the markup.
-  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  // Sign-in gate.
   $("authLogin").addEventListener("click", () => doLogin($("authLogin")));
   ["authToken", "authPassword", "authName", "authName2"].forEach((id) => {
     const el = $(id);
@@ -77,6 +112,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("peopleListing", "change", async (e) => {
     try {
       await post("/api/profiles/listing", { list_profiles: e.currentTarget.checked });
+      adoptOwnUsersWrite();
     } catch (err) {
       flashNote(err.message, false);
       e.currentTarget.checked = !e.currentTarget.checked;
@@ -84,21 +120,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Audit.
-  bind("auditVerify", "click", async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    try {
-      const r = await api("/api/audit/verify");
-      const v = r.verify || {};
-      flashNote(v.ok
-        ? TF("Intact — {n} records, every one matching its digest.", { n: v.records || 0 })
-        : TF("BROKEN at record {n}: {why}", { n: v.broken_at || "?", why: v.reason || "" }),
-        !!v.ok);
-      renderAudit([], r.audit || {});
-      loadAudit();
-    } catch (err) { flashNote(err.message, false); }
-    finally { btn.disabled = false; }
-  });
+  bind("auditVerify", "click", (e) => verifyAudit(e.currentTarget));
+  bind("auditWho", "change", (e) => { auditFilter.who = e.currentTarget.value; paintAuditList(); });
+  bind("auditAct", "change", (e) => { auditFilter.act = e.currentTarget.value; paintAuditList(); });
+  bind("auditBad", "change", (e) => { auditFilter.bad = e.currentTarget.checked; paintAuditList(); });
   bind("auditExport", "click", () => {
     // Plain navigation: a file download, with the session cookie attached.
     window.location.href = "/api/audit/export";
@@ -131,11 +156,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const setupOpen = $("setupOpen");
   if (setupOpen) setupOpen.addEventListener("click", enterSetup);
   const setupFromSettings = $("setupFromSettings");
-  if (setupFromSettings) setupFromSettings.addEventListener("click", () => { showPanelInternal("dlgServices"); enterSetup(); });
+  // The chooser re-reads the config when applied, which would drop unsaved Settings edits silently.
+  if (setupFromSettings) setupFromSettings.addEventListener("click", () => {
+    if (settingsDirty && !confirm(T("You have unsaved changes in Settings. Choosing services reloads the configuration and discards them. Continue?"))) return;
+    showPanelInternal("dlgServices"); enterSetup();
+  });
   const ovSetupOpen = $("ovSetupOpen");
   if (ovSetupOpen) ovSetupOpen.addEventListener("click", () => { showPanelInternal("dlgServices"); enterSetup(); });
   const setupCancel = $("setupCancel");
-  if (setupCancel) setupCancel.addEventListener("click", exitSetup);
+  if (setupCancel) setupCancel.addEventListener("click", () => exitSetup(true));
   const setupApply = $("setupApply");
   if (setupApply) setupApply.addEventListener("click", () => applySetup(setupApply));
   document.querySelectorAll(".pick-box").forEach((b) =>
@@ -258,12 +287,18 @@ document.addEventListener("DOMContentLoaded", () => {
       renderIndex(lastStatus.index || {});
       renderDicomweb(lastStatus.dicomweb || {});
       renderDeidState(lastStatus.deid || {});
+      renderDeidKeyBox(lastStatus.deid || {});
+      renderSettingsStates(lastStatus, hostIps(lastStatus));
     }
+    buildLogKinds();
     if (gateOpen) return;      // behind the prompt there is nothing to refetch
     pollStatus();
     // Rows the dashboard drew (history, stuck, orders, people, audit…) are redrawn by the active loader.
     runActiveLoader();
   });
+
+  // Audit times follow the navbar clock like the log does.
+  document.addEventListener("carino-clock-change", () => { if (auditRows.length) paintAuditList(); });
 
   // popstate resolves Back; hashchange only covers hand-edited fragments (pushState fires neither).
   window.addEventListener("popstate", () => resolveHash(location.hash));
@@ -317,9 +352,15 @@ function resolveHash(hash) {
   const raw = (hash || "").replace(/^#/, "");
   if (!raw) return false;
   if (raw === "setup") { showPanelInternal("dlgServices"); enterSetup(); return true; }
-  const [head, tail] = raw.split("/");
+  // "#activity/logs?kind=print": the query presets the log filter (a card's "See the log" link).
+  const [path, query] = raw.split("?");
+  const [head, tail] = path.split("/");
   let panelId = PANEL_BY_HASH[head];
   let tabId = tail || null;
+  if (query) {
+    const q = new URLSearchParams(query);
+    if (q.has("kind")) setLogFilter({ kind: q.get("kind") });
+  }
   if (!panelId && LEGACY_HASH[head]) { panelId = LEGACY_HASH[head][0]; tabId = LEGACY_HASH[head][1] || null; }
   if (!panelId) return false;
   routing = true;                 // the resolver reads the URL; it must not rewrite it
@@ -330,4 +371,17 @@ function resolveHash(hash) {
 function openInitialPanel() {
   if (resolveHash(location.hash)) return;
   showPanel(firstAllowedPanel(), { silent: !!location.hash });
+}
+
+// Open one Settings group (a card's ⚙ link): the tab, the group unfolded, scrolled to and briefly marked.
+function openSettingsGroup(id) {
+  goTo("dlgConfig", "settings");
+  const g = $(id);
+  if (!g) return;
+  g.open = true;
+  g.scrollIntoView({ block: "start" });
+  const sum = g.querySelector("summary");
+  if (sum) sum.focus({ preventScroll: true });
+  g.classList.add("flash");
+  setTimeout(() => g.classList.remove("flash"), 1600);
 }

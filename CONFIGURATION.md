@@ -45,7 +45,9 @@ PACS that refuses to start is a PACS the operator cannot fix. A hand-edited
 complaint appears in the Activity log at startup instead:
 *would be REFUSED if it were saved from the dashboard: … — it is being used as it
 stands.* That is why several entries below describe a value that validation would
-have refused and that the code still has to survive.
+have refused and that the code still has to survive. A refused save answers
+`400` with `{"error": …, "field": "scp.port"}` — the dotted key, when the validator
+knows it — so the dashboard can open the right group and mark the field.
 
 **Keys beginning with `_`** are not read by anything. `config.example.json` uses
 `_comment` in a few sections; validation ignores them and the merge preserves
@@ -59,13 +61,24 @@ file will find them.
 Six services carry near-identical key sets. The shared behaviour is described
 once here; the per-section entries below cover only what is particular to them.
 
-### `enabled` is enrolment, not a run switch
+### `enabled` is the on/off switch
 
-For `scp`, `scu`, `print`, `mwl`, `ris` and `qr`, this flag says the service is
-enrolled on this machine. A save that turns it **on** starts the service without
-a restart. A plain save that turns it **off** does *not* stop a service that is
-already running — the setup chooser (an enforcing save) and the Stop button on
-the service card are what enforce the flag.
+For `scp`, `scu`, `print`, `mwl`, `ris` and `qr`, this flag is the one switch for
+the service: it says whether the service runs now and whether it comes back at the
+next start. There is no second "running" state kept anywhere else.
+
+- **Start** on a service card writes `enabled: true` for that section and starts
+  it; **Stop** (which asks first) writes `enabled: false` and stops it. Only that
+  one flag is written — nothing else in the form is saved, and no other service is
+  touched.
+- A save that turns the flag **on** starts the service; a save that turns it
+  **off** stops it. In the dashboard this checkbox reads *Run this service (also
+  at startup)*.
+- A save restarts a running service only when **its own** section changed (or a
+  shared thing it reads at start, such as a TLS file or the storage folder).
+  Changes to destinations, routing, de-identification, the web section, the
+  modalities list or `notify` restart nothing. The response to `POST /api/config`
+  lists what it restarted in `restarted`, and the dashboard says so after a save.
 
 The CLI runs a service for one run without writing anything: `pacs serve
 --receive --watch --print --ris --mwl --qr`, or the single-service commands
@@ -223,7 +236,7 @@ C-STORE and C-ECHO, and writes what arrives to a folder on disk.
 
 `boolean` · default `false`
 
-Enrolment, not a run switch; see [above](#enabled-is-enrolment-not-a-run-switch).
+The on/off switch; see [above](#enabled-is-the-onoff-switch).
 `pacs serve --receive` starts the receiver for one run without writing this flag.
 
 ### `scp.aet`
@@ -334,7 +347,7 @@ files under the settings as saved.
 
 `boolean` · default `false`
 
-Enrolment, exactly as [`scp.enabled`](#scpenabled). `pacs serve --watch` and
+The on/off switch, exactly as [`scp.enabled`](#scpenabled). `pacs serve --watch` and
 `pacs send` start the watcher for one run without writing the flag.
 
 ### `scu.aet`
@@ -541,13 +554,32 @@ queue at [`scu.pending_dir`](#scupending_dir). A film carries burned-in pixels, 
 a structured PatientID, so captured film is never auto-forwarded: an operator
 identifies and approves it, and only then is it converted to DICOM.
 
+What the receiver tolerates, because real modalities differ:
+
+- A modality that leaves the Film Session / Film Box UIDs to the printer gets
+  them minted here, as the standard allows.
+- A Presentation LUT is accepted (so the job negotiates) and ignored; the film is
+  rendered with the pixel values as sent.
+- A modality that asks for the printer's configuration (Printer Configuration
+  Retrieval) before its first film gets an answer instead of a refused context.
+- The called AE title is **not** checked. A modality whose printer entry carries a
+  different called AE still prints, so a mistyped printer AE is not why a print
+  fails; the *calling* AE is what [`print.allowed_aets`](#printallowed_aets)
+  filters on.
+
+Every refusal and failure — an AE not on the allowed list, a colour job with
+colour off, a film that never received an image, a render that failed — is a
+`print` line in the activity log, counts in the card's Errors, and appears as the
+card's *Last problem*. The manual's troubleshooting chapter lists each message and
+its fix.
+
 The section is called `print` in the file. In the code it is reached as
 `cfg.printer`, because `print` is a builtin — grepping for `cfg.print` finds
 nothing.
 
 ### `print.enabled`
 
-`boolean` · default `false` · see [enrolment](#enabled-is-enrolment-not-a-run-switch)
+`boolean` · default `false` · see [the on/off switch](#enabled-is-the-onoff-switch)
 
 `pacs print` and `pacs serve --print` start the printer for one run without
 writing the flag.
@@ -556,8 +588,9 @@ writing the flag.
 
 `string` · default `"CARINOPRINT"`
 
-The called AE title this listener answers to; the modality's printer entry has to
-carry exactly this. Refused above 16 characters (`print.aet must be 16 characters
+The AE title this printer presents; put it in the modality's printer entry. The
+receiver does not refuse a different called AE (see above), so this is a label the
+modality shows rather than a filter. Refused above 16 characters (`print.aet must be 16 characters
 or fewer`). An empty AE title is **not** refused here, unlike
 [`scp.aet`](#scpaet), so a blank one saves and then goes to pynetdicom as an empty
 called AE.
@@ -575,7 +608,10 @@ called AE.
 `boolean` · default `false`
 
 Adds Basic Color Print Management to the advertised contexts alongside grayscale.
-Leave it off and a colour-only print SCU cannot negotiate at all. Turning it on
+Leave it off and a colour-only print SCU cannot negotiate at all — and that is now
+named, not silent: the log and the card's *Last problem* say the modality asked for
+Basic Color Print Management and that this setting is the fix. That one is not
+counted as an error. Turning it on
 changes nothing about grayscale jobs: whether a film box is treated as colour is
 decided by which meta context it arrived on, not by this flag.
 
@@ -593,11 +629,19 @@ validation, which accepts exactly those four spellings and reports the two that
 matter: `print.layout must be 'pdf' or 'image'`. Neither
 `config.example.json` nor the README mentions the two extra spellings.
 
+Which to pick: many PACS and viewers store an Encapsulated PDF but do not display
+it, or show it only as an attachment. If the film has to be *read* on the
+receiving side, choose `"image"` (Secondary Capture), which every viewer shows.
+Keep `"pdf"` when the archive is known to display PDFs, or when one document per
+print job matters more than one image per sheet.
+
 ### `print.allowed_aets`
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)
 
-Not type-checked.
+Not type-checked. A refused modality is logged as `Print: refused <AE> @ <ip> — its
+AE title is not in the allowed list (…)`, counted in Errors and
+shown as the card's *Last problem*.
 
 ### `print.tls` / `print.tls_cert` / `print.tls_key` / `print.tls_ca`
 
@@ -712,7 +756,7 @@ modality's worklist.
 
 ### `ris.enabled`
 
-`boolean` · default `false` · see [enrolment](#enabled-is-enrolment-not-a-run-switch)
+`boolean` · default `false` · see [the on/off switch](#enabled-is-the-onoff-switch)
 
 `pacs serve --ris` and `pacs ris` start the listener for one run without touching
 this key.
@@ -841,7 +885,7 @@ control on the port.
 
 ### `qr.enabled`
 
-`boolean` · default `false` · see [enrolment](#enabled-is-enrolment-not-a-run-switch)
+`boolean` · default `false` · see [the on/off switch](#enabled-is-the-onoff-switch)
 
 Enabling it is not sufficient: `start_qr` refuses outright when the index is
 unavailable — `Query/Retrieve needs the instance index — enable index.enabled` —

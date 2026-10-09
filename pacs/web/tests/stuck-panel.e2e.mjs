@@ -441,13 +441,12 @@ async function state(label, want) {
           "every named file is on screen: " + JSON.stringify(s.chips));
   }
   if (want.heldRows) {
-    // Same rule as the orphan message and for a stronger reason: `message` is
-    // the engine's reason AND the one edit that releases the hold, and a second
-    // copy composed in the browser from `reason`/`remedy` is free to drift from
-    // the profile the engine is actually reading.
+    // The row is drawn from the engine's `cause` (HELD_TEXT, held equal to
+    // server.py by test_dashboard_globals) so it can be translated; in English
+    // it must still read exactly as the engine's message, reason AND remedy.
     const server = (api.held || []).map((h) => h.message.trim());
     check(JSON.stringify(s.heldMessages) === JSON.stringify(server),
-          "held rows render the ENGINE's message verbatim (reason AND remedy, nothing recomposed)");
+          "held rows read exactly as the engine's message in English (reason AND remedy)");
     check(server.every((m, i) => m.includes((api.held[i].reason || "").trim())
                                  && m.includes((api.held[i].remedy || "").trim())),
           "…and that message is the only field carrying both halves");
@@ -534,9 +533,11 @@ async function main() {
   check(pt.summary === "1 arquivo precisa de atenção", "the summary is translated: " + pt.summary);
   check(pt.stuckRows === 1 && pt.orphanRows === 1 && pt.heldRows === 1 && pt.badge === "1",
         "badge and panel still agree after the language switch");
-  check(pt.messages[0] === (api.orphaned || [])[0].message.trim()
-        && pt.heldMessages[0] === (api.held || [])[0].message.trim(),
-        "the engine's messages are still the engine's, in the engine's language");
+  check(pt.messages[0] === (api.orphaned || [])[0].message.trim(),
+        "the orphan message is still the engine's, in the engine's language");
+  check(pt.heldMessages[0].startsWith("Nada está sendo enviado para ")
+        && pt.heldMessages[0].includes((api.held || [])[0].name),
+        "the held reason and remedy are translated, naming the destination: " + pt.heldMessages[0].slice(0, 60));
 
   /* Width budget. The orphan and held sections each add prose, a chip row of
      file names and a whole engine sentence — the held one carries two, reason

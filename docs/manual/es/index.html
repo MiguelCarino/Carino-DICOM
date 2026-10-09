@@ -57,7 +57,8 @@
     <p class="standfirst">Carino DICOM es una <strong>pasarela DICOM</strong> y un <strong>equipo de
       continuidad</strong>: recibe estudios, los enruta y los reenvía, los publica por Query/Retrieve y
       DICOMweb, y sostiene el servicio de imagen cuando el PACS o el RIS dejan de responder. Este manual
-      cubre la puesta en marcha, el modelo de seguridad, cada servicio y sus límites reales.</p>
+      cubre la puesta en marcha, los trabajos de cada día y qué hacer cuando fallan, el modelo de
+      seguridad, cada servicio y sus límites reales.</p>
 
     <p class="shots-note">Todas las capturas de este manual son de una instancia real de este software con estudios inventados para la foto. Aquí no aparece ningún paciente.</p>
 
@@ -66,8 +67,10 @@
       <ol>
         <li><a href="#que-es">Qué es y qué papel juega</a></li>
         <li><a href="#primeros-pasos">Primeros pasos</a></li>
+        <li><a href="#howto">Cómo hago para…</a></li>
+        <li><a href="#trouble">Cuando algo va mal</a></li>
         <li><a href="#seguridad">El modelo de seguridad y la regla del token</a></li>
-        <li><a href="#servicios">Los servicios, uno por uno</a></li>
+        <li><a href="#servicios">Los servicios, uno por uno (referencia)</a></li>
         <li><a href="#no-es">Esto no es un producto sanitario</a></li>
         <li><a href="#ayuda">Licencia y dónde pedir ayuda</a></li>
       </ol>
@@ -142,7 +145,8 @@
       <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">página
       de releases</a> y ábrelo. Se queda en la bandeja del sistema; al hacer clic se abre el panel. Como
       todavía no está firmado digitalmente, Windows y macOS avisan la primera vez: en la
-      <a href="../../">portada</a> están los pasos exactos para abrirlo igualmente.</p>
+      <a href="https://dicom.carino.systems/" target="_blank" rel="noopener">portada</a> están los pasos
+      exactos para abrirlo igualmente.</p>
     <p>En el primer arranque pregunta, una sola vez, si puede consultar en GitHub si hay una versión más
       nueva. Si respondes que no —o si cierras la pregunta— se queda desactivado, que es como viene de
       fábrica. Si está activado, una versión nueva aparece como una línea en el menú de la bandeja y
@@ -154,24 +158,26 @@
 
     <h3>Docker</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
-mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
-docker compose up -d
+cd Carino-DICOM
+mkdir -p data
+echo "PACS_UID=$(id -u)" &gt;&gt; .env
+echo "PACS_GID=$(id -g)" &gt;&gt; .env
+docker compose up -d --build
 docker compose logs -f pacs</code></pre>
     <p>El primer arranque <strong>genera e imprime un token de acceso</strong> en el log. Abre
       <code>http://127.0.0.1:8042/</code> y pégalo cuando el panel lo pida. Todo —configuración,
       estudios, logs, índice— vive en <code>./data</code>, que es lo que tienes que respaldar.</p>
     <div class="warn">
       <p><b>El fallo más común del primer arranque</b> es que <code>./data</code> pertenezca a root:
-        el contenedor nunca corre como root y muere con <code>EACCES</code>. Si tu usuario no es el
-        1000, pon <code>PACS_UID</code> y <code>PACS_GID</code> en un fichero <code>.env</code> y
-        reconstruye. En hosts con SELinux (Fedora, RHEL, Rocky) el sufijo <code>:z</code> del volumen
+        el contenedor nunca corre como root y muere con <code>EACCES</code>. Las dos líneas
+        <code>echo</code> de arriba lo evitan construyendo la imagen para tu propio usuario; si te las
+        saltaste, añádelas y vuelve a ejecutar <code>docker compose up -d --build</code>. En hosts con SELinux (Fedora, RHEL, Rocky) el sufijo <code>:z</code> del volumen
         no es decorativo: sin él el montaje es inescribible aunque los permisos parezcan correctos.</p>
     </div>
 
     <h3>Servicio systemd (Linux)</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM.git
-cd Carino-PACS
+cd Carino-DICOM
 sudo packaging/systemd/install.sh</code></pre>
     <p>El instalador crea el usuario de sistema <code>carino-pacs</code>, copia el código a
       <code>/opt/carino-pacs</code>, prepara <code>/var/lib/carino-pacs</code> y deja la unidad
@@ -205,25 +211,22 @@ journalctl -u carino-pacs -f</code></pre>
         debe ejecutar <em>esta</em> máquina; enciende solo eso.</li>
       <li><strong>Añade los destinos</strong> (nombre, host, puerto, AE title) en la pestaña
         <em>Destinos</em> de <em>Configuración</em>, que es la que abre por defecto.</li>
-      <li><strong>Comprueba la conectividad con C-ECHO</strong> antes de mover una sola imagen:
-        <code>./run.sh echo --name "PACS del hospital"</code>. Si el C-ECHO no pasa, no es un problema de
-        Carino: es red, cortafuegos o AE title.</li>
-      <li><strong>Apunta un equipo hacia aquí</strong> con el AE title, la IP y el puerto del receptor, y
-        envía un estudio de prueba.</li>
+      <li><strong>Comprueba la conectividad antes de mover una sola imagen:</strong> pulsa
+        <em>Echo</em> en la fila del destino. En una máquina sin panel,
+        <code>./run.sh echo --name "PACS del hospital"</code> hace lo mismo. Si el echo no pasa, no es un
+        problema de Carino: es red, cortafuegos o AE title.</li>
+      <li><strong>Apunta un equipo hacia aquí</strong> con la línea <em>Apunta la modalidad a</em> de la
+        tarjeta del receptor, y envía un estudio de prueba (ver <a href="#howto-store">Cómo hago
+        para…</a>).</li>
       <li><strong>Mira el registro</strong> en la pestaña <em>Registro</em> de <em>Actividad</em>.
-        Si algo falla, ahí aparece; este software prefiere gritar a fallar en silencio.</li>
+        Si algo falla, ahí aparece, y también en la tarjeta del servicio como <em>Último problema</em>;
+        este software prefiere gritar a fallar en silencio.</li>
     </ol>
 
     <figure class="shot">
       <img src="../img/es/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El asistente de configuración del panel, titulado «Elige los servicios que debe ejecutar este PC», con seis tarjetas —receptor, auto-envío, receptor de impresión, RIS de emergencia, worklist y Query/Retrieve—, cada una con su casilla «Usar» sin marcar, y debajo un pie que dice que no has marcado nada y que este PC no recibirá ni enviará nada, con los botones «Ahora no» y «Activar los marcados»." />
-      <figcaption>Paso 1. Los seis servicios se ofrecen aquí, ninguno está marcado y nada está en marcha: el pie lo dice, y no se abre ningún puerto hasta que pulsas <em>Activar los marcados</em>. Cada tarjeta explica para qué sirve el servicio, así que la decisión se toma leyendo la descripción y no el nombre del protocolo.</figcaption>
-    </figure>
-
-    <figure class="shot">
-      <img src="../img/es/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="La pestaña Registro de Actividad: un flujo con marcas de tiempo. Las líneas de arranque nombran cada listener y su puerto; un bloque rojo explica que una regla pide anonimizar mientras el perfil está apagado; una línea ámbar informa de una asociación rechazada y de cuándo se reintentará." />
-      <figcaption>Paso 5. El flujo de actividad. Cada línea que importa dice qué hacer al respecto: el bloque rojo es una retención por anonimización que nombra el remedio, y la línea ámbar es un destino que rechazó la conexión y anuncia su próximo reintento.</figcaption>
+        alt="El asistente de configuración del panel, titulado «Elige los servicios que debe ejecutar este PC», con seis tarjetas —receptor, auto-envío, receptor de impresión, RIS de emergencia, worklist y Query/Retrieve—, cada una con su casilla «Usar» y una línea que dice que su puerto está libre. Solo el receptor está marcado, así que el pie dice «1 marcado», junto a los botones «Ahora no» y «Activar los marcados»." />
+      <figcaption>Paso 1. Los seis servicios se ofrecen aquí y solo el <em>Receptor</em> viene marcado —es lo que convierte esta máquina en un destino—, así que el pie dice <em>1 marcado</em>; todavía no hay nada en marcha, y no se abre ningún puerto hasta que pulsas <em>Activar los marcados</em>. Cada tarjeta explica para qué sirve el servicio, así que la decisión se toma leyendo la descripción y no el nombre del protocolo.</figcaption>
     </figure>
 
     <h3>Sin interfaz gráfica</h3>
@@ -240,7 +243,248 @@ journalctl -u carino-pacs -f</code></pre>
     <p>Todos los comandos aceptan <code>-c / --config &lt;ruta&gt;</code>. En Windows, <code>run.ps1</code>.</p>
 
     <!-- ─────────────────────────────────────────────────────────── -->
-    <h2 id="seguridad">3. El modelo de seguridad y la regla del token</h2>
+    <h2 id="howto">3. Cómo hago para…</h2>
+
+    <p>Recetas cortas para los trabajos que salen en el día a día. Cada una termina diciendo cómo sabes
+      que funcionó; si no funcionó, el capítulo siguiente es la lista de lo que hay que revisar.</p>
+
+    <h3 id="howto-store">…apuntar una modalidad aquí para guardar imágenes</h3>
+    <ol>
+      <li>Abre <em>Servicios</em>. Si la tarjeta del <em>Receptor</em> dice que está parado, pulsa
+        <em>Iniciar</em>.</li>
+      <li>Lee la línea <em>Apunta la modalidad a</em> de la tarjeta: un AE title, una dirección IP y un
+        puerto (por defecto <code>CARINODICOM</code> y <code>11112</code>). El botón de copiar que tiene al
+        lado copia los tres. Si la máquina tiene más de una dirección, usa la que está en la red de la
+        modalidad.</li>
+      <li>En la modalidad, añade un destino de almacenamiento —cada fabricante lo llama de una forma:
+        nodo DICOM, archivo, «Enviar a» o «Store»— con esos tres valores. El AE title de la propia
+        modalidad es el AE <em>llamante</em>; no hace falta escribirlo aquí.</li>
+      <li>Si en <em>Configuración</em> → <em>Ajustes</em> → <em>Este PACS</em> hay AE titles en
+        <em>Aceptar solo estos AE</em>, añade ahí el de la modalidad, o el receptor la rechazará.</li>
+      <li>Lanza la prueba de conexión de la propia modalidad (suele llamarse <em>Verify</em> o
+        <em>Echo</em>) y luego envía un estudio. Aparece en <em>Estudios</em> → <em>Historial</em>.</li>
+    </ol>
+    <p>El botón <em>Probar</em> de la tarjeta comprueba el receptor desde esta misma máquina. Si
+      <em>Probar</em> pasa y la modalidad sigue fallando, el problema está entre las dos: dirección,
+      puerto, cortafuegos o la lista de AE permitidos.</p>
+
+    <h3 id="howto-print">…apuntar una modalidad aquí para imprimir</h3>
+    <p>Para equipos cuya única salida es la placa. Carino se hace pasar por la impresora de placas y
+      captura cada hoja para que la identifiques; no se imprime nada en papel.</p>
+    <ol>
+      <li>Abre <em>Servicios</em> y pulsa <em>Iniciar</em> en la tarjeta de <em>Impresión</em>.</li>
+      <li>Lee su línea <em>Apunta la modalidad a</em> (por defecto <code>CARINOPRINT</code>, la IP de esta
+        máquina y el puerto <code>11113</code>).</li>
+      <li>En la modalidad, añade una impresora DICOM —a veces se llama impresora láser o de placas— con
+        esos tres valores. La escala de grises siempre se ofrece; si la modalidad solo imprime en color,
+        marca <em>Aceptar también trabajos de impresión en color</em> en <em>Configuración</em> →
+        <em>Ajustes</em> → <em>Impresión</em>.</li>
+      <li>Pulsa <em>Enviar una impresión de prueba</em> en la tarjeta. En unos segundos aparece en
+        <em>Estudios</em> → <em>Pendientes</em> una hoja marcada
+        <strong>TEST PRINT — safe to discard</strong> («impresión de prueba, se puede descartar»). Eso
+        demuestra que el receptor funciona; descarta la hoja.</li>
+      <li>Imprime una placa desde la modalidad. La tarjeta muestra <em>Última impresión</em> con el número
+        de placas, el AE title de la modalidad y su dirección, el contador <em>Capturadas</em> sube, y la
+        placa espera en <em>Pendientes</em> a que la apruebes (ver más abajo).</li>
+    </ol>
+    <p><em>Guardar cada placa capturada como</em> (en <em>Impresión</em>) decide en qué se convierte la
+      placa cuando la apruebas. Muchos archivos y visores guardan un PDF pero no lo muestran; elige
+      <em>Imagen</em> (Secondary Capture) si la placa tiene que leerse al otro lado.</p>
+    <p>El AE title de impresora que se teclea en la modalidad no se comprueba: aunque tenga una errata,
+      imprime igual. Solo se filtra el AE title de la propia modalidad, y solo si rellenas <em>Aceptar
+      solo estos AE</em>. Si una impresión falla, la tarjeta muestra <em>Último problema</em>; la
+      <a href="#trouble-print">tabla de problemas de impresión</a> recoge cada mensaje y su arreglo.</p>
+
+    <h3 id="howto-worklist">…apuntar una modalidad aquí para que descargue su worklist</h3>
+    <ol>
+      <li>Asegúrate de que hay órdenes. O bien el RIS manda órdenes HL7 al servicio <em>RIS de
+        emergencia</em> (puerto <code>2575</code>), o bien alguien las teclea en <em>Órdenes</em> →
+        <em>Nueva orden</em>.</li>
+      <li>En <em>Configuración</em> → <em>Modalidades</em>, registra la sala con el AE title exacto de su
+        estación. Así el destino de una orden se elige de esa lista en vez de teclearse.</li>
+      <li>Abre <em>Servicios</em>, pulsa <em>Iniciar</em> en la tarjeta de <em>Worklist</em> y lee su línea
+        <em>Apunta la modalidad a</em> (por defecto <code>CARINOMWL</code> y el puerto
+        <code>11114</code>).</li>
+      <li>En la modalidad, configura el proveedor de worklist (MWL, «HIS/RIS» o «servidor de worklist»)
+        con esos valores y haz la consulta.</li>
+    </ol>
+    <p>Una orden sin destino aparece en todas las estaciones; una orden con destino aparece solo en la
+      estación cuyo AE title coincide exactamente. Cuando el estudio vuelve, se concilia con su orden
+      por número de accession y la orden se cierra sola.</p>
+
+    <h3 id="howto-approve">…aprobar una placa pendiente</h3>
+    <p>Las placas capturadas, y los PDF o imágenes encontrados junto a un estudio, esperan en
+      <em>Estudios</em> → <em>Pendientes</em>. El contador 📎 junto a <em>Estudios</em> dice cuántos
+      hay.</p>
+    <ol>
+      <li>Abre la <em>Vista previa</em> y mira la hoja.</li>
+      <li>Si el paciente tiene una orden abierta, pulsa <em>Asociar a una orden…</em> y elígela. El
+        nombre, el ID de paciente, el accession y el estudio salen de la orden, y la orden se cierra como
+        capturada.</li>
+      <li>Si no, teclea tú la identidad. <em>ID de paciente</em> y <em>Nombre del paciente</em> son
+        obligatorios; el accession, la fecha y la descripción, muy recomendables.</li>
+      <li>Si el elemento llegó junto a un estudio y has cambiado el paciente, elige a qué pertenece:
+        <em>Adjuntar al estudio original</em> solo si ese estudio es de verdad de este paciente; si no,
+        <em>Estudio nuevo</em>. Elegir mal archiva la hoja de un paciente dentro del estudio de otro.</li>
+      <li>Pulsa <em>Aprobar y enviar</em>. Se convierte a DICOM y se reenvía como cualquier otro
+        estudio.</li>
+    </ol>
+    <p>No hay deshacer: una vez aprobado, el fichero original desaparece de Pendientes y la copia DICOM
+      ya va de camino. Un error se corrige en el archivo. <em>Descartar</em> quita un elemento sin
+      enviarlo.</p>
+
+    <h3 id="howto-stuck">…arreglar un reenvío atascado</h3>
+    <p>Abre <em>Estudios</em> → <em>Atascados</em> (el contador ⚠ junto a <em>Estudios</em>). Las filas
+      se agrupan por estudio, con el paciente, el accession y la descripción, y se reparten en tres
+      clases:</p>
+    <ul>
+      <li><strong>Reintentando automáticamente</strong>: un destino rechazó la conexión o no contestó.
+        Lee el error de la fila: dice si el remoto nos rechazó (y por qué, por ejemplo «add CARINOSCU to
+        the remote's allowed AE titles», es decir, añade CARINOSCU a los AE permitidos del remoto), si
+        cortó la conexión o si nunca contestó. Arregla eso, pulsa <em>Echo</em> en la fila del destino en
+        <em>Configuración</em> → <em>Destinos</em> y luego <em>Reintentar ahora</em>.</li>
+      <li><strong>Retenido: no se envía nada</strong>: una retención por anonimización. Ningún
+        temporizador la libera; usa los dos botones de la fila y mira
+        <a href="#deid">Anonimización al reenviar</a>.</li>
+      <li><strong>Sin destino al que reintentar</strong>: los ficheros van a un destino que se borró o se
+        desactivó. Vuelve a activarlo, o pulsa <em>Enviar a…</em> y elige otro destino, o <em>Quitar de
+        la cola</em> (pregunta antes) para dar la pérdida por buena.</li>
+    </ul>
+
+    <h3 id="howto-why">…averiguar por qué falló algo</h3>
+    <ol>
+      <li>Mira la tarjeta del servicio. Cada listener muestra <em>Último problema</em> cuando algo salió
+        mal; haz clic y se abre el registro ya filtrado por ese servicio.</li>
+      <li>En <em>Actividad</em> → <em>Registro</em>, usa los chips de servicio (recepción, envío,
+        impresión, worklist, Q/R, RIS…), <em>Solo errores y avisos</em> y el filtro de texto: un AE
+        title, una dirección IP o un número de accession lo acotan enseguida.</li>
+      <li>Para pasarle el problema a otra persona, copia las líneas visibles o descarga el registro de un
+        día entero.</li>
+      <li>Pulsa <em>Probar</em> en la tarjeta. Si la prueba pasa desde esta máquina y la modalidad sigue
+        fallando, mira la red que hay entre las dos.</li>
+      <li>Si cambió un ajuste y nadie sabe quién, <em>Actividad</em> → <em>Auditoría</em> dice la persona y
+        las secciones que cambió.</li>
+    </ol>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="trouble">4. Cuando algo va mal</h2>
+
+    <p>Primero el síntoma, luego dónde mirar, luego el arreglo. Casi todas las filas empiezan en los
+      mismos dos sitios: la tarjeta del servicio en <em>Servicios</em> (su <em>Último problema</em>) y
+      <em>Actividad</em> → <em>Registro</em>. Las líneas del registro salen del motor en inglés y se
+      citan aquí tal cual, para que las encuentres con el filtro de texto.</p>
+
+    <h3 id="trouble-general">Envío, recepción y worklist</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Síntoma</th><th>Dónde mirar</th><th>Arreglo</th></tr></thead>
+        <tbody>
+          <tr><td>La modalidad no consigue enviarnos nada</td><td>Tarjeta del receptor; líneas del registro
+            que empiezan por <code>Receiver: refused</code></td><td><code>its AE title is not in the allowed
+            list</code>: añade el AE de la modalidad en <em>Aceptar solo estos AE</em>, o vacía la lista.
+            Nada en el registro: la conexión nunca llegó; revisa la IP y el puerto en la modalidad, el
+            cortafuegos y que la tarjeta esté en marcha. <em>Probar</em> en la tarjeta separa «esta máquina»
+            de «la red».</td></tr>
+          <tr><td>La modalidad envió, pero el estudio no está en Historial</td><td>Registro, chip de
+            recepción; <em>Espacio libre</em> en Resumen</td><td><code>Refused C-STORE — low disk
+            space</code>: libera disco o baja <code>scp.min_free_gb</code>. La modalidad puede reenviar en
+            cuanto haya sitio.</td></tr>
+          <tr><td>Una tarjeta está en ámbar: «activado pero no está en marcha»</td><td>El registro del
+            momento en que arrancó</td><td>Otro programa, u otro servicio de aquí, ocupa su puerto. Cambia el
+            puerto o para el otro programa y pulsa <em>Iniciar</em>.</td></tr>
+          <tr><td>Los estudios no llegan al PACS principal</td><td><em>Estudios</em> →
+            <em>Atascados</em></td><td>El error de la fila dice qué hizo el PACS: <code>rejected
+            permanently: calling AE title not recognised</code> → añade nuestro AE de envío (por defecto
+            <code>CARINOSCU</code>) en el PACS; <code>connection refused</code> → puerto equivocado o el PACS
+            está parado; <code>no reply</code> → equipo apagado o cortafuegos; <code>aborted</code> → a
+            menudo un desajuste de TLS.</td></tr>
+          <tr><td>A un destino no se le envía nada y nada se reintenta</td><td><em>Atascados</em>, sección
+            «Retenido»</td><td>Una retención por anonimización: ver
+            <a href="#deid">Anonimización al reenviar</a>.</td></tr>
+          <tr><td>La modalidad no ve su worklist</td><td>Tarjeta de Worklist; registro, chip de
+            worklist</td><td><code>MWL: refused</code>: añade su AE a la lista de permitidos de la worklist.
+            Ninguna consulta en el registro: IP, puerto o AE equivocados en la modalidad. La consulta llega
+            pero la lista sale vacía: el AE de destino de la orden no coincide exactamente con la estación;
+            corrígelo en <em>Modalidades</em>.</td></tr>
+          <tr><td>El RIS del propio hospital no le da su lista a la modalidad</td><td><em>Configuración</em>
+            → <em>Modalidades</em> → <em>Probar worklist</em></td><td>Ver
+            <a href="#probe">Sonda de worklist</a>; las respuestas aparecen en <em>Actividad</em> →
+            <em>Sondas de worklist</em>.</td></tr>
+          <tr><td>No aparecen las órdenes HL7 del RIS</td><td>Tarjeta del RIS de emergencia; registro, chip
+            de RIS</td><td>Comprueba que el RIS envía a esta IP en el puerto <code>2575</code>, y que su
+            dirección está en <code>ris.allowed_hosts</code> si esa lista está rellena.</td></tr>
+          <tr><td>Se cerró la sesión de todo el mundo</td><td>—</td><td>Es normal tras un reinicio: las
+            sesiones viven en memoria a propósito. Vuelve a entrar.</td></tr>
+          <tr><td>El panel deja de responder o sus números dejan de cambiar</td><td>Recarga la
+            página</td><td>Si no vuelve, el motor no contesta: comprueba que el servicio o el contenedor
+            está en marcha (<code>systemctl status carino-pacs</code>, <code>docker compose ps</code>) y
+            lee su log.</td></tr>
+          <tr><td>El contenedor muere con <code>EACCES</code></td><td><code>docker compose logs pacs</code></td><td>El
+            contenedor no puede escribir en <code>./data</code>: pon <code>PACS_UID</code>/<code>PACS_GID</code>
+            en <code>.env</code> y reconstruye (ver Docker más arriba).</td></tr>
+          <tr><td>El correo de failover está activado, pero no le llegó a nadie</td><td><em>Configuración</em> →
+            <em>Personas</em></td><td>El correo va a los perfiles que tienen dirección, no a una lista. Ver
+            <a href="#notify">Avisos</a>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="trouble-print">Impresión</h3>
+    <p>Cada rechazo y cada fallo del receptor de impresión es una línea del registro (el chip de
+      impresión), cuenta en los <em>Errores</em> de la tarjeta y aparece como su <em>Último problema</em>.
+      Un trabajo correcto aparece como <em>Última impresión</em>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Línea del registro o síntoma</th><th>Qué significa</th><th>Arreglo</th></tr></thead>
+        <tbody>
+          <tr><td><code>Print: refused X @ ip — its AE title is not in the allowed list (…)</code></td><td>El
+            AE title de la modalidad no está en la lista del receptor de impresión.</td><td>Añádelo en
+            <em>Impresión</em> → <em>Aceptar solo estos AE</em>, o vacía la lista.</td></tr>
+          <tr><td><code>Print: refused X @ ip — too many connections at once</code></td><td>La modalidad, o
+            varias, abrieron más conexiones de las que el receptor acepta a la vez.</td><td>Deja que terminen
+            los trabajos y vuelve a imprimir; si se repite, imprime de uno en uno.</td></tr>
+          <tr><td><code>Print: X @ ip asked for Basic Color Print Management…, which this printer does not
+            offer</code></td><td>La modalidad quiere color y el color está desactivado.</td><td>Marca
+            <em>Aceptar también trabajos de impresión en color</em>. No cuenta como error: una modalidad que
+            ofrece las dos cosas imprime en escala de grises.</td></tr>
+          <tr><td><code>Print from X: nothing to print — no film was created first</code>, <code>… N film(s)
+            were created but no image was sent into them</code>, <code>… the film it named (…) was never
+            created here</code></td><td>La modalidad se saltó un paso de la secuencia de impresión. Se le
+            contestó «página vacía» (un aviso, 0xB603).</td><td>Es un ajuste o un fallo del lado de la
+            modalidad: revisa su configuración de impresora (formato de placa, número de imágenes) y vuelve a
+            imprimir.</td></tr>
+          <tr><td><code>Print: X sent an image for a box this printer never handed out (…); refused</code></td><td>La
+            modalidad hizo referencia a una casilla de imagen de otra sesión.</td><td>Repite la impresión
+            desde la modalidad; si se repite, repórtalo con la línea del registro.</td></tr>
+          <tr><td><code>Print: could not read image N from X (…); it is left blank on the film</code></td><td>Una
+            imagen usaba un formato de píxel que el receptor no lee; el resto de la hoja se conservó.</td><td>Cambia
+            los ajustes de impresión de la modalidad (profundidad de bits, color) si los ofrece; si no,
+            reporta la línea.</td></tr>
+          <tr><td><code>Failed to render or queue the print job from X: …</code></td><td>La placa llegó, pero no
+            se pudo escribir (estado 0x0110).</td><td>Comprueba el espacio libre en disco y que la carpeta de
+            pendientes (<code>scu.pending_dir</code>) admite escritura.</td></tr>
+          <tr><td>Otras líneas que empiezan por <code>Print: …</code></td><td>Mensajes de la propia biblioteca
+            DICOM para esa conexión de impresión, pasados tal cual.</td><td>Léelas junto con la línea
+            anterior; repórtalas si no quedan claras.</td></tr>
+          <tr><td>Nada de nada en el registro</td><td>La conexión nunca llegó.</td><td>¿La tarjeta está en
+            marcha (no en ámbar)? ¿La modalidad usa la IP de esta máquina y el puerto <code>11113</code>?
+            ¿Hay un cortafuegos por medio? <em>Enviar una impresión de prueba</em> en la tarjeta demuestra que
+            este lado funciona.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Dos cosas que <em>no</em> son la causa: el AE title de impresora tecleado en la modalidad (no se
+      comprueba) y que la modalidad deje a la impresora los números de la sesión y de la placa (se crean
+      aquí si faltan). Una Presentation LUT se acepta y se ignora, y una modalidad que primero pregunta la configuración de la impresora recibe respuesta.</p>
+
+    <figure class="shot">
+      <img src="../img/es/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="La pestaña Registro de Actividad: encima del flujo, un chip por servicio, una casilla de solo errores y avisos y un filtro de texto; debajo, las líneas del día con su marca de tiempo, las más recientes abajo, cada una con el servicio que la escribió; bajo el flujo, el número de líneas, «Copiar lo visible», un selector de día, «Descargar el registro del día» y «Limpiar vista»." />
+      <figcaption>Donde empieza cada fila de las tablas de arriba. El registro se abre en sus líneas más recientes, abajo del todo; los errores salen en rojo y los avisos en ámbar, y cada línea que importa dice qué hacer al respecto. Cuando el flujo va cargado, acótalo con los chips de servicio (<em>Receptor</em>, <em>Auto-envío</em>, <em>Impresión</em>…), con <em>Solo errores y avisos</em> y con el filtro de texto. <em>Copiar lo visible</em> copia lo que dejan los filtros, <em>Descargar el registro del día</em> guarda el fichero entero del día elegido a su lado, y <em>Limpiar vista</em> vacía la pantalla, no el fichero.</figcaption>
+    </figure>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="seguridad">5. El modelo de seguridad y la regla del token</h2>
 
     <figure class="shot">
       <img src="../img/es/gate.webp" width="1150" height="950" loading="lazy" decoding="async"
@@ -259,7 +503,7 @@ journalctl -u carino-pacs -f</code></pre>
 
     <figure class="shot">
       <img src="../img/es/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="La pestaña Personas de Configuración, con su tira de pestañas arriba y una línea que dice «4 perfiles»: Administrador, TI, Radiólogo y Recepción. La ficha del Administrador es corta, con la casilla «Administrador (todo, incluidos los permisos futuros)» marcada y por eso sin rejilla de permisos; debajo, la de TI muestra entera su rejilla «Puede hacer», con unas casillas marcadas y otras no, y la imagen se corta a la altura de su fila «Puede ver». Abajo a la derecha, fijado, el botón «Añadir a alguien»." />
+        alt="La pestaña Personas de Configuración, bajo una línea que dice «4 perfiles». La ficha del Administrador es corta, con la casilla «Administrador (todo, incluidos los permisos futuros)» marcada y por eso sin rejilla de permisos, solo su campo de contraseña, Guardar y Borrar; debajo, la de TI muestra su rejilla «Puede hacer», con unas casillas marcadas y otras no, y la imagen se corta a mitad de esa rejilla, antes de su fila «Puede ver». Abajo a la derecha, fijado, el botón «Añadir a alguien»." />
       <figcaption>Los perfiles, una vez activados. Los permisos son por persona y se comprueban en cada endpoint, no en el navegador. Un perfil marcado como administrador no enseña rejilla: esa casilla ya lo concede todo, incluidos los permisos que aún no existen. Para el resto, «puede ver» va aparte de «puede hacer»: un perfil de TI puede reenrutar un estudio por su número de accession sin leer jamás el nombre de un paciente. Lo que no está marcado se muestra como <code>***</code> allí donde habría aparecido.</figcaption>
     </figure>
 
@@ -386,21 +630,28 @@ openssl rand -base64 32</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <figure class="shot">
       <img src="../img/es/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="La pestaña Auditoría de Actividad: en la cabecera del panel, encima de la tira de pestañas, los botones de limpiar vista, comprobar integridad y exportar; debajo, una línea con el número de archivos, su tamaño y el resumen de la cabecera de la cadena, y cinco filas todas de la misma forma: marca de tiempo, «system», «login», «api token» y «ok»." />
-      <figcaption>La auditoría, con la cabecera de la cadena impresa encima: ese resumen es el valor que conviene copiar a un sitio que esta máquina no pueda tocar. Los tres botones son del panel, no de la pestaña: están igual de a mano en <em>Registro</em>. Aquí cada fila es un acceso correcto con el token compartido, que se anota como <em>system</em> y no como una persona; los rechazos se registran con la misma fidelidad que los aciertos, y en esta máquina todavía no ha habido ninguno.</figcaption>
+        alt="La pestaña Auditoría de Actividad: una línea con el número de archivos, su tamaño y el resumen de la cabecera de la cadena; una fila de filtros —todos, todas las acciones y una casilla de solo fallidas o rechazadas— con los botones «Comprobar integridad» y «Exportar» a su derecha; y filas con marca de tiempo, la más reciente arriba, todas «Hecho» y con el detalle plegado: el motor iniciando sesión con el token de acceso, una fila por entrada, y debajo «Probó una worklist» de US_ROOM_2, hecha con el token de acceso." />
+      <figcaption>La auditoría, con la cabecera de la cadena impresa encima: ese resumen es el valor que conviene copiar a un sitio que esta máquina no pueda tocar. La pestaña tiene su propia fila de filtros —de quién (todos o una persona), qué acción y <em>Solo fallidas o rechazadas</em>— con <em>Comprobar integridad</em> y <em>Exportar</em> a su derecha; <em>Limpiar vista</em> es de <em>Registro</em>, no de aquí. Los rechazos se registran con la misma fidelidad que los aciertos: una petición denegada es una fila más.</figcaption>
     </figure>
 
-    <h2 id="servicios">4. Los servicios, uno por uno</h2>
+    <h2 id="servicios">6. Los servicios, uno por uno</h2>
 
     <p>Todo lo que abre un puerto viene <strong>apagado</strong>. La pregunta correcta no es «¿qué
       puede hacer?», sino «¿qué necesita hacer <em>esta</em> máquina?». Cada servicio encendido es un
       puerto abierto más. El índice de abajo es la única excepción: arranca solo, porque es una caché
       sqlite local que no abre ningún puerto.</p>
 
+    <p>Cada servicio tiene un solo interruptor. <em>Iniciar</em> en su tarjeta lo arranca y lo deja
+      encendido tras un reinicio; <em>Parar</em> pregunta antes, lo para y lo deja apagado. En
+      <em>Configuración</em> → <em>Ajustes</em> ese mismo interruptor es la casilla <em>Ejecutar este
+      servicio (también al arrancar)</em>, así que la tarjeta y el ajuste nunca pueden contradecirse.
+      Guardar los ajustes reinicia solo los servicios cuyos ajustes propios cambiaron, y el panel dice
+      cuáles.</p>
+
     <figure class="shot">
       <img src="../img/es/services.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="El panel de Servicios: una tarjeta por servicio —receptor, auto-envío, receptor de impresión, RIS de emergencia, worklist, Query/Retrieve—, cada una con un punto verde, un botón de parar, su AE title, en qué está escuchando y sus contadores." />
-      <figcaption>Cada servicio arranca y para por su cuenta, y cada tarjeta lleva los dos números que hay que mirar: lo que ha atendido y lo que ha fallado. El panel no es el motor: parar uno aquí para ese listener, no el equipo.</figcaption>
+        alt="El panel de Servicios: una tarjeta por servicio —receptor, auto-envío, receptor de impresión, RIS de emergencia, worklist, Query/Retrieve—, cada una con un punto de estado, un botón de parar, una línea «Apunta la modalidad a» con el AE title, la dirección IP y el puerto y un botón de copiar, un botón de probar y sus contadores; la tarjeta de impresión muestra además su línea de última impresión y un botón para enviar una impresión de prueba." />
+      <figcaption>Cada servicio arranca y para por su cuenta, y cada tarjeta lleva lo que necesita un técnico: la dirección que hay que teclear en la modalidad, un <em>Probar</em> que comprueba el servicio desde esta máquina, y los dos números que hay que mirar: lo que ha atendido y lo que ha fallado. Cuando algo falla, <em>Último problema</em> dice qué y enlaza con el registro. El panel no es el motor: parar uno aquí para ese listener, no el equipo.</figcaption>
     </figure>
 
     <figure class="shot">
@@ -426,8 +677,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña Historial de Estudios, en su vista de recibidos: una fila por estudio con paciente, ID, fecha, descripción, modalidad y número de imágenes, sus series debajo, y acciones por fila: enviar, adjuntar, editar etiquetas, ir al fichero y borrar." />
-        <figcaption>Lo que ha llegado, lo más reciente primero, con las series de cada estudio. «Ir al fichero» abre dónde aterrizó de verdad en el disco: el archivado es un árbol de carpetas real, no una base de datos de la que haya que exportar.</figcaption>
+          alt="La pestaña Historial de Estudios, en su vista de recibidos: un cuadro de filtro y chips de modalidad sobre una fila por estudio con paciente, ID, fecha, número de accession, descripción, modalidad y número de imágenes, sus series debajo, y en cada fila un botón de enviar y un botón ⋯ que abre el resto de acciones de la fila." />
+        <figcaption>Lo que ha llegado, lo más reciente primero, con las series de cada estudio; el cuadro de filtro y los chips de modalidad acotan la lista. <em>Enviar</em> es la única acción a la vista en la fila; el menú <em>⋯</em> guarda el resto: <em>Añadir PDF/imagen</em>, <em>Editar tags</em> (cuando hay una dirección de editor configurada), <em>Copiar ruta</em>, <em>Abrir carpeta</em> (solo si el panel se usa en la propia máquina) y <em>Borrar</em>. La ruta es real: el archivado es un árbol de carpetas, no una base de datos de la que haya que exportar.</figcaption>
       </figure>
     </div>
 
@@ -465,7 +716,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña Destinos de Configuración: tres filas —Main archive, Reading room y Teaching archive—, cada una con host, puerto, AE title, casillas de TLS, sin RIS y principal de emergencia, y un botón de Echo." />
+          alt="La pestaña Destinos de Configuración: tres filas —Main archive, Reading room y Teaching archive—, cada una con host, puerto, AE title, casillas de TLS, sin RIS y conmutación, y un botón de Echo." />
         <figcaption>Los destinos se nombran aquí y se referencian por nombre en todas partes, así que renombrar un nodo no deja huérfanas las reglas que lo apuntan. «Echo» comprueba la asociación antes de que ninguna imagen dependa de ella.</figcaption>
       </figure>
 
@@ -477,8 +728,8 @@ openssl rand -base64 32</code></pre>
 
       <figure class="shot">
         <img src="../img/es/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña Atascados de Estudios, con un aviso arriba de que hay archivos que necesitan atención y dos secciones debajo. «Reintentando automáticamente»: una fila del destino Teaching archive, con las instancias que esperan, el número de intentos, una línea roja con el último error, un botón «Reintentar ahora» y la cuenta atrás del próximo intento. «Retenido: no se envía nada»: una fila del destino Main archive, etiquetada «perfil desactivado», con tres instancias en espera, los nombres de sus tres archivos .dcm, el párrafo que nombra la edición que las libera y dos botones, «Ajustes de anonimización» y «La regla que lo pide», que abren la pestaña de Ajustes y la de Rutas." />
-        <figcaption>Las dos secciones son problemas distintos y la pestaña las mantiene separadas. Arriba, un nodo caído que se arreglará solo; abajo, una retención por anonimización, que ningún temporizador libera: por eso cada fila deletrea la edición que sí lo hace y lleva los dos botones que abren la pestaña donde se hace, <em>Ajustes de anonimización</em> hacia <em>Ajustes</em> y <em>La regla que lo pide</em> hacia <em>Rutas</em>.</figcaption>
+          alt="La pestaña Atascados de Estudios, bajo un aviso de que 8 archivos necesitan atención y con dos secciones. «Reintentando automáticamente»: el destino Teaching archive con dos instancias del estudio de CR en espera, su último error en rojo, un botón «Reintentar ahora» y la cuenta atrás del próximo intento. «Retenido: no se envía nada»: el destino Teaching archive, etiquetado «perfil desactivado», con seis instancias del estudio de TC en espera bajo su paciente y su número de accession, la edición que las libera, los botones «Ajustes de anonimización» y «La regla que lo pide», y «Enviar a…» y «Quitar de la cola»." />
+        <figcaption>Las dos secciones son problemas distintos y la pestaña las mantiene separadas. Arriba, un nodo caído que se arreglará solo; abajo, una retención por anonimización, que ningún temporizador libera: por eso cada fila deletrea la edición que sí lo hace y lleva los dos botones que abren la pestaña donde se hace, <em>Ajustes de anonimización</em> hacia <em>Ajustes</em> y <em>La regla que lo pide</em> hacia <em>Rutas</em>. Las filas se agrupan por estudio, así que se ve de quién son las imágenes que esperan, no solo nombres de fichero.</figcaption>
       </figure>
 
       <p>La pestaña puede dibujar una tercera sección, <em>Sin destino al que reintentar</em>, que aquí
@@ -486,11 +737,13 @@ openssl rand -base64 32</code></pre>
         destino habilitado. No queda ningún nodo al que llamar, así que nada los reintenta y ninguna
         edición de anonimización los mueve; cada fila dice qué pasará con ellos. Se arregla en
         <em>Destinos</em>, volviendo a habilitar ese destino con el mismo nombre o corrigiendo el nombre
-        en la regla que los mandó allí.</p>
+        en la regla que los mandó allí; o desde la propia fila, con <em>Enviar a…</em> otro destino, o
+        con <em>Quitar de la cola</em> para dar la pérdida por buena. Hasta entonces se quedan en la
+        carpeta de salida, sin archivarse ni borrarse.</p>
     </div>
 
     <div class="svc-doc">
-      <h3>Anonimización al reenviar</h3>
+      <h3 id="deid">Anonimización al reenviar</h3>
       <p class="port">Perfil PS3.15 Anexo E · se aplica solo a la copia que sale</p>
       <dl>
         <dt>Qué hace</dt>
@@ -648,17 +901,22 @@ openssl rand -base64 32</code></pre>
         <dd>Cuando sirves la worklist o tecleas órdenes a mano. Mientras no haya ninguna estación
           registrada, el destino de una orden se escribe a mano y una errata no se puede detectar.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/es/modalities.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="La pestaña Modalidades de Configuración: tres salas registradas —ER CT, Ultrasound 2 y Portable CR—, cada una con su nombre, el AE title de la estación, el código de modalidad y el nombre de estación, una casilla de activada y un botón «Probar worklist», sobre un botón para guardar las modalidades." />
+        <figcaption>Las salas a las que sirve este equipo. El destino de una orden se elige de esta lista, y <em>Probar worklist</em> en una fila le pregunta al otro RIS del hospital qué le daría a esa sala.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
-      <h3>Sonda de worklist — preguntarle al otro RIS</h3>
+      <h3 id="probe">Sonda de worklist — preguntarle al otro RIS</h3>
       <p class="port">Cliente saliente · C-FIND de worklist · <em>Configuración → Modalidades</em></p>
       <dl>
         <dt>Qué hace</dt>
         <dd>Responde a «¿por qué este equipo no ve su lista?» sin tocar el equipo. Dale una dirección al RIS
           real del hospital —o a su bróker— en <em>Ajustes</em> y pulsa <em>Probar worklist</em> en la fila
           de una modalidad: Carino le hace a ese RIS la pregunta que haría esa modalidad, usando su mismo AE
-          title, y archiva cada respuesta en <em>Actividad</em> → <em>Capturadas</em>. Una ejecución hace la
+          title, y archiva cada respuesta en <em>Actividad</em> → <em>Sondas de worklist</em>. Una ejecución hace la
           misma pregunta cinco veces, ensanchándola de clave en clave —estación, fecha y modalidad; luego
           sin la modalidad; sin la fecha; sin la estación—, porque lo que localiza el fallo es la
           <em>diferencia</em> entre las respuestas. Si no vuelve nada en ninguna, el otro RIS no tiene nada
@@ -669,10 +927,15 @@ openssl rand -base64 32</code></pre>
           modalidad, y dos cosas respondiendo al mismo AE title en un mismo RIS es un lío que luego hay que
           ir a deshacer.</dd>
         <dt>Qué no es</dt>
-        <dd>Ni un servicio, ni una agenda, ni una cola. Lo que hay en <em>Capturadas</em> es el registro de
+        <dd>Ni un servicio, ni una agenda, ni una cola. Lo que hay en <em>Sondas de worklist</em> es el registro de
           lo que contestó otro: esas órdenes no se sirven nunca en la worklist de este equipo, que no
           reclama ninguna. <em>Limpiar</em> vacía ese registro y nada más.</dd>
       </dl>
+      <figure class="shot">
+        <img src="../img/es/probes.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="La pestaña Sondas de worklist de Actividad: una ronda de sondeo hecha como US_ROOM_2 al otro RIS en pacs-peer, con las cinco preguntas —estación, fecha y modalidad, y luego quitando cada clave por turno— y lo que devolvió cada una, que aquí es siempre nada, porque el otro RIS de la demo no tiene órdenes; a la derecha, los botones de actualizar y limpiar." />
+        <figcaption>Una ronda de <em>Probar worklist</em>: la cabecera dice a quién se preguntó y con qué AE title, y cada fila es una pregunta con las claves que conserva, seguida de lo que devolvió. Se lee de la más estrecha a la más ancha: si una pregunta más ancha trae órdenes donde la más estrecha no trajo nada, la clave que quitó es la que estaba mal. Aquí todas responden <em>nada</em>, lo que significa que el otro RIS no tiene nada programado para esa sala, no que haya una clave mal: el RIS de la demo no tiene órdenes.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -693,8 +956,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/orders.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="El panel de órdenes RIS: un desplegable de nueva orden manual, pestañas de abiertas y cerradas, y tres órdenes abiertas con número de accession, paciente, modalidad, procedimiento solicitado, el emisor HL7 y la hora en que entraron, con acciones de capturar estudio, cancelar y borrar." />
-        <figcaption>Órdenes llegadas por HL7, y el desplegable de arriba para teclear una cuando no queda nada vivo aguas arriba. Cada una se cierra sola cuando aterriza el estudio que le corresponde, y se archiva en vez de borrarse.</figcaption>
+          alt="El panel de órdenes RIS: un desplegable de nueva orden manual, pestañas de abiertas y cerradas, un cuadro de búsqueda, un interruptor del pitido de llegada, y tres órdenes abiertas llegadas del RIS con número de accession, paciente, modalidad, procedimiento solicitado, el emisor HL7 y la hora en que entraron, cada una con un botón «Añadir PDF/imagen»." />
+        <figcaption>Órdenes llegadas por HL7, y el desplegable de arriba para teclear una cuando no queda nada vivo aguas arriba. Cada una se cierra sola cuando aterriza el estudio que le corresponde, y se archiva en vez de borrarse. Las órdenes del RIS solo las puede cancelar el RIS, así que no llevan Cancelar. Una orden nueva hace parpadear la fila <em>Órdenes</em>, y este puesto puede además pitar al llegar: el interruptor es por máquina y se recuerda.</figcaption>
       </figure>
       <div class="warn">
         <p><b>Sin TLS y sin credenciales.</b> Ver el apartado de seguridad: quien pueda abrir un socket a
@@ -720,7 +983,7 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
-      <h3>Avisos — webhook y correo</h3>
+      <h3 id="notify">Avisos — webhook y correo</h3>
       <p class="port">Sólo saliente · webhook HTTP, SMTP</p>
       <dl>
         <dt>Qué hace</dt>
@@ -746,23 +1009,48 @@ openssl rand -base64 32</code></pre>
           contador y una línea de registro, no en una excepción. Enviados, fallidos, descartados, en cola y
           el último error se pueden leer, así que «activado y no ha entregado nunca nada» se ve
           <em>antes</em> de la caída que depende de ello. Pruébalo una tarde tranquila, no durante una.</dd>
+        <dt>Dónde se configura</dt>
+        <dd>Todavía no en el panel: en la sección <code>notify</code> de <code>config.json</code> (la URL
+          del webhook, el servidor SMTP y el interruptor general <code>notify.enabled</code>). El secreto del
+          webhook y la contraseña SMTP van por <code>POST /api/notify/secret</code>, nunca a mano en el
+          fichero. Cada clave está descrita en
+          <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONFIGURATION.md#notify" target="_blank" rel="noopener">CONFIGURATION.md</a>.</dd>
       </dl>
     </div>
 
     <div class="svc-doc">
-      <h3>Impresión virtual</h3>
-      <p class="port">Puerto 11113 · DICOM Print, salida PDF</p>
+      <h3 id="print">Impresión virtual</h3>
+      <p class="port">Puerto 11113 · DICOM Print, salida PDF o Secondary Capture</p>
       <dl>
         <dt>Qué hace</dt>
-        <dd>Se presenta como una impresora DICOM y captura como PDF lo que le manden. Para equipos cuya
-          única salida es la placa, es la forma de conservar algo archivable.</dd>
+        <dd>Se presenta como una impresora DICOM (AE title <code>CARINOPRINT</code> por defecto) y captura
+          cada hoja de placa que le manden. Para equipos cuya única salida es la placa, es la forma de
+          conservar algo archivable. Una placa no trae una identidad de paciente fiable, así que cada una
+          espera en <em>Pendientes</em> a que una persona la identifique; nada impreso se reenvía solo.</dd>
         <dt>Cuándo activarlo</dt>
-        <dd>Cuando tengas una modalidad que solo sabe imprimir y quieras rescatar su resultado.</dd>
+        <dd>Cuando tengas una modalidad que solo sabe imprimir y quieras rescatar su resultado. Los pasos
+          están en <a href="#howto-print">Cómo hago para… imprimir</a>.</dd>
+        <dt>Ajustes</dt>
+        <dd>En <em>Configuración</em> → <em>Ajustes</em> → <em>Impresión</em>: el AE title y el puerto,
+          <em>Aceptar solo estos AE</em> (las modalidades que pueden imprimir; vacía significa cualquiera),
+          <em>Aceptar también trabajos de impresión en color</em> y <em>Guardar cada placa capturada
+          como</em> PDF o Imagen. Elige Imagen cuando el PACS o el visor que recibe no muestre PDF, y
+          muchos no lo hacen.</dd>
+        <dt>Cómo sabes que funciona</dt>
+        <dd><em>Enviar una impresión de prueba</em> en la tarjeta pasa una impresión completa por el
+          receptor y deja en <em>Pendientes</em> una hoja marcada «TEST PRINT — safe to discard». Tras un
+          trabajo real, la tarjeta muestra <em>Última impresión</em> (cuántas placas, de qué AE y desde qué
+          dirección) y el contador <em>Capturadas</em>. Un rechazo o un fallo aparece como <em>Último
+          problema</em>; ver la <a href="#trouble-print">tabla de problemas de impresión</a>.</dd>
+        <dt>Qué tolera</dt>
+        <dd>Modalidades que dejan a la impresora los números de la sesión y de la placa, una Presentation
+          LUT (se acepta y se ignora) y un AE title de impresora tecleado distinto en la modalidad: el AE
+          llamado no se comprueba.</dd>
       </dl>
       <figure class="shot">
         <img src="../img/es/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña Pendientes de Estudios: dos elementos en cola, un PDF y un JPEG, cada uno con nombre de paciente, ID, número de accession, fecha y descripción del estudio ya rellenados a partir del estudio junto al que llegaron, un enlace de vista previa y botones de aprobar y enviar o descartar." />
-        <figcaption>La placa capturada —y cualquier PDF o imagen encontrado junto a un estudio— espera aquí con los datos del propio estudio ya rellenados, en vez de convertirse a DICOM a ciegas. Usted confirma la identidad y luego aprueba.</figcaption>
+          alt="La pestaña Pendientes de Estudios, con un 3 en la pestaña: el JPEG y, debajo, el PDF que llegaron junto al estudio de RM, con el nombre del paciente, el ID, el número de accession, la fecha y la descripción del estudio ya rellenados a partir de ese estudio, un enlace de vista previa, un botón «Asociar a una orden…» y botones de aprobar y enviar o descartar. El tercer elemento, la placa capturada por el receptor de impresión, queda más abajo en la lista, fuera de la captura." />
+        <figcaption>Un JPEG y un PDF encontrados junto al estudio de RM, cada uno con los datos de ese estudio ya rellenados. Lo que no es DICOM espera aquí en vez de convertirse a ciegas; las placas capturadas por el receptor de impresión también llegan a esta pestaña, en esta lista por debajo de estos dos. Elige con <em>Asociar a una orden…</em> la orden abierta a la que pertenece, o teclea la identidad (el ID y el nombre del paciente son obligatorios), y luego aprueba. Si cambias el paciente de un elemento que llegó junto a un estudio, se te pregunta si sigue perteneciendo a ese estudio o empieza uno nuevo.</figcaption>
       </figure>
     </div>
 
@@ -784,7 +1072,7 @@ openssl rand -base64 32</code></pre>
           —<em>Destinos</em>, <em>Rutas</em>, <em>Ajustes</em>, <em>Modalidades</em> y
           <em>Personas</em>—, y esa pantalla abre por <em>Destinos</em>, no por <em>Ajustes</em>; y los
           tres registros son las pestañas de <em>Actividad</em> —<em>Registro</em>, <em>Auditoría</em> y
-          <em>Capturadas</em>, esta última lo que contestó otro RIS cuando este equipo le preguntó como
+          <em>Sondas de worklist</em>, esta última lo que contestó otro RIS cuando este equipo le preguntó como
           una de tus modalidades—. <em>Órdenes</em> mantiene
           su propia tira de abiertas y cerradas. La fila de <em>Estudios</em> lleva dos contadores
           que son botones, 📎 lo que espera aprobación y ⚠ lo que está atascado, y cada uno abre su
@@ -812,8 +1100,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="../img/es/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña Ajustes de Configuración, con sus doce bloques en tres columnas en una pantalla ancha: el AE title del receptor, su dirección de escucha, puerto, carpeta de almacenamiento, mínimo de espacio libre, lista de AE permitidos y campos TLS; el AE llamante del auto-envío, la carpeta vigilada, el intervalo de sondeo, qué hacer tras enviar un fichero y sus ajustes de confianza TLS; y al lado los bloques de impresión, conmutación de emergencia, Modality Worklist, RIS de emergencia, Consulta/Recuperación, DICOMweb, índice de instancias, anonimización, acceso a la API e integraciones." />
-        <figcaption>Todo lo que hay en <code>config.json</code>, en un formulario. El fichero sigue siendo la fuente de verdad: editar aquí lo escribe, y una configuración que el panel se negaría a guardar se rechaza diciendo por qué, no se reescribe en silencio.</figcaption>
+          alt="La pestaña Ajustes de Configuración, abierta en su primer grupo, Este PACS, marcado como receptor en marcha: la casilla «Ejecutar este servicio (también al arrancar)» del receptor, su AE title, la dirección de escucha, el puerto, la carpeta de almacenamiento, la casilla de organizar por paciente, estudio y serie, el mínimo de espacio libre, la lista de AE permitidos y la casilla de servir DICOM por TLS. Los demás grupos quedan más abajo, y abajo a la derecha están los botones «Volver a elegir servicios» y «Guardar configuración»." />
+        <figcaption>Todo lo que hay en <code>config.json</code>, en un formulario agrupado por tareas: abre el grupo que necesitas y deja el resto plegado. El fichero sigue siendo la fuente de verdad: editar aquí lo escribe, y una configuración que el panel se negaría a guardar se rechaza diciendo por qué y en qué campo, no se reescribe en silencio. Los grupos son secciones plegables —aquí <em>Este PACS</em> abierto, y <em>Envío</em>, <em>Worklist y órdenes</em>, <em>Impresión</em> y los demás plegados debajo—, y <em>Apagar el servicio</em> está solo en el último, <em>Zona de peligro</em>. <em>Volver a elegir servicios</em> y <em>Guardar configuración</em> son los botones del pie, siempre a la vista.</figcaption>
       </figure>
 
       <figure class="shot">
@@ -824,7 +1112,7 @@ openssl rand -base64 32</code></pre>
 
       <figure class="shot">
         <img src="../img/es/editor-tags.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="La pestaña de edición del editor: una barra con anonimizar todo, aleatorizar todo, añadir etiqueta, JSON, CSV, imprimir y descargar todo; una tira con las cinco series cargadas; filtros por paciente, estudio, serie, imagen, equipo, UIDs y etiquetas privadas; la tabla de etiquetas, una fila por atributo con su grupo y elemento, descripción, VR y un valor editable; y en el tercio derecho un panel de ediciones de imagen —girar, voltear, invertir y censurar el texto grabado, escrito en los píxeles guardados— sobre la vista previa, una lectura de ventana/nivel plegada y la zona para soltar archivos." />
+          alt="La pestaña de edición del editor: una barra con anonimizar (PS3.15), opciones, paciente ficticio (datos de prueba), deshacer y rehacer, añadir etiqueta, JSON, CSV, imprimir, este archivo y descargar todo; una tira con las cinco series cargadas; filtros por paciente, estudio, serie, imagen, equipo, UIDs y etiquetas privadas; la tabla de etiquetas, una fila por atributo con su grupo y elemento, descripción, VR y un valor editable; y en el tercio derecho un panel de ediciones de imagen —girar, voltear, invertir y censurar el texto grabado, escrito en los píxeles guardados— sobre la vista previa, una lectura de ventana/nivel plegada y la zona para soltar archivos." />
         <figcaption>La tabla de etiquetas, donde se corrige una cabecera antes de reenviar un estudio: un número de accession equivocado o un ID de paciente mal tecleado, arreglado en la pasarela y no en la modalidad que ya siguió con lo suyo.</figcaption>
       </figure>
     </div>
@@ -873,7 +1161,7 @@ openssl rand -base64 32</code></pre>
       </div>
     </div>
 
-    <h2 id="no-es">5. Esto no es un producto sanitario</h2>
+    <h2 id="no-es">7. Esto no es un producto sanitario</h2>
 
     <div class="danger">
       <p><b>Carino DICOM no es un producto sanitario.</b> No está certificado, ni autorizado, ni
@@ -910,7 +1198,7 @@ openssl rand -base64 32</code></pre>
       él; del resto respondes tú.</p>
 
     <!-- ─────────────────────────────────────────────────────────── -->
-    <h2 id="ayuda">6. Licencia y dónde pedir ayuda</h2>
+    <h2 id="ayuda">8. Licencia y dónde pedir ayuda</h2>
     <p>Carino DICOM se publica bajo <strong>AGPL-3.0-or-later</strong>. Como es un servidor de red, se
       aplica el §13: si ejecutas una versión modificada como servicio, debes ofrecer su código a quienes
       la usen. Conserva el fichero <code>LICENSE</code> y un enlace al código con cualquier despliegue
@@ -924,9 +1212,10 @@ openssl rand -base64 32</code></pre>
         contribuir</a></li>
     </ul>
     <p>Si encuentras un error en este manual —o una traducción que un radiólogo no diría nunca— abre una
-      incidencia. La documentación en español y portugués es parte del proyecto, no un extra.</p>
+      incidencia. Los manuales en español, portugués, japonés y ruso son parte del proyecto, no un
+      extra.</p>
 
-    <p class="foot">Carino DICOM · <a href="../../">portada</a> · parte del taller
+    <p class="foot">Carino DICOM · <a href="https://dicom.carino.systems/" target="_blank" rel="noopener">portada</a> · parte del taller
       <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a> ·
       AGPL-3.0-or-later.</p>
   </main>

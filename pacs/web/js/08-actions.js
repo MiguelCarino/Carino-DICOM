@@ -7,6 +7,9 @@ async function echoRow(tr) {
     host: tr.querySelector(".d-host").value.trim(),
     port: parseInt(tr.querySelector(".d-port").value, 10),
     aet: tr.querySelector(".d-aet").value.trim(),
+    // The row's own TLS tick: a plain echo to a TLS-only node is a false failure, and a pass on a
+    // node that takes both is a false pass.
+    tls: tr.querySelector(".d-tls").checked,
   };
   const btn = tr.querySelector(".echo");
   if (!dest.host || !dest.port || !dest.aet) { flashNote(T("Fill host, port and AE first"), false); return; }
@@ -21,7 +24,9 @@ async function echoRow(tr) {
 
 /* A toast: `ok` = green/red. `opts.warn` = must-not-miss: announced assertively (role="alert",
    so it interrupts #ordAlertLive), never times out. The role is set BEFORE the text because
-   several screen readers skip text that arrives together with its live region. */
+   several screen readers skip text that arrives together with its live region.
+   An error (ok=false) also stays until dismissed or replaced: a refusal read in five seconds,
+   on a tab the operator may not even be looking at, is a refusal missed. */
 let noteGen = 0;
 function flashNote(msg, ok, opts) {
   // The token prompt owns its own message line; don't stack 401 toasts behind it.
@@ -38,11 +43,11 @@ function flashNote(msg, ok, opts) {
   const paint = () => {
     if (gen !== noteGen) return;      // a newer toast landed inside the gap
     t.textContent = msg;
-    if (warn) t.append(" ", dismissNote());
+    if (warn || !ok) t.append(" ", dismissNote());
   };
   if (warn) setTimeout(paint, 60); else paint();
-  // A warning stays until dismissed or replaced: what it reports stays true until acted on.
-  if (!warn) flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
+  // A warning or an error stays until dismissed or replaced: what it reports stays true until acted on.
+  if (!warn && ok) flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
 }
 
 // Keyboard-reachable close button for a warning toast; the name lives on aria-label, not the glyph.
@@ -186,24 +191,155 @@ async function applyToken(action) {
   setAuthMsg(T("Token changed — sign in with the new one."), true);
 }
 
-async function saveConfig() {
-  try {
-    await post("/api/config", collectConfig());
-    flashNote(T("Saved."), true);
-    pollStatus();
-    return true;
-  } catch (e) { flashNote(e.message, false); return false; }
+/* One Save for every Configuration tab (the engine takes the whole document). Checked here first,
+   then sent with If-Match: a 409 means someone else saved since this tab loaded, and the answer is
+   a reload, never a retry (which would revert their change). */
+// The engine names what a Save restarted, started and stopped, in its own English labels; say it
+// in the operator's language, and say a stop out loud — unticking "Run this service" now stops it.
+const ENGINE_SERVICE_LABEL = {
+  "receiver": "Receiver", "print receiver": "Print receiver", "RIS listener": "Emergency RIS",
+  "worklist SCP": "Worklist", "Query/Retrieve SCP": "Query/Retrieve", "watcher": "Auto-send",
+};
+function savedSummary(r) {
+  const names = (list) => (list || []).map((x) => T(ENGINE_SERVICE_LABEL[x] || x)).join(", ");
+  const parts = [];
+  if (r && r.stopped && r.stopped.length) parts.push(TF("{services} stopped", { services: names(r.stopped) }));
+  if (r && r.started && r.started.length) parts.push(TF("{services} started", { services: names(r.started) }));
+  if (r && r.restarted && r.restarted.length) parts.push(TF("{services} restarted", { services: names(r.restarted) }));
+  return parts.length ? TF("Saved — {changes}", { changes: parts.join("; ") }) : T("Saved.");
 }
 
+async function saveConfig() {
+  clearFieldProblems();
+  if (configReadOnly) return false;
+  const problem = configProblem();
+  if (problem) { showFieldProblem(problem); return false; }
+  try {
+    let etag = "";
+    const r = await api("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Carino": "1", ...(configEtag ? { "If-Match": configEtag } : {}) },
+      body: JSON.stringify(collectConfig()),
+      onResponse: (res) => { etag = res.headers.get("ETag") || ""; },
+    });
+    if (etag) configEtag = etag;
+    // The saved document is now what is loaded: later own-write checks compare against it.
+    await refreshEtagAfterOwnWrite(null, etag || true);
+    settingsDirty = false;
+    showStale(false);
+    flashNote(savedSummary(r), true);
+    pollStatus();
+    return true;
+  } catch (e) {
+    if (e.status === 409 && e.code === "stale_config") { showStale(true); return false; }
+    if (e.field) { showFieldProblem(problemForField(e.field, e.message)); return false; }
+    if (e.status === 403 && e.forbidden) {
+      const caps = e.forbidden.capabilities || [e.forbidden.capability].filter(Boolean);
+      flashNote(TF("Not saved — your profile is not allowed to make this change (it needs: {caps}).", { caps: caps.join(", ") }), false);
+      return false;
+    }
+    flashNote(e.message, false);
+    return false;
+  }
+}
+
+/* After a write that changed the stored config by OUR hand (a card Start/Stop, the site key), take
+   the new version tag ONLY if the document differs from what this tab loaded in exactly that way.
+   Anything else means someone else changed it too, and the old tag stays so the next Save gets
+   the 409 it deserves. `expect(doc, old)` rewrites the fresh document back to the loaded shape.
+   `adopt` (after our own Save) is the tag the POST answered with: the fresh copy is taken only if it
+   still carries that tag (true = no tag to compare, take it). */
+async function refreshEtagAfterOwnWrite(expect, adopt) {
+  if (!can("config.read") || !loadedRaw) return;
+  let etag = "", fresh;
+  try {
+    fresh = await api("/api/config", { onResponse: (res) => { etag = res.headers.get("ETag") || ""; } });
+  } catch (e) { return; }
+  if (adopt) {
+    if (adopt !== true && etag && etag !== adopt) return;
+  } else {
+    const probe = JSON.parse(JSON.stringify(fresh));
+    if (expect) expect(probe, loadedRaw);
+    if (JSON.stringify(probe) !== JSON.stringify(loadedRaw)) return;
+  }
+  loadedRaw = fresh;
+  if (etag) configEtag = etag;
+}
+
+// Service -> its config section and the Settings checkbox that mirrors its `enabled` flag.
+const SERVICE_SECTION = {
+  receiver: ["scp", "scpEnabled"], watcher: ["scu", "scuEnabled"], printer: ["print", "prnEnabled"],
+  ris: ["ris", "risEnabled"], mwl: ["mwl", "mwlEnabled"], qr: ["qr", "qrEnabled"],
+};
+const SERVICE_NAME = { receiver: "Receiver", watcher: "Auto-send", printer: "Print receiver",
+                       ris: "Emergency RIS", mwl: "Worklist", qr: "Query/Retrieve" };
+
+// What stopping each service does to the equipment that depends on it, said before it happens.
+function stopConsequence(kind) {
+  const st = (lastStatus && lastStatus[kind]) || {};
+  const aet = st.aet || "";
+  switch (kind) {
+    case "receiver": return TF("Modalities sending to {aet} will get errors until it is started again.", { aet });
+    case "printer": return TF("Modalities printing to {aet} will get errors until it is started again.", { aet });
+    case "mwl": return TF("Modalities asking {aet} for their worklist will get errors until it is started again.", { aet });
+    case "qr": return TF("Workstations searching {aet} will get errors until it is started again.", { aet });
+    case "ris": return TF("HL7 orders sent to port {port} will be refused until it is started again.", { port: st.port || "" });
+    default: return T("Studies in the watched folder wait, and nothing is forwarded until it is started again.");
+  }
+}
+
+/* Start/Stop is ONE model (engine C1): start = enable + start, stop = disable + stop, persisted by the
+   engine for that service alone. Nothing from the Settings form is posted from a card. */
 async function toggle(kind, btn) {
   const action = btn.dataset.on === "true" ? "stop" : "start";
+  if (action === "stop" && !confirm(TF("Stop {svc}?", { svc: T(SERVICE_NAME[kind] || kind) }) + "\n\n"
+      + stopConsequence(kind) + " " + T("It stays off after a restart too."))) return;
   btn.disabled = true;
   try {
-    // Persist current edits before starting so workers use them.
-    if (action === "start") await post("/api/config", collectConfig()).catch(() => {});
-    await post("/api/" + kind, { action });
+    const r = await post("/api/" + kind, { action });
+    if (r && r.ok === false) flashNote(r.error || r.message || T("The service did not change."), false);
+    const blk = (r && r[kind]) || null;
+    const enabled = blk && typeof blk.enabled === "boolean" ? blk.enabled : action === "start";
+    syncEnabledFlag(kind, enabled);
   } catch (e) { flashNote(e.message, false); }
   finally { btn.disabled = false; pollStatus(); }
+}
+
+/* Mirror the engine's persisted flag into the Settings checkbox and the loaded snapshot (a later Save
+   spreads the snapshot, and under C2b a stale `enabled` there would stop the service again), then
+   adopt the new version tag if this toggle was the only change. */
+function syncEnabledFlag(kind, enabled) {
+  const map = SERVICE_SECTION[kind];
+  if (!map) return;
+  const [section, boxId] = map;
+  const box = $(boxId);
+  if (box) box.checked = enabled;
+  const snap = { scp: loadedScp, scu: loadedScu, print: loadedPrint, ris: loadedRis, mwl: loadedMwl, qr: loadedQr }[section];
+  if (snap) snap.enabled = enabled;
+  refreshEtagAfterOwnWrite((doc, old) => {
+    if (doc[section] && old[section]) doc[section].enabled = old[section].enabled;
+  }).then(() => {
+    if (loadedRaw && loadedRaw[section]) loadedRaw[section].enabled = enabled;
+  });
+}
+
+/* POST /api/selftest (C4): the engine connects to its own listener and reports. The answer stays
+   on the card, beside the button that asked. */
+async function selfTest(service, btn, print) {
+  const pfx = { receiver: "rx", printer: "px", mwl: "mw", qr: "qr", ris: "rs" }[service];
+  const out = $(pfx + "TestResult");
+  btn.disabled = true;
+  if (out) { out.hidden = false; out.className = "card-test-result"; out.textContent = T("Testing…"); }
+  try {
+    const r = await post("/api/selftest", print ? { service, print: true } : { service });
+    if (out) {
+      out.className = "card-test-result " + (r.ok ? "ok" : "bad");
+      out.textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "") + (r.ms != null ? " (" + r.ms + " ms)" : "")
+        + (print && r.ok ? " " + T("The test sheet lands in 📎 Pending — discard it there.") : "");
+    }
+  } catch (e) {
+    if (out) { out.className = "card-test-result bad"; out.textContent = "✗ " + e.message; }
+  } finally { btn.disabled = false; }
 }
 
 // ---- Drag & drop a folder onto the Receiver / Auto-send cards ----

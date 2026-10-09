@@ -263,5 +263,31 @@ def test_arming_that_cannot_be_saved_does_not_leave_the_dashboard_lying(ctl):
     assert ctl.armed is False
 
 
+def test_the_route_lets_anyone_signed_in_dismiss_but_not_decide(tmp_path):
+    from pacs.server import PacsServer
+    from pacs.web import create_app
+    cfg = Config(str(tmp_path / "config.json")).load()
+    cfg.scu["watch_dir"] = str(tmp_path / "outgoing")
+    with cfg.mutate():
+        cfg.users["profiles"] = U.preset_profiles()
+        cfg.save()
+    srv = PacsServer(cfg)
+    try:
+        ids = {p["name"]: p["id"] for p in cfg.users["profiles"]}
+        c = create_app(srv).test_client()
+        h = {"X-Carino": "1"}
+        # Reception holds no emergency.activate.
+        assert c.post("/api/login", json={"profile": ids["Reception"]},
+                      headers=h).status_code == 200
+        r = c.post("/api/emergency", json={"action": "dismiss"}, headers=h)
+        assert r.status_code == 200 and r.get_json()["ok"], r.get_json()
+        for action in ("activate", "arm", "disarm", "resume", None):
+            r = c.post("/api/emergency", json={"action": action}, headers=h)
+            assert r.status_code == 403, (action, r.status_code)
+            assert r.get_json()["forbidden"]["capability"] == "emergency.activate"
+    finally:
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

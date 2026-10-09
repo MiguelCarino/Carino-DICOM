@@ -953,6 +953,11 @@ def test_allowed_aets():
         ae.add_requested_context(StudyRootQueryRetrieveInformationModelFind)
         assoc = ae.associate("127.0.0.1", scp.port, ae_title=QR_AET)
         assert not assoc.is_established, "an unlisted calling AE was let in"
+        time.sleep(0.2)
+        said = [e["message"] for e in fx.log.tail(50) if e.get("kind") == "qr"]
+        assert any("refused BADAE" in m and "allowed list (GOODAE)" in m for m in said), \
+            f"the refusal left no reason in the log: {said}"
+        assert scp.error_count == 1, "a refused caller was not counted"
 
         q = Dataset()
         q.QueryRetrieveLevel = "STUDY"

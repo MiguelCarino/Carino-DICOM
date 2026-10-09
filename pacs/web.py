@@ -18,6 +18,7 @@ import copy
 import json
 import mimetypes
 import os
+import re
 import sys
 import threading
 import time
@@ -26,7 +27,7 @@ from urllib.parse import urlsplit
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
 
 from . import APP_NAME, __version__, audit, auth, users
-from .config import (auth_token_of, deid_secret_of, is_loopback_host,
+from .config import (DEFAULTS, auth_token_of, deid_secret_of, is_loopback_host,
                      notify_secrets_of, web_host_of)
 from .server import PacsServer
 
@@ -37,6 +38,11 @@ from .server import PacsServer
 # Python resolves MIME types from /etc/mime.types on Linux and from the registry
 # on Windows, where .wasm is frequently absent. Register it rather than hope.
 mimetypes.add_type("application/wasm", ".wasm")
+
+# A validation message that starts with a config key ("scp.port must be …",
+# "'print' must be an object"); see _config_field in create_app.
+_FIELD_AT_START = re.compile(r"^'?([a-z_]+(?:\.[a-z_]+)*)'?(?=[\s\[]|$)")
+_CONFIG_SECTIONS = frozenset(DEFAULTS) | {"destinations", "modalities"}
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 # When frozen by PyInstaller the package modules live in the archive; the web/
@@ -322,6 +328,7 @@ def create_app(server: PacsServer) -> Flask:
         "disk":           "config.read",    # storage paths and free space
         "pending":        "studies.read",
         "stuck":          "studies.read",
+        "stuck_by_dest":  "routing.read",   # node names, and errors that carry host:port
         "index":          "studies.read",
         "ris":            "orders.read",    # carries the last order's identity
         # This department's own rooms: name, AE title, modality code. No
@@ -358,7 +365,8 @@ def create_app(server: PacsServer) -> Flask:
         # someone emergency.notify names, and whether they have already
         # acknowledged this particular outage.
         if "emergency" in body:
-            body["emergency"] = server.emergency.status(_as_profile(profile))
+            body["emergency"] = {**server.emergency.status(_as_profile(profile)),
+                                 "held_remaining": body["emergency"].get("held_remaining")}
         out = {}
         for key, value in body.items():
             need = _STATUS_GATES.get(key)
@@ -545,9 +553,10 @@ def create_app(server: PacsServer) -> Flask:
     # token rotation rather than merely safe from another Save. What this still
     # buys is the bounce: apply_config stops and restarts services outside the
     # config lock, and two of those running through each other is a receiver
-    # started from one config and stopped by the other. Nothing else takes this
-    # lock, and nothing takes it while holding the config lock, so the two
-    # cannot deadlock against each other.
+    # started from one config and stopped by the other. Only the routes that
+    # move services take it (Save, a card's Start/Stop, the setup chooser), and
+    # nothing takes it while holding the config lock, so the two cannot
+    # deadlock against each other.
     _save_lock = threading.Lock()
 
     class _Refused(Exception):
@@ -570,6 +579,34 @@ def create_app(server: PacsServer) -> Flask:
         """Stamp a config response with the fingerprint of what is now stored."""
         resp.headers["ETag"] = f'"{server.cfg.version()}"'
         return resp
+
+    def _config_field(message: str, doc) -> "str | None":
+        """The dotted config key a validation message is about, so the dashboard
+        can take the operator to the field; None when it names none.
+
+        Read off the message because validate() states the key first ("scp.port
+        must be 1..65535", "'print' must be an object") — the convention every
+        message there follows."""
+        m = _FIELD_AT_START.match(message)
+        if m and m.group(1).split(".")[0] in _CONFIG_SECTIONS:
+            field = m.group(1)
+            # "<x>.tls is on but tls_cert / tls_key are not set": the field
+            # that needs filling is the certificate, not the switch.
+            if field.endswith(".tls") and "tls_cert" in message:
+                field = field[:-4] + ".tls_cert"
+            return field
+        if message.startswith(("routing rule", "routing.rules")):
+            return "routing.rules"
+        if message.startswith(("destination", "destinations")):
+            return "destinations"
+        if message.startswith(("modality", "modalities")):
+            return "modalities"
+        if message.startswith("AE titles must be"):
+            for key in ("scp", "scu"):
+                block = doc.get(key) if isinstance(doc, dict) else None
+                if isinstance(block, dict) and len(str(block.get("aet", ""))) > 16:
+                    return f"{key}.aet"
+        return None
 
     @app.get("/api/config")
     def api_get_config():
@@ -786,23 +823,49 @@ def create_app(server: PacsServer) -> Flask:
                     detail="this Save changes de-identification, which decides whether a "
                            "study a routing rule promised to scrub is sent identified. "
                            "It needs deid.manage, which this profile does not hold."))
+
+            # Routing rules and destinations each have their own write
+            # capability, and config.write does not imply either — the same rule
+            # as deid.manage above. This whole document is the only way to edit
+            # them, so without this comparison routing.write and
+            # destinations.write would be checkboxes that change nothing.
+            change = audit.config_changes(stored, data)
+            request.environ["carino.audit_detail"] = change
+            who = guard.current()
+            lacking = [cap for section, cap in (("routing", "routing.write"),
+                                                ("destinations", "destinations.write"))
+                       if section in change["sections"] and not who.can(cap)]
+            if lacking:
+                raise _Refused(403, dict(
+                    ok=False, error="not permitted",
+                    forbidden={"capability": lacking[0], "capabilities": lacking,
+                               "fields": [c.split(".")[0] for c in lacking]},
+                    detail="this Save changes "
+                           + " and ".join(c.split(".")[0] for c in lacking)
+                           + ", which needs " + " and ".join(lacking)
+                           + " — this profile does not hold it."))
             return data
 
         with _save_lock:
             try:
-                server.apply_config(edit=_merge)
+                applied = server.apply_config(edit=_merge) or {}
             except _Refused as refusal:
                 # 409 carries the CURRENT fingerprint so the client's reload has
                 # something to compare against; the 400s are plain refusals.
                 resp = jsonify(**refusal.body)
                 return (_tagged(resp) if refusal.status == 409 else resp), refusal.status
             except ValueError as exc:          # invalid config
-                return jsonify(error=str(exc)), 400
+                return jsonify(error=str(exc), field=_config_field(str(exc), data)), 400
             except OSError as exc:             # e.g. TLS cert/key unreadable, port in use
                 return jsonify(error=f"could not apply config: {exc}"), 400
             # The new fingerprint rides out on the response, so a client that
             # sent one can keep saving without a re-GET between every Save.
-            return _tagged(jsonify(ok=True, config=_redacted(server.cfg.data)))
+            # `restarted` says which listeners the Save bounced (only those whose
+            # own settings changed); `started`/`stopped` the ones a flag moved.
+            return _tagged(jsonify(ok=True, config=_redacted(server.cfg.data),
+                                   restarted=applied.get("restarted", []),
+                                   started=applied.get("started", []),
+                                   stopped=applied.get("stopped", [])))
 
     @app.post("/api/auth/token")
     def api_auth_token():
@@ -1039,7 +1102,12 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         d = request.get_json(silent=True) or {}
         try:
-            res = server.apply_setup(d.get("services") or {})
+            # Under the save lock like every other config writer: its
+            # sync_services() starts and stops listeners, and a Save or a card's
+            # Start/Stop restarting the same ones at the same moment can leave
+            # a service down that both meant to have up.
+            with _save_lock:
+                res = server.apply_setup(d.get("services") or {})
         except ValueError as exc:          # invalid candidate config
             return jsonify(error=str(exc)), 400
         except OSError as exc:             # e.g. config file unwritable
@@ -1119,111 +1187,59 @@ def create_app(server: PacsServer) -> Flask:
                        message=f"Dev peer {block['aet']} listening on "
                                f"127.0.0.1:{block['scp_port']}.")
 
-    @app.post("/api/receiver")
-    def api_receiver():
+    def _service_switch(name: str, label: str):
+        """A card's Start / Stop. One model (PacsServer.set_service): Start
+        enables and starts, Stop disables and stops — only that service's flag
+        is written and no other service is touched. Under the save lock, so a
+        flag write and a Save's restarts cannot interleave."""
         denied = guard.deny("services.control")
         if denied:
             return denied
         action = (request.get_json(silent=True) or {}).get("action")
+        if action not in ("start", "stop"):
+            return jsonify(error="action must be start|stop"), 400
         try:
-            if action == "start":
-                server.start_receiver()
-            elif action == "stop":
-                server.stop_receiver()
-            else:
-                return jsonify(error="action must be start|stop"), 400
-        except OSError as exc:
-            return jsonify(error=f"could not start receiver: {exc}"), 400
-        return jsonify(ok=True, receiver=server.status()["receiver"])
+            with _save_lock:
+                server.set_service(name, action)
+        # ValueError as well as OSError: a Start that would clash with another
+        # enabled listener's port is refused by validation, and Q/R refuses to
+        # run without the instance index. Both are messages, not 500s.
+        except (OSError, ValueError) as exc:
+            return jsonify(error=f"could not {action} the {label}: {exc}"), 400
+        return jsonify(**{"ok": True, name: server.status()[name]})
+
+    @app.post("/api/receiver")
+    def api_receiver():
+        return _service_switch("receiver", "receiver")
 
     @app.post("/api/printer")
     def api_printer():
-        denied = guard.deny("services.control")
-        if denied:
-            return denied
-        action = (request.get_json(silent=True) or {}).get("action")
-        try:
-            if action == "start":
-                server.start_printer()
-            elif action == "stop":
-                server.stop_printer()
-            else:
-                return jsonify(error="action must be start|stop"), 400
-        except OSError as exc:
-            return jsonify(error=f"could not start print receiver: {exc}"), 400
-        return jsonify(ok=True, printer=server.status()["printer"])
+        return _service_switch("printer", "print receiver")
 
     @app.post("/api/ris")
     def api_ris():
-        denied = guard.deny("services.control")
-        if denied:
-            return denied
-        action = (request.get_json(silent=True) or {}).get("action")
-        try:
-            if action == "start":
-                server.start_ris()
-            elif action == "stop":
-                server.stop_ris()
-            else:
-                return jsonify(error="action must be start|stop"), 400
-        except OSError as exc:
-            return jsonify(error=f"could not start RIS listener: {exc}"), 400
-        return jsonify(ok=True, ris=server.status()["ris"])
+        return _service_switch("ris", "RIS listener")
 
     @app.post("/api/emergency")
     def api_emergency():
-        denied = guard.deny("emergency.activate")
-        if denied:
-            return denied
         action = (request.get_json(silent=True) or {}).get("action")
+        # Dismiss is acknowledging a prompt the caller is being shown, which
+        # anyone signed in may do (emergency_action records who); the actions
+        # that change what the appliance does need the capability.
+        if action != "dismiss":
+            denied = guard.deny("emergency.activate")
+            if denied:
+                return denied
         res = server.emergency_action(action, _profile_or_none())
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/mwl")
     def api_mwl():
-        denied = guard.deny("services.control")
-        if denied:
-            return denied
-        action = (request.get_json(silent=True) or {}).get("action")
-        try:
-            if action == "start":
-                server.start_mwl()
-                # An operator pressing Start says the worklist should stay up
-                # until an operator presses Stop. start_mwl() clears the
-                # reclaimable flag on a start it actually performs, but it
-                # returns early when the SCP is already running — which is
-                # exactly the case this line exists for: pressing Start on a
-                # worklist the outage brought up is an operator adopting it,
-                # and it must not then be taken away by the next order that
-                # closes.
-                server.mwl_for_orders = False
-            elif action == "stop":
-                server.stop_mwl()
-            else:
-                return jsonify(error="action must be start|stop"), 400
-        except OSError as exc:
-            return jsonify(error=f"could not start worklist SCP: {exc}"), 400
-        return jsonify(ok=True, mwl=server.status()["mwl"])
+        return _service_switch("mwl", "worklist SCP")
 
     @app.post("/api/qr")
     def api_qr():
-        denied = guard.deny("services.control")
-        if denied:
-            return denied
-        action = (request.get_json(silent=True) or {}).get("action")
-        try:
-            if action == "start":
-                server.start_qr()
-            elif action == "stop":
-                server.stop_qr()
-            else:
-                return jsonify(error="action must be start|stop"), 400
-        # ValueError as well as OSError: Q/R answers exclusively out of the
-        # instance index and start_qr refuses to run without it. That is a
-        # message the operator has to see, not a 500.
-        except (OSError, ValueError) as exc:
-            return jsonify(error=f"could not {action} Query/Retrieve SCP: {exc}"), 400
-        return jsonify(ok=True, qr=server.status()["qr"])
+        return _service_switch("qr", "Query/Retrieve SCP")
 
     # ---- RIS orders (emergency RIS: intake + reconciliation) --------------
     @app.get("/api/ris/orders")
@@ -1320,17 +1336,7 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/watcher")
     def api_watcher():
-        denied = guard.deny("services.control")
-        if denied:
-            return denied
-        action = (request.get_json(silent=True) or {}).get("action")
-        if action == "start":
-            server.start_watcher()
-        elif action == "stop":
-            server.stop_watcher()
-        else:
-            return jsonify(error="action must be start|stop"), 400
-        return jsonify(ok=True, watcher=server.status()["watcher"])
+        return _service_switch("watcher", "watcher")
 
     @app.post("/api/echo")
     def api_echo():
@@ -1343,6 +1349,18 @@ def create_app(server: PacsServer) -> Flask:
                 return jsonify(error=f"destination missing '{k}'"), 400
         res = server.echo(dest)
         return jsonify(ok=res.ok, message=res.message)
+
+    @app.post("/api/selftest")
+    def api_selftest():
+        """Test one of our own listeners from the inside (see
+        PacsServer.selftest). A failed test is a 200 with ok:false — the
+        answer to "does it work?" is the result, not an HTTP error."""
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
+        d = request.get_json(silent=True) or {}
+        res = server.selftest(str(d.get("service", "")), do_print=bool(d.get("print")))
+        return jsonify(res)
 
     @app.post("/api/worklist/probe")
     def api_worklist_probe():
@@ -1391,7 +1409,37 @@ def create_app(server: PacsServer) -> Flask:
             since = int(request.args.get("since", 0))
         except ValueError:
             since = 0
-        return jsonify(last_seq=server.log.last_seq, entries=server.log.since(since))
+        try:
+            limit = max(0, int(request.args.get("limit", 0) or 0))
+        except ValueError:
+            limit = 0
+        kinds = [k.strip() for k in str(request.args.get("kind", "")).split(",") if k.strip()]
+        return jsonify(last_seq=server.log.last_seq,
+                       entries=server.log.query(since, kinds=kinds,
+                                                level=str(request.args.get("level", "")),
+                                                text=str(request.args.get("q", "")),
+                                                limit=limit))
+
+    @app.get("/api/log/days")
+    def api_log_days():
+        denied = guard.deny("logs.read")
+        if denied:
+            return denied
+        return jsonify(days=server.log.days())
+
+    @app.get("/api/log/file")
+    def api_log_file():
+        """One day's log file, as written (UTC days). The same lines the ring
+        holds, so the same capability reads them."""
+        denied = guard.deny("logs.read")
+        if denied:
+            return denied
+        day = str(request.args.get("day", ""))
+        path = server.log.day_file(day)
+        if path is None:
+            return jsonify(error=f"no log file for {day or 'that day'}"), 404
+        return send_file(path, mimetype="text/plain", as_attachment=True,
+                         download_name=f"carino-dicom-{day}.log", max_age=0)
 
     # ---- study history (received / sent) ----------------------------------
     @app.get("/api/studies")
@@ -1634,6 +1682,45 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         from . import routing
         d = request.get_json(silent=True) or {}
+        # A draft rule list from the editor, tested without saving it. Checked
+        # with the same validator a Save runs, against a copy of the live
+        # document, so a rule the Save would refuse is refused here too rather
+        # than explained as if it could ever run.
+        draft = None
+        if "rules" in d:
+            rules = d.get("rules")
+            candidate = copy.deepcopy(server.cfg.data)
+            if not isinstance(candidate.get("routing"), dict):
+                candidate["routing"] = {}      # a hand-broken stored section
+            candidate["routing"]["rules"] = rules
+            if "routing_enabled" in d:
+                candidate["routing"]["enabled"] = d.get("routing_enabled") is True
+            from .config import validate
+            try:
+                validate(candidate)
+            except ValueError as exc:
+                # Only the draft's fault if the saved document passes on its
+                # own; a stored config that already fails (load does not
+                # validate) must not make every rule look broken.
+                try:
+                    validate(copy.deepcopy(server.cfg.data))
+                except ValueError:
+                    # The draft is still checked — on its own, beside the
+                    # defaults — or a malformed rule (a number, a string
+                    # 'match') reaches the router and comes back as a 500.
+                    from .config import DEFAULTS, _deep_merge
+                    try:
+                        validate(_deep_merge(DEFAULTS, {"routing": candidate["routing"]}))
+                    except ValueError as own:
+                        return jsonify(ok=False, message=str(own), error=str(own),
+                                       field="rules"), 400
+                else:
+                    return jsonify(ok=False, message=str(exc), error=str(exc),
+                                   field="rules"), 400
+            draft = candidate["routing"]
+            if not isinstance(draft.get("rules"), list):
+                return jsonify(ok=False, message="'rules' must be a list",
+                               error="'rules' must be a list", field="rules"), 400
         attrs = d.get("attributes")
         if attrs is None:
             attrs = {k: d[k] for k in routing._MATCH_FIELDS if k in d} or None
@@ -1642,12 +1729,17 @@ def create_app(server: PacsServer) -> Flask:
                 return jsonify(ok=False, message="'attributes' must be an object"), 400
             # No log: an explain must never be able to flood the activity buffer.
             r = routing.Router.from_config(server.cfg, None)
+            if draft is not None:
+                r.update(draft, r.enabled)
             described = {str(k): str(v if v is not None else "") for k, v in attrs.items()}
             return jsonify(ok=True, **r.explain(attrs=described))
         path = d.get("path")
         if not path:
             return jsonify(ok=False, message="need 'attributes' or a study 'path'"), 400
-        res = server.explain_route(d.get("group", "received"), path)
+        if draft is not None:
+            res = server.explain_route(d.get("group", "received"), path, routing_cfg=draft)
+        else:
+            res = server.explain_route(d.get("group", "received"), path)
         return jsonify(res), (200 if res.get("ok") else 400)
 
     # ---- instance index (what Q/R and DICOMweb query) ---------------------
@@ -1680,7 +1772,36 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.read")
         if denied:
             return denied
-        return jsonify(server.stuck_sends())
+        return jsonify(server.stuck_sends(detail=True))
+
+    @app.post("/api/stuck/discard")
+    def api_stuck_discard():
+        """Delete orphaned/held files the stuck listing reports — accepting the
+        loss the orphan row describes. Takes the rows' ``items[].rel`` handles."""
+        denied = guard.deny("studies.delete")
+        if denied:
+            return denied
+        files = (request.get_json(silent=True) or {}).get("files")
+        res = server.discard_stuck(files)
+        # A count, not the handles: those are storage paths, and the storage
+        # layout puts the PatientID in them.
+        request.environ["carino.audit_detail"] = {
+            "files": len(files) if isinstance(files, list) else 0}
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/stuck/send")
+    def api_stuck_send():
+        """Forward orphaned/held files to a destination the operator picks."""
+        denied = guard.deny("studies.send")
+        if denied:
+            return denied
+        d = request.get_json(silent=True) or {}
+        files = d.get("files")
+        res = server.send_stuck(files, d.get("destination"))
+        request.environ["carino.audit_detail"] = {
+            "files": len(files) if isinstance(files, list) else 0,
+            "destination": str(d.get("destination") or "")}
+        return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/stuck/retry")
     def api_stuck_retry():
@@ -1697,7 +1818,16 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.read")
         if denied:
             return denied
-        return jsonify(server.list_pending())
+        body = server.list_pending()
+        # Which fields reach this profile as the redaction placeholder, per
+        # item, so the review form can lock them instead of posting "***" back
+        # as a patient's name. Computed here because the redaction itself runs
+        # after the handler, in _withhold_identifiers.
+        who = guard.current()
+        for item in body.get("items") or []:
+            item["redacted"] = (users.withheld(list(item), who)
+                                if guard.profiles_enabled else [])
+        return jsonify(body)
 
     @app.post("/api/pending/approve")
     def api_pending_approve():
@@ -1709,7 +1839,29 @@ def create_app(server: PacsServer) -> Flask:
         if not pid:
             return jsonify(ok=False, message="missing 'id'"), 400
         edits = {k: d.get(k) for k in ("patient", "patient_id", "study_desc", "series_desc", "study_date", "accession") if k in d}
-        res = server.approve_pending(pid, edits)
+        order_id = d.get("order_id") or ""
+        if not isinstance(order_id, str):
+            return jsonify(ok=False, error="'order_id' must be a string", field="order_id"), 400
+        if order_id:
+            # Matching to an order closes it as captured — an order write, the
+            # same act the Orders panel gates on orders.write.
+            denied = guard.deny("orders.write")
+            if denied:
+                return denied
+        # The redaction placeholder is dropped again in ingest; it is dropped
+        # here too so no caller of this route can ever be the one that writes it.
+        edits = {k: v for k, v in edits.items()
+                 if not (isinstance(v, str) and v.strip() == users.REDACTED)}
+        res = server.approve_pending(pid, edits, order_id=order_id,
+                                     keep_study=d.get("keep_study") is True)
+        if order_id:
+            request.environ["carino.audit_detail"] = {"order_id": order_id}
+            if (not res.get("ok") and res.get("field") == "order_id"
+                    and not guard.current().can("orders.read")):
+                # "not found" vs "already closed" tells a caller who may not
+                # read orders whether an id exists; one answer for both.
+                why = "that order is not available"
+                res = {"ok": False, "message": why, "error": why, "field": "order_id"}
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/pending/discard")
@@ -2066,6 +2218,8 @@ def create_app(server: PacsServer) -> Flask:
         "/api/studies/delete":      audit.STUDY_DELETED,
         "/api/studies/delete-all":  audit.STUDY_DELETED,
         "/api/stuck/retry":         audit.STUDY_SENT,
+        "/api/stuck/send":          audit.STUDY_SENT,
+        "/api/stuck/discard":       audit.STUDY_DELETED,
         "/api/pending/approve":     audit.STUDY_SENT,
         "/api/pending/discard":     audit.STUDY_DELETED,
         "/api/ris/orders":          audit.ORDER_CHANGED,
@@ -2082,7 +2236,20 @@ def create_app(server: PacsServer) -> Flask:
         "/api/emergency":           audit.EMERGENCY_CHANGED,
         "/api/dev-peer":            audit.DEV_PEER_CHANGED,
         "/api/shutdown":            audit.SHUTDOWN,
+        "/api/worklist/probe":      audit.WORKLIST_PROBED,
+        "/api/profiles/save":       audit.PROFILE_CHANGED,
+        "/api/profiles/delete":     audit.PROFILE_DELETED,
+        "/api/profiles/seed":       audit.PROFILE_CREATED,
+        "/api/profiles/listing":    audit.CONFIG_CHANGED,
     }
+
+    # Handlers that write their own, more specific record when they succeed
+    # (which profile, how many worklist items). A second generic row for the
+    # same act read as two events; the generic one is kept for a refusal or a
+    # failure, which those handlers do not record.
+    _AUDIT_SELF = frozenset({"/api/worklist/probe", "/api/profiles/save",
+                             "/api/profiles/delete", "/api/profiles/seed",
+                             "/api/profiles/listing"})
 
     # Endpoints whose body is genuinely uninteresting and high-volume enough
     # that recording each one would bury the records that matter.
@@ -2143,12 +2310,17 @@ def create_app(server: PacsServer) -> Flask:
             action = _AUDIT_ACTIONS.get(path) or "api" + path[4:].replace("/", ".")
             outcome = ("ok" if 200 <= resp.status_code < 300 else
                        "denied" if resp.status_code in (401, 403) else "failed")
+            if outcome == "ok" and path in _AUDIT_SELF:
+                return resp
             server.audit.record(
                 action if outcome != "denied" else audit.DENIED,
                 actor=guard.current(),
                 target=_audit_target() or path,
                 outcome=outcome,
                 source=request.remote_addr or "",
+                # What a config Save changed, set by the handler that worked it
+                # out; absent (and not recorded) everywhere else.
+                detail=request.environ.get("carino.audit_detail"),
                 status=resp.status_code,
                 endpoint=path,
             )

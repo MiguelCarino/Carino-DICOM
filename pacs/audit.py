@@ -110,6 +110,66 @@ DENIED = "denied"
 READ_ACTIONS = frozenset({STUDY_READ})
 
 
+# What an absent per-destination flag means. The dashboard writes every flag
+# back explicitly, so a row stored by hand or by an older engine without them
+# would otherwise read as "changed" on a Save that touched nothing — refusing a
+# profile without destinations.write and putting a phantom change in the trail.
+_DEST_ROW_DEFAULTS = {"tls": False, "no_ris": False, "emergency_trigger": False,
+                      "ephemeral": False}
+
+
+def _rows_with_defaults(doc: dict) -> dict:
+    """*doc* with each destination row merged over _DEST_ROW_DEFAULTS (a copy
+    where anything changed; the original is never touched)."""
+    rows = doc.get("destinations")
+    if not isinstance(rows, list):
+        return doc
+    out = dict(doc)
+    out["destinations"] = [{**_DEST_ROW_DEFAULTS, **r} if isinstance(r, dict) else r
+                           for r in rows]
+    return out
+
+
+def config_changes(stored: dict, incoming: dict) -> dict:
+    """What a config Save changes, for the config.changed record's ``detail``
+    and for the per-section capability checks that read the same answer.
+
+    *incoming* is compared as it will be applied — merged over DEFAULTS, the way
+    Config.replace() merges it — so a section a client simply left out counts
+    as reverted to its default, which is what the save will do to it.
+
+    Destinations and rules are named, since "which node did somebody delete" is
+    the question the record exists to answer; names only, never hosts, so the
+    trail stays a list of decisions and not a copy of the configuration.
+    """
+    from .config import DEFAULTS, _deep_merge
+    stored = _rows_with_defaults(stored if isinstance(stored, dict) else {})
+    after = _rows_with_defaults(_deep_merge(DEFAULTS, incoming if isinstance(incoming, dict) else {}))
+    out: dict = {"sections": sorted(k for k in set(after) | set(stored)
+                                    if after.get(k) != stored.get(k))}
+
+    def _named(rows) -> dict:
+        named = {}
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                named.setdefault(str(row.get("name") or ""), row)
+        return named
+
+    def _diff(kind: str, before, now) -> None:
+        a, b = _named(before), _named(now)
+        for label, names in (("added", sorted(set(b) - set(a))),
+                             ("removed", sorted(set(a) - set(b))),
+                             ("changed", sorted(n for n in set(a) & set(b) if a[n] != b[n]))):
+            if names:
+                out[f"{kind}_{label}"] = names
+
+    _diff("destinations", stored.get("destinations"), after.get("destinations"))
+    sr = stored.get("routing") if isinstance(stored.get("routing"), dict) else {}
+    ar = after.get("routing") if isinstance(after.get("routing"), dict) else {}
+    _diff("rules", sr.get("rules"), ar.get("rules"))
+    return out
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 

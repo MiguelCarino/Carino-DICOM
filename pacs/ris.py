@@ -544,8 +544,12 @@ class OrderStore:
                 kind="ris",
             )
         elif action == "cancelled":
+            # Warn-level lines also become the RIS card's "last problem" in
+            # /api/status, which no per-field redaction reaches inside a
+            # message — so these two name the order by its id, not the patient
+            # or the accession.
             self.log.warn(
-                f"RIS cancelled order [acc {acc}] {order.get('patient') or '?'} — "
+                f"RIS cancelled order {order.get('id') or '?'} — "
                 f"it is closed and will not appear on any worklist",
                 kind="ris",
             )
@@ -556,7 +560,7 @@ class OrderStore:
             )
         elif action == "ignored-closed":
             self.log.warn(
-                f"RIS sent an update for a CLOSED order [acc {acc}] — left as it is. "
+                f"RIS sent an update for a CLOSED order {order.get('id') or '?'} — left as it is. "
                 f"If this is a new exam reusing the accession, key it in by hand",
                 kind="ris",
             )

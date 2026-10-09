@@ -80,6 +80,11 @@ class FakeServer:
         self.calls.append("stop_qr")
         self.qr_running = False
 
+    def set_service(self, name, action):
+        # The card routes go through PacsServer.set_service (start/stop plus the
+        # persisted flag); the stub keeps the start_/stop_ call trail.
+        getattr(self, f"{action}_{name}")()
+
     def status(self):
         return {
             "qr": {"enabled": True, "running": self.qr_running, "port": 11115},
@@ -1470,29 +1475,34 @@ def test_a_save_that_cannot_be_written_leaves_the_pacs_on_the_air():
 
 
 def test_a_service_that_will_not_stop_does_not_strand_the_others():
-    """The bounce is five stops and four starts and any of them can throw — a
-    shutdown() that raises, an association thread that will not join. Raising out
-    of the middle left the save persisted and every service from the failure
-    onwards stopped: the same outage by another door. Each step stands alone
-    now, and the restart runs whatever happened."""
+    """A bounce is a stop and a start per changed listener, and any of them can
+    throw — a shutdown() that raises, an association thread that will not join.
+    Raising out of the middle left the save persisted and every service from the
+    failure onwards stopped: the same outage by another door. Each step stands
+    alone, and the restart runs whatever happened."""
     import copy as _copy
 
-    srv = _pacs()
+    srv = _pacs(printer=True)
     try:
         srv.start_receiver()
+        srv.start_printer()
 
         def wont_stop():
             raise RuntimeError("shutdown() hung on an association")
 
+        real_stop_printer = srv.stop_printer
         srv.stop_printer = wont_stop          # the second stop in the bounce
         new = _copy.deepcopy(srv.cfg.data)
         new["scp"]["aet"] = "REBRANDED"
+        new["print"]["aet"] = "REPRINT"       # both changed, so both are bounced
         srv.apply_config(new)
         assert srv.scp and srv.scp.running, "the receiver never came back"
         assert srv.cfg.scp["aet"] == "REBRANDED", "the save did not apply"
         assert "print receiver" in _errors(srv), \
             "the failed stop was swallowed instead of logged"
     finally:
+        srv.stop_printer = real_stop_printer
+        srv.stop_printer()
         srv.stop_receiver()
 
 

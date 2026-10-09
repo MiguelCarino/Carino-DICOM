@@ -17,8 +17,8 @@
  *
  * Drives headless Chromium over CDP with node's built-in WebSocket, so this has
  * no dependencies at all — no puppeteer, no npm install, nothing to keep in step
- * with a browser version. It needs `chromium-browser` on PATH (override with
- * CHROMIUM=/path/to/chrome).
+ * with a browser version. It runs /usr/bin/chromium-browser — a fixed path, not
+ * a PATH lookup — so on any other layout set CHROMIUM=/path/to/chrome.
  */
 import { spawn } from 'node:child_process';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
@@ -111,7 +111,8 @@ const signIn = async () => evaluate(`(async () => {
  * that row's panel. The sidebar is six rows now, and most of what the manual
  * photographs no longer has a nav button of its own: History, Pending and Stuck
  * are tabs of Studies; Destinations, Routing, Settings and People are tabs of
- * Configuration; Logs and Audit are tabs of Activity. The old one-click form
+ * Configuration, with Modalities; Logs, Audit and Worklist probes are tabs of
+ * Activity. The old one-click form
  * looked for buttons that eight of these figures no longer have.
  *
  * Both the panel and the pane are checked, because a pane's `hidden` no longer
@@ -132,7 +133,9 @@ const open = (panel, tab) => evaluate(`(async () => {
   await new Promise(r => setTimeout(r, 1200));
   const p = document.getElementById('${panel}');
   if (!p || p.hidden) return 'panel stayed hidden';
-${tab ? `  const t = p.querySelector('.panel-tabs .hist-tab[data-tab="${tab}"]');
+${tab ? `  const t = ${JSON.stringify([].concat(tab))}
+    .map((k) => p.querySelector('.panel-tabs .hist-tab[data-tab="' + k + '"]'))
+    .find(Boolean);
   if (!t) return 'no tab button';
   if (t.hidden) return 'tab hidden for this profile';
   t.click();
@@ -159,7 +162,7 @@ if (MODE === 'setup') {
   await shot('gate-people');
   await signIn();
   await sleep(2000);
-  // People is the fourth tab of Configuration. Thrown rather than named: this
+  // People is the last tab of Configuration (after Modalities). Thrown rather than named: this
   // mode captures one figure, so there is nothing left to salvage by going on,
   // and 'tab hidden for this profile' here means the token this run signed in
   // with does not hold auth.manage.
@@ -186,13 +189,17 @@ if (MODE === 'setup') {
     ['dlgConfig',   'destinations', 'destinations'],
     ['dlgConfig',   'routing',      'routing'],
     ['dlgConfig',   'settings',     'settings'],
+    ['dlgConfig',   'modalities',   'modalities'],
     ['dlgActivity', 'logs',         'logs'],
     ['dlgActivity', 'audit',        'audit'],
+    // The tab is labelled "Worklist probes"; its data-tab may still be the
+    // older "caught", so both are tried (see open()).
+    ['dlgActivity', ['probes', 'caught'], 'probes'],
   ];
   for (const [panel, tab, name] of FIGURES) {
     const ok = await open(panel, tab);
     // Named rather than thrown: one figure that would not open should not cost
-    // the other ten, and a silent gap in the output is how a missing figure
+    // the others, and a silent gap in the output is how a missing figure
     // gets shipped.
     if (ok !== 'ok') { console.log(`  ! ${name}: ${ok}`); continue; }
     await shot(name);

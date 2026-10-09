@@ -16,14 +16,14 @@ Needs **Python 3.10+** (and, for the desktop app, **Node 18+**). Nothing is comp
 
 **Linux / macOS**
 ```bash
-cd Carino-PACS
+cd Carino-DICOM
 ./setup.sh            # once — creates .venv and installs deps
 ./run.sh serve        # dashboard → http://127.0.0.1:8042
 ```
 
 **Windows (PowerShell)**
 ```powershell
-cd Carino-PACS
+cd Carino-DICOM
 .\setup.ps1           # once
 .\run.ps1 serve
 ```
@@ -38,7 +38,7 @@ run.sh echo --host 10.0.0.5 --port 104 --aet REMOTE
 ### The desktop app (tray + window), dev mode
 Runs against the `.venv` you just created — no build needed.
 ```bash
-cd Carino-PACS/desktop
+cd Carino-DICOM/desktop
 npm install
 npm start
 ```
@@ -149,7 +149,7 @@ OSes** and uploads the installers. But it only runs once the code is on GitHub.
 ### 3a. One-time: put the project on GitHub
 
 ```bash
-cd Carino-PACS
+cd Carino-DICOM
 git init
 git add -A
 git commit -m "Carino DICOM initial commit"
@@ -159,7 +159,7 @@ git branch -M main
 Create an **empty** repository on github.com (no README/licence), then:
 
 ```bash
-git remote add origin https://github.com/<your-user>/Carino-PACS.git
+git remote add origin https://github.com/<your-user>/Carino-DICOM.git
 git push -u origin main
 ```
 
@@ -245,7 +245,7 @@ explanation, per-platform download buttons, a section for technical users).
 
 Enable it once: **GitHub → Settings → Pages → Build and deployment → Source:
 “Deploy from a branch” → Branch: `main` / folder: `/docs`**. Your site appears at
-`https://<your-user>.github.io/Carino-PACS/`.
+`https://<your-user>.github.io/Carino-DICOM/`.
 
 The download buttons call the GitHub API for your **latest release** and auto-fill
 the correct `.exe` / `.dmg` / `.AppImage` links (and detect the visitor's OS). Until

@@ -369,6 +369,52 @@ def test_concurrent_messages_about_one_order_do_not_race():
     check(len(uids) == 1, "…with a single Study Instance UID")
 
 
+def test_problem_lines_carry_no_patient_or_accession():
+    """Warn/error lines double as a card's "last problem" in /api/status, where
+    no per-field redaction reaches inside a message."""
+    from pacs.logbuf import LogBuffer
+    from pacs import mwl
+    log = LogBuffer()
+    s = OrderStore(tempfile.mkdtemp(prefix="carino-ris-"), log=log)
+    s.apply_hl7(orm(accession="ACC-SECRET", patient="SECRET^PATIENT"), "test")
+    s.apply_hl7(orm(accession="ACC-SECRET", patient="SECRET^PATIENT", control="CA"), "test")
+    s.apply_hl7(orm(accession="ACC-SECRET", patient="SECRET^PATIENT", control="XO"), "test")
+    problems = [e["message"] for e in log.tail(50) if e.get("level") in ("warn", "error")]
+    check(problems, "the cancel and the closed-order update are warnings")
+    check(not any("SECRET" in m for m in problems), f"no identifier in {problems}")
+    lp = log.last_problem("ris") or {}
+    check("SECRET" not in lp.get("message", ""), "last_problem is clean")
+
+    # A worklist item that cannot be built names the order by id.
+    order = s.list()[0]
+    order = dict(order, status="open")
+    scp = mwl.MwlSCP("MWL", "127.0.0.1", 1, log, lambda: [order])
+    real = mwl.build_worklist_item
+
+    def boom(*a, **k):
+        raise ValueError("bad date")
+
+    class Req:
+        ae_title = "CT01"
+        address = "127.0.0.1"
+
+    class Ev:
+        is_cancelled = False
+        identifier = None
+        assoc = type("A", (), {"requestor": Req()})()
+
+    mwl.build_worklist_item = boom
+    real_match = mwl.order_matches_query
+    mwl.order_matches_query = lambda o, q: True
+    try:
+        list(scp._handle_find(Ev()))
+    finally:
+        mwl.build_worklist_item = real
+        mwl.order_matches_query = real_match
+    err = [e["message"] for e in log.tail(50) if "could not build item" in e["message"]]
+    check(err and order["id"] in err[0] and "SECRET" not in err[0], f"mwl error by id: {err}")
+
+
 def main():
     for fn in sorted(
         (v for k, v in globals().items() if k.startswith("test_")),

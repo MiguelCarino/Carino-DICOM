@@ -77,6 +77,7 @@ from pynetdicom.sop_class import (
     Verification,
 )
 
+from .assocwords import caller_of, listener_refusal
 from .logbuf import LogBuffer
 from .netclaim import claim
 
@@ -1257,14 +1258,24 @@ class MwlSCP:
             except Exception as exc:
                 with self._lock:
                     self.error_count += 1
+                # By id: an error here is also the worklist card's "last
+                # problem", and an accession is an identifier.
                 self.log.error(f"MWL: could not build item for order "
-                               f"{order.get('accession') or order.get('id')}: {exc}", kind="mwl")
+                               f"{order.get('id') or '?'}: {exc}", kind="mwl")
                 continue
             n += 1
             yield 0xFF00, item           # Pending — one match
         with self._lock:
             self.match_count += n
         # Generator return → pynetdicom sends 0x0000 Success.
+
+    def _handle_rejected(self, event) -> None:
+        """Say why a modality was turned away, which pynetdicom does not."""
+        who, addr = caller_of(event)
+        with self._lock:
+            self.error_count += 1
+        self.log.warn(f"MWL: refused {who or 'a modality'} @ {addr} — "
+                      f"{listener_refusal(event, self.allowed_aets)}", kind="mwl")
 
     # ---- lifecycle ---------------------------------------------------------
     @property
@@ -1282,6 +1293,7 @@ class MwlSCP:
         handlers = [
             (evt.EVT_C_FIND, self._handle_find),
             (evt.EVT_C_ECHO, self._handle_echo),
+            (evt.EVT_REJECTED, self._handle_rejected),
         ]
         ssl_context = None
         if self.tls:

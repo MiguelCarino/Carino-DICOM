@@ -34,9 +34,13 @@ const tabLoaders = {
     renderIndex(lastStatus.index || {});
     renderDicomweb(lastStatus.dicomweb || {});
     renderDeidState(lastStatus.deid || {});
+    renderDeidKeyBox(lastStatus.deid || {});
+    renderSettingsStates(lastStatus, hostIps(lastStatus));
   },
   dlgPeople: loadPeople,
   dlgAudit: loadAudit,
+  // Lines arrive by the log poll; opening the tab only refreshes which day files can be downloaded.
+  dlgLogs: loadLogDays,
   // No fetch: registry comes with the config; redraw in case another tab's Save rewrote it.
   dlgModalities: () => renderMods(loadedModalities),
   dlgCaught: loadCaught,

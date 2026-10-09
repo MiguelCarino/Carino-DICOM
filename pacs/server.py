@@ -110,6 +110,29 @@ def _config_signature(cfg) -> str:
     return json.dumps([cfg.deid, cfg.routing], sort_keys=True, default=str)
 
 
+def _service_inputs(data: dict, name: str) -> list:
+    """What a listener is BUILT from: the config it reads once, at start. A
+    save that changes none of it has nothing to restart that listener for.
+
+    `enabled` is left out — the flag is on/off, handled as its own transition.
+    The receiver and Q/R hold the index object, which a change to the index's
+    switch or path replaces. The RIS listener reads only its socket settings at
+    start; match_on and store_dir are re-pointed live."""
+    def sect(key):
+        block = data.get(key)
+        return {k: v for k, v in block.items() if k != "enabled"} if isinstance(block, dict) else {}
+    idx = data.get("index") if isinstance(data.get("index"), dict) else {}
+    index = [bool(idx.get("enabled", True)), str(idx.get("path", "") or "")]
+    if name == "receiver":
+        return [sect("scp"), index]
+    if name == "qr":
+        return [sect("qr"), index]
+    if name == "ris":
+        r = sect("ris")
+        return [{k: r.get(k) for k in ("bind", "port", "allowed_hosts")}]
+    return [sect({"printer": "print"}.get(name, name))]
+
+
 def _deid_answers(router, names) -> dict:
     """What de-identification each destination is PROMISED, one string per name.
 
@@ -363,10 +386,12 @@ class PacsServer:
         # When this process started: the origin for uptime and for the counters
         # of objects that outlive a save (the watcher is built once, here).
         self.started_at = time.time()
-        # Counter origins for the three services this object REBUILDS on every
-        # save and every Start (print/RIS/worklist): their tallies zero with the
-        # new object, so each is stamped where it is constructed and reported
-        # next to its counters. StorageSCP carries its own started_at.
+        # Counter origins for the services this object REBUILDS on a Start or
+        # on a save that changes them (RIS/worklist): their tallies zero with
+        # the new object, so each is stamped where it is constructed and
+        # reported next to its counters. The printer is the exception — its
+        # tallies are carried into the new object, so its origin is stamped
+        # once. StorageSCP carries its own started_at.
         self._counter_since: dict[str, float] = {}
         self.log = LogBuffer(log_dir=cfg.logs_dir)
         # Config.load() does not validate, on purpose (its comment argues why:
@@ -674,6 +699,7 @@ class PacsServer:
             if self.print_scp and self.print_scp.running:
                 return
             p = self.cfg.printer
+            old = self.print_scp
             self.print_scp = PrintSCP(
                 aet=p.get("aet", "CARINOPRINT"),
                 bind=p.get("bind", "0.0.0.0"),
@@ -688,7 +714,14 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(p.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(p.get("tls_ca", "")),
             )
-            self._counter_since["printer"] = time.time()
+            # The card's evidence — how many films, the last one, the last
+            # problem — is what an operator checks after a modality reports a
+            # failed print, so a Stop/Start or a Save must not wipe it. The
+            # counters keep the origin they were first counted from.
+            if old is not None:
+                for attr in ("printed_count", "error_count", "last_problem", "last_print"):
+                    setattr(self.print_scp, attr, getattr(old, attr))
+            self._counter_since.setdefault("printer", time.time())
             self.print_scp.start()
 
     def stop_printer(self) -> None:
@@ -845,8 +878,8 @@ class PacsServer:
         one is still open.
 
         This is the predicate the config paths use, because a save is not a
-        decision about an outage. apply_config() stops and restarts every bound
-        service, and the worklist was the one service whose restart asked only
+        decision about an outage. apply_config() restarts a bound service whose
+        settings changed, and the worklist was the one service whose restart asked only
         about configuration — so an administrator finishing the setup chooser in
         the middle of a failover took the emergency's only path to the modalities
         down with it, permanently (sync_worklist() runs on launch and on a save,
@@ -1417,6 +1450,24 @@ class PacsServer:
         self.release_worklist()
         return {"ok": True, "removed": n, "message": f"Removed {n} closed order(s)"}
 
+    @staticmethod
+    def _order_identity(order: dict) -> dict:
+        """The patient and study an order hands a converted file — study UID
+        included, since that is the UID the modality burns in via the worklist
+        and the one the order is later matched on."""
+        return {
+            "patient": order.get("patient", ""),
+            "patient_name": order.get("patient_name", ""),
+            "patient_id": order.get("patient_id", ""),
+            "patient_birthdate": order.get("patient_birthdate", ""),
+            "patient_sex": order.get("patient_sex", ""),
+            "study_uid": order.get("study_uid", ""),
+            "study_date": order.get("scheduled_dt", ""),
+            "study_desc": order.get("study_desc", ""),
+            "accession": order.get("accession", ""),
+            "referring": order.get("referring", ""),
+        }
+
     def create_study_from_order(self, order_id: str, filename: str, data: bytes) -> dict:
         """Use-case-B bridge: wrap an exported PDF/image as a DICOM study that
         inherits THIS order's identity (patient, IDs, accession, and the order's
@@ -1435,16 +1486,7 @@ class PacsServer:
             return {"ok": False, "message": "unsupported file — capture a PDF, JPEG or PNG"}
         base = os.path.splitext(os.path.basename(filename))[0]
         meta = {
-            "patient": order.get("patient", ""),
-            "patient_name": order.get("patient_name", ""),
-            "patient_id": order.get("patient_id", ""),
-            "patient_birthdate": order.get("patient_birthdate", ""),
-            "patient_sex": order.get("patient_sex", ""),
-            "study_uid": order.get("study_uid", ""),
-            "study_date": order.get("scheduled_dt", ""),
-            "study_desc": order.get("study_desc", ""),
-            "accession": order.get("accession", ""),
-            "referring": order.get("referring", ""),
+            **self._order_identity(order),
             "series_desc": base or order.get("study_desc") or "Captured study",
             "source": "RIS order " + (order.get("accession") or order_id),
         }
@@ -1499,6 +1541,60 @@ class PacsServer:
             f"C-ECHO {d.name}: {res.message}", kind="echo"
         )
         return res
+
+    def selftest(self, service: str, do_print: bool = False) -> dict:
+        """Test one of our own listeners from the inside: C-ECHO for the DICOM
+        ones (and, for the printer, optionally a real one-sheet print that lands
+        in Pending), an HL7 ACK round trip for the RIS listener. Always a
+        {ok, message, ms} — a failure is an answer, never an exception."""
+        from . import selftest as st
+        t0 = time.monotonic()
+
+        def done(ok: bool, message: str) -> dict:
+            return {"ok": ok, "message": message, "ms": int((time.monotonic() - t0) * 1000)}
+
+        table = {
+            "receiver": (self.scp, "receiver"),
+            "printer": (self.print_scp, "print receiver"),
+            "mwl": (self.mwl_scp, "worklist"),
+            "qr": (self.qr_scp, "Query/Retrieve"),
+            "ris": (self.ris, "RIS listener"),
+        }
+        if service not in table:
+            return done(False, "service must be receiver, printer, mwl, qr or ris")
+        obj, label = table[service]
+        if not (obj and obj.running):
+            return done(False, f"The {label} is not running — start it first.")
+        host = st.loopback_for(obj.bind)
+        try:
+            if service == "ris":
+                ok, said = st.hl7_ping(host, int(obj.port))
+                if not ok and obj.allowed_hosts and host not in obj.allowed_hosts:
+                    said += (f" — {host} is not in its allowed hosts "
+                             f"({', '.join(obj.allowed_hosts)}), so it was turned away")
+                return done(ok, f"RIS listener at {host}:{obj.port}: {said}.")
+            allowed = list(obj.allowed_aets or [])
+            calling = allowed[0].strip() if allowed else self.cfg.scu.get("aet", "CARINOSCU")
+            as_whom = (f" Called as {calling}, the first AE title in its allowed list."
+                       if allowed else "")
+            ctx = None
+            if obj.tls:
+                scu = self.cfg.scu
+                ctx = st.client_tls(bool(obj.tls_ca),
+                                    self.cfg.resolve_path(scu.get("tls_cert", "")),
+                                    self.cfg.resolve_path(scu.get("tls_key", "")))
+            dest = Destination(name=label, host=host, port=int(obj.port), aet=obj.aet,
+                               tls=bool(obj.tls))
+            res = c_echo(dest, calling, timeout=5, tls_context=ctx)
+            where = f"{obj.aet} at {host}:{obj.port}{' over TLS' if obj.tls else ''}"
+            if not res.ok:
+                return done(False, f"The {label} did not answer C-ECHO ({where}): {res.message}.{as_whom}")
+            if service == "printer" and do_print:
+                ok, said = st.test_print(host, int(obj.port), obj.aet, calling, ctx)
+                return done(ok, f"Test print to {where}: {said}.{as_whom}")
+            return done(True, f"The {label} answered C-ECHO ({where}).{as_whom}")
+        except Exception as exc:          # a bad client certificate path, say
+            return done(False, f"The test could not run: {exc}")
 
     # ---- worklist probe ----------------------------------------------------
     def probe_worklist(self, station_aet: str) -> dict:
@@ -1612,7 +1708,7 @@ class PacsServer:
         # reads like a small archive, and a row outliving the folder it names
         # turns into a study that is not there. history.py's module docstring
         # has the full account, so nobody rebuilds it.
-        return {"group": group, "root": root, "studies": history.scan_studies(root)}
+        return {"group": group, "root": root, **history.scan(root)}
 
     def delete_study(self, group: str, path: str) -> dict:
         from . import history
@@ -1947,7 +2043,7 @@ class PacsServer:
         with self._stale_lock:
             return [dict(r) for r in self._stale_sends]
 
-    def explain_route(self, group: str, path: str) -> dict:
+    def explain_route(self, group: str, path: str, routing_cfg: Optional[dict] = None) -> dict:
         """Where would this study go, and why — rule by rule. Read-only, and the
         router is built without a log on purpose: pressing the button in the
         dashboard must not write warnings into the Activity feed."""
@@ -1962,6 +2058,9 @@ class PacsServer:
         if not files:
             return {"ok": False, "message": "no DICOM files found for this study"}
         r = routing.Router.from_config(self.cfg, None)
+        if routing_cfg is not None:
+            # A draft from the rule editor, already validated by the caller.
+            r.update(routing_cfg, r.enabled)
         # Settled before it leaves: a dry run that promises a scrub this install
         # cannot perform is the same lie as /api/status making the promise, told
         # to the operator at the moment they are deciding whether to forward.
@@ -2053,13 +2152,32 @@ class PacsServer:
         d = self._pending_dir()
         return {"root": d, "items": ingest.list_pending(d)}
 
-    def approve_pending(self, pid: str, edits: dict) -> dict:
+    def approve_pending(self, pid: str, edits: dict, order_id: str = "",
+                        keep_study: bool = False) -> dict:
         """Convert a queued file into the outgoing folder so the normal
-        auto-send + archive pipeline forwards and files it."""
+        auto-send + archive pipeline forwards and files it.
+
+        With *order_id* the file takes that open order's identity and study UID,
+        exactly as a capture against the order does, and the order closes as
+        captured — a film identified from the worklist is that order fulfilled."""
         from . import ingest
         watch = self.cfg.resolved("scu", "watch_dir")
+        order = None
+        if order_id:
+            order = self.orders.get(order_id)
+            order = dict(order) if order else None
+            if not order:
+                return {"ok": False, "message": "order not found", "error": "order not found",
+                        "field": "order_id"}
+            if order.get("status") != "open":
+                return {"ok": False, "message": "order is already closed",
+                        "error": "order is already closed", "field": "order_id"}
         try:
-            out = ingest.approve_pending(self._pending_dir(), pid, edits or {}, watch)
+            out = ingest.approve_pending(
+                self._pending_dir(), pid, edits or {}, watch, keep_study=keep_study,
+                identity=self._order_identity(order) if order else None)
+        except ingest.PendingInputError as exc:
+            return {"ok": False, "message": str(exc), "error": str(exc), "field": exc.field}
         except (ValueError, OSError) as exc:
             return {"ok": False, "message": str(exc)}
         except Exception as exc:
@@ -2067,6 +2185,14 @@ class PacsServer:
         if self.index is not None:
             self.index.enqueue_file(out, "outgoing")
         self.log.info(f"Approved review item → {os.path.basename(out)} into outgoing", kind="config")
+        if order:
+            # Closed only once the instance is on disk, as a capture does: a
+            # conversion that failed leaves the order open to be tried again.
+            self.orders.close(order_id, reason=ris.CLOSE_CAPTURED,
+                              matched_study=order.get("study_uid", ""))
+            self.log.info(f"Review item matched to order {order_id}; "
+                          f"order closed", kind="ris")
+            self.release_worklist()
         if self.watcher.running:
             msg = "Converted and queued — Auto-send will forward it."
         else:
@@ -2141,11 +2267,14 @@ class PacsServer:
         self._sync_index()
 
     def apply_config(self, new_data: Optional[dict] = None, enforce: bool = False,
-                     edit=None) -> None:
+                     edit=None) -> dict:
         """Persist a new config from the dashboard and hot-apply it.
 
-        The receiver is bound to a port/AE at start time, so if it is running
-        we bounce it; the watcher reads config live, so it just keeps going.
+        A listener is bound to a port/AE at start time, so a running one whose
+        own inputs changed (_service_inputs) is bounced, and only that one; the
+        watcher reads config live, so it just keeps going. A flag turned on
+        starts its service and a flag turned off stops it. Returns the engine
+        labels of what was restarted, started and stopped.
         Read the apply invariant above this method before reordering anything
         in it — the order is the safety property, not an accident.
 
@@ -2209,92 +2338,108 @@ class PacsServer:
         # A config that has just been through validate() has no problem left to
         # report; the startup note must not outlive the edit that fixed it.
         self.config_problem = ""
-        was_receiving = bool(self.scp and self.scp.running)
-        was_printing = bool(self.print_scp and self.print_scp.running)
-        was_ris = bool(self.ris and self.ris.running)
-        was_mwl = bool(self.mwl_scp and self.mwl_scp.running)
-        was_qr = bool(self.qr_scp and self.qr_scp.running)
+        listeners = self._listener_table()
+        now = self.cfg.data
+        running = {n: self._is_running(n) for n in listeners}
+        enabled = {n: bool((now.get(sec) or {}).get("enabled")) for n, (sec, *_r) in listeners.items()}
+        was_enabled = {n: bool((previous.get(sec) or {}).get("enabled"))
+                       for n, (sec, *_r) in listeners.items()}
+        moved = {n for n in listeners
+                 if _service_inputs(previous, n) != _service_inputs(now, n)}
+        was_for_orders = self.mwl_for_orders
+        # Turned off in this save (C2b: the flag IS on/off) — stopped and not
+        # started again. Not under an enforcing save: sync_services() performs
+        # that transition and reports it. The worklist is turned off only when
+        # nothing else needs it; an emergency, a no_ris destination or an order
+        # typed during an outage keeps it serving whatever the flag says.
+        turned_off = {n for n in listeners
+                      if not enforce and running[n] and was_enabled[n] and not enabled[n]
+                      and not (n == "mwl" and self.worklist_in_use())}
+        # Restarted: running, and something it was built from changed. A save
+        # that only touches destinations, routing, de-identification, the web
+        # settings, modalities or notifications restarts nothing — the watcher
+        # and the sender read those live, and a restart aborts associations in
+        # flight. An enforcing save leaves alone what it is disabling.
+        if enforce:
+            bounce = [n for n in listeners if running[n] and n in moved
+                      and (self.worklist_in_use() if n == "mwl" else enabled[n])]
+        else:
+            bounce = [n for n in listeners if running[n] and n in moved and n not in turned_off]
+        restarted, started, stopped = [], [], []
         # ---- the bounce: past this line only exit (b) is left ---------------
-        for stop, label, kind in (
-            (self.stop_receiver, "receiver", "scp"),
-            (self.stop_printer, "print receiver", "print"),
-            (self.stop_ris, "RIS listener", "ris"),
-            (self.stop_mwl, "worklist SCP", "mwl"),
-            (self.stop_qr, "Query/Retrieve SCP", "qr"),
-        ):
-            # A stop() that throws took the services after it down with it and
-            # skipped the restart entirely: config saved, PACS mute. It is a log
-            # line now — the socket may or may not have closed, and the start
-            # below will say so if it did not.
-            self._apply_step(stop, f"stop the {label} for the config change", kind)
+        for n in [n for n in listeners if n in bounce or n in turned_off]:
+            _sec, _start, stop, label, kind = listeners[n]
+            # A stop() that throws used to take the services after it down with
+            # it and skip the restart entirely: config saved, PACS mute. It is a
+            # log line now — the socket may or may not have closed, and the
+            # start below will say so if it did not.
+            failed = self._apply_step(stop, f"stop the {label} for the config change", kind)
+            if n in turned_off and failed is None:
+                stopped.append(label)
         # Nothing on the dashboard draws a failed re-point, so like the run-now
         # case below it is kept and handed to the caller once everything else
         # has been applied.
         first_exc = self._apply_step(
             self._repoint_live_objects, "re-point the live objects at the new config", "config")
-        # A plain save restarts whatever was running and also starts anything it
-        # newly ENABLES — persisting "enabled: true" and leaving the service
-        # stopped would be a trap. It never STOPS a running service, though: the
-        # flag is enrollment, and Start on the card (like the CLI overrides) is
-        # a deliberate run-now on top of it.
-        # An enforcing save only bounces what was running AND stays enrolled. It
-        # starts nothing it is disabling — rebinding a port for ~50ms after the
-        # operator said "off" is exactly the bounce the chooser exists to avoid —
-        # and nothing it newly enables either, so sync_services() below performs
-        # each of those transitions once, and reports it.
-        for was, enabled, start, label, kind in (
-            (was_receiving, self.cfg.scp.get("enabled"), self.start_receiver, "receiver", "scp"),
-            (was_printing, self.cfg.printer.get("enabled"), self.start_printer, "print receiver", "print"),
-            (was_ris, self.cfg.ris.get("enabled"), self.start_ris, "RIS listener", "ris"),
-            (was_qr, self.cfg.qr.get("enabled"), self.start_qr, "Query/Retrieve SCP", "qr"),
-        ):
-            if not ((was and enabled) if enforce else (was or enabled)):
-                continue
+        for n in bounce:
+            _sec, start, _stop, label, kind = listeners[n]
             try:
                 start()
             except Exception as exc:
                 self.log.error(f"Could not start {label}: {exc}", kind=kind)
                 # Enabled but not bound is a state the dashboard shows (and the
                 # log explains), not a reason to abort a save that is already
-                # persisted — the remaining services, the worklist and the health
-                # monitor still have to be brought up. A run-now service that is
-                # NOT enrolled draws nothing on the dashboard, so for that one
-                # case the exception is the only signal the caller will ever get:
-                # it is kept and re-raised once everything else has been applied.
-                # An enforcing save never reaches here on a disabled service, and
-                # sync_services() retries the rest into a results row.
-                if was and not enabled and first_exc is None:
+                # persisted. A run-now service that is NOT enrolled draws nothing
+                # on the dashboard, so for that case the exception is the only
+                # signal the caller will ever get: it is kept and re-raised once
+                # everything else has been applied.
+                if not enabled[n] and first_exc is None:
                     first_exc = exc
-        # The worklist is not in the loop above: worklist_in_use(), not the flag,
-        # decides whether it runs, and sync_worklist() starts one that is. This
-        # is only the run-now case — a worklist nothing wants, kept alive across
-        # a plain save the same way the three services above are.
-        if was_mwl and not enforce and not self.worklist_in_use():
-            try:
-                self.start_mwl()
-                # This worklist is not the emergency's — it was up before the
-                # save and nothing but the save could have taken it down, so it
-                # is a run-now service an operator is keeping alive by hand.
-                # release_worklist() must not reclaim it when an order closes;
-                # only a deliberate Stop should end it. start_mwl() says the
-                # same thing by default now, and this still is not redundant:
-                # it returns early if the bounce failed to stop the SCP, and
-                # the answer for a worklist an operator is keeping alive must
-                # not depend on whether a stop worked.
-                self.mwl_for_orders = False
-            except Exception as exc:
-                self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
-                if first_exc is None:
-                    first_exc = exc
+                continue
+            restarted.append(label)
+            if n == "mwl":
+                # Whoever owned the worklist before the save owns it after: a
+                # reclaimable one stays reclaimable unless this save made it
+                # configured, and an operator's stays the operator's.
+                self.mwl_for_orders = was_for_orders and not self.worklist_wanted()
+        if "mwl" in turned_off:
+            self.mwl_for_orders = False
+        elif not enforce and running["mwl"] and was_enabled["mwl"] and not enabled["mwl"]:
+            # Switched off but still needed (see turned_off): it now serves only
+            # for that reason, so it is let go when the reason ends.
+            self.mwl_for_orders = not self.worklist_wanted()
+        if not enforce:
+            # Newly enabled (or enabled and not bound — a port that was busy at
+            # the last attempt): give it its start. An enforcing save leaves
+            # this to sync_services(), which reports each one as a row.
+            for n in ("receiver", "printer", "ris", "qr"):
+                _sec, start, _stop, label, kind = listeners[n]
+                if not enabled[n] or self._is_running(n):
+                    continue
+                try:
+                    start()
+                    started.append(label)
+                except Exception as exc:
+                    self.log.error(f"Could not start {label}: {exc}", kind=kind)
+        had_mwl = self._is_running("mwl")
         self.sync_worklist()   # a no_ris destination may now want a permanent worklist
-        if self.cfg.scu.get("enabled") and not self.watcher.running and not enforce:
-            # The watcher is never bounced (it reads config live), so a newly
-            # enrolled one needs its own nudge — except under an enforcing save,
-            # where sync_services() starts it and says so.
-            try:
-                self.start_watcher()
-            except Exception as exc:
-                self.log.error(f"Could not start watcher: {exc}", kind="watch")
+        if not had_mwl and self._is_running("mwl"):
+            started.append(listeners["mwl"][3])
+        if not enforce:
+            # The watcher is never bounced (it reads config live); it follows
+            # its flag like the listeners, except under an enforcing save, where
+            # sync_services() moves it and says so.
+            scu_was = bool((previous.get("scu") or {}).get("enabled"))
+            scu_now = bool(self.cfg.scu.get("enabled"))
+            if scu_now and not self.watcher.running:
+                try:
+                    self.start_watcher()
+                    started.append("watcher")
+                except Exception as exc:
+                    self.log.error(f"Could not start watcher: {exc}", kind="watch")
+            elif scu_was and not scu_now and self.watcher.running:
+                if self._apply_step(self.stop_watcher, "stop the watcher", "watch") is None:
+                    stopped.append("watcher")
         # Re-sync the health monitor to the new config (armed flag / trigger
         # set). Fenced like everything else in the bounce: the monitor is the
         # last thing standing between a dark primary and a failover, but a
@@ -2316,9 +2461,173 @@ class PacsServer:
         self._apply_step(self.emergency.start, "resume the health monitor", "emergency")
         if was_emergency in (EMG_ACTIVE, EMG_RECOVERING) and self.emergency.state != was_emergency:
             self.emergency.state = was_emergency
-        self.log.info("Configuration updated", kind="config")
+        self.log.info("Configuration updated — " + (
+            "restarted: " + ", ".join(restarted) if restarted else "no service restarted"),
+            kind="config")
         if first_exc is not None:
             raise first_exc
+        return {"restarted": restarted, "started": started, "stopped": stopped}
+
+    # ---- one service on or off (a card's Start / Stop) --------------------
+    def _listener_table(self) -> dict:
+        """name -> (config section, start, stop, engine label, log kind), in
+        the order a bounce takes them down."""
+        return {
+            "receiver": ("scp", self.start_receiver, self.stop_receiver, "receiver", "scp"),
+            "printer": ("print", self.start_printer, self.stop_printer, "print receiver", "print"),
+            "ris": ("ris", self.start_ris, self.stop_ris, "RIS listener", "ris"),
+            "mwl": ("mwl", self.start_mwl, self.stop_mwl, "worklist SCP", "mwl"),
+            "qr": ("qr", self.start_qr, self.stop_qr, "Query/Retrieve SCP", "qr"),
+        }
+
+    def _is_running(self, name: str) -> bool:
+        if name == "watcher":
+            return bool(self.watcher.running)
+        obj = {"receiver": self.scp, "printer": self.print_scp, "ris": self.ris,
+               "mwl": self.mwl_scp, "qr": self.qr_scp}.get(name)
+        return bool(obj and obj.running)
+
+    def _persist_enabled(self, section: str, value: bool, narrow: bool = False) -> None:
+        """Write ONE enabled flag, under the lock and through the validation a
+        Save goes through, so the two cannot interleave. The config version is
+        derived from the document, so it moves with the flag: a dashboard still
+        holding the old version is refused (409) instead of putting it back.
+
+        *narrow* writes just the flag without validating the whole document:
+        for a stored config that is already invalid (config_problem), where a
+        full validation would refuse every flag over a field this one never
+        touches — and leave the operator unable even to Stop a service."""
+        import copy
+        with self.cfg.mutate():
+            if bool((self.cfg.data.get(section) or {}).get("enabled")) == value:
+                return
+            if narrow:
+                block = self.cfg.data.get(section)
+                if not isinstance(block, dict):
+                    raise ValueError(f"'{section}' must be an object")
+                block["enabled"] = value
+                try:
+                    self.cfg.save()
+                except Exception:
+                    block["enabled"] = not value
+                    raise
+                return
+            doc = copy.deepcopy(self.cfg.data)
+            doc.setdefault(section, {})["enabled"] = value
+            previous = self.cfg.data
+            try:
+                self.cfg.replace(doc)
+            except Exception:
+                self.cfg.data = previous
+                raise
+        self.config_problem = ""
+
+    # Every listener section, for the start check on an already-invalid config.
+    _LISTENER_SECTIONS = (("scp", 11112), ("print", 11113), ("mwl", 11114),
+                          ("qr", 11115), ("ris", 2575))
+
+    def _own_start_problem(self, section: str) -> str:
+        """What would stop *section* starting, judged on that section alone plus
+        the ports the other listeners hold — for a stored config that already
+        fails validation somewhere else. "" when nothing of its own is wrong.
+
+        A probe document rather than the full one: validate() stops at the first
+        error, so on a config with a bad notify.smtp.port every Start would be
+        refused over a field the service never reads."""
+        import copy
+        import re
+        from .config import DEFAULTS, _deep_merge
+        data = self.cfg.data
+        probe = copy.deepcopy(DEFAULTS)
+        own = copy.deepcopy(data.get(section) or {})
+        if not isinstance(own, dict):
+            return f"'{section}' must be an object"
+        own["enabled"] = True
+        probe[section] = _deep_merge(probe.get(section) or {}, own)
+        for other, default in self._LISTENER_SECTIONS:
+            if other == section:
+                continue
+            blk = data.get(other)
+            port = blk.get("port", default) if isinstance(blk, dict) else None
+            if isinstance(port, int) and 1 <= port <= 65535:
+                # Only what the clash check reads; anything else wrong with that
+                # section is that section's problem, not this one's.
+                probe.setdefault(other, {}).update(
+                    port=port, enabled=bool(blk.get("enabled")))
+        try:
+            self.cfg.would_accept(probe)
+        except ValueError as exc:
+            msg = str(exc)
+            if re.search(rf"(^|\W){re.escape(section)}(\.|')", msg):
+                return msg
+        return ""
+
+    def set_service(self, name: str, action: str) -> None:
+        """Start or Stop from a service card. One model: Start = enable + start,
+        Stop = disable + stop, so a stopped service stays stopped across a
+        restart and a Save, and a running one is not "enabled but not running".
+        Only this service's flag is written and only this service moves.
+
+        Start validates first and persists after the start, so a port clash or
+        a bind failure leaves the flag as it was. Stop stops first and records
+        the flag after, best effort: Stop is the control an operator reaches
+        for when something is wrong, and neither an invalid stored config nor
+        an unwritable config directory may keep a service running against
+        their wish (an unrecorded Stop is logged — it comes back at restart).
+        Raises KeyError (unknown service), ValueError (refused) or OSError."""
+        import copy
+        if name == "watcher":
+            section, start, stop, label, kind = ("scu", self.start_watcher, self.stop_watcher,
+                                                 "watcher", "watch")
+        else:
+            section, start, stop, label, kind = self._listener_table()[name]
+        if action == "start":
+            doc = copy.deepcopy(self.cfg.data)
+            doc.setdefault(section, {})["enabled"] = True
+            narrow = False
+            try:
+                self.cfg.would_accept(doc)
+            except ValueError as refused:
+                # Refused for something the stored config ALREADY had wrong
+                # (config_problem)? Then only this service's own settings and
+                # its port can stand in the way; enabling it did not cause the
+                # rest and must not be blocked by it.
+                try:
+                    self.cfg.would_accept(self.cfg.data)
+                    stored_ok = True
+                except ValueError:
+                    stored_ok = False
+                if stored_ok:
+                    raise refused           # valid before: enabling this broke it
+                own = self._own_start_problem(section)
+                if own:
+                    raise ValueError(own)
+                narrow = True
+            was = self._is_running(name)
+            start()
+            if name == "mwl":
+                # An operator pressing Start says the worklist stays up until an
+                # operator presses Stop. start_mwl() clears the reclaimable flag
+                # on a start it performs, but returns early when the SCP is
+                # already up — and pressing Start on a worklist an outage
+                # brought up is an operator adopting it.
+                self.mwl_for_orders = False
+            try:
+                self._persist_enabled(section, True, narrow=narrow)
+            except Exception:
+                if not was:
+                    self._apply_step(stop, f"stop the {label} again", kind)
+                raise
+        elif action == "stop":
+            stop()
+            try:
+                self._persist_enabled(section, False, narrow=True)
+            except Exception as exc:
+                self.log.error(f"Stopped the {label}, but could not record it in the "
+                               f"config ({exc}) — it will start again at the next restart",
+                               kind=kind)
+        else:
+            raise ValueError("action must be start|stop")
 
     # ---- service enrollment (the dashboard's setup chooser) ---------------
     def sync_services(self) -> list:
@@ -2364,9 +2673,9 @@ class PacsServer:
         """Finish the setup chooser: write the five enabled flags plus the
         completion marker in ONE save, then sync the services to them.
 
-        One save is the point — apply_config stops and restarts every bound
-        service each time it runs, so posting the five service toggles
-        separately would mean five windows with the receiver down. A service
+        One save is the point — apply_config restarts each bound service whose
+        settings changed, so posting the five service toggles separately could
+        mean five windows with the receiver down. A service
         that then fails to bind is reported in `results`, not as an error: it
         is enrolled, which is exactly what was asked for."""
         # A `services` that is not an object (an array, say) passes the "key in
@@ -2582,9 +2891,17 @@ class PacsServer:
              "releases them too — as IDENTIFIED copies."),
     }
 
-    def stuck_sends(self) -> dict:
+    def stuck_sends(self, detail: bool = False, _actionable: Optional[dict] = None) -> dict:
         """Everything sitting in the outgoing folder that is not moving, in three
         deliberately separate lists.
+
+        *detail* adds ``items`` to each row — the sampled files with the patient,
+        accession and study description read from their headers — for the
+        panel. The badge and the failover monitor call this every poll and leave
+        it off, since it costs a header read per sampled file. *_actionable*, when
+        given, collects every orphaned or held file (absolute path -> list) so
+        the discard and send actions can refuse anything this listing would not
+        have shown.
 
         ``destinations`` — the original stuck panel, unchanged: a forward to a
         node that is STILL enabled has FAILED at least once and is waiting out
@@ -2653,8 +2970,10 @@ class PacsServer:
                     continue                       # queued but not yet failed
                 stuck_here = True
                 agg = per.setdefault(dname, {"name": dname, "instances": 0,
-                                             "attempts": 0, "last_error": "", "next_try": float("inf")})
+                                             "attempts": 0, "last_error": "", "next_try": float("inf"),
+                                             "files": [], "more": 0})
                 agg["instances"] += 1
+                self._stuck_sample(agg, path, detail)
                 agg["attempts"] = max(agg["attempts"], int(f.get("attempts", 0)))
                 agg["last_error"] = f.get("last_error", "") or agg["last_error"]
                 agg["next_try"] = min(agg["next_try"], float(f.get("next_try", 0) or 0))
@@ -2681,10 +3000,9 @@ class PacsServer:
                 if dname in pins:
                     agg["pinned_files"] += 1
                     agg["pinned"] = True
-                if len(agg["files"]) < self._ORPHAN_SAMPLE:
-                    agg["files"].append(os.path.basename(path))
-                else:
-                    agg["more"] += 1
+                self._stuck_sample(agg, path, detail)
+                if _actionable is not None:
+                    _actionable.setdefault(os.path.abspath(path), []).append("orphaned")
             # The names no list above can reach, because nothing was ever
             # attempted for them and they were kept out of the route on purpose.
             held_here = False
@@ -2711,10 +3029,9 @@ class PacsServer:
                 cause = str(e.get("hold_cause", "") or "")
                 agg["cause"] = cause if agg["cause"] is None else (
                     agg["cause"] if agg["cause"] == cause else "")
-                if len(agg["files"]) < self._ORPHAN_SAMPLE:
-                    agg["files"].append(os.path.basename(path))
-                else:
-                    agg["more"] += 1
+                self._stuck_sample(agg, path, detail)
+                if _actionable is not None:
+                    _actionable.setdefault(os.path.abspath(path), []).append("held")
             if stuck_here:
                 files += 1
             if orphan_here:
@@ -2772,6 +3089,48 @@ class PacsServer:
                 "held": held_rows, "held_files": held_files,
                 "attention_files": attention}
 
+    def _stuck_sample(self, agg: dict, path: str, detail: bool) -> None:
+        """Add one file to a stuck row's bounded sample (the rest are counted)."""
+        if len(agg["files"]) >= self._ORPHAN_SAMPLE:
+            agg["more"] += 1
+            return
+        agg["files"].append(os.path.basename(path))
+        if detail:
+            agg.setdefault("items", []).append(self._stuck_item(path))
+
+    def _stuck_item(self, path: str) -> dict:
+        """Who a stuck file belongs to, for the panel: one header read, pixels
+        skipped, cached on (path, mtime) so a refresh of an unchanged queue reads
+        nothing. ``rel`` is the handle the discard and send actions take — a path
+        inside the outgoing folder, or "" for a file outside it (the folder was
+        moved since the file was queued), which no action will touch."""
+        from .dicomfs import safe_within
+        from .history import _fmt_name, _read_header
+        watch = self.cfg.resolved("scu", "watch_dir")
+        rel = os.path.relpath(path, watch) if safe_within(watch, path) else ""
+        try:
+            key = (path, os.path.getmtime(path))
+        except OSError:
+            key = None
+        cache = getattr(self, "_stuck_headers", None)
+        if cache is None:
+            cache = self._stuck_headers = {}
+        ident = cache.get(key) if key else None
+        if ident is None:
+            hdr = _read_header(path)
+            ident = {
+                "patient": _fmt_name(getattr(hdr, "PatientName", "")) if hdr else "",
+                "patient_id": str(getattr(hdr, "PatientID", "") or "") if hdr else "",
+                "accession": str(getattr(hdr, "AccessionNumber", "") or "") if hdr else "",
+                "study_desc": str(getattr(hdr, "StudyDescription", "") or "") if hdr else "",
+                "study_uid": str(getattr(hdr, "StudyInstanceUID", "") or "") if hdr else "",
+            }
+            if key:
+                if len(cache) > 2000:     # bounded: a queue that drained leaves stale keys
+                    cache.clear()
+                cache[key] = ident
+        return {"file": os.path.basename(path), "rel": rel, **ident}
+
     def stuck_count(self) -> int:
         """Files needing an operator's attention — backoff-stuck, orphaned and
         held, counted once each even when a file is more than one. This is the
@@ -2790,6 +3149,154 @@ class PacsServer:
             return {"ok": True, "reset": n,
                     "message": f"Cleared backoff on {n} item(s) — start Auto-send to retry them."}
         return {"ok": True, "reset": n, "message": f"Retrying {n} item(s) now…"}
+
+    def _resolve_stuck_files(self, files) -> tuple:
+        """Map the panel's file handles to absolute paths, or say why not.
+
+        Only a file the stuck listing itself reports as orphaned or held is
+        accepted: these actions delete and transmit, and the handle comes from a
+        request body. Anything else — a path outside the outgoing folder, a
+        traversal, a file that is merely queued or still retrying on its own —
+        refuses the whole request rather than acting on part of it."""
+        from .dicomfs import safe_within
+        if not isinstance(files, list) or not files:
+            return None, "send 'files': the stuck files to act on"
+        watch = self.cfg.resolved("scu", "watch_dir")
+        actionable: dict = {}
+        self.stuck_sends(_actionable=actionable)
+        out = []
+        for rel in files:
+            if not isinstance(rel, str) or not rel.strip() or os.path.isabs(rel):
+                return None, f"not a stuck file: {rel!r}"
+            fp = os.path.abspath(os.path.join(watch, rel))
+            if not safe_within(watch, fp) or fp not in actionable:
+                return None, f"not an orphaned or held file in the outgoing folder: {rel}"
+            if fp not in out:
+                out.append(fp)
+        return out, ""
+
+    def discard_stuck(self, files) -> dict:
+        """Delete orphaned/held files from the outgoing folder — the operator
+        accepting that they will never reach the node they were routed to."""
+        from .dicomfs import prune_empty_dirs
+        from . import routing
+        paths, why = self._resolve_stuck_files(files)
+        if paths is None:
+            return {"ok": False, "message": why, "error": why, "field": "files"}
+        # Orphaned/held is about ONE name on the entry; the same file can still
+        # owe a live node (routed to PACS-A and to a deleted node, or held for
+        # Research while PACS-A retries). Deleting it would lose that delivery
+        # too, so such a file refuses the whole request — the operator discards
+        # it once the live node has it. Refusing rather than trimming the dead
+        # name off the entry: the next pass re-records route/held from the rules
+        # and would put it straight back.
+        want = self._enabled_dest_names()
+        owing: set = set()
+        n = 0
+        for fp in paths:
+            e = self.watcher.state.peek(fp) or {}
+            need = routing.wanted_from(e, want)
+            # None = never routed: it owes whatever is enabled, like stuck_sends.
+            left = (set(want) if need is None else need) - set(e.get("sent", []))
+            if left:
+                n += 1
+                owing |= left
+        if owing:
+            why = (f"{n} of these file(s) still have to reach "
+                   f"{', '.join(sorted(owing))}; nothing was removed. They are delivered "
+                   f"there on their own — discard them once that is done.")
+            return {"ok": False, "message": why, "error": why, "field": "files",
+                    "owing": sorted(owing)}
+        watch = self.cfg.resolved("scu", "watch_dir")
+        removed = 0
+        for fp in paths:
+            try:
+                os.remove(fp)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                self.log.warn(f"Could not remove stuck file {os.path.basename(fp)}: {exc}",
+                              kind="send")
+                continue
+            removed += 1
+            self.watcher.state.drop(fp)
+            if self.index is not None:
+                self.index.remove_file(fp)
+            prune_empty_dirs(os.path.dirname(fp), watch)
+        self.watcher.state.save()
+        self.log.warn(f"Discarded {removed} stuck file(s) from the outgoing folder", kind="send")
+        return {"ok": True, "removed": removed, "message": f"Removed {removed} file(s)"}
+
+    def send_stuck(self, files, destination: str) -> dict:
+        """One-off forward of orphaned/held files to a destination the operator
+        picks. The files stay in the outgoing folder (remove them once the copy
+        is confirmed), and de-identification is honoured: a destination any rule
+        scrubs for gets a scrubbed copy or nothing."""
+        from . import routing
+        from .deid import Deidentifier, deidentified_tempfile
+        from .scu import Destination, c_store
+        name = str(destination or "").strip()
+        dests = [Destination.from_dict(d) for d in self.cfg.enabled_destinations()]
+        nodes = routing.resolve_all(dests, [name]) if name else []
+        if not nodes:
+            why = f"'{name}' is not an enabled destination" if name else "pick a destination"
+            return {"ok": False, "message": why, "error": why, "field": "destination"}
+        paths, why = self._resolve_stuck_files(files)
+        if paths is None:
+            return {"ok": False, "message": why, "error": why, "field": "files"}
+        router = routing.Router.from_config(self.cfg, None)
+        # Scrubbed if ANY rule scrubs for this node, not only one matching this
+        # file: the operator is sending outside the rules, and the node's own
+        # promise is the only one left to keep.
+        summary = router.deid_summary()
+        if name in summary["held"]:
+            why = (f"{name} is held: a routing rule asks for de-identification and the "
+                   f"profile is off, so nothing is sent to it")
+            return {"ok": False, "message": why, "error": why, "field": "destination"}
+        scrub = name in summary["destinations"]
+        deider = None
+        if scrub:
+            try:
+                deider = Deidentifier.from_config(self.cfg, self.log)
+            except Exception as exc:
+                deider = None
+                self.log.error(f"Stuck send: could not build the de-identifier ({exc})", kind="send")
+            if not routing.usable_deidentifier(deider):
+                why = (f"{name} needs a de-identified copy and no de-identifier can be built "
+                       f"from the current settings — nothing was sent")
+                return {"ok": False, "message": why, "error": why, "field": "destination"}
+        ctx = None
+        if any(d.tls for d in nodes):
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return {"ok": False, "message": f"TLS config error: {exc}"}
+        aet = self.cfg.scu.get("aet", "CARINOSCU")
+
+        def _run():
+            ok = fail = 0
+            for fp in paths:
+                try:
+                    with deidentified_tempfile(fp, deider if scrub else None) as payload:
+                        for d in nodes:
+                            res = c_store(d, payload, aet, tls_context=ctx)
+                            if res.ok:
+                                ok += 1
+                                self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}", kind="send")
+                            else:
+                                fail += 1
+                                self.log.warn(f"Send {os.path.basename(fp)} -> {d.name}: "
+                                              f"{res.message}", kind="send")
+                except Exception as exc:
+                    fail += len(nodes)
+                    self.log.error(f"Send {os.path.basename(fp)}: {exc}", kind="send")
+            (self.log.info if not fail else self.log.warn)(
+                f"Stuck files sent to {name}: {ok} ok, {fail} failed — they stay in the "
+                f"outgoing folder until removed", kind="send")
+
+        threading.Thread(target=_run, name="pacs-stuck-send", daemon=True).start()
+        return {"ok": True, "files": len(paths),
+                "message": f"Sending {len(paths)} file(s) to {name}…"}
 
     # ---- disk headroom on the storage volume ------------------------------
     def _disk_status(self) -> dict:
@@ -2863,6 +3370,19 @@ class PacsServer:
         block["errors"] = idx.errors
         return block
 
+    def held_remaining(self) -> Optional[int]:
+        """Instances hold-and-forward still owes a primary, counted only while
+        an emergency is on the air or recovering (None otherwise) — the number
+        that tells the operator when Resume is safe."""
+        if getattr(self.emergency, "state", "") not in (EMG_ACTIVE, EMG_RECOVERING):
+            return None
+        n = 0
+        for path, entry in self.watcher.state.all_entries().items():
+            sent = set(entry.get("sent") or [])
+            if any(p not in sent for p in (entry.get("pin") or [])) and os.path.exists(path):
+                n += 1
+        return n
+
     def status(self) -> dict:
         from . import ingest
         scp = self.scp
@@ -2874,6 +3394,7 @@ class PacsServer:
         mcfg = self.cfg.mwl
         qr = self.qr_scp
         qcfg = self.cfg.qr
+        stuck = self.stuck_sends()
         return {
             "receiver": {
                 "enabled": bool(self.cfg.scp.get("enabled", False)),   # enrolled
@@ -2897,6 +3418,9 @@ class PacsServer:
                 # no receiver has ever run in this process or none has arrived
                 # since it started — running/enabled tell those apart.
                 "last": scp.last_stored if scp else None,
+                # The newest refusal or error of this listener, {message, at},
+                # kept by the log so it outlives a Stop/Start and a Save.
+                "last_problem": self.log.last_problem("scp", "store"),
             },
             "printer": {
                 "enabled": bool(pr.get("enabled", False)),
@@ -2908,7 +3432,15 @@ class PacsServer:
                 "layout": pr.get("layout", "pdf"),
                 "printed": pscp.printed_count if pscp else 0,
                 "errors": pscp.error_count if pscp else 0,
+                # What the card says when a modality reports a failed print:
+                # the last refusal/failure in plain words, and the last film
+                # that did arrive, so "is it working?" has an answer.
+                # From the log rather than the object so a failed start counts
+                # too; the object's own copy says the same about a print.
+                "last_problem": self.log.last_problem("print"),
+                "last_print": pscp.last_print if pscp else None,
                 "tls": bool(pr.get("tls", False)),
+                "tls_mutual": bool(pr.get("tls", False) and pr.get("tls_ca", "")),
                 "since": int(self._counter_since.get("printer", self.started_at)),
             },
             "watcher": {
@@ -2951,6 +3483,7 @@ class PacsServer:
                 "orders_cancelled": ris.cancelled_count if ris else 0,
                 "orders_noop": ris.noop_count if ris else 0,
                 "errors": ris.error_count if ris else 0,
+                "last_problem": self.log.last_problem("ris"),
                 # Anchors received/orders_in/errors ONLY. `counts` below comes
                 # from the persisted store and survives restarts entirely — it
                 # is a current state, not a window, and has no origin to give.
@@ -2996,6 +3529,8 @@ class PacsServer:
                 "errors": mwl.error_count if mwl else 0,
                 "since": int(self._counter_since.get("mwl", self.started_at)),
                 "tls": bool(mcfg.get("tls", False)),
+                "tls_mutual": bool(mcfg.get("tls", False) and mcfg.get("tls_ca", "")),
+                "last_problem": self.log.last_problem("mwl"),
                 "wanted": self.worklist_wanted(),   # permanent (enabled or a no_ris destination)
             },
             "qr": {
@@ -3012,7 +3547,8 @@ class PacsServer:
                 "move_failures": qr.move_failures if qr else 0,
                 "errors": qr.error_count if qr else 0,
                 # QrSCP carries its own started_at, like the receiver: it is
-                # rebuilt on every save, so its counters restart with it.
+                # rebuilt by a save that changes its settings, and its
+                # counters restart with it.
                 "since": int(qr.started_at) if qr else int(self.started_at),
                 "tls": bool(qcfg.get("tls", False)),
                 "tls_mutual": bool(qcfg.get("tls", False) and qcfg.get("tls_ca", "")),
@@ -3020,6 +3556,7 @@ class PacsServer:
                 # can resolve without falling back to the destination list.
                 "destinations": sorted(qcfg.get("move_destinations", {}) or {}),
                 "last": qr.last_query if qr else None,
+                "last_problem": self.log.last_problem("qr"),
             },
             "index": self.index_status(),
             "dicomweb": {
@@ -3080,7 +3617,7 @@ class PacsServer:
                 # study that stopped halfway.
                 "superseded_sends": self.stale_sends(),
             },
-            "emergency": self.emergency.status(),
+            "emergency": {**self.emergency.status(), "held_remaining": self.held_remaining()},
             # Present ONLY when this process was started with --dev-peer, so a
             # dashboard that never sees this key hides the panel entirely.
             # Here rather than in web.py's _status_for because that function
@@ -3104,12 +3641,19 @@ class PacsServer:
             # of them describes a window — that absence is how the dashboard
             # tells them apart from received/sent, which do.
             "pending": ingest.count_pending(self._pending_dir()),
-            "stuck": self.stuck_count(),
+            "stuck": stuck["attention_files"],
+            # Per destination: what its forwards are doing right now. Overview
+            # draws a node whose sends keep failing as failing, instead of the
+            # "Not checked" a node outside the failover probe would otherwise get.
+            "stuck_by_dest": {d["name"]: {"instances": d.get("instances", 0),
+                                          "last_error": d.get("last_error", "")}
+                              for d in stuck.get("destinations", [])},
             "disk": self._disk_status(),
             "editor_url": self.cfg.web.get("editor_url", ""),
             # Same epoch base as a log entry. This is when the PROCESS started —
             # it is uptime's origin, not the counters': each block above carries
-            # its own `since`, because a save rebuilds the object behind it.
+            # its own `since`, because a save that changes a service rebuilds the
+            # object behind it.
             "started_at": int(self.started_at),
             "uptime_sec": int(time.time() - self.started_at),
             "setup": self.setup_state(),

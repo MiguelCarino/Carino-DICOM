@@ -450,9 +450,14 @@ async function main() {
         "the Q/R card's Start bound the SCP on port " + qrPort);
   check(await cdp.eval("document.getElementById('qrToggle').textContent") !== "Start",
         "the toggle flipped to Stop");
+  // Stop asks first (a native confirm() would block CDP), so answer it here and
+  // keep what it said: the operator must be told what stopping costs.
+  await cdp.eval("window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return true; }");
   await cdp.eval("document.getElementById('qrToggle').click()");
   await cdp.waitFor("!document.getElementById('qrDot').classList.contains('on')", 15000, "the Q/R service to stop");
   ok("the Q/R card's Stop takes it down again");
+  check(await cdp.eval("window.__asked.length === 1 && /stays off after a restart/i.test(window.__asked[0])"),
+        "Stop asked first and said the service stays off");
 
   /* a later 401 re-raises the prompt without losing the operator's place */
   await cdp.eval("document.getElementById('authLogout').click()");

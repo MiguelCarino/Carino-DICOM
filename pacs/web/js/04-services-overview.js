@@ -2,7 +2,7 @@
 "use strict";
 // ---- Service chooser (#dlgServices in its "setup" state) ----
 /* Same cards plus a checkbox each. All *.enabled flags are written in ONE post, since
-   apply_config() restarts the receiver on every save; picks stay local until Apply. */
+   each save may restart what it changes; picks stay local until Apply. */
 const SETUP_CARDS = [
   { svc: "receiver", card: "receiverCard", pick: "pickRx", port: "portRx", label: "Receiver",       block: "receiver" },
   { svc: "watcher",  card: "watcherCard",  pick: "pickWx", port: "",       label: "Auto-send",      block: "watcher" },
@@ -11,8 +11,14 @@ const SETUP_CARDS = [
   { svc: "mwl",      card: "mwlCard",      pick: "pickMw", port: "portMw", label: "Worklist",       block: "mwl" },
   { svc: "qr",       card: "qrCard",       pick: "pickQr", port: "portQr", label: "Query/Retrieve", block: "qr" },
 ];
-// setupDismissed is in-memory only: "Not now" lasts this page-load; a reload re-offers the chooser.
+/* "Not now" is remembered per browser (a kiosk reload must not re-open the chooser every time);
+   the Overview note and "Choose services" still offer it. Storage may be unavailable: then it
+   lasts this page-load. */
+const SETUP_LATER_KEY = "carino.setupLater";
 let setupActive = false, setupSeeded = false, setupDismissed = false;
+try { setupDismissed = localStorage.getItem(SETUP_LATER_KEY) === "1"; } catch (e) { /* page-load only */ }
+// Set by applySetup: the next status poll fills the "Connect your equipment" box.
+let setupDoneWanted = false;
 const labelFor = (svc) => (SETUP_CARDS.find((c) => c.svc === svc) || {}).label || svc;
 
 function setCardState(id, enabled, running) {
@@ -48,10 +54,12 @@ function enterSetup() {
   else updateSetupCount();  // no status yet (boot #setup) — the next poll seeds it
 }
 
-function exitSetup() {
+// later=true is "Not now": remembered, so the chooser stops opening by itself on this browser.
+function exitSetup(later) {
   const panel = $("dlgServices");
   setupActive = false;
   setupDismissed = true;
+  if (later === true) { try { localStorage.setItem(SETUP_LATER_KEY, "1"); } catch (e) { /* page-load only */ } }
   if (panel) panel.classList.remove("setup");
   const intro = $("setupIntro"), foot = $("setupFoot");
   if (intro) intro.hidden = true;
@@ -62,8 +70,11 @@ function exitSetup() {
 // Seed from persisted flags once per chooser session; then the operator owns them.
 function seedSetup(s) {
   setupSeeded = true;
+  // A machine nobody has set up yet starts with the Receiver ticked: receiving is what a PACS is for,
+  // and "Nothing selected" as the first thing a new operator reads is a trap, not a choice.
+  const fresh = !!(s.setup && s.setup.needed) && !SETUP_CARDS.some((c) => (s[c.block] || {}).enabled);
   SETUP_CARDS.forEach((c) => {
-    const on = !!((s[c.block] || {}).enabled);
+    const on = !!((s[c.block] || {}).enabled) || (fresh && c.svc === "receiver");
     const box = $(c.pick);
     if (box) box.checked = on;
     const card = $(c.card);
@@ -144,10 +155,34 @@ async function applySetup(btn) {
     });
     // Flashed last: a failed re-read means the next Save would post the pre-chooser config.
     if (resyncErr) flashNote(TF("Load failed: {err}", { err: resyncErr.message }), false);
+    // An answer was given: forget any earlier "Not now", and end on what to type into the equipment.
+    try { localStorage.removeItem(SETUP_LATER_KEY); } catch (e) { /* nothing stored */ }
+    setupDoneWanted = n > 0;
     exitSetup();
   } catch (e) {
     flashNote(e.message, false);
   } finally { btn.disabled = false; }
+}
+
+// "Connect your equipment": the chooser's last step, one line per listener just turned on.
+function renderSetupDone(s, ips) {
+  const box = $("setupDone"), list = $("setupDoneList");
+  if (!box || !list || !setupDoneWanted) return;
+  setupDoneWanted = false;
+  list.textContent = "";
+  [["receiver", "Receiver"], ["printer", "Print receiver"], ["mwl", "Worklist"], ["qr", "Query/Retrieve"], ["ris", "Emergency RIS"]]
+    .forEach(([key, label]) => {
+      const b = s[key] || {};
+      if (!b.enabled) return;
+      const bind = b.bind || "0.0.0.0";
+      const addrs = (bind === "0.0.0.0" || bind === "::") ? (ips.length ? ips : [bind]) : [bind];
+      const li = document.createElement("li");
+      const v = document.createElement("b");
+      v.textContent = [b.aet, addrs.join(" / "), b.port].filter((x) => x != null && x !== "").join(" · ");
+      li.append(T(label) + ": ", v, b.running ? "" : " — " + T("not listening"));
+      list.appendChild(li);
+    });
+  box.hidden = !list.children.length;
 }
 
 // ---- Overview ----
@@ -160,9 +195,18 @@ function renderOverview(s) {
   const qr = s.qr || {};
   const setup = s.setup || {};
 
-  // Must match the enrollable set in SETUP_CARDS.
-  const services = [rx, wx, px, rs, mw, qr];
-  txt("ovServices", services.filter((b) => b.running).length + "/" + services.length);
+  /* Running out of what this site USES (enabled), not out of all six: a receiver-only site must
+     read "1 of 1 running", not "1/6". Must match the enrollable set in SETUP_CARDS. */
+  const blocks = [[rx, "Receiver"], [wx, "Auto-send"], [px, "Print receiver"], [rs, "Emergency RIS"],
+                  [mw, "Worklist"], [qr, "Query/Retrieve"]];
+  const used = blocks.filter(([b]) => b.enabled || (b === mw && b.wanted));
+  const down = used.filter(([b]) => !b.running);
+  const svcTile = $("ovServices");
+  txt("ovServices", !used.length ? T("None turned on")
+    : !down.length ? TF("{n} of {m} running", { n: used.length, m: used.length })
+    : TF("{n} of {m} — {names} stopped", { n: used.length - down.length, m: used.length,
+                                          names: down.map(([, l]) => T(l)).join(", ") }));
+  if (svcTile) svcTile.classList.toggle("warn", down.length > 0);
   txt("ovReceived", rx.received || 0);
   txt("ovSent", wx.sent || 0);
   txt("ovStuck", s.stuck || 0);
@@ -182,8 +226,7 @@ function renderOverview(s) {
   const note = $("ovSetupNote");
   if (note) note.hidden = !setup.needed;
 
-  const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
-  setAtomic("ovIp", ips.length ? ips[0] + (ips.length > 1 ? " +" + (ips.length - 1) : "") : "");
+  setAtomic("ovIp", hostIps(s).join(" · "));
   // Flag a stopped receiver so nobody points a modality at a dead port.
   setAtomic("ovAetPort", rx.aet
     ? rx.aet + ":" + rx.port + (rx.running ? "" : " · " + T("not listening"))
@@ -193,8 +236,39 @@ function renderOverview(s) {
   setPath("ovStorageDir", rx.storage_dir);
   setPath("ovLogsDir", s.logs_dir);
 
+  renderOvDicomweb(s.dicomweb || {});
+  renderOvFailover(s.emergency);
   renderOvDests(s);
   renderOvLast(s);
+}
+
+// DICOMweb: on/off and, when on, the absolute base URL a viewer needs, with a copy button.
+function renderOvDicomweb(dw) {
+  const dd = $("ovDicomweb");
+  if (!dd) return;
+  dd.textContent = "";
+  if (!dw.enabled) { dd.textContent = T("Off"); return; }
+  let abs = dw.url || "/dicom-web";
+  try { abs = new URL(abs, location.origin).href; } catch (e) { /* keep it relative */ }
+  const v = document.createElement("span");
+  v.className = "ov-atomic";
+  v.textContent = abs;
+  v.title = abs;
+  dd.append(v, copyButton(abs));
+}
+
+/* Failover: armed or not, how many primaries it watches, and the newest probe. Absent block
+   (no capability for it) reads as unknown, never as "off". */
+function renderOvFailover(emg) {
+  const dd = $("ovFailover");
+  if (!dd) return;
+  if (!emg) { dd.textContent = "—"; return; }
+  if (!emg.armed) { dd.textContent = T("Not armed"); return; }
+  const dests = emg.destinations || [];
+  const probes = dests.map((d) => Date.parse(d.last_probe || "")).filter((t) => !isNaN(t));
+  const last = probes.length ? Math.max.apply(null, probes) : 0;
+  dd.textContent = TF("Armed · watching {n}", { n: dests.length })
+    + (last ? " · " + TF("last probe {ts}", { ts: fmtLogTs(last) }) : "");
 }
 
 // ---- Desktop shell update notice ----
@@ -236,6 +310,7 @@ function renderOvDests(s) {
   // Only 🚨-flagged destinations are probed (while armed); others show "Not checked", never green.
   const probes = {};
   ((s.emergency || {}).destinations || []).forEach((e) => { probes[e.name] = e; });
+  const failing = s.stuck_by_dest || {};
   list.forEach((d) => {
     const row = I18N_IN(tpl.content.cloneNode(true)).querySelector(".ov-dest");
     const nm = row.querySelector(".ov-dest-name");
@@ -259,6 +334,13 @@ function renderOvDests(s) {
       if (p.last_error) state.title = p.last_error;
       note.textContent = p.last_probe
         ? TF("checked {ts}", { ts: fmtLogTs(Date.parse(p.last_probe), p.last_probe) }) : "";
+    } else if (failing[d.name] && failing[d.name].instances) {
+      // Not probed, but its own forwards say enough: a node that keeps refusing is not "Not checked".
+      const f = failing[d.name];
+      state.classList.add("bad");
+      state.textContent = T("Sends failing");
+      if (f.last_error) state.title = f.last_error;
+      note.textContent = TN(f.instances, "{n} instances waiting");
     } else {
       state.classList.add("unknown");
       state.textContent = T("Not checked");
@@ -326,16 +408,25 @@ function renderOvLast(s) {
 }
 
 // ---- Navbar service chips ----
-// Gold when running. A click re-fires the card's toggle so the start/persist logic lives in one place.
+/* Gold when running. Status only: a click opens the Services card (where Stop asks first) rather than
+   stopping a clinical listener from an always-visible header. */
 const NAV_SERVICES = [
-  { key: "rx", label: "Receiver",  toggle: "rxToggle" },
-  { key: "wx", label: "Auto-send", toggle: "wxToggle" },
-  { key: "px", label: "Printer",   toggle: "pxToggle" },
-  { key: "rs", label: "RIS",       toggle: "rsToggle" },
-  { key: "mw", label: "Worklist",  toggle: "mwToggle" },
+  { key: "rx", label: "Receiver",  card: "receiverCard" },
+  { key: "wx", label: "Auto-send", card: "watcherCard" },
+  { key: "px", label: "Printer",   card: "printerCard" },
+  { key: "rs", label: "RIS",       card: "risCard" },
+  { key: "mw", label: "Worklist",  card: "mwlCard" },
   // "Q/R" stays untranslated: the chip is too narrow for the full noun.
-  { key: "qr", label: "Q/R",       toggle: "qrToggle" },
+  { key: "qr", label: "Q/R",       card: "qrCard" },
 ];
+function focusServiceCard(cardId) {
+  goTo("dlgServices");
+  const card = $(cardId);
+  if (!card || card.hidden) return;
+  card.scrollIntoView({ block: "nearest" });
+  const btn = card.querySelector(".btn.toggle");
+  if (btn) btn.focus({ preventScroll: true });
+}
 function mountServiceChips() {
   const nav = $("carinoNav");
   if (!nav) return false;                       // navbar not injected yet
@@ -358,7 +449,7 @@ function mountServiceChips() {
     const dot = document.createElement("span"); dot.className = "svc-chip-dot";
     const lab = document.createElement("span"); lab.className = "svc-chip-label"; lab.textContent = T(svc.label);
     chip.append(dot, lab);
-    chip.addEventListener("click", () => { const b = $(svc.toggle); if (b) b.click(); });
+    chip.addEventListener("click", () => focusServiceCard(svc.card));
     box.appendChild(chip);
   });
   right.insertBefore(box, right.firstChild);
@@ -366,15 +457,15 @@ function mountServiceChips() {
   return true;
 }
 /* Who may click the chips (everyone may see them: service state is ungated in _STATUS_GATES).
-   Without services.control the button is disabled but the dot stays. Called from
-   applyCapabilities() each poll, since mountServiceChips() only runs once. */
+   The click opens the Services panel, which needs services.control; without it the chip is an
+   indicator only. Called from applyCapabilities() each poll, since mountServiceChips() only runs once. */
 function chipAuthority() {
   const allowed = can("services.control");
   NAV_SERVICES.forEach((svc) => {
     const chip = $("nav_" + svc.key);
     if (!chip) return;
     chip.disabled = !allowed;
-    chip.title = chipTitle(svc, chip, allowed);
+    labelChip(svc, chip);
   });
 }
 // Nav-row count badge: hidden at zero, labelled for screen readers.
@@ -386,19 +477,19 @@ function setBadge(id, n, glyph, label) {
   el.setAttribute("aria-label", label);
   el.title = label;
 }
-function chipTitle(svc, chip, allowed) {
+// The state is in the accessible name, not only in the colour: "Receiver: running".
+function labelChip(svc, chip) {
   const name = T(svc.label);
-  if (allowed) return TF("{svc} — click to start/stop", { svc: name });
-  return chip.dataset.on === "true"
-    ? TF("{svc} — running", { svc: name })
-    : TF("{svc} — stopped", { svc: name });
+  const label = chip.dataset.on === "true" ? TF("{svc}: running", { svc: name }) : TF("{svc}: stopped", { svc: name });
+  chip.setAttribute("aria-label", label);
+  chip.title = label;
 }
 // Re-label the already-mounted chips after a language switch.
 function relabelServiceChips() {
   NAV_SERVICES.forEach((svc) => {
     const chip = $("nav_" + svc.key);
     if (!chip) return;
-    chip.title = chipTitle(svc, chip, can("services.control"));
+    labelChip(svc, chip);
     const lab = chip.querySelector(".svc-chip-label");
     if (lab) lab.textContent = T(svc.label);
   });
@@ -408,11 +499,8 @@ function setChip(key, on) {
   if (!chip) return;
   chip.dataset.on = String(!!on);
   chip.classList.toggle("on", !!on);
-  // The read-only title names the state, so update it too.
-  if (chip.disabled) {
-    const svc = NAV_SERVICES.find((s) => s.key === key);
-    if (svc) chip.title = chipTitle(svc, chip, false);
-  }
+  const svc = NAV_SERVICES.find((s) => s.key === key);
+  if (svc) labelChip(svc, chip);
 }
 function showChip(key, show) {
   const chip = $("nav_" + key);
@@ -434,3 +522,23 @@ function pulseChip(key) {
   chip.classList.add("tx");
 }
 
+
+// A small "Copy" button for a value an engineer has to type somewhere else.
+function copyButton(text) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn ghost tiny cc-copy";
+  b.textContent = T("Copy");
+  b.setAttribute("aria-label", T("Copy the address"));
+  b.addEventListener("click", () => copyText(text));
+  return b;
+}
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    flashNote(TF("Copied: {text}", { text }), true);
+  } catch (e) {
+    // Plain-http on a LAN address has no clipboard API: show it so it can be copied by hand.
+    window.prompt(T("Copy this:"), text);
+  }
+}

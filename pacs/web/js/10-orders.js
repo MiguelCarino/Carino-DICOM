@@ -4,12 +4,14 @@
 let orderStatus = "open";
 // Poll and clicks can race: each load carries its tab + sequence; superseded answers are dropped.
 let ordersReq = 0;
+let ordersCache = [];          // the loaded tab's orders, so the search box filters without a fetch
+let editingOrder = null;       // the manual order the form is editing, or null for a new one
 
 // Depends on the CLOSED count, which moves whenever a study arrives, so the status poll calls it too.
 function paintOrdPurge(closed) {
   const btn = $("ordPurge");
   if (!btn) return;
-  btn.hidden = orderStatus !== "closed" || !closed;
+  btn.hidden = orderStatus !== "closed" || !closed || !capAllowed(btn);
 }
 
 /* Tablist: aria-selected and the roving tabindex must move with the class (screen readers read the
@@ -32,41 +34,68 @@ async function loadOrders() {
   const list = $("ordersList");
   const req = ++ordersReq;
   const want = orderStatus;
+  // The form is static markup outside the nav sweep, so it follows its data-cap here.
+  const form = $("orderNew");
+  if (form) form.hidden = !capAllowed(form);
   // Only show "Loading…" on an empty list; blanking a populated one would flicker.
   if (!list.querySelector(".order-row")) listLoading(list);
   try {
     const data = await api("/api/ris/orders?status=" + want);
     if (req !== ordersReq || want !== orderStatus) return;   // a newer load owns the list
-    renderOrders(data.orders || []);
-    paintOrdPurge(data.counts && data.counts.closed);
+    ordersCache = data.orders || [];
+    const c = data.counts || {};
+    setTabCount("tab_ordOpen", c.open, true);
+    setTabCount("tab_ordClosed", c.closed, true);
+    renderOrders();
+    paintOrdPurge(c.closed);
   } catch (e) {
     if (req !== ordersReq || want !== orderStatus) return;
-    listError(list, e.message);
+    listError(list, failText(e));
   }
 }
 
-function renderOrders(orders) {
+// HL7 sends "S" (OBR-27.6 / ORC-7); a typed or ISO-style "STAT" means the same.
+const isStat = (o) => /^(S|STAT)$/i.test(String((o && o.priority) || "").trim());
+const whenMs = (raw) => { const p = parseWhen(raw); return p && !isNaN(p.date.getTime()) ? p.date.getTime() : Infinity; };
+
+function orderMatches(o, q) {
+  if (!q) return true;
+  return [o.accession, o.patient, o.patient_name, o.patient_id, o.study_desc, o.referring, o.station_aet, o.modality]
+    .some((v) => String(v || "").toLowerCase().indexOf(q) >= 0);
+}
+
+function renderOrders() {
   const list = $("ordersList");
+  const q = (($("ordFilter") || {}).value || "").trim().toLowerCase();
+  let orders = ordersCache.filter((o) => orderMatches(o, q));
+  // Open orders are a work queue: STAT first, then by when the exam is due. Closed keep the engine's order.
+  if (orderStatus === "open") {
+    orders = orders.slice().sort((a, b) =>
+      (isStat(b) - isStat(a)) || (whenMs(a.scheduled_dt) - whenMs(b.scheduled_dt)));
+  }
   list.innerHTML = "";
-  if (!orders.length) {
+  if (!ordersCache.length) {
     list.appendChild(emptyNote(orderStatus === "open"
       ? T("No open orders. Send an ORM over HL7/MLLP or add one above.")
       : T("No closed orders yet.")));
     return;
   }
+  if (!orders.length) { list.appendChild(emptyNote(T("Nothing matches the filter."))); return; }
   orders.forEach((o) => {
     const row = I18N_IN($("orderRowTpl").content.cloneNode(true)).querySelector(".order-row");
     const acc = row.querySelector(".order-acc");
     acc.textContent = o.accession ? TF("ACC {acc}", { acc: o.accession }) : T("no accession");
     if (!o.accession) acc.classList.add("order-noacc");
     row.querySelector(".order-patient").textContent = o.patient || o.patient_name || T("(no patient)");
+    row.querySelector(".order-stat").hidden = !isStat(o);
     row.querySelector(".hist-meta").textContent = [
       o.patient_id ? TF("ID {id}", { id: o.patient_id }) : "",
-      [fmtDate(o.patient_birthdate), o.patient_sex].filter(Boolean).join(" "),
+      o.patient_birthdate ? TF("DOB {d}", { d: fmtDate(o.patient_birthdate) }) : "",
+      o.patient_sex ? TF("Sex {s}", { s: o.patient_sex }) : "",
       o.modality || "",
       o.station_aet ? "→ " + o.station_aet : "",
       o.study_desc || T("(no study description)"),
-      o.scheduled_dt ? "@ " + String(o.scheduled_dt).replace("T", " ") : "",
+      o.scheduled_dt ? "@ " + fmtWhen(o.scheduled_dt) : "",
     ].filter(Boolean).join("  ·  ");
     // Origin decides what may be done to the order, so it is tagged on the row.
     const originTag = row.querySelector(".order-origin");
@@ -92,30 +121,41 @@ function renderOrders(orders) {
     }
     if (o.referring) bits.push(TF("ref: {who}", { who: o.referring }));
     sub.textContent = bits.join("  ·  ");
+    // Gated first; the status rules below only ever hide more.
+    capGate(row);
+    const who = whoOf(o);
     const captureBtn = row.querySelector(".order-capture");
     const cancelBtn = row.querySelector(".order-cancel");
+    const editBtn = row.querySelector(".order-edit");
+    const delBtn = row.querySelector(".order-del");
     if (o.status === "closed") {
       captureBtn.hidden = true;
       cancelBtn.hidden = true;
+      editBtn.hidden = true;
     } else {
       captureBtn.addEventListener("click", () => captureForOrder(o, captureBtn));
-      // Only the RIS may cancel a RIS order (the server refuses it too), so no button.
+      // The RIS owns its orders: only it may cancel or edit one (the server refuses a cancel too),
+      // and an open one is not deleted here either — the RIS would still think it is scheduled.
       if (o.origin === "ris") {
         cancelBtn.hidden = true;
+        editBtn.hidden = true;
+        delBtn.hidden = true;
       } else {
-        cancelBtn.addEventListener("click", () => orderAction("cancel", o, T("Cancel this order? It moves to Closed (kept for the audit trail).")));
+        cancelBtn.addEventListener("click", () => orderAction("cancel", o, T("Cancel this order? It moves to Closed.")));
+        editBtn.addEventListener("click", () => editOrder(o));
       }
     }
-    row.querySelector(".order-del").addEventListener("click", () =>
-      orderAction("delete", o, T("Delete this order permanently? This removes it from the audit trail.")));
+    delBtn.addEventListener("click", () =>
+      orderAction("delete", o, o.status === "closed"
+        ? T("Delete this order permanently? It is removed from the Closed list.")
+        : T("Delete this order permanently? It is removed from this list and from the worklist.")));
+    [captureBtn, cancelBtn, editBtn, delBtn].forEach((b) => ariaWho(b, who));
     list.appendChild(row);
   });
 }
 
-function fmtStamp(iso) {
-  if (!iso) return "";
-  return String(iso).replace("T", " ").replace("Z", "");
-}
+// queued/closed stamps are UTC ("…Z"); fmtWhen shows them in local time.
+const fmtStamp = (iso) => (iso ? fmtWhen(iso) : "");
 
 /* Queued-order outcome, localised here from the engine's code (see ORDER_QUEUED_MESSAGES):
    it is often the only warning that an order reaches no scanner. Unknown codes fall back to
@@ -228,6 +268,7 @@ async function addOrder(btn) {
     if (box) box.focus();
     return;
   }
+  if (editingOrder) { await saveOrderEdit(btn, fields); return; }
   const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
   try {
     const r = await post("/api/ris/orders", fields);
@@ -240,12 +281,7 @@ async function addOrder(btn) {
     if (r.ok !== false) {
       // Untick "Test order" FIRST: its fields are readOnly while on, and releasing the lock
       // restores pre-test values, so it must run before the clear below.
-      const test = $("ordTest");
-      if (test && test.checked) { test.checked = false; applyTestDefaults(false); }
-      ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
-      // Station is not sticky: an inherited one would send the next order to the previous room.
-      const sel = $("ordStationSel");
-      if (sel) sel.value = "";
+      clearOrderForm();
       // Back to Open via the tab helper so ARIA state follows.
       selectOrderTab("open");
       pollStatus();
@@ -253,53 +289,140 @@ async function addOrder(btn) {
   } catch (e) {
     // Known engine refusals are localised (red, sticky); anything else keeps the engine's English.
     const said = orderRefusedText(e.code);
-    flashNote(said || e.message, false, { warn: !!said });
+    flashNote(said || failText(e), false, { warn: !!said });
   } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+function clearOrderForm() {
+  // Untick "Test order" FIRST: its fields are readOnly while on, and releasing the lock
+  // restores pre-test values, so it must run before the clear below.
+  const test = $("ordTest");
+  if (test && test.checked) { test.checked = false; applyTestDefaults(false); }
+  ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
+  // Station is not sticky: an inherited one would send the next order to the previous room.
+  const sel = $("ordStationSel");
+  if (sel) sel.value = "";
+}
+
+// "YYYY-MM-DDTHH:MM" for <input type=datetime-local>, from whatever the order carries.
+function localInputValue(raw) {
+  const p = parseWhen(raw);
+  if (!p || isNaN(p.date.getTime())) return "";
+  const d = p.date, pad = (n) => String(n).padStart(2, "0");
+  return isoDay(d) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+/* Edit a manual open order in the same form (POST /api/ris/orders/update overwrites every field it
+   is given, so the whole form is sent). The Test tick is locked while editing: it fills fields. */
+function editOrder(o) {
+  const form = $("orderNew");
+  clearOrderForm();
+  editingOrder = o;
+  const set = (id, v) => { const el = $(id); if (el) el.value = v || ""; };
+  set("ordAcc", o.accession);
+  set("ordPatient", o.patient || o.patient_name);
+  set("ordPid", o.patient_id);
+  set("ordDob", fmtDate(o.patient_birthdate));
+  set("ordSex", o.patient_sex);
+  const mod = $("ordMod");
+  if (mod && o.modality && ![...mod.options].some((x) => x.value === o.modality)) {
+    const extra = document.createElement("option");
+    extra.value = extra.textContent = o.modality;
+    mod.appendChild(extra);
+  }
+  set("ordMod", o.modality);
+  const sel = $("ordStationSel");
+  if (sel && !sel.hidden) {
+    // Posting the dropdown's "" for an AE it does not list would retarget the order at every worklist.
+    addStationOption(sel, o.station_aet);
+    sel.value = o.station_aet || "";
+  } else set("ordStation", o.station_aet);
+  set("ordDesc", o.study_desc);
+  set("ordWhen", localInputValue(o.scheduled_dt));
+  set("ordRef", o.referring);
+  $("ordTest").disabled = true;
+  $("ordAdd").textContent = T("Save changes");
+  $("ordEditCancel").hidden = false;
+  $("ordEditing").textContent = TF("Editing the order for {who}", { who: whoOf(o) });
+  $("ordEditing").hidden = false;
+  if (form) { form.open = true; form.scrollIntoView({ block: "nearest" }); }
+  $("ordAcc").focus();
+}
+
+function endOrderEdit() {
+  editingOrder = null;
+  clearOrderForm();
+  $("ordTest").disabled = false;
+  $("ordAdd").textContent = T("Queue order");
+  $("ordEditCancel").hidden = true;
+  $("ordEditing").hidden = true;
+}
+
+async function saveOrderEdit(btn, fields) {
+  const o = editingOrder;
+  const body = Object.assign({ id: o.id }, fields);
+  delete body.test;
+  btn.disabled = true;
+  try {
+    const r = await studyPost("/api/ris/orders/update", body);
+    flashNote(T("Order updated"), r.ok !== false);
+    endOrderEdit();
+    loadOrders();
+    pollStatus();
+  } catch (e) {
+    const said = orderRefusedText(e.code);
+    flashNote(said || failText(e), false, { warn: !!said });
+  } finally { btn.disabled = false; }
 }
 
 async function orderAction(action, o, confirmMsg) {
   if (confirmMsg && !confirm(confirmMsg + "\n\n" + (o.patient || T("(no patient)")) +
       (o.accession ? "  ·  " + TF("ACC {acc}", { acc: o.accession }) : ""))) return;
   try {
-    const r = await post("/api/ris/orders/" + action, { id: o.id });
+    const r = await studyPost("/api/ris/orders/" + action, { id: o.id });
     flashNote(r.message || T("Done"), r.ok !== false);
+    if (editingOrder && editingOrder.id === o.id) endOrderEdit();
     loadOrders();
     pollStatus();
-  } catch (e) { flashNote(e.message, false); }
+  } catch (e) { flashNote(failText(e), false); }
 }
 
 // Use-case-B bridge: attach an exported PDF/image to this order; the server wraps it as DICOM
-// (order identity + Study UID), queues it to outgoing, and closes the order.
+// (order identity + Study UID), queues it to outgoing, and closes the order. Confirmed first:
+// there is no reopen.
 function captureForOrder(o, btn) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/*";
-  input.addEventListener("change", async () => {
-    const f = input.files && input.files[0];
-    if (!f) return;
+  pickDocument(async (f) => {
+    if (!confirm(TF("Add “{file}” to the order for {who}? It is sent as a new study and the order is closed.",
+                    { file: f.name, who: whoOf(o) }))) return;
     const fd = new FormData();
     fd.append("id", o.id);
     fd.append("file", f);
     const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
     try {
-      const res = await fetch("/api/ris/orders/capture", { method: "POST", headers: { "X-Carino": "1" }, body: fd });
-      let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
-      flashNote(body.message || (res.ok ? T("Study created") : T("Capture failed")), res.ok && body.ok !== false);
-      if (res.ok) { loadOrders(); pollStatus(); }
+      const body = await studyForm("/api/ris/orders/capture", fd);
+      flashNote(body.message || T("Study created"), body.ok !== false);
+      loadOrders(); pollStatus();
     } catch (e) {
-      flashNote(e.message, false);
+      flashNote(failText(e) || T("Capture failed"), false);
     } finally { btn.disabled = false; btn.textContent = old; }
   });
-  input.click();
 }
 
 async function purgeClosedOrders() {
-  if (!confirm(T("Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail."))) return;
+  if (!confirm(T("Delete ALL closed orders?\n\nThis permanently empties the Closed list."))) return;
   try {
-    const r = await post("/api/ris/orders/purge", {});
+    const r = await studyPost("/api/ris/orders/purge", {});
     flashNote(r.message || T("Purged"), r.ok !== false);
     loadOrders();
     pollStatus();
-  } catch (e) { flashNote(e.message, false); }
+  } catch (e) { flashNote(failText(e), false); }
 }
+
+// Static controls only this file uses (scripts run after the markup).
+(function wireOrdersPanel() {
+  const filter = $("ordFilter");
+  if (filter) filter.addEventListener("input", renderOrders);
+  const cancel = $("ordEditCancel");
+  if (cancel) cancel.addEventListener("click", endOrderEdit);
+})();
 

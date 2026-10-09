@@ -128,7 +128,7 @@ compiled.
 
 ```bash
 git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
+cd Carino-DICOM
 ./setup.sh                 # Windows: .\setup.ps1
 ./run.sh init              # creates ~/CarinoDICOM/config.json and its folders
 ./run.sh serve             # dashboard at http://127.0.0.1:8042

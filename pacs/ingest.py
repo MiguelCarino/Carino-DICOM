@@ -72,6 +72,39 @@ def _norm_date(value) -> str:
     return digits[:8] if len(digits) >= 8 else ""
 
 
+class PendingInputError(ValueError):
+    """A review-form value the converter refuses, naming the form field so the
+    dashboard can point at it rather than at a toast."""
+
+    def __init__(self, message: str, field: str):
+        super().__init__(message)
+        self.field = field
+
+
+def form_date(value) -> str:
+    """A review-form study date as DICOM DA: '' stays '', YYYYMMDD and
+    YYYY-MM-DD are accepted, anything else is refused.
+
+    Refused rather than coerced the way _norm_date coerces: a typed "3/4/2026"
+    or "2026-3-4" would otherwise lose its date silently (or, digits being
+    digits, become a different one), and the operator who typed it would never
+    learn that the study went out undated.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        s = s[:4] + s[5:7] + s[8:]
+    if len(s) != 8 or not s.isdigit():
+        raise PendingInputError("study date must be YYYY-MM-DD", "study_date")
+    import datetime
+    try:
+        datetime.date(int(s[:4]), int(s[4:6]), int(s[6:]))
+    except ValueError:
+        raise PendingInputError("study date is not a real date", "study_date") from None
+    return s
+
+
 def _resolve_patient_name(meta: dict) -> str:
     """Best PatientName to write: keep the original 'Family^Given' structure when
     the form value is just its display form unchanged, otherwise use what the
@@ -340,18 +373,91 @@ def preview_path(pending_dir: str, pid: str) -> tuple[str, str] | None:
     return entry, meta["filename"]
 
 
-def approve_pending(pending_dir: str, pid: str, edits: dict, out_dir: str) -> str:
+def _same_person_key(name: str) -> str:
+    """A patient name reduced to what decides "is this the same person": the
+    display form, case and spacing folded, so 'Doe^Jane' and 'JANE  DOE' agree."""
+    from .history import _fmt_name
+    return " ".join(_fmt_name(name).upper().split())
+
+
+def _identity_changed(before: dict, after: dict) -> bool:
+    """Did the review form put a DIFFERENT patient on this item?
+
+    Only a stored value that was there to begin with can be contradicted. A
+    print film usually arrives with no identity at all, and filling it in is
+    identifying the film, not correcting it — dropping the study UID there would
+    split a film the modality did tie to its study.
+    """
+    old_id = str(before.get("patient_id") or "").strip()
+    new_id = str(after.get("patient_id") or "").strip()
+    if old_id and new_id != old_id:
+        return True
+    old_name = _same_person_key(_resolve_patient_name(before))
+    new_name = _same_person_key(_resolve_patient_name(after))
+    return bool(old_name) and new_name != old_name
+
+
+def _without_redacted(edits: dict) -> dict:
+    """Drop every form value that is the redaction placeholder.
+
+    A profile that may not see a field is shown the placeholder in its place,
+    and a form posts back what it was shown. Written as typed, the placeholder
+    becomes the PatientName of an instance that is then forwarded to the PACS.
+    A withheld field therefore keeps its stored value — the profile was never
+    in a position to correct it.
+    """
+    from .users import REDACTED
+    return {k: v for k, v in (edits or {}).items()
+            if not (isinstance(v, str) and v.strip() == REDACTED)}
+
+
+def approve_pending(pending_dir: str, pid: str, edits: dict, out_dir: str, *,
+                    keep_study: bool = False, identity: dict | None = None) -> str:
     """Convert a pending item to DICOM in *out_dir* (the watch folder, so the
-    normal send+archive pipeline carries it), then remove the pending entry."""
+    normal send+archive pipeline carries it), then remove the pending entry.
+
+    *identity* (an order's patient and study, study UID included) replaces the
+    item's identity outright; only the series description is still the form's.
+    Without it the form's edits are merged over the stored identity, a patient
+    name and ID are required, and a corrected patient loses the stored study UID
+    unless *keep_study* says the operator chose to keep it.
+    """
     entry = _safe_entry_dir(pending_dir, pid)
     meta = _load_entry(entry)
     if not meta:
         raise ValueError("pending item not found")
+    edits = _without_redacted(edits)
     # Identity the operator corrected wins over the identity that was pre-filled
     # from a sibling header. The KIND does not: it is the sidecar's, decided when
     # the item was staged, so nothing coming back from a review form can talk the
     # converter into handing a PDF to the image path.
-    build_meta = {**meta, **(edits or {})}
+    if identity is not None:
+        build_meta = {**meta, **identity}
+        if edits.get("series_desc"):
+            build_meta["series_desc"] = edits["series_desc"]
+    else:
+        if "study_date" in edits:
+            edits["study_date"] = form_date(edits["study_date"])
+        build_meta = {**meta, **edits}
+        if not _resolve_patient_name(build_meta):
+            raise PendingInputError("patient name is required", "patient")
+        if not str(build_meta.get("patient_id") or "").strip():
+            raise PendingInputError("patient ID is required", "patient_id")
+        # An item siphoned from beside a study carries that study's UID. Put a
+        # different patient under it and the receiving PACS files patient B's
+        # document inside patient A's study, or refuses the whole study as a
+        # conflict. A fresh UID (see _base_dataset) is the safe default; keeping
+        # the old one is the operator's explicit call.
+        if not keep_study and _identity_changed(meta, build_meta):
+            build_meta["study_uid"] = ""
+            # The rest of the study's identity goes with its UID: patient A's
+            # accession on patient B's film reconciles B's image against A's
+            # order downstream. A value the form CHANGED is the operator's; one
+            # merely posted back as pre-filled is still patient A's.
+            for k in ("accession", "study_date", "study_desc"):
+                new = str(edits.get(k) or "").strip()
+                if not new or new == str(meta.get(k) or "").strip():
+                    build_meta[k] = ""
     with open(meta["_path"], "rb") as fh:
         data = fh.read()
     ds = build_from_bytes(data, meta["kind"], build_meta)

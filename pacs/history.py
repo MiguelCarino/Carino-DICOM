@@ -60,10 +60,34 @@ def _fmt_name(raw) -> str:
     return s.replace("^", " ").strip()
 
 
+def _source_ae(hdr) -> str:
+    """The sending AE as the file itself records it (File Meta 0002,0016), or "".
+
+    Read from the file rather than kept beside it: this module describes the
+    shelf, and a separate record of who sent what would be one more store that
+    can disagree with the disk.
+    """
+    meta = getattr(hdr, "file_meta", None)
+    try:
+        return str(getattr(meta, "SourceApplicationEntityTitle", "") or "").strip()
+    except Exception:
+        return ""
+
+
 def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
     """Group every stored instance under *root* into studies (newest first)."""
+    return scan(root, max_studies)["studies"]
+
+
+def scan(root: str, max_studies: int = 800) -> dict:
+    """scan_studies() plus how many studies there were before the cap.
+
+    ``{"studies": [...], "total": n, "truncated": bool}`` — the browser shows
+    the newest *max_studies*, and has to be able to say so rather than present
+    a cut list as the whole archive.
+    """
     if not root or not os.path.isdir(root):
-        return []
+        return {"studies": [], "total": 0, "truncated": False}
 
     studies: dict[str, dict] = {}
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -99,7 +123,9 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
                 "patient_id": str(getattr(hdr, "PatientID", "") or ""),
                 "study_date": _fmt_date(getattr(hdr, "StudyDate", "")),
                 "study_desc": str(getattr(hdr, "StudyDescription", "") or ""),
+                "accession": str(getattr(hdr, "AccessionNumber", "") or ""),
                 "study_uid": suid,
+                "source_ae": _source_ae(hdr),
                 "series": [],
                 "instances": 0,
                 "_dirs": [],
@@ -141,7 +167,8 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
     # Sorted before the cap, so it keeps the newest studies rather than
     # whichever ones os.walk happened to reach first.
     out.sort(key=lambda s: s.get("mtime", 0), reverse=True)
-    return out[:max_studies]
+    return {"studies": out[:max_studies], "total": len(out),
+            "truncated": len(out) > max_studies}
 
 
 def study_files(root: str, path: str) -> list[str]:

@@ -18,6 +18,7 @@ from typing import Callable, Optional
 from pynetdicom import AE, evt, AllStoragePresentationContexts, ALL_TRANSFER_SYNTAXES
 from pynetdicom.sop_class import Verification
 
+from .assocwords import caller_of, listener_refusal
 from .dicomfs import save_dicom
 from .logbuf import LogBuffer
 from .netclaim import claim
@@ -169,6 +170,12 @@ class StorageSCP:
         try:
             ds = event.dataset
             ds.file_meta = event.file_meta
+            # Who sent it, kept in the file itself (0002,0016) the way storescp
+            # does: History reads the source AE from here, and it is the one
+            # record of the sender that survives the file being copied around.
+            caller = str(event.assoc.requestor.ae_title or "").strip()
+            if caller:
+                ds.file_meta.SourceApplicationEntityTitle = caller
             path = dest_path(self.storage_dir, ds, self.organize)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             save_dicom(ds, path)
@@ -208,6 +215,15 @@ class StorageSCP:
             self.log.error(f"Failed to store instance: {exc}", kind="store")
             return 0xA700
 
+    def _handle_rejected(self, event) -> None:
+        """Say why a modality was turned away, which pynetdicom does not. It
+        counts as an error: from the modality's side its images did not go."""
+        who, addr = caller_of(event)
+        with self._lock:
+            self.error_count += 1
+        self.log.warn(f"Receiver: refused {who or 'a modality'} @ {addr} — "
+                      f"{listener_refusal(event, self.allowed_aets)}", kind="scp")
+
     # ---- lifecycle ---------------------------------------------------------
     @property
     def running(self) -> bool:
@@ -226,6 +242,7 @@ class StorageSCP:
         handlers = [
             (evt.EVT_C_STORE, self._handle_store),
             (evt.EVT_C_ECHO, self._handle_echo),
+            (evt.EVT_REJECTED, self._handle_rejected),
         ]
         ssl_context = None
         if self.tls:

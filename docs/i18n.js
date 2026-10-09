@@ -17,7 +17,12 @@ const I18N = {
         'Good afternoon.': 'Buenas tardes.',
         'Good evening.': 'Buenas noches.',
         // Hero
-        'Your PACS systems are down?': '¿Tu PACS está caído?',
+        'Your PACS is down?': '¿Tu PACS está caído?',
+        'A scanner that can only print? It captures the film so it can be filed like any study.': '¿Un equipo que solo sabe imprimir? Captura la placa para que se archive como cualquier estudio.',
+        'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': '¿No llegan órdenes al equipo? Recibe órdenes HL7, o las que tú escribes, y las sirve como worklist.',
+        'The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.': '¿Se cayó el PACS? Mantiene la worklist, retiene lo que llega y lo envía cuando el PACS vuelve.',
+        'Not a medical device · not a viewer · not an archive': 'No es un dispositivo médico · no es un visor · no es un archivo',
+        'Intel Mac or ARM64 Linux? Use the second build named on that button.': '¿Mac Intel o Linux ARM64? Usa la segunda compilación que nombra ese botón.',
         'Urgent patients cannot wait.': 'Los pacientes urgentes no pueden esperar.',
         'recommended': 'recomendado',
         'Checking for the latest version…': 'Buscando la última versión…',
@@ -97,7 +102,12 @@ const I18N = {
         'Good morning.': 'Bom dia.',
         'Good afternoon.': 'Boa tarde.',
         'Good evening.': 'Boa noite.',
-        'Your PACS systems are down?': 'Seu PACS caiu?',
+        'Your PACS is down?': 'Seu PACS caiu?',
+        'A scanner that can only print? It captures the film so it can be filed like any study.': 'Um equipamento que só sabe imprimir? Ele captura o filme para ser arquivado como qualquer estudo.',
+        'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': 'Os pedidos não chegam ao equipamento? Ele recebe pedidos HL7, ou os que você digita, e os serve como worklist.',
+        'The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.': 'O PACS caiu? Ele mantém a worklist, segura o que chega e envia quando o PACS volta.',
+        'Not a medical device · not a viewer · not an archive': 'Não é dispositivo médico · não é visualizador · não é arquivo',
+        'Intel Mac or ARM64 Linux? Use the second build named on that button.': 'Mac Intel ou Linux ARM64? Use a segunda compilação indicada nesse botão.',
         'Urgent patients cannot wait.': 'Pacientes urgentes não podem esperar.',
         'recommended': 'recomendado',
         'Checking for the latest version…': 'Verificando a versão mais recente…',
@@ -169,7 +179,12 @@ const I18N = {
         'Good morning.': 'おはようございます。',
         'Good afternoon.': 'こんにちは。',
         'Good evening.': 'こんばんは。',
-        'Your PACS systems are down?': 'PACSがダウン？',
+        'Your PACS is down?': 'PACSがダウン？',
+        'A scanner that can only print? It captures the film so it can be filed like any study.': '印刷しかできない装置？フィルムを取り込み、ほかの検査と同じように保存できます。',
+        'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': '装置にオーダーが届かない？HL7オーダーや手入力したオーダーを受け取り、ワークリストとして配信します。',
+        'The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.': 'PACSが止まった？ワークリストを動かし続け、届いた検査を保持し、PACSが戻ったら送ります。',
+        'Not a medical device · not a viewer · not an archive': '医療機器ではありません · ビューアではありません · アーカイブではありません',
+        'Intel Mac or ARM64 Linux? Use the second build named on that button.': 'Intel MacやARM64のLinuxですか？そのボタンに書かれた2つ目のビルドを使ってください。',
         'Urgent patients cannot wait.': '急患は待ってくれません。',
         'recommended': '推奨',
         'Checking for the latest version…': '最新バージョンを確認中…',
@@ -241,7 +256,12 @@ const I18N = {
         'Good morning.': 'Доброе утро.',
         'Good afternoon.': 'Добрый день.',
         'Good evening.': 'Добрый вечер.',
-        'Your PACS systems are down?': 'PACS не работает?',
+        'Your PACS is down?': 'PACS не работает?',
+        'A scanner that can only print? It captures the film so it can be filed like any study.': 'Аппарат умеет только печатать? Он примет плёнку, и её можно будет архивировать как любое исследование.',
+        'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': 'Заказы не доходят до аппарата? Он принимает заказы HL7 или введённые вручную и раздаёт их как рабочий список.',
+        'The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.': 'PACS упал? Он держит рабочий список, удерживает поступающее и отправляет, когда PACS вернётся.',
+        'Not a medical device · not a viewer · not an archive': 'Не медицинское изделие · не просмотрщик · не архив',
+        'Intel Mac or ARM64 Linux? Use the second build named on that button.': 'Intel-Mac или Linux на ARM64? Берите вторую сборку, указанную на этой кнопке.',
         'Urgent patients cannot wait.': 'Экстренные пациенты не могут ждать.',
         'recommended': 'рекомендуется',
         'Checking for the latest version…': 'Проверяем последнюю версию…',
@@ -316,14 +336,13 @@ const I18N = {
 // links mirror the English markup exactly.
 const RICH = {
     // RICH is innerHTML and nothing checks inside it, so these four have to be
-    // moved by hand whenever the English lede moves. They were last widened when
-    // the lede gained the hold-and-back-fill sentence and the de-identification
-    // and audit-trail clause.
+    // moved by hand whenever the English lede moves. The lede is one plain
+    // sentence now; the three situations under it are ordinary [data-i18n] keys.
     '.lede': {
-        es: '<strong>Carino DICOM</strong> es una pasarela <abbr title="el formato y el protocolo estándar de las imágenes médicas de los equipos: rayos X, TC, RM, ecografía…">DICOM</abbr> autoalojada y un equipo de continuidad. Recibe estudios, los enruta y los reenvía según las reglas que tú escribes, responde a <em>Query/Retrieve</em> y <em>DICOMweb</em>, y sirve él mismo la worklist mientras tu PACS está inaccesible: retiene todo lo que llega y lo reenvía en cuanto el principal vuelve a responder. Puede anonimizar la copia que sale y guarda una auditoría de quién hizo qué. Un archivo de configuración, un proceso, sin nube.',
-        'pt-BR': '<strong>Carino DICOM</strong> é um gateway <abbr title="o formato e o protocolo padrão das imagens médicas dos equipamentos: raio-X, TC, RM, ultrassom…">DICOM</abbr> auto-hospedado e um equipamento de continuidade. Recebe estudos, roteia e encaminha conforme as regras que você escreve, responde a <em>Query/Retrieve</em> e <em>DICOMweb</em>, e serve a própria worklist enquanto o seu PACS está inacessível: segura tudo o que chega e reenvia assim que o principal volta a responder. Pode anonimizar a cópia que sai e mantém uma trilha de auditoria de quem fez o quê. Um arquivo de configuração, um processo, sem nuvem.',
-        ja: '<strong>Carino DICOM</strong> は自前で運用する<abbr title="X線・CT・MRI・超音波など医用画像の標準フォーマットおよび通信規格">DICOM</abbr>ゲートウェイであり、業務を止めないための装置です。検査を受信し、自分で書いたルールで振り分けて転送し、<em>Query/Retrieve</em>と<em>DICOMweb</em>に応答し、PACSに届かない間はワークリストを自ら配信します。届いた検査はすべて保持し、本番のPACSが応答した時点でまとめて送り直します。送信するコピーの匿名化もでき、誰が何をしたかの監査証跡も残ります。設定ファイル1つ、プロセス1つ、クラウド不要。',
-        ru: '<strong>Carino DICOM</strong> — разворачиваемый у себя <abbr title="стандартный формат и сетевой протокол медицинских изображений: рентген, КТ, МРТ, УЗИ…">DICOM</abbr>-шлюз и устройство непрерывности работы. Он принимает исследования, маршрутизирует и пересылает их по вашим правилам, отвечает на <em>Query/Retrieve</em> и <em>DICOMweb</em> и сам раздаёт рабочий список, пока ваш PACS недоступен: удерживает всё поступившее и досылает, как только основной снова отвечает. Может обезличить отправляемую копию и ведёт журнал того, кто что сделал. Один файл конфигурации, один процесс, без облака.',
+        es: '<strong>Carino DICOM</strong> se coloca entre tus equipos de imagen y tu archivo, y mantiene los estudios en movimiento cuando algo falla: en tu propio hardware, sin nube.',
+        'pt-BR': '<strong>Carino DICOM</strong> fica entre os seus equipamentos de imagem e o seu arquivo, e mantém os estudos circulando quando algo quebra: no seu próprio hardware, sem nuvem.',
+        ja: '<strong>Carino DICOM</strong> は画像装置とアーカイブの間に入り、何かが止まっても検査の流れを止めません。自前のハードウェアで動き、クラウドは不要です。',
+        ru: '<strong>Carino DICOM</strong> стоит между вашим оборудованием и архивом и не даёт исследованиям застрять, когда что-то ломается, — на вашем железе, без облака.',
     },
     '#fr-win': {
         es: '<strong>Windows:</strong> <em>Más información</em> → <em>Ejecutar de todas formas</em>.',
@@ -392,28 +411,10 @@ const RICH = {
         ru: '<b>DICOM-TLS</b> с обеих сторон (опционально), включая взаимный TLS. Bearer-токен для HTTP API; не-loopback <code>web.host</code> с пустым токеном — ошибка запуска.',
     },
     '#tl-ui': {
-        es: 'Panel web, CLI sin interfaz (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>), app de bandeja, imagen Docker o unidad systemd. Puerto DICOM <code>11112</code>; panel en <code>127.0.0.1:8042</code>.',
-        'pt-BR': 'Painel web, CLI headless (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>), app de bandeja, imagem Docker ou unidade systemd. Porta DICOM <code>11112</code>; painel em <code>127.0.0.1:8042</code>.',
-        ja: 'Webダッシュボード、ヘッドレスCLI（<code>pacs serve|receive|send|echo|ris|mwl|qr</code>）、トレイアプリ、Dockerイメージ、systemdユニット。DICOMポートは<code>11112</code>、ダッシュボードは<code>127.0.0.1:8042</code>。',
-        ru: 'Веб-панель, headless CLI (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>), приложение в трее, образ Docker или systemd-юнит. DICOM-порт <code>11112</code>; панель — <code>127.0.0.1:8042</code>.',
-    },
-    // Kept in step with the English markup by hand, because RICH is innerHTML and
-    // nothing checks inside it: when the trailing link was dropped from the note
-    // and Podman added, these four still carried the old sentence AND an anchor
-    // to a section that no longer exists — visible only to a reader in one of
-    // these languages.
-    // The version numbers are gone from all five as of 1.1.0, and that is the
-    // point rather than a side effect: a hand-kept translation carrying a
-    // version is a translation that goes stale on a schedule nobody is watching,
-    // and this entry had already done it once. The arch names stay in Latin
-    // script deliberately — Apple Silicon, Intel, ARM64 and x86-64 are machine
-    // names, and translating them would put four new keys through a CI guard
-    // that exists to catch exactly the drift above.
-    '#dl-release': {
-        es: 'macOS y Linux traen <b>dos compilaciones cada uno</b>: Apple Silicon e Intel, ARM64 y x86-64. Los botones nombran las dos en vez de adivinar: un Mac Intel no puede abrir una compilación Apple Silicon, y ningún navegador distingue con honestidad una máquina de la otra. Estos botones solo entregan versiones estables; los instaladores preliminares están en <i>Todas las versiones</i>, arriba.',
-        'pt-BR': 'macOS e Linux trazem <b>duas compilações cada um</b>: Apple Silicon e Intel, ARM64 e x86-64. Os botões nomeiam as duas em vez de adivinhar: um Mac Intel não abre uma compilação Apple Silicon de jeito nenhum, e nenhum navegador distingue as duas máquinas com honestidade. Estes botões só entregam versões estáveis; os instaladores de pré-lançamento ficam em <i>Todas as versões</i>, acima.',
-        ja: 'macOS と Linux は<b>それぞれ 2 種類</b>のビルドを配布します — Apple シリコンと Intel、ARM64 と x86-64。推測せず両方を並べているのは、Intel Mac では Apple シリコン版がそもそも起動せず、しかもブラウザーからこの 2 つを正しく見分ける方法がないからです。このボタンから配布されるのは安定版だけです。プレリリース版のインストーラーは上の<i>全バージョン</i>にあります。',
-        ru: 'macOS и Linux выходят <b>в двух сборках каждая</b> — Apple Silicon и Intel, ARM64 и x86-64. Кнопки называют обе, а не угадывают: на Intel-Маке сборка для Apple Silicon просто не запустится, и ни один браузер не отличит эти машины честно. Эти кнопки выдают только стабильные сборки; предварительные установщики — в разделе <i>Все версии</i> выше.',
+        es: 'Panel web, CLI sin interfaz (<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>), app de bandeja, imagen Docker o unidad systemd. Puerto DICOM <code>11112</code>; panel en <code>127.0.0.1:8042</code>.',
+        'pt-BR': 'Painel web, CLI headless (<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>), app de bandeja, imagem Docker ou unidade systemd. Porta DICOM <code>11112</code>; painel em <code>127.0.0.1:8042</code>.',
+        ja: 'Webダッシュボード、ヘッドレスCLI（<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>）、トレイアプリ、Dockerイメージ、systemdユニット。DICOMポートは<code>11112</code>、ダッシュボードは<code>127.0.0.1:8042</code>。',
+        ru: 'Веб-панель, headless CLI (<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>), приложение в трее, образ Docker или systemd-юнит. DICOM-порт <code>11112</code>; панель — <code>127.0.0.1:8042</code>.',
     },
 };
 

@@ -22,15 +22,17 @@ Two rules the whole procedure exists to keep:
 
 ## What you need
 
-`podman` (or `docker`, with the obvious substitutions), a `chromium-browser`
-binary, node 22 or newer for the built-in `WebSocket`, ImageMagick for the
+`podman` (or `docker`, with the obvious substitutions), Chromium at
+`/usr/bin/chromium-browser` (`capture.mjs` runs that exact path, not a PATH
+lookup — set `CHROMIUM=/path/to/chrome` anywhere else), node 22 or newer for the built-in `WebSocket`, ImageMagick for the
 conversion, and this repository's virtualenv for the two Python scripts.
 
 ## 1. Build the image and bring up two instances
 
 The peer exists so that forwarding has somewhere to succeed; the demo needs at
 least one destination that accepts and one that refuses, or the Stuck tab of
-Studies has nothing in it.
+Studies has nothing in it. The peer also runs a worklist, so it can play "the
+hospital's other RIS" for the worklist-probe figure.
 
     podman build --format docker -t carino-dicom:local .
     podman network create pacsdemo
@@ -38,12 +40,13 @@ Studies has nothing in it.
     mkdir -p /tmp/pacsdemo/peer /tmp/pacsdemo/demo
     podman run -d --name pacs-peer --network pacsdemo \
       --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/peer:/data:z \
-      -e PACS_SERVICES=scp -e PACS_AUTH_TOKEN=peer-token \
+      -e PACS_SERVICES=scp,mwl -e PACS_AUTH_TOKEN=peer-token \
       localhost/carino-dicom:local
 
     podman run -d --name pacs-demo --network pacsdemo \
       --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/demo:/data:z \
       -p 127.0.0.1:18042:8042 -p 127.0.0.1:11512:11112 -p 127.0.0.1:12575:2575 \
+      -p 127.0.0.1:11513:11113 \
       -e PACS_SERVICES=scp,scu,print,mwl,qr,ris,dicomweb \
       -e PACS_AUTH_TOKEN=manual-screenshots-token \
       localhost/carino-dicom:local
@@ -51,7 +54,8 @@ Studies has nothing in it.
 Those published ports are deliberately not the obvious ones. The suites take
 DICOM ports in two arcs, a fresh number per test and never one twice:
 `test_print.py` counts up from **11211**, and `tests/test_qr.py` counts up from
-**11401**. A demo instance published inside either arc makes that suite fail
+**11401**. `11512` (store) and `11513` (print) sit clear of both. A demo
+instance published inside either arc makes that suite fail
 with `EADDRINUSE` — a failure that reads as a bug in the print SCP or the
 query/retrieve SCP and is really a screenshot session nobody remembered was
 still up. `11512` is clear of both with room for either arc to grow. Earlier
@@ -102,11 +106,24 @@ figures need:
 * **`scu.on_success: "move"`**, so the archive pass runs and sweeps the PDF and
   the JPEG into the Pending tab. With `keep` it never runs and Pending stays
   empty.
+* **`modalities`** — three rooms, so the Modalities figure is a real list and
+  orders pick their station from it:
+  `{"name": "ER CT", "aet": "ER_CT_01", "modality": "CT", "enabled": true}`,
+  `{"name": "Ultrasound 2", "aet": "US_ROOM_2", "modality": "US", "enabled": true}`,
+  `{"name": "Portable CR", "aet": "CR_PORTABLE", "modality": "CR", "enabled": true}`.
+* **`worklist_source`** — `{"host": "pacs-peer", "port": 11114, "aet":
+  "CARINOMWL"}`: the peer's worklist stands in for the hospital's RIS.
 
 ## 3. Traffic
 
     .venv/bin/python docs/manual/tools/forge-studies.py /tmp/pacsdemo/forged
-    .venv/bin/python docs/manual/tools/seed-traffic.py /tmp/pacsdemo/forged 11512 12575
+    .venv/bin/python docs/manual/tools/seed-traffic.py /tmp/pacsdemo/forged 11512 12575 11513
+
+    # one worklist probe round, so the Worklist probes tab has a record in it
+    # (the X-Carino header is the CSRF guard every POST needs)
+    curl -s -X POST -H "Authorization: Bearer manual-screenshots-token" \
+      -H "X-Carino: 1" -H "Content-Type: application/json" \
+      -d '{"station_aet": "US_ROOM_2"}' http://127.0.0.1:18042/api/worklist/probe
 
     # two invented attachments — a referral note and a scanned film
     magick -size 900x1200 xc:white -fill black -pointsize 34 \
@@ -131,6 +148,12 @@ figures need:
              /tmp/pacsdemo/demo/outgoing/CR-CHEST-DEMO-0003
     cp /tmp/pacsdemo/forged/DEMO-0001_*.dcm /tmp/pacsdemo/demo/outgoing/CT-CHEST-DEMO-0001/
     cp /tmp/pacsdemo/forged/DEMO-0003_*.dcm /tmp/pacsdemo/demo/outgoing/CR-CHEST-DEMO-0003/
+
+The fourth argument to `seed-traffic.py` is the published print port: it prints
+one film as `US_ROOM_2`, the way a print-only ultrasound does, so the print card
+shows a real *Last print* line and Pending holds a captured sheet next to the PDF
+and JPEG. Leave it off and both figures show a print receiver that has never
+printed.
 
 **Only the outgoing folder is routed.** A study that merely arrived over
 C-STORE sits in `received`, where no rule ever sees it — so seeding traffic and
@@ -172,14 +195,26 @@ of the seeded profiles would find some of the strip missing, because a tab a
 profile's capabilities do not pay for is not drawn at all, and those figures
 come out as `! name: tab hidden for this profile` lines — or `! name: nav row
 hidden for this profile`, when the whole row is gone — rather than files. Read
-the run's output either way: `panels` mode prints the dashboard names and then
-`editor` and `editor-tags`, and every `!` line in place of one of them is a
+the run's output either way: `panels` mode prints the dashboard names (now
+including `modalities` and `probes`) and then `editor` and `editor-tags`, and every `!` line in place of one of them is a
 figure that will be missing from every manual.
 
-**`gate` and `first-run`** come from an instance that has never been set up: the
-container entrypoint marks setup done on first boot, so bring up a third one,
-blank `setup_completed` in its `config.json`, turn every service off, restart,
-and capture it in `setup` mode.
+**`gate` and `first-run`** come from an instance that has never been set up. The
+container entrypoint stamps setup as done on first boot only when `PACS_SERVICES`
+names something, so a third instance started with it empty comes up exactly as a
+new box does — every service off and the chooser waiting:
+
+    mkdir -p /tmp/pacsdemo/setup
+    podman run -d --name pacs-setup --network pacsdemo \
+      --userns keep-id:uid=1000,gid=1000 -v /tmp/pacsdemo/setup:/data:z \
+      -p 127.0.0.1:18043:8042 \
+      -e PACS_SERVICES= -e PACS_AUTH_TOKEN=manual-screenshots-token \
+      localhost/carino-dicom:local
+
+    for L in en es pt-BR ja ru; do
+      node docs/manual/tools/capture.mjs $L /tmp/pacsdemo/shots/$L \
+        http://127.0.0.1:18043/ manual-screenshots-token setup
+    done
 
 **`people` and `gate-people`** come from an instance that *has* profiles, which
 is a one-way door — do them last, on the demo instance, in `people` mode. That

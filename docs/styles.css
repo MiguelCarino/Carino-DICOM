@@ -121,9 +121,22 @@ a { color: var(--accent); }
 .lede { color: #d4d4d4;
   max-width: min(820px, calc(660px + var(--tall) * .35));
   font-size: min(1.32rem, calc(clamp(.92rem, .55rem + .5vh, 1.05rem) + var(--tall) * .012));
-  margin: 0 auto min(52px, calc(clamp(12px, 2.4vh, 26px) + var(--tall) * .07)); }
+  margin: 0 auto 10px; }
 .lede abbr { text-decoration: underline dotted var(--muted); cursor: help; }
 .lede em { color: var(--text); font-style: normal; border-bottom: 1px solid var(--accent); }
+/* The three situations: short lines, left-aligned in a centred block so the
+   question at the start of each one is what the eye scans down. */
+.situations { list-style: none; padding: 0; text-align: left; color: #cfcfcf;
+  max-width: min(720px, calc(600px + var(--tall) * .3));
+  font-size: min(1.08rem, calc(clamp(.86rem, .5rem + .45vh, .98rem) + var(--tall) * .008));
+  margin: 0 auto min(52px, calc(clamp(12px, 2.4vh, 26px) + var(--tall) * .07)); }
+.situations li { padding-left: 1.1em; position: relative; margin: .25em 0; }
+.situations li::before { content: "›"; color: var(--accent); position: absolute; left: 0; }
+.not-line { margin: min(22px, calc(8px + var(--tall) * .03)) 0 0; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--muted); font-size: min(.95rem, calc(.78rem + var(--tall) * .007));
+  text-decoration: underline dotted; text-underline-offset: 3px; }
+.linkish:hover, .linkish:focus-visible { color: var(--accent); }
 
 /* download chips */
 .downloads { display: flex; justify-content: center; flex-wrap: wrap;
@@ -244,9 +257,9 @@ a { color: var(--accent); }
   .dl-btn b { font-size: .95rem; }
   .downloads { gap: 8px; }
   .lede { font-size: .88rem; }
+  .situations { font-size: .84rem; }
   .dl-note { font-size: .76rem; }
   .chips { gap: 6px; }
-  .chip { padding: 4px 10px; font-size: .72rem; }
   .btn.ghost { padding: 7px 13px; }
 }
 /* Stacked, not three columns. The commands are the reason the dialog exists and

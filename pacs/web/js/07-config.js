@@ -22,6 +22,7 @@ function rememberLoadedSections(c) {
 
 // Section fillers: one settings card each, called by loadConfig in page order.
 function fillScpForm(scp) {
+  $("scpEnabled").checked = !!scp.enabled;
   $("scpAet").value = scp.aet;
   $("scpBind").value = scp.bind;
   $("scpPort").value = scp.port;
@@ -36,6 +37,7 @@ function fillScpForm(scp) {
 }
 
 function fillScuForm(scu) {
+  $("scuEnabled").checked = !!scu.enabled;
   $("scuAet").value = scu.aet;
   $("scuDir").value = scu.watch_dir;
   $("scuPoll").value = scu.poll_interval;
@@ -110,7 +112,18 @@ function fillQrForm(qc) {
 }
 
 async function loadConfig() {
-  const c = await api("/api/config");
+  // Without config.read the document is not ours to see; Destinations/Routing come from the
+  // routing.read view instead (read-only), and nothing else needs the config.
+  if (!can("config.read")) {
+    if (can("routing.read")) await loadRoutingReadOnly();
+    return;
+  }
+  let etag = "";
+  const c = await api("/api/config", { onResponse: (res) => { etag = res.headers.get("ETag") || ""; } });
+  configEtag = etag;
+  loadedRaw = c;
+  setConfigReadOnly(false);
+  showStale(false);
   loadedModalities = Array.isArray(c.modalities) ? c.modalities : [];
   loadedWorklistSource = c.worklist_source || {};
   $("wsHost").value = loadedWorklistSource.host || "";
@@ -148,7 +161,40 @@ async function loadConfig() {
   $("rtEnabled").checked = !!(c.routing && c.routing.enabled);
   renderRules((c.routing && c.routing.rules) || []);
   renderAuthState();
+  syncTlsFields();
+  settingsDirty = false;
 }
+
+/* GET /api/routing (routing.read): the rules and the ENABLED destination names, nothing else. Shown
+   so a profile that may read routing sees the real rules, not an empty editor and a 403 toast. */
+async function loadRoutingReadOnly() {
+  const r = await api("/api/routing");
+  renderDests((r.destinations || []).map((name) => ({ name, enabled: true })));
+  $("rtEnabled").checked = !!r.enabled;
+  renderRules(r.rules || []);
+  setConfigReadOnly(true);
+}
+
+// Read-only Destinations/Routing: every editing control disabled; the routing test stays usable.
+let configReadOnly = false;
+function setConfigReadOnly(ro) {
+  configReadOnly = ro;
+  const note = $("cfgReadOnly");
+  if (note) note.hidden = !ro;
+  ["#dlgDests input", "#dlgDests .del", "#dlgDests .echo", "#rtRules input", "#rtRules button", "#rtEnabled"]
+    .forEach((sel) => document.querySelectorAll(sel).forEach((el) => { el.disabled = ro; }));
+}
+
+// TLS certificate/key/CA fields show only while their TLS box is ticked.
+function syncTlsFields() {
+  document.querySelectorAll(".tls-fields[data-tls-for]").forEach((box) => {
+    const cb = $(box.dataset.tlsFor);
+    box.hidden = !(cb && cb.checked);
+  });
+}
+
+// Unsaved Settings edits, so "Re-run service setup" can warn before it reloads the form.
+let settingsDirty = false;
 
 // ---- web.auth_token ----
 // GET /api/config redacts it and POST refuses it; it changes only via applyToken(). Never post
@@ -235,7 +281,8 @@ async function probeModality(tr, btn) {
   try {
     const r = await post("/api/worklist/probe", { station_aet: aet });
     flashNote(r.message || (r.ok ? T("Probe done") : T("Probe failed")), r.ok !== false);
-    if (r.ok) loadCaught();
+    // The answer is a probe round in Activity → Worklist probes: go there and mark the new one.
+    if (r.ok) { goTo("dlgActivity", "caught"); loadCaught(true); }
   } catch (e) {
     flashNote(e.message, false);
   } finally {
@@ -244,7 +291,7 @@ async function probeModality(tr, btn) {
 }
 
 // Probe rounds, newest first; each answer shows the here / nobody / elsewhere split, which carries the diagnosis.
-async function loadCaught() {
+async function loadCaught(markNewest) {
   const list = $("caughtList");
   if (!list) return;
   let data;
@@ -275,7 +322,7 @@ async function loadCaught() {
       row.className = "caught-probe" + (pr.ok ? "" : " bad");
       const q = document.createElement("span");
       q.className = "caught-q";
-      q.textContent = pr.label;
+      q.textContent = probeQuestion(pr);
       const a = document.createElement("span");
       a.className = "caught-a";
       if (!pr.ok) {
@@ -297,6 +344,9 @@ async function loadCaught() {
     });
     list.appendChild(box);
   });
+  // Newest first, so the round just asked for is the first one.
+  const first = markNewest === true && list.querySelector(".caught-round");
+  if (first) { first.classList.add("fresh"); first.scrollIntoView({ block: "nearest" }); }
 }
 
 function collectMods() {
@@ -309,7 +359,7 @@ function collectMods() {
       modality: tr.querySelector(".m-mod").value.trim().toUpperCase(),
       station_name: tr.querySelector(".m-station").value.trim(),
     }))
-    .filter((m) => m.name && m.aet);
+    .filter((m) => m.name || m.aet || m.modality || m.station_name);
 }
 
 // Whether the Modalities rows exist to collect from; if absent, the loaded snapshot is used.
@@ -379,6 +429,10 @@ function fillStationChoices() {
     o.dataset.modality = m.modality || "";
     sel.appendChild(o);
   });
+  // An order being edited keeps its own target even when that room left the registry (or was
+  // disabled): rebuilding the list must not quietly turn it into "Any modality".
+  const editing = typeof editingOrder !== "undefined" && editingOrder && editingOrder.station_aet;
+  if (editing && chosen === editing) addStationOption(sel, chosen);
   if (chosen && [...sel.options].some((o) => o.value === chosen)) sel.value = chosen;
   // Drop typed text the picker rejected, or it would resurface if the registry ever emptied.
   else txt.value = "";
@@ -481,6 +535,27 @@ function applyTestDefaults(on) {
 }
 
 // The station the operator picked, whichever control is on screen.
+// A station the registry does not list (removed, renamed or disabled), offered under its own AE title.
+function addStationOption(sel, aet) {
+  if (!aet || [...sel.options].some((o) => o.value === aet)) return;
+  const o = document.createElement("option");
+  o.value = aet;
+  o.textContent = TF("{aet} — not in the modality list", { aet });
+  sel.appendChild(o);
+}
+
+// What a probe asked, in the operator's language. Rounds filed before the keys were stored keep the
+// engine's English label.
+function probeQuestion(pr) {
+  if (!pr.calling_key) return pr.label || "";
+  return [
+    TF("as {aet}", { aet: pr.calling_key }),
+    pr.station_key ? TF("station {aet}", { aet: pr.station_key }) : T("any station"),
+    pr.date_key ? fmtDate(pr.date_key) : T("any date"),
+    pr.modality_key || T("any modality"),
+  ].join(", ");
+}
+
 function chosenStation() {
   const sel = $("ordStationSel");
   return (sel && !sel.hidden) ? sel.value.trim() : $("ordStation").value.trim();
@@ -499,7 +574,9 @@ function collectDests() {
       emergency_trigger: tr.querySelector(".d-emg").checked,
       ephemeral: tr.dataset.ephemeral === "1",
     }))
-    .filter((d) => d.host && d.aet && d.port);
+    // Only a completely blank row is ignored; a partly filled one is refused by validateRows()
+    // before the Save, instead of vanishing with the node it was meant to be.
+    .filter((d) => d.name || d.host || d.aet || !isNaN(d.port));
 }
 
 const csv = (id) => $(id).value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -512,6 +589,7 @@ function collectScpForm() {
     ...loadedScp,
     aet: $("scpAet").value.trim(),
     bind: $("scpBind").value.trim() || "0.0.0.0",
+    enabled: $("scpEnabled").checked,
     port: parseInt($("scpPort").value, 10),
     storage_dir: $("scpDir").value.trim(),
     organize: $("scpOrganize").checked,
@@ -527,6 +605,7 @@ function collectScpForm() {
 function collectScuForm() {
   return {
     ...loadedScu,
+    enabled: $("scuEnabled").checked,
     aet: $("scuAet").value.trim(),
     watch_dir: $("scuDir").value.trim(),
     poll_interval: parseFloat($("scuPoll").value) || 3,
@@ -664,3 +743,120 @@ function collectConfig() {
   };
 }
 
+
+/* ---- Checks made before a Save is posted ----
+   The engine validates too; these catch what it would otherwise reject in config-key jargon, or what
+   the old code silently dropped (a destination row missing its port vanished on Save). Each returns
+   the first problem as {tab, el, msg} so saveConfig can show it where it is. */
+function rowProblem(tab, bodyId, fields) {
+  const rows = [...$(bodyId).querySelectorAll("tr")];
+  for (let i = 0; i < rows.length; i++) {
+    const tr = rows[i];
+    tr.classList.remove("row-bad");
+    const vals = fields.map(([cls]) => tr.querySelector(cls).value.trim());
+    if (vals.every((v) => !v)) continue;                  // a blank starter row is fine
+    const miss = fields.findIndex(([, , required], k) => required && !vals[k]);
+    const bad = fields.findIndex(([cls]) => !tr.querySelector(cls).checkValidity());
+    const k = miss >= 0 ? miss : bad;
+    if (k < 0) continue;
+    tr.classList.add("row-bad");
+    const msg = miss >= 0
+      ? TF("Row {n}: {field} is missing", { n: i + 1, field: T(fields[k][1]) })
+      : TF("Row {n}: {field} is not valid", { n: i + 1, field: T(fields[k][1]) });
+    return { tab, el: tr.querySelector(fields[k][0]), msg };
+  }
+  return null;
+}
+function rulesProblem() {
+  const rules = [...document.querySelectorAll("#rtRules .rt-rule")];
+  for (let i = 0; i < rules.length; i++) {
+    for (const inp of rules[i].querySelectorAll('.rt-f[data-field="modality"], .rt-f[data-field="calling_aet"]')) {
+      const long = inp.value.split(",").map((x) => x.trim()).filter((x) => x.length > 16)[0];
+      if (long) return { tab: "routing", el: inp, msg: TF("Rule {n}: {value} is longer than 16 characters", { n: i + 1, value: long }) };
+    }
+  }
+  return null;
+}
+/* HTML5 constraints (required ports, 1..65535, maxlength) on the Settings form. Not stepMismatch:
+   step="1" is a spinner hint, and a hand-written 2.5 s poll interval is a value the engine accepts. */
+function settingsProblem() {
+  const broken = (v) => v.valueMissing || v.rangeUnderflow || v.rangeOverflow || v.tooLong || v.badInput || v.typeMismatch;
+  const bad = [...document.querySelectorAll("#dlgSettings input, #dlgSettings select")]
+    .find((el) => !el.disabled && broken(el.validity));
+  return bad ? { tab: "settings", el: bad, msg: bad.validationMessage } : null;
+}
+function configProblem() {
+  return rowProblem("destinations", "destBody", [[".d-name", "Name", false], [".d-host", "Host", true], [".d-port", "Port", true], [".d-aet", "AE title", true]])
+    || (modsOpen() ? rowProblem("modalities", "modBody", [[".m-name", "Name", true], [".m-aet", "AE title", true], [".m-mod", "Modality", false]]) : null)
+    || rulesProblem()
+    || settingsProblem();
+}
+
+/* Dotted engine key (C12 `field`) -> the input that holds it. Keys not listed still open the right
+   tab from their first segment. */
+const FIELD_INPUT = {
+  "scp.aet": "scpAet", "scp.bind": "scpBind", "scp.port": "scpPort", "scp.storage_dir": "scpDir",
+  "scp.min_free_gb": "scpMinFree", "scp.allowed_aets": "scpAllowed", "scp.tls": "scpTls",
+  "scp.tls_cert": "scpTlsCert", "scp.tls_key": "scpTlsKey", "scp.tls_ca": "scpTlsCa",
+  "scu.aet": "scuAet", "scu.watch_dir": "scuDir", "scu.poll_interval": "scuPoll", "scu.on_success": "scuMode",
+  "scu.sent_dir": "scuSent", "scu.tls_ca": "scuTlsCa", "scu.tls_cert": "scuTlsCert", "scu.tls_key": "scuTlsKey",
+  "print.aet": "prnAet", "print.bind": "prnBind", "print.port": "prnPort", "print.layout": "prnLayout",
+  "print.allowed_aets": "prnAllowed", "print.tls": "prnTls", "print.tls_cert": "prnTlsCert",
+  "print.tls_key": "prnTlsKey", "print.tls_ca": "prnTlsCa",
+  "mwl.aet": "mwlAet", "mwl.bind": "mwlBind", "mwl.port": "mwlPort", "mwl.allowed_aets": "mwlAllowed",
+  "mwl.tls": "mwlTls", "mwl.tls_cert": "mwlTlsCert", "mwl.tls_key": "mwlTlsKey", "mwl.tls_ca": "mwlTlsCa",
+  "ris.bind": "risBind", "ris.port": "risPort", "ris.store_dir": "risDir", "ris.allowed_hosts": "risHosts",
+  "qr.aet": "qrAetIn", "qr.bind": "qrBind", "qr.port": "qrPort", "qr.allowed_aets": "qrAllowed",
+  "qr.tls": "qrTlsIn", "qr.tls_cert": "qrTlsCert", "qr.tls_key": "qrTlsKey", "qr.tls_ca": "qrTlsCa",
+  "emergency.probe_interval_sec": "emgProbe", "emergency.offline_threshold_sec": "emgThreshold",
+  "emergency.recovery_successes": "emgRecovery",
+  "worklist_source.host": "wsHost", "worklist_source.port": "wsPort", "worklist_source.aet": "wsAet",
+  "dicomweb.cors_origins": "dwCors", "index.path": "idxPath", "deid.prefix": "deidPrefix",
+  "deid.profile": "deidProfile", "web.editor_url": "webEditorUrl",
+};
+const FIELD_TAB = { destinations: "destinations", routing: "routing", modalities: "modalities" };
+function problemForField(field, msg) {
+  const head = String(field).split(".")[0];
+  const tab = FIELD_TAB[head] || "settings";
+  let el = FIELD_INPUT[field] ? $(FIELD_INPUT[field]) : null;
+  // "destinations.2.port" / "modalities.0.aet": the nth row's matching input.
+  const m = /^(destinations|modalities)\.(\d+)\.(\w+)$/.exec(field);
+  if (m) {
+    const tr = $(m[1] === "destinations" ? "destBody" : "modBody").querySelectorAll("tr")[+m[2]];
+    const cls = { name: "name", host: "host", port: "port", aet: "aet", modality: "mod", station_name: "station" }[m[3]];
+    if (tr && cls) el = tr.querySelector("." + (m[1] === "destinations" ? "d-" : "m-") + cls);
+  }
+  return { tab, el, msg };
+}
+
+// Show a problem where it is: its tab, its group opened, the input outlined, the reason under it.
+function showFieldProblem(p) {
+  clearFieldProblems();
+  goTo("dlgConfig", p.tab);
+  if (!p.el) { flashNote(p.msg, false); return; }
+  const group = p.el.closest("details");
+  if (group) group.open = true;
+  const tlsBox = p.el.closest(".tls-fields");
+  if (tlsBox) tlsBox.hidden = false;
+  p.el.classList.add("field-bad");
+  const err = document.createElement("p");
+  err.className = "field-err";
+  err.setAttribute("role", "alert");
+  err.textContent = p.msg;
+  const host = p.el.closest("label") || p.el.closest("td") || p.el.parentNode;
+  host.appendChild(err);
+  p.el.scrollIntoView({ block: "center" });
+  p.el.focus({ preventScroll: true });
+  // Cleared as soon as the operator edits it.
+  p.el.addEventListener("input", clearFieldProblems, { once: true });
+}
+function clearFieldProblems() {
+  document.querySelectorAll(".field-err").forEach((e) => e.remove());
+  document.querySelectorAll(".field-bad").forEach((e) => e.classList.remove("field-bad"));
+}
+
+// The 409 banner: persistent, because the edits on screen were not saved.
+function showStale(on) {
+  const b = $("cfgStale");
+  if (b) b.hidden = !on;
+}

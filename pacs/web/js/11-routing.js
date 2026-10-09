@@ -97,6 +97,8 @@ function refreshRuleDests() {
     const picked = [...node.querySelectorAll(".rt-dests input:checked")].map((c) => c.value);
     fillRuleDests(node, picked);
   });
+  // Fresh checkboxes are born enabled; a read-only view (no config.read) must stay read-only.
+  if (configReadOnly) setConfigReadOnly(true);
 }
 
 function numberRules() {
@@ -162,7 +164,8 @@ async function testRoute(btn) {
   };
   btn.disabled = true;
   try {
-    renderRouteResult(await post("/api/routing/test", { attributes: attrs }));
+    // The rules as they are on screen (C7), so a draft can be tried before it is saved.
+    renderRouteResult(await post("/api/routing/test", { attributes: attrs, rules: collectRules(), routing_enabled: $("rtEnabled").checked }));
   } catch (e) {
     flashNote(e.message, false);
   } finally { btn.disabled = false; }

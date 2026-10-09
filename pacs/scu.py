@@ -8,14 +8,19 @@ store fails loudly rather than silently corrupting data.
 
 from __future__ import annotations
 
+import socket
 import ssl
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 from pydicom import dcmread
 from pydicom.uid import ImplicitVRLittleEndian
-from pynetdicom import AE
+from pynetdicom import AE, evt
 from pynetdicom.sop_class import Verification
+
+from .assocwords import describe_reject
 
 # C-STORE statuses that are "stored, with a caveat" — treat as success.
 # Reading them as failure would cost more than the caveat: the sender never
@@ -59,6 +64,90 @@ class SendResult:
     message: str
 
 
+def _associate(ae: AE, dest: "Destination", tls_context):
+    """ae.associate() that also remembers whether the TCP connection opened.
+
+    pynetdicom reports "could not connect" and "connected, then refused or
+    dropped" the same way — an association that is not established — and the
+    two have different fixes, so the difference is kept here for
+    _why_not_established()."""
+    opened: list = []
+    assoc = ae.associate(dest.host, dest.port, ae_title=dest.aet,
+                         tls_args=_tls_args(dest, tls_context),
+                         evt_handlers=[(evt.EVT_CONN_OPEN, lambda _e: opened.append(True))])
+    assoc._carino_opened = bool(opened)
+    return assoc
+
+
+# Recent answers from the diagnostic connect below, per (host, port, tls). A
+# dead node is tried for every queued file on every Auto-send pass; without
+# this each of those failures paid a second connect timeout on top of the
+# association's own, purely to word the error.
+_DIAG_TTL = 30.0
+_DIAG_TIMEOUT = 2.0
+_diag_cache: dict = {}
+_diag_lock = threading.Lock()
+
+
+def _why_no_connection(dest: "Destination", timeout) -> str:
+    """The socket never opened, and pynetdicom kept the reason in its own
+    logger. One short plain connect recovers it — at most once per node per
+    _DIAG_TTL, reusing the last answer in between."""
+    key = (dest.host, dest.port, bool(dest.tls))
+    now = time.monotonic()
+    with _diag_lock:
+        hit = _diag_cache.get(key)
+        if hit and now - hit[0] < _DIAG_TTL:
+            return hit[1]
+    try:
+        with socket.create_connection((dest.host, dest.port),
+                                      timeout=min(float(timeout), _DIAG_TIMEOUT)):
+            pass
+    except ConnectionRefusedError:
+        why = (f"connection refused by {dest.host}:{dest.port} — nothing is listening "
+               f"there; check that the remote is running and the port is right")
+    except (socket.timeout, TimeoutError):
+        why = (f"no reply from {dest.host}:{dest.port} — the host is off, unreachable, "
+               f"or a firewall is dropping the connection")
+    except OSError as exc:
+        why = f"could not connect to {dest.host}:{dest.port}: {exc}"
+    else:
+        if dest.tls:
+            why = (f"TLS handshake with {dest.host}:{dest.port} failed — check the "
+                   f"certificates and that the remote expects TLS")
+        else:
+            # Not cached: the node is back, and the next try should say so
+            # or, better, succeed.
+            return f"could not connect to {dest.host}:{dest.port} (it answers now — try again)"
+    with _diag_lock:
+        if len(_diag_cache) > 256:
+            _diag_cache.clear()
+        _diag_cache[key] = (now, why)
+    return why
+
+
+def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) -> str:
+    """Why an association did not come up, in words for whoever has to fix it:
+    a refusal (with the remote's reason), an abort, no reply, or no
+    connection at all."""
+    scheme = "TLS " if dest.tls else ""
+    where = f"{dest.aet} at {dest.host}:{dest.port}"
+    if getattr(assoc, "is_rejected", False):
+        prim = getattr(getattr(assoc, "acceptor", None), "primitive", None)
+        return (f"{scheme}association {describe_reject(prim, calling_aet=calling_aet, called_aet=dest.aet)}"
+                f" ({where})")
+    if not getattr(assoc, "_carino_opened", True):
+        return _why_no_connection(dest, timeout)
+    prim = getattr(getattr(assoc, "acceptor", None), "primitive", None)
+    if getattr(assoc, "is_aborted", False):
+        if prim is not None and getattr(prim, "result", None) == 0:
+            return (f"{scheme}association with {where} accepted but nothing we proposed was "
+                    f"(no common presentation context), so it was aborted")
+        return (f"{scheme}association aborted by {where} — it took the connection and then "
+                f"dropped it{' (often a TLS mismatch)' if not dest.tls else ''}")
+    return (f"no answer to the association request from {where} within {timeout}s")
+
+
 def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
            tls_context: Optional[ssl.SSLContext] = None) -> SendResult:
     """C-ECHO *dest* and report whether it answered, as a SendResult.
@@ -76,12 +165,11 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
     try:
-        assoc = ae.associate(dest.host, dest.port, ae_title=dest.aet, tls_args=_tls_args(dest, tls_context))
+        assoc = _associate(ae, dest, tls_context)
     except (ssl.SSLError, OSError) as exc:
         return SendResult(False, f"TLS/connection error: {exc}")
     if not assoc.is_established:
-        scheme = "TLS " if dest.tls else ""
-        return SendResult(False, f"{scheme}association rejected/aborted to {dest.host}:{dest.port}")
+        return SendResult(False, _why_not_established(assoc, dest, calling_aet, timeout))
     try:
         status = assoc.send_c_echo()
         if status and status.Status == 0x0000:
@@ -101,6 +189,10 @@ class WorklistProbe:
     items: list                 # the worklist items that came back
     station_key: str            # the ScheduledStationAETitle we asked for ("" = any)
     date_key: str               # the date we asked for ("" = any)
+    # The rest of the question, so the dashboard can say it in the operator's
+    # language instead of showing `label`, which is English.
+    calling_key: str = ""       # the calling AE title we asked as
+    modality_key: str = ""      # the modality we asked for ("" = any)
 
 
 def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
@@ -136,15 +228,18 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
     label += f", {date}" if date else ", any date"
     label += f", {modality}" if modality else ", any modality"
 
+    def _probe(*args):
+        pr = WorklistProbe(*args)
+        pr.calling_key, pr.modality_key = calling_aet, modality
+        return pr
+
     try:
-        assoc = ae.associate(dest.host, dest.port, ae_title=dest.aet,
-                             tls_args=_tls_args(dest, tls_context))
+        assoc = _associate(ae, dest, tls_context)
     except (ssl.SSLError, OSError) as exc:
-        return WorklistProbe(label, False, f"TLS/connection error: {exc}", [], station_aet, date)
+        return _probe(label, False, f"TLS/connection error: {exc}", [], station_aet, date)
     if not assoc.is_established:
-        scheme = "TLS " if dest.tls else ""
-        return WorklistProbe(label, False,
-                             f"{scheme}association rejected/aborted to {dest.host}:{dest.port}",
+        return _probe(label, False,
+                             _why_not_established(assoc, dest, calling_aet, timeout),
                              [], station_aet, date)
 
     # The identifier a modality sends: a few match keys filled, the rest present
@@ -175,7 +270,7 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
     try:
         for status, identifier in assoc.send_c_find(ds, ModalityWorklistInformationFind):
             if not status:
-                return WorklistProbe(label, False, "connection lost during the query",
+                return _probe(label, False, "connection lost during the query",
                                      items, station_aet, date)
             code = status.Status
             if code in (0xFF00, 0xFF01) and identifier is not None:
@@ -183,13 +278,13 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
             elif code == 0x0000:
                 break                       # success, no more matches
             elif code not in (0xFF00, 0xFF01):
-                return WorklistProbe(label, False, f"C-FIND failed (0x{code:04X})",
+                return _probe(label, False, f"C-FIND failed (0x{code:04X})",
                                      items, station_aet, date)
     except Exception as exc:                # a malformed response must not take the probe down
-        return WorklistProbe(label, False, f"query error: {exc}", items, station_aet, date)
+        return _probe(label, False, f"query error: {exc}", items, station_aet, date)
     finally:
         assoc.release()
-    return WorklistProbe(label, True, f"{len(items)} item(s)", items, station_aet, date)
+    return _probe(label, True, f"{len(items)} item(s)", items, station_aet, date)
 
 
 def _worklist_item(ds) -> dict:
@@ -268,12 +363,11 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
     try:
-        assoc = ae.associate(dest.host, dest.port, ae_title=dest.aet, tls_args=_tls_args(dest, tls_context))
+        assoc = _associate(ae, dest, tls_context)
     except (ssl.SSLError, OSError) as exc:
         return SendResult(False, f"TLS/connection error: {exc}")
     if not assoc.is_established:
-        scheme = "TLS " if dest.tls else ""
-        return SendResult(False, f"{scheme}association rejected/aborted to {dest.host}:{dest.port}")
+        return SendResult(False, _why_not_established(assoc, dest, calling_aet, timeout))
     try:
         status = assoc.send_c_store(ds)
         if not status:

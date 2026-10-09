@@ -127,6 +127,8 @@ class CaughtStore:
                 "message": getattr(pr, "message", ""),
                 "station_key": getattr(pr, "station_key", ""),
                 "date_key": getattr(pr, "date_key", ""),
+                "calling_key": getattr(pr, "calling_key", ""),
+                "modality_key": getattr(pr, "modality_key", ""),
                 "count": len(items),
                 # Split by who each item is actually addressed to. This is the
                 # line that turns "3 came back" into an answer: an item with no

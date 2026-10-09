@@ -77,7 +77,7 @@ The container is the fastest path and needs nothing on the host but Docker.
 
 ```bash
 git clone https://github.com/MiguelCarino/Carino-DICOM.git
-cd Carino-PACS
+cd Carino-DICOM
 
 # The container never runs as root, so ./data has to be writable by your uid.
 mkdir -p data
@@ -379,8 +379,21 @@ Deliberately not implemented, and answered `406` rather than faked: `/rendered`,
 For modalities that will only print to a laser imager. Carino answers Basic
 Grayscale Print Management (and Color, optionally), reassembles each film sheet
 from the image boxes, and renders it to a **PDF** or a **Secondary Capture**
-image (`print.layout`). It also answers the Basic Annotation Box and Print Job
-SOP classes so a fuller-featured print SCU negotiates cleanly.
+image (`print.layout`). It also answers the Basic Annotation Box, Presentation
+LUT, Print Job and Printer Configuration Retrieval SOP classes so a fuller-featured print SCU negotiates cleanly
+(a Presentation LUT is accepted and ignored). Film Session / Film Box UIDs are
+minted here when the modality leaves them to the printer, and the called AE title
+is not enforced — only the calling AE, if you set an allow-list.
+
+Every refusal or failure is logged as a `print` line, counted on the card, and
+shown as its *Last problem*; a good job shows as *Last print*. The dashboard's
+**Send a test print** runs one full print through the receiver and drops a sheet
+marked "TEST PRINT — safe to discard" into Pending. Each message and its fix is
+in the manual's troubleshooting chapter.
+
+Which layout: many PACS and viewers store an Encapsulated PDF but do not display
+it, so choose `image` (Secondary Capture) when the film has to be read on the
+other side.
 
 A film carries burned-in pixels, not a structured PatientID — so captured film
 lands in the **pending review queue** for an operator to identify and approve,
@@ -488,6 +501,10 @@ Nothing is sent anywhere you have not written down, no patient identifiers
 appear in either channel, and neither can delay or crash a failover — every send
 is queued to a worker thread and a failure becomes a counter and a log line.
 
+The dashboard has no form for this yet: set it in the `notify` section of
+`config.json` (secrets through `POST /api/notify/secret`). Every key is in
+[CONFIGURATION.md](CONFIGURATION.md#notify).
+
 ### People and permissions
 
 Optional, and off until you turn it on. Until then the shared access token is
@@ -593,6 +610,27 @@ it — can watch GitHub for a newer release, off unless somebody answers yes to 
 question it asks on first run; it downloads nothing, and what the check costs in
 privacy is spelled out below.
 
+### HTTP API, for scripts and monitoring
+
+The dashboard is a client of the same API anything else can call, with the token
+as `Authorization: Bearer …` (or a profile's session). Each route checks the
+caller's capability. The ones most useful from a script:
+
+| Route | What it does |
+|---|---|
+| `GET /api/status` | Every service's state, counters, `last_problem`, and the print receiver's `last_print` |
+| `POST /api/<svc>` `{"action":"start"\|"stop"}` | `svc` is `receiver`, `watcher`, `printer`, `ris`, `mwl` or `qr`; also writes that section's `enabled` |
+| `POST /api/selftest` `{"service":…, "print":true?}` | Connects to one of this machine's own listeners (C-ECHO; a TCP check for `ris`); with `"print": true` on `printer`, runs a one-sheet test print into Pending. Answers `{ok, message, ms}`, never a 500 |
+| `GET /api/log?kind=print&level=warn&q=…&limit=…` | The activity log, filtered by service, by level (`warn` = warnings and errors) and by text |
+| `GET /api/log/days`, `GET /api/log/file?day=YYYY-MM-DD` | The days that have a log file, and one day's file as plain text |
+| `POST /api/config` | Saves the configuration; restarts only the services whose section changed and lists them in `restarted`; a refusal names the `field` |
+| `POST /api/routing/test` | Explains where a study would go; send `rules` to test a draft instead of the saved rules |
+| `GET /api/stuck`, `POST /api/stuck/send`, `POST /api/stuck/discard` | What is stuck; send orphaned/held files to another destination, or remove them from the queue |
+| `GET /api/pending`, `POST /api/pending/approve` | The review queue; approve with typed identity, or with `order_id` to take identity from an open order (and close it). `keep_study: true` keeps the original study when the identity was changed |
+
+CONFIGURATION.md and SECURITY.md cover the configuration, token and profile
+routes.
+
 ---
 
 ## Maturity
@@ -617,10 +655,9 @@ your 2009 CR reader will negotiate cleanly. If it works with your modality, that
 is a useful report — please open an issue saying so, including the ones that
 fail.
 
-Known interop caveats that are already documented in the code: the print SCP
-relies on the print SCU supplying Film Session / Film Box UIDs (pynetdicom's own
-SCU and most modalities do), and DICOMweb answers `406` for anything needing a
-rendering or transcoding pipeline rather than approximating it.
+Known interop caveat that is already documented in the code: DICOMweb answers
+`406` for anything needing a rendering or transcoding pipeline rather than
+approximating it.
 
 ---
 
@@ -849,6 +886,8 @@ The dashboard is optional — every function has a head-less command:
 ./run.sh serve [--receive] [--watch] [--print] [--ris] [--mwl] [--qr] [--host H] [--port P]
                      # web dashboard; the flags start a service for THIS run only,
                      # without enrolling it in the config
+./run.sh serve --dev-peer      # also offer the disposable loopback test archive
+                               # (bench only; see the manual's "dev peer" section)
 ./run.sh receive [--port 11112] [--aet CARINODICOM] [--out ./received]
 ./run.sh send [--watch-dir ./outgoing]
 ./run.sh print [--port 11113] [--aet CARINOPRINT]
@@ -856,7 +895,11 @@ The dashboard is optional — every function has a head-less command:
 ./run.sh mwl [--port 11114] [--aet CARINOMWL]
 ./run.sh qr [--port 11115] [--aet CARINOQR]
 ./run.sh echo --name "Example PACS"
-./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS
+./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS [--calling MYAET] [--tls]
+                               # --calling: the AE title to call AS (default scu.aet);
+                               # --tls: dial over TLS with the scu TLS settings
+                               # (with --name, the destination's own TLS tick decides);
+                               # exit code 0 answered, 1 dialled and failed, 2 nothing dialled
 ./run.sh init [--token]        # scaffold config + folders; --token mints the API token
 ```
 
@@ -917,7 +960,7 @@ control.
 
 | Document | What is in it |
 |---|---|
-| [The manual](https://dicom.carino.systems/manual/) | Deployment, the security model, every service, and the software's real limits — in English, Spanish, Portuguese, Japanese and Russian. Also served by the appliance itself at `/manual/`, so it is there when the box is not on the internet |
+| [The manual](https://dicom.carino.systems/manual/) | Deployment, step-by-step recipes (point a modality at it to store, print or pull its worklist; approve a film; fix a stuck forward), a troubleshooting chapter, the security model, every service, and the software's real limits — in English, Spanish, Portuguese, Japanese and Russian. Also served by the appliance itself at `/manual/`, so it is there when the box is not on the internet |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The four paths through the code: what runs on which thread, what owns what, what happens when it fails |
 | [CONFIGURATION.md](CONFIGURATION.md) | Every key in `config.json`: what it does, its default, what validation refuses |
 | [SECURITY.md](SECURITY.md) | Threat model, what is and is not protected, private disclosure |

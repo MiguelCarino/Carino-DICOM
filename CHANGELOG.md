@@ -5,7 +5,71 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Added
+- **Test from the dashboard.** Every listener card has a Test button
+  (`POST /api/selftest`): the engine calls its own receiver, print receiver,
+  worklist or Q/R with C-ECHO, and the RIS listener with an HL7 message, and
+  says what answered. The print card also has *Send a test print*, which drives
+  a real one-sheet print through the print SCP; the sheet lands in Pending as
+  "TEST PRINT — safe to discard".
+- Each listener card names what to type into the modality ("Point the modality
+  at: AE · IP · port", with Copy) and shows its last problem, linked to the log
+  filtered to that service. Status blocks carry `last_problem`.
+- Activity → Logs filters by service, by errors and warnings, and by text;
+  copies what is shown; downloads a whole day's log file (`/api/log/days`,
+  `/api/log/file`). `/api/log` takes `kind`, `level`, `q` and `limit`; the
+  in-memory ring holds 2000 lines.
+- Pending review: *Match to order…* fills the identity from an open order and
+  closes it as captured on approval (`order_id`); patient name and ID are
+  required otherwise; the study date is a date field.
+- Stuck: files are grouped by study (patient, ID, accession, description), and
+  orphaned or held files can be sent to another destination or removed from the
+  queue (`/api/stuck/send`, `/api/stuck/discard`; only files the stuck scan
+  itself reports are accepted).
+- History: filter box and modality chips, received time and sending AE, and
+  "Showing the newest N of TOTAL" when the list is capped. The receiver now
+  records the calling AE in File Meta (0002,0016).
+- Orders: search, tab counts, a STAT pill, local times for HL7 and UTC stamps,
+  and Edit for manual orders.
+- Routing → Test a study tests the rules on screen, not only the saved ones.
+- Audit records which config sections, destinations and rules a save changed,
+  and the Audit tab shows it, with filters and readable action names.
+- Overview: services counted against what is enabled, DICOMweb and failover
+  rows, and a destination whose forwards keep failing reads "Sends failing"
+  (status `stuck_by_dest`).
+- A red banner when the dashboard loses contact with the engine.
+- Manual: a "How do I…" chapter and a "When something goes wrong" chapter,
+  including a print-receiver troubleshooting table, in all five languages.
+
 ### Changed
+- **Start/Stop is the on/off switch.** A card's Start or Stop writes that
+  service's `enabled` flag and nothing else; Stop asks first and says what
+  stops working. A Save that clears a service's "Run this service (also at
+  startup)" box stops it. Before, Start saved the whole Settings form and
+  restarted every listener, and a stopped service came back on the next save.
+- **A save restarts only what changed.** `POST /api/config` restarts the
+  listeners whose own settings changed and returns `restarted`; a destinations,
+  routing or modalities save restarts nothing. The dashboard sends `If-Match`,
+  so a save over someone else's newer change is refused with a banner instead of
+  silently overwriting it. Validation errors name the field (`field`) and the
+  dashboard points at it.
+- Configuration → Settings is grouped into collapsible sections (This PACS,
+  Sending, Worklist and orders, Printing, Query and web access, Failover,
+  Privacy and security, Integrations, Danger zone); TLS paths show only when
+  TLS is ticked; Shut down moved into the Danger zone.
+- Saving routing needs `routing.write` and saving destinations needs
+  `destinations.write`, as their names always promised. Without `config.read`,
+  Destinations and Routing load read-only from `/api/routing`.
+- Services cards drop rows that only repeated settings; Stop is a plain
+  button; hints are always visible; the header chips open their card instead of
+  toggling the service.
+- "Caught" is now "Worklist probes". The de-identification site key can be set
+  from Settings.
+- Refused associations on the receiver, worklist and Q/R are logged with the
+  reason, and a failed send says whether the remote rejected it (and why),
+  aborted, refused the connection or never answered.
+- Landing page: plain lede, the three situations it is for, and the clone
+  commands now `cd Carino-DICOM`.
 - `pacs/web/app.js` is gone: the dashboard is split into fourteen plain classic
   scripts, `pacs/web/js/01-core.js` … `14-boot.js`, loaded by `index.html` in
   the original order with no build step. The code is moved verbatim; the only
@@ -49,6 +113,51 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   inline-style cleanup; see the upstream CHANGELOG.
 
 ### Fixed
+- **Print receiver: a modality that leaves UIDs to the printer can print.**
+  Most modalities send N-CREATE for the Film Session and Film Box without an
+  Affected SOP Instance UID; the print SCP answered `0x0110 Processing failure`
+  to the first one and the reason went only to pynetdicom's own logger, so the
+  modality showed an error and the log showed nothing. The UIDs are now minted
+  and returned. A Presentation LUT is accepted, Printer Configuration Retrieval
+  is answered, an N-SET on the session or film
+  box succeeds, and every refusal or failure (AE not allowed, colour not
+  offered, an image for a box never handed out, an empty print, a render
+  failure, an exception inside pynetdicom) is logged, counted and shown on the
+  card. Counters and the last print survive restarts.
+- **Approving a pending item can no longer write "***" into the DICOM.** A
+  profile that sees identifiers redacted posted the placeholders back as the
+  patient name; withheld fields are now locked in the form and dropped by the
+  engine.
+- **Correcting the patient on a pending item starts a new study.** The item
+  kept the StudyInstanceUID of the study it was found beside, so a corrected
+  identity was filed inside another patient's study. The UID is replaced unless
+  the operator chooses "Attach to the original study".
+- Destination Echo honours the row's TLS box.
+- Partly filled destination or modality rows are no longer dropped silently on
+  save; the save is refused and the row named.
+- Two Settings / Worklist probes hints were never translated.
+- On narrow screens the header's address readout no longer pushes the page
+  sideways, and sidebar badges stay on their row.
+- The install docs `cd` into the directory `git clone` actually creates; the
+  systemd recipe enables the unit so it survives a reboot.
+- Activity → Logs opens on the newest lines and keeps following them; it used
+  to sit on the oldest line because the backlog arrived while the tab was
+  hidden.
+- People: permission and identifier names are translated (they were the
+  engine's English in every language), and the access token signs in as
+  "Access token" rather than "API token · service". Worklist probe questions
+  are written in the operator's language (probe rounds now record the calling
+  AE and modality they asked with). Russian "Studies" is nominative.
+- The Stuck panel's held rows (why nothing is sent, and the one edit that
+  releases it) are translated; the dashboard draws them from the engine's
+  `cause`, and a test keeps its copy of the sentences equal to the engine's.
+- With both sidebar badges showing, Studies no longer ellipsises in Russian:
+  the two badges stack in one column. Copy buttons never break across lines
+  (Japanese split "コピー"), and two Russian buttons got labels that fit.
+- Audit: a worklist test or a profile change is one record, not two (the
+  generic `api.*` row is kept only for a refusal or failure); the remaining
+  `api.*` codes, the outcomes, the engine and the access token read in the
+  operator's language.
 - Stopping the engine now closes the index's own database handle, so the dev
   peer's temporary folder can be deleted on Windows (it failed with the
   folder's `index.db` still open).

@@ -395,5 +395,17 @@ def test_the_it_preset_can_work_without_reading_the_chart():
     assert not it.can("auth.manage") and not it.can("deid.manage")
 
 
+def test_withheld_names_exactly_the_keys_redact_would_replace():
+    it = [U.Profile(r) for r in U.preset_profiles() if r["name"] == "IT"][0]
+    item = {"patient": "Jane", "patient_name": "Doe^Jane", "patient_id": "P1",
+            "accession": "A1", "study_desc": "CT", "series_desc": "x", "kind": "pdf"}
+    withheld = U.withheld(list(item), it)
+    redacted = U.redact(item, it)
+    assert withheld == [k for k in item if redacted[k] == U.REDACTED]
+    assert withheld == ["patient", "patient_name", "study_desc"]
+    admin = [U.Profile(r) for r in U.preset_profiles() if r["admin"]][0]
+    assert U.withheld(list(item), admin) == []
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

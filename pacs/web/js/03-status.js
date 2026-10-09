@@ -14,22 +14,29 @@ function syncStatusAuth(auth) {
   }
 }
 
+// This machine's addresses: every IP, never "+1" alone — on a two-NIC box the second may be the one a modality needs.
+function hostIps(s) {
+  return (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
+}
+
 // This machine's network identity (what remote nodes send to).
 function renderNetInfo(s, rx) {
   const ni = $("netInfo");
   if (!ni) return;
   ni.textContent = "";
-  // Compact navbar form: first IP + count, then the receiver AE:port.
-  const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
+  // Compact navbar form: first IP + count, then the receiver AE:port; the tooltip lists them all.
+  const ips = hostIps(s);
   if (ips.length) {
     ni.classList.remove("offline");
     const v = (t) => { const el = document.createElement("span"); el.className = "v"; el.textContent = t; return el; };
     ni.append(v(ips[0]));
     if (ips.length > 1) ni.append(" +" + (ips.length - 1));
     ni.append(" · ", v(rx.aet + ":" + rx.port));
+    ni.title = ips.join(" · ") + " — " + rx.aet + ":" + rx.port;
   } else {
     ni.classList.add("offline");
     ni.textContent = T("offline");
+    ni.title = "";
   }
 }
 
@@ -72,10 +79,49 @@ function renderDiskWarn(d) {
 }
 
 // ---- Service cards: one readout per listener ----
-function renderReceiverCard(rx) {
+/* "Point the modality at: AE · IP · port". A specific bind address is the only address that works;
+   0.0.0.0 means every address this machine has, so all of them are listed. Stopped = "not listening". */
+function renderConnect(pfx, blk, ips) {
+  const line = $(pfx + "Connect");
+  if (!line) return;
+  const bind = blk.bind || "0.0.0.0";
+  const addrs = (bind === "0.0.0.0" || bind === "::") ? (ips.length ? ips : [bind]) : [bind];
+  const aet = $(pfx + "Aet");
+  if (aet) { aet.textContent = dash(blk.aet); aet.title = dash(blk.aet); }
+  $(pfx + "Ips").textContent = addrs.join(" / ");
+  $(pfx + "CPort").textContent = dash(blk.port);
+  const off = $(pfx + "Off");
+  if (off) off.hidden = !!blk.running;
+  line.classList.toggle("off", !blk.running);
+  // Copy text is plain and complete: what gets pasted into an engineer's notes or a ticket.
+  line.dataset.copyText = [blk.aet, addrs.join(" / "), blk.port].filter((v) => v != null && v !== "").join(" · ");
+}
+
+// Security row only when TLS is on: "plaintext" on every card repeated a default as news.
+function renderTlsRow(pfx, blk) {
+  const row = $(pfx + "TlsRow");
+  if (row) row.hidden = !blk.tls;
+  const el = $(pfx + "Tls");
+  if (el) el.textContent = blk.tls ? (blk.tls_mutual ? T("mTLS") : "TLS") : "";
+}
+
+/* last_problem {message, at} of a listener: the reason a modality only ever sees as a status code.
+   `newerThan` (seconds) hides a problem that a later success has already answered. */
+function renderProblem(pfx, pb, newerThan) {
+  const line = $(pfx + "Problem");
+  if (!line) return;
+  const show = !!(pb && pb.message && (!newerThan || pb.at > newerThan));
+  line.hidden = !show;
+  if (!show) return;
+  line.querySelector(".cp-text").textContent =
+    TF("Last problem ({ts}): {msg}", { ts: fmtLogTs(pb.at * 1000), msg: pb.message });
+  const link = line.querySelector(".cp-log");
+  if (link) link.hidden = !can("logs.read");
+}
+
+function renderReceiverCard(rx, ips) {
   setDot($("rxDot"), rx.running);
-  setAtomic("rxAet", rx.aet);
-  setAtomic("rxAddr", `${rx.bind}:${rx.port}`);
+  renderConnect("rx", rx, ips);
   setPath("rxDir", rx.storage_dir);
   $("rxCount").textContent = rx.received;
   // `refused` = stores turned away below the free-space floor (the low-disk banner only shows
@@ -85,8 +131,9 @@ function renderReceiverCard(rx) {
   rxErr.title = rx.refused
     ? TF("{n} incoming studies were REFUSED for low disk space and never arrived. Nothing retries them from this side — the sender has to send them again once there is space.", { n: rx.refused })
     : "";
-  $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? T("mTLS") : "TLS") : T("plaintext");
-  setToggle($("rxToggle"), rx.running);
+  renderTlsRow("rx", rx);
+  renderProblem("rx", rx.last_problem);
+  setToggle($("rxToggle"), rx.running, "Receiver");
   setChip("rx", rx.running);
 }
 
@@ -94,53 +141,60 @@ function renderWatcherCard(wx) {
   setDot($("wxDot"), wx.running);
   setPath("wxDir", wx.watch_dir);
   setAtomic("wxAet", wx.aet);
-  $("wxMode").textContent = T(wx.on_success);
   $("wxSent").textContent = wx.sent;
   $("wxFailed").textContent = wx.failed;
   $("wxLast").textContent = wx.last_activity || "—";
-  setToggle($("wxToggle"), wx.running);
+  setToggle($("wxToggle"), wx.running, "Auto-send");
   setChip("wx", wx.running);
 }
 
-function renderPrinterCard(px) {
+function renderPrinterCard(px, ips) {
   setDot($("pxDot"), px.running);
-  setAtomic("pxAet", px.aet || "—");
-  setAtomic("pxAddr", `${px.bind || "0.0.0.0"}:${px.port}`);
+  renderConnect("px", px, ips);
   $("pxMode").textContent = (px.color ? T("gray + color") : T("grayscale")) +
     " · " + (px.layout === "image" ? T("→ SC") : T("→ PDF"));
+  // Nothing is printed: each job is captured into Pending, so the counter says so.
   $("pxCount").textContent = px.printed || 0;
   $("pxErr").textContent = px.errors || 0;
-  $("pxTls").textContent = px.tls ? "TLS" : T("plaintext");
-  setToggle($("pxToggle"), px.running);
+  renderTlsRow("px", px);
+  // Last film that arrived, and the last thing that went wrong if it is newer:
+  // a modality only ever shows a status code, so this is where the reason is.
+  const lp = px.last_print;
+  $("pxLast").textContent = lp
+    ? TF("{n} film(s) from {src}, {ts}", { n: lp.films, src: lp.source, ts: fmtLogTs(lp.at * 1000) })
+    : "—";
+  renderProblem("px", px.last_problem, lp ? lp.at : 0);
+  const since = $("pxSince");
+  if (since) since.textContent = px.since ? TF("Counted since {ts}", { ts: fmtLogTs(px.since * 1000) }) : "";
+  setToggle($("pxToggle"), px.running, "Print receiver");
   setChip("px", px.running);
 }
 
-function renderRisCard(rs) {
+function renderRisCard(rs, ips) {
   setDot($("rsDot"), rs.running);
-  setAtomic("rsAddr", `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`);
-  $("rsMatch").textContent = rs.match_on === "accession_or_patient" ? T("accession / patient ID") : T("accession");
+  renderConnect("rs", rs, ips);
   $("rsOpen").textContent = (rs.counts && rs.counts.open) || 0;
   $("rsRecv").textContent = rs.received || 0;
   $("rsErr").textContent = rs.errors || 0;
-  setToggle($("rsToggle"), rs.running);
+  renderProblem("rs", rs.last_problem);
+  setToggle($("rsToggle"), rs.running, "Emergency RIS");
   setChip("rs", rs.running);
 }
 
-function renderMwlCard(mw) {
+function renderMwlCard(mw, ips) {
   setDot($("mwDot"), mw.running);
-  setAtomic("mwAet", mw.aet || "—");
-  setAtomic("mwAddr", `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`);
+  renderConnect("mw", mw, ips);
   $("mwQueries").textContent = mw.queries || 0;
   $("mwMatches").textContent = mw.matches || 0;
-  $("mwTls").textContent = mw.tls ? "TLS" : T("plaintext");
-  setToggle($("mwToggle"), mw.running);
+  renderTlsRow("mw", mw);
+  renderProblem("mw", mw.last_problem);
+  setToggle($("mwToggle"), mw.running, "Worklist");
   setChip("mw", mw.running);
 }
 
-function renderQrCard(qr) {
+function renderQrCard(qr, ips) {
   setDot($("qrDot"), qr.running);
-  setAtomic("qrAet", qr.aet || "—");
-  setAtomic("qrAddr", `${qr.bind || "0.0.0.0"}:${qr.port || "—"}`);
+  renderConnect("qr", qr, ips);
   $("qrQueries").textContent = qr.queries || 0;
   $("qrMatches").textContent = qr.matches || 0;
   const qrSent = $("qrSent");
@@ -149,8 +203,12 @@ function renderQrCard(qr) {
   qrSent.title = TF("{moves} C-MOVE · {gets} C-GET", { moves: qr.moves || 0, gets: qr.gets || 0 });
   $("qrFailed").textContent = qr.move_failures || 0;
   $("qrErr").textContent = qr.errors || 0;
-  $("qrTls").textContent = qr.tls ? (qr.tls_mutual ? T("mTLS") : "TLS") : T("plaintext");
-  setToggle($("qrToggle"), qr.running);
+  renderTlsRow("qr", qr);
+  renderProblem("qr", qr.last_problem);
+  // qr.aet is editable, so the hint names the one actually in use.
+  const hint = $("qrHint");
+  if (hint) hint.textContent = TF("C-MOVE calls out as {aet} — allow that AE there", { aet: qr.aet || "CARINOQR" });
+  setToggle($("qrToggle"), qr.running, "Query/Retrieve");
   setChip("qr", qr.running);
 }
 
@@ -184,6 +242,7 @@ function renderStatus(s) {
   if (s.auth) syncStatusAuth(s.auth);
   mountServiceChips();      // self-heals if the navbar mounted after us
   renderNetInfo(s, rx);
+  const ips = hostIps(s);
 
   editorUrl = (s.editor_url || "").trim();
 
@@ -199,6 +258,7 @@ function renderStatus(s) {
   if (activePanel === "dlgDevPeer") renderDevPeer(s.dev_peer || null);
 
   renderStatusBadges(s, rs);
+  syncStudyCounts(s);       // Pending/Stuck tab counts + refresh of the visible pane (js/09-studies.js)
 
   /* Order arrival, edge-triggered off ris.created_seq (rises once per created order).
      After the badge repaint so number and flash agree. Without orders.read the ris
@@ -224,17 +284,20 @@ function renderStatus(s) {
   // the engine publishes the verdict as status.config_problem and it must be shown.
   renderConfigProblem(s.config_problem || "", s.config_path || "");
 
-  renderReceiverCard(rx);
+  renderReceiverCard(rx, ips);
   renderWatcherCard(wx);
-  renderPrinterCard(px);
-  renderRisCard(rs);
-  renderMwlCard(mw);
-  renderQrCard(qr);
+  renderPrinterCard(px, ips);
+  renderRisCard(rs, ips);
+  renderMwlCard(mw, ips);
+  renderQrCard(qr, ips);
 
   renderEmergency(s.emergency || {}, rs, mw);
   renderIndex(s.index || {});
   renderDicomweb(s.dicomweb || {});
   renderDeidState(s.deid || {});
+  renderDeidKeyBox(s.deid || {});
+  renderSettingsStates(s, ips);
+  renderSetupDone(s, ips);
 
   paintServiceCardStates(rx, wx, px, rs, mw, qr);
   offerFirstRunSetup(s);
@@ -257,6 +320,8 @@ function renderEmergency(emg, rs, mw) {
   const banner = $("emgBanner");
   const state = emg.state || "off";
   const who = emg.trigger_dest || "primary";
+  // may_activate is absent without profiles, where anyone may answer.
+  const allowed = emg.may_activate !== false;
   if (state === "triggered" || state === "active" || state === "recovering") {
     banner.hidden = false;
     banner.className = "emg-banner " + state;
@@ -269,6 +334,12 @@ function renderEmergency(emg, rs, mw) {
       actions = [[T("Resume normal"), "resume", "btn"]];
     } else if (state === "recovering") {
       text = TF("↩ '{who}' is back — flushing held studies to it. Click Resume when done.", { who });
+      // held_remaining (when the engine can count it cheaply) says when "done" is.
+      if (typeof emg.held_remaining === "number") {
+        text += " " + (emg.held_remaining
+          ? TF("{n} held studies still to send.", { n: emg.held_remaining })
+          : T("Every held study has been sent."));
+      }
       actions = [[T("Resume normal"), "resume", "btn"]];
     } else {  // triggered (prompt may be dismissed)
       text = TF("⚠ Primary '{who}' is unreachable — emergency RIS not activated.", { who });
@@ -277,11 +348,15 @@ function renderEmergency(emg, rs, mw) {
     $("emgBannerText").textContent = text;
     const wrap = $("emgBannerActions");
     wrap.innerHTML = "";
-    actions.forEach(([label, action, cls]) => {
+    // Only someone who may answer gets the buttons; the others would click into a refusal.
+    (allowed ? actions : []).forEach(([label, action, cls]) => {
       const b = document.createElement("button");
       b.className = cls + " tiny";
       b.textContent = label;
-      b.addEventListener("click", () => emergencyAction(action));
+      b.addEventListener("click", () => {
+        if (action === "disarm" && !confirm(T("Disarm failover? Nothing watches the primary archive until it is armed again in Settings."))) return;
+        emergencyAction(action);
+      });
       wrap.appendChild(b);
     });
   } else {
@@ -294,12 +369,10 @@ function renderEmergency(emg, rs, mw) {
       $("emgPromptMsg").textContent =
         TF("The primary PACS '{who}' has been unreachable past the failover threshold.", { who });
       renderEmergencyGuidance(emg);
-      prompt.hidden = false;
-      emgPromptShown = true;
+      openEmgPrompt();
     }
-  } else {
-    prompt.hidden = true;
-    emgPromptShown = false;
+  } else if (emgPromptShown) {
+    closeEmgPrompt();
   }
 }
 
@@ -336,14 +409,51 @@ function renderEmergencyGuidance(emg) {
   if (dismiss) dismiss.textContent = allowed ? T("Not now") : T("I have seen this");
 }
 
+// A real modal: the dashboard behind it goes inert and focus lands on the first action.
+function openEmgPrompt() {
+  const prompt = $("emgPrompt");
+  prompt.hidden = false;
+  emgPromptShown = true;
+  const wrap = document.querySelector("main.wrap");
+  if (wrap && !gateOpen) wrap.inert = true;
+  const act = $("emgActivate");
+  const first = (act && !act.hidden) ? act : $("emgDismiss");
+  if (first) setTimeout(() => first.focus(), 0);
+}
+function closeEmgPrompt() {
+  const prompt = $("emgPrompt");
+  if (prompt) prompt.hidden = true;
+  emgPromptShown = false;
+  const wrap = document.querySelector("main.wrap");
+  if (wrap && !gateOpen) wrap.inert = false;
+}
+
 async function emergencyAction(action) {
   try {
     const r = await post("/api/emergency", { action });
     flashNote(r.message || TF("Emergency: {action}", { action }), r.ok !== false);
-    $("emgPrompt").hidden = true;
-    emgPromptShown = false;
+    closeEmgPrompt();
+    syncArmedFlag();
     pollStatus();
-  } catch (e) { flashNote(e.message, false); }
+  } catch (e) {
+    flashNote(e.message, false);
+    // A refused "I have seen this" must not leave the whole dashboard locked behind the prompt.
+    if (action === "dismiss") closeEmgPrompt();
+  }
+}
+
+/* Arm/Disarm persist emergency.armed. Mirror it into the Settings form and its snapshot, and adopt
+   the new version tag, or the next Save posts the stale flag back (re-arming) or reads as a 409. */
+async function syncArmedFlag() {
+  if (!can("config.read") || !loadedRaw) return;
+  let fresh;
+  try { fresh = await api("/api/config"); } catch (e) { return; }
+  const armed = !!(fresh.emergency && fresh.emergency.armed);
+  if (!!loadedEmg.armed === armed) return;
+  loadedEmg.armed = armed;
+  const box = $("emgArmed");
+  if (box) box.checked = armed;
+  refreshEtagAfterOwnWrite((doc, old) => { if (doc.emergency && old.emergency) doc.emergency.armed = old.emergency.armed; });
 }
 // ---- Settings readouts: instance index, DICOMweb, de-identification ----
 // Drawn from the status poll; skipped when their markup is absent.
@@ -454,7 +564,7 @@ function renderDeidState(dd) {
     key.className = "deid-key" + (dd.secret_set ? "" : " warn");
     key.textContent = dd.secret_set
       ? T("A site key is set — pseudonyms and date shifts cannot be reproduced without it.")
-      : T("No site key is set — pseudonyms are derived from the study alone, so anyone with this software can reverse them. Set one with POST /api/deid/secret.");
+      : T("No site key is set — pseudonyms are derived from the study alone, so anyone with this software can reverse them. Set one below.");
     st.appendChild(key);
   }
   // `retrieval_raw`: open retrieval services (C-MOVE, C-GET, WADO-RS) serve stored files
@@ -494,12 +604,128 @@ async function rescanIndex(btn) {
   }
 }
 
-function setToggle(btn, on) {
+// `name` is the English service label: four identical "Stop" buttons say nothing to a screen reader.
+function setToggle(btn, on, name) {
   btn.dataset.on = String(on);
   btn.textContent = on ? T("Stop") : T("Start");
+  if (name) btn.setAttribute("aria-label", on ? TF("Stop {svc}", { svc: T(name) }) : TF("Start {svc}", { svc: T(name) }));
 }
 function setDot(el, on) {
   el.classList.toggle("on", on);
   el.classList.toggle("off", !on);
 }
 
+
+// ---- Lost contact with the engine ----
+/* Fed by api() for every status poll (js/01-core.js). Three misses in a row (~6 s at the 2 s poll)
+   raise a page-wide banner and grey out every live indicator; the poll keeps running, and the
+   first answer clears it. A 401 is contact (the gate takes over), so it never counts. */
+let contactFails = 0, contactLostAt = 0;
+function noteContact(ok) {
+  if (ok) {
+    if (contactFails >= 3) paintContact(false);
+    contactFails = 0;
+    contactLostAt = 0;
+    return;
+  }
+  if (!contactFails) contactLostAt = Date.now();
+  contactFails += 1;
+  if (contactFails === 3) paintContact(true);
+}
+function paintContact(lost) {
+  document.body.classList.toggle("contact-lost", lost);
+  const el = $("lostContact");
+  if (!el) return;
+  el.hidden = !lost;
+  el.textContent = lost
+    ? TF("Lost contact with the PACS engine at {time} — what you see is frozen. Retrying…",
+         { time: new Date(contactLostAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
+    : "";
+}
+
+// ---- Settings: live state beside each group heading ----
+const GROUP_SERVICES = {
+  sgThisPacs: [["receiver", "Receiver"]],
+  sgSending: [["watcher", "Auto-send"]],
+  sgWorklist: [["mwl", "Worklist"], ["ris", "Emergency RIS"]],
+  sgPrinting: [["printer", "Print receiver"]],
+  sgQuery: [["qr", "Query/Retrieve"], ["dicomweb", "DICOMweb"]],
+};
+function renderSettingsStates(s, ips) {
+  if (!settingsOpen()) return;
+  Object.keys(GROUP_SERVICES).forEach((gid) => {
+    const el = $(gid + "State");
+    if (!el) return;
+    el.textContent = "";
+    GROUP_SERVICES[gid].forEach(([key, label], i) => {
+      const blk = s[key] || {};
+      // DICOMweb has no listener of its own: "running" is whether it is switched on.
+      const on = key === "dicomweb" ? !!blk.enabled : !!blk.running;
+      const span = document.createElement("span");
+      span.className = on ? "on" : "off";
+      span.textContent = on ? TF("{svc}: running", { svc: T(label) }) : TF("{svc}: stopped", { svc: T(label) });
+      if (i) el.append(" · ");
+      el.appendChild(span);
+    });
+  });
+  const fo = $("sgFailoverState");
+  if (fo) {
+    const emg = s.emergency || {};
+    fo.textContent = emg.armed ? T("Failover armed") : T("Failover not armed");
+  }
+  const pv = $("sgPrivacyState");
+  if (pv) {
+    const prof = (s.deid || {}).profile || "off";
+    pv.textContent = TF("De-identification: {profile}", { profile: prof });
+  }
+  // The print section repeats the card's connect line: the engineer configuring the modality is here.
+  const pc = $("prnConnect");
+  if (pc) {
+    const px = s.printer || {};
+    const bind = px.bind || "0.0.0.0";
+    const addrs = (bind === "0.0.0.0" || bind === "::") ? (ips.length ? ips : [bind]) : [bind];
+    pc.textContent = TF("Give the modality: AE {aet} · IP {ip} · port {port}", { aet: px.aet || "—", ip: addrs.join(" / "), port: px.port || "—" })
+      + (px.running ? "" : " · " + T("not listening"));
+  }
+}
+
+// ---- De-identification site key (POST /api/deid/secret) ----
+function renderDeidKeyBox(dd) {
+  const clear = $("deidKeyClear");
+  if (clear) clear.hidden = !dd.secret_set;
+  const set = $("deidKeySet");
+  if (set) set.textContent = dd.secret_set ? T("Replace site key") : T("Set site key");
+  // The engine wants the access token itself; without one configured there is nothing to prove.
+  const proof = $("deidKeyProofWrap");
+  if (proof) proof.hidden = !authRequired;
+}
+
+/* Not through api(): the token travels in a header for this request only, and a 401/403 here means
+   the typed proof was wrong, which must not sign the dashboard out. */
+async function applyDeidKey(action) {
+  const tokenEl = $("deidKeyToken"), keyEl = $("deidKeyNew");
+  const tok = ((tokenEl && tokenEl.value) || "").trim();
+  const key = ((keyEl && keyEl.value) || "").trim();
+  const isSet = !!(lastStatus && lastStatus.deid && lastStatus.deid.secret_set);
+  if (action === "set" && !key) { flashNote(T("Enter or generate the new site key first."), false); if (keyEl) keyEl.focus(); return; }
+  if (authRequired && !tok) { flashNote(T("Type the current access token first — changing the site key needs it."), false); if (tokenEl) tokenEl.focus(); return; }
+  if (action === "set" && isSet && !confirm(T("Replace the site key? Everything exported from now on gets different pseudonyms and date shifts, so it will no longer line up with what was exported before."))) return;
+  if (action === "clear" && !confirm(T("Remove the site key? Pseudonyms are then derived from the study alone, and anyone with this software can reverse them."))) return;
+  const headers = { "Content-Type": "application/json", "X-Carino": "1" };
+  if (tok) headers["X-Carino-Token"] = tok;
+  let res, body = {};
+  try {
+    res = await fetch("/api/deid/secret", {
+      method: "POST", headers,
+      body: JSON.stringify(action === "clear" ? { action: "clear" } : { action: "set", secret: key }),
+    });
+    try { body = await res.json(); } catch (e) { /* empty */ }
+  } catch (e) { flashNote(e.message, false); return; }
+  if (!res.ok) { flashNote(body.error || body.message || res.statusText, false); return; }
+  if (tokenEl) tokenEl.value = "";
+  if (keyEl) { keyEl.value = ""; keyEl.type = "password"; }
+  flashNote(body.message || (action === "clear" ? T("Site key removed.") : T("Site key set.")), true);
+  // The key is part of the stored config: adopt the new version tag, or the next Save reads as stale.
+  refreshEtagAfterOwnWrite((doc, old) => { if (doc.deid && old.deid) doc.deid.secret_set = old.deid.secret_set; });
+  pollStatus();
+}

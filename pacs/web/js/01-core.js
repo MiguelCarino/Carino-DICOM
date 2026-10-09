@@ -19,8 +19,22 @@ const TF = (s, vals) => T(s).replace(/\{(\w+)\}/g, (m, k) => (vals && vals[k] !=
 const TN = (n, s) => (window.tn ? window.tn(n, s) : String(s).replace(/\{n\}/g, n));
 const I18N_IN = (root) => { if (window.applyI18nIn) window.applyI18nIn(root); return root; };
 
+/* opts.onResponse(res) sees the raw Response (headers: the config ETag). A fetch that never got an
+   answer and a gateway error both mean "engine unreachable"; the status poll reports either to
+   noteContact() so a frozen dashboard says so (any HTTP answer, even 401, is contact). */
 const api = async (url, opts) => {
-  const res = await fetch(url, opts);
+  const { onResponse, ...init } = opts || {};
+  const isPoll = url === "/api/status";
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    if (isPoll) noteContact(false);
+    e.status = 0;
+    throw e;
+  }
+  if (isPoll) noteContact(!(res.status === 502 || res.status === 503 || res.status === 504));
+  if (onResponse) onResponse(res);
   let body = {};
   try { body = await res.json(); } catch (e) { /* empty */ }
   if (!res.ok) {
@@ -29,6 +43,10 @@ const api = async (url, opts) => {
     // Machine-readable outcome code, so callers can show a translated rejection
     // instead of the engine's English err.message.
     err.code = body.code || "";
+    // Dotted config key a validation error is about (e.g. "scp.port"), when the engine knows it.
+    err.field = body.field || "";
+    // A capability refusal names what was missing ({capability, capabilities, fields}).
+    err.forbidden = body.forbidden || null;
     // Test auth.required, not ok:false (every API error is ok:false). See pacs/auth.py.
     err.auth = (body.auth && body.auth.required) ? body.auth : null;
     // Prompt here so every caller (including polls after a restart) shares one recovery path.
@@ -39,8 +57,9 @@ const api = async (url, opts) => {
 };
 // Every write (including POST /api/login) needs X-Carino: 1, or web.py's
 // cross-site guard answers 403 before the credential is even checked.
-const post = (url, data) =>
-  api(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Carino": "1" }, body: JSON.stringify(data || {}) });
+const post = (url, data, headers) =>
+  api(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Carino": "1", ...(headers || {}) },
+             body: JSON.stringify(data || {}) });
 
 // Full loaded config sections, posted back on Save so keys without a form input
 // survive: apply_config merges over DEFAULTS, so an omitted section is RESET
@@ -60,6 +79,11 @@ let loadedWeb = { host: "127.0.0.1", port: 8042 };
 // Top-level onboarding stamp; carried through Save or the setup chooser reappears.
 let loadedSetup = "";
 let loadedLogsDir = "";   // no form field; cfg.replace merges over DEFAULTS, so a Save would reset it
+/* Optimistic concurrency (web.py): the ETag from GET /api/config goes back as If-Match on every Save,
+   so a Save built on a stale copy gets 409 instead of silently reverting someone else's change.
+   loadedRaw is the whole GET body, kept to recognise our OWN later writes (a card Start/Stop). */
+let configEtag = "";
+let loadedRaw = null;
 let statusTimer = null, logTimer = null;
 let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 let devPeerAvailable = false;                      // --dev-peer was given AND we may see it (the status block is gated)

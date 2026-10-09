@@ -46,8 +46,8 @@
     <p class="standfirst">Carino DICOM is a <strong>DICOM gateway</strong> and a <strong>continuity
       appliance</strong>: it receives studies, routes and forwards them, publishes what it holds over
       Query/Retrieve and DICOMweb, and keeps an imaging department working when the PACS or the RIS stops
-      answering. This manual covers deployment, the security model, every service, and the software's
-      real limits.</p>
+      answering. This manual covers deployment, the everyday jobs and what to do when they fail, the
+      security model, every service, and the software's real limits.</p>
 
     <p class="shots-note">Every screenshot here is a live instance of this software, holding studies that were invented for the picture. No patient appears anywhere in this manual.</p>
 
@@ -56,8 +56,10 @@
       <ol>
         <li><a href="#what">What it is and what role it plays</a></li>
         <li><a href="#start">Getting started</a></li>
+        <li><a href="#howto">How do I…</a></li>
+        <li><a href="#trouble">When something goes wrong</a></li>
         <li><a href="#security">The security model and the token rule</a></li>
-        <li><a href="#services">The services, one by one</a></li>
+        <li><a href="#services">The services, one by one (reference)</a></li>
         <li><a href="#not">This is not a medical device</a></li>
         <li><a href="#help">Licence and where to get help</a></li>
       </ol>
@@ -130,7 +132,8 @@
       <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases
       page</a> and open it. It tucks into the system tray; clicking it opens the dashboard. It is not
       code-signed yet, so Windows and macOS warn on first launch — the
-      <a href="../">landing page</a> has the exact steps to open it anyway.</p>
+      <a href="https://dicom.carino.systems/" target="_blank" rel="noopener">landing page</a> has the
+      exact steps to open it anyway.</p>
     <p>On first run it asks, once, whether it may check GitHub for a newer version. Answering no — or
       closing the question — leaves it off, which is the default. If it is on, a newer release shows up
       as a line in the tray menu and beside the version on the <em>Overview</em> panel; clicking either
@@ -140,24 +143,27 @@
 
     <h3>Docker</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
-mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
-docker compose up -d
+cd Carino-DICOM
+mkdir -p data
+echo "PACS_UID=$(id -u)" &gt;&gt; .env
+echo "PACS_GID=$(id -g)" &gt;&gt; .env
+docker compose up -d --build
 docker compose logs -f pacs</code></pre>
     <p>The first boot <strong>generates and prints an access token</strong> into the log. Open
       <code>http://127.0.0.1:8042/</code> and paste it when the dashboard asks. Everything — config,
       studies, logs, index — lives in <code>./data</code>, which is what you back up.</p>
     <div class="warn">
       <p><b>The most common first-run failure</b> is <code>./data</code> owned by root: the container
-        never runs as root and dies with <code>EACCES</code>. If your account is not uid 1000, put
-        <code>PACS_UID</code> and <code>PACS_GID</code> in a <code>.env</code> file and rebuild. On
+        never runs as root and dies with <code>EACCES</code>. The two <code>echo</code> lines above
+        prevent it by building the image for your own account; if you skipped them, add them and run
+        <code>docker compose up -d --build</code> again. On
         SELinux hosts (Fedora, RHEL, Rocky) the volume's <code>:z</code> suffix is not decoration:
         without it the bind mount is unwritable while the ownership looks perfectly correct.</p>
     </div>
 
     <h3>systemd service (Linux)</h3>
     <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM.git
-cd Carino-PACS
+cd Carino-DICOM
 sudo packaging/systemd/install.sh</code></pre>
     <p>The installer creates the <code>carino-pacs</code> system user, copies the code to
       <code>/opt/carino-pacs</code>, provisions <code>/var/lib/carino-pacs</code>, and installs the
@@ -192,25 +198,21 @@ journalctl -u carino-pacs -f</code></pre>
         what <em>this</em> machine should run; enable only that.</li>
       <li><strong>Add your destinations</strong> (name, host, port, AE title) on the <em>Destinations</em>
         tab of <em>Configuration</em>, which is the tab that row opens on.</li>
-      <li><strong>Prove connectivity with C-ECHO</strong> before moving a single image:
-        <code>./run.sh echo --name "Hospital PACS"</code>. If C-ECHO fails, the problem is not Carino —
-        it is the network, the firewall or the AE title.</li>
-      <li><strong>Point one device at it</strong> using the receiver's AE title, IP and port, and send a
-        test study.</li>
+      <li><strong>Prove connectivity before moving a single image:</strong> press <em>Echo</em> on the
+        destination's row. On a machine with no dashboard, <code>./run.sh echo --name "Hospital
+        PACS"</code> does the same. If the echo fails, the problem is not Carino — it is the network, the
+        firewall or the AE title.</li>
+      <li><strong>Point one device at it</strong> using the <em>Point the modality at</em> line on the
+        receiver's card, and send a test study (see <a href="#howto-store">How do I…</a>).</li>
       <li><strong>Watch the activity log</strong>, on the <em>Logs</em> tab of <em>Activity</em>. If
-        something fails it shows up there; this software would rather shout than fail quietly.</li>
+        something fails it shows up there, and on the service's card as <em>Last problem</em>; this
+        software would rather shout than fail quietly.</li>
     </ol>
 
     <figure class="shot">
       <img src="img/en/first-run.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The dashboard's setup chooser, headed “Choose the services this PC should run”: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a Use this tick box, every one unticked, over a footer reading “Nothing selected — this PC will not receive or send anything” beside Not now and Turn these on buttons." />
-      <figcaption>Step 1. Nothing is ticked and nothing is running: the footer says so, and no port opens until you apply. Each card names what the service is for, so the choice is made from the description rather than from the protocol name.</figcaption>
-    </figure>
-
-    <figure class="shot">
-      <img src="img/en/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The Logs tab of Activity: a timestamped stream. Startup lines name each listener and its port; a red block explains that a routing rule asks for de-identification while the profile is off; an amber line reports a rejected association and when it will be retried." />
-      <figcaption>Step 5. The activity stream. Every line that matters says what it wants done about it — the red block here is a de-identification hold naming the remedy, and the amber line is a refused destination naming its next retry.</figcaption>
+        alt="The dashboard's setup chooser, headed “Choose the services this PC should run”: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a Use this tick box and a line saying its port is free. Only the receiver is ticked, so the footer reads “1 selected”, beside Not now and Turn these on buttons." />
+      <figcaption>Step 1. Only the <em>Receiver</em> comes ticked — it is what makes this machine a destination at all — so the footer reads <em>1 selected</em>; nothing is running yet, and no port opens until you apply. Each card names what the service is for, so the choice is made from the description rather than from the protocol name.</figcaption>
     </figure>
 
     <h3>Headless</h3>
@@ -227,7 +229,229 @@ journalctl -u carino-pacs -f</code></pre>
     <p>Every command takes <code>-c / --config &lt;path&gt;</code>. On Windows, <code>run.ps1</code>.</p>
 
     <!-- ─────────────────────────────────────────────────────────── -->
-    <h2 id="security">3. The security model and the token rule</h2>
+    <h2 id="howto">3. How do I…</h2>
+
+    <p>Short recipes for the jobs that come up on the floor. Each one ends with how you know it worked;
+      if it did not, the next chapter is the list of what to check.</p>
+
+    <h3 id="howto-store">…point a modality at it to store images</h3>
+    <ol>
+      <li>Open <em>Services</em>. If the <em>Receiver</em> card says it is stopped, press <em>Start</em>.</li>
+      <li>Read the card's line <em>Point the modality at</em>: an AE title, an IP address and a port
+        (by default <code>CARINODICOM</code> and <code>11112</code>). The copy button beside it copies
+        all three. If the machine has more than one address, use the one on the modality's network.</li>
+      <li>On the modality, add a storage destination — vendors call it a DICOM node, an archive, a
+        "Send to" or a "Store" target — with those three values. The modality's own AE title is the
+        <em>calling</em> AE; you do not have to enter it here.</li>
+      <li>If <em>Configuration</em> → <em>Settings</em> → <em>This PACS</em> lists AE titles under
+        <em>Accept only these AEs</em>, add the modality's AE title there, or the receiver refuses it.</li>
+      <li>Run the modality's own connection test (often <em>Verify</em> or <em>Echo</em>), then send
+        one study. It appears in <em>Studies</em> → <em>History</em>.</li>
+    </ol>
+    <p>The card's <em>Test</em> button checks the receiver from this machine itself. If <em>Test</em>
+      passes and the modality still fails, the problem is between the two: address, port, firewall or
+      the AE allow-list.</p>
+
+    <h3 id="howto-print">…point a modality at it to print</h3>
+    <p>For equipment whose only output is film. Carino pretends to be the film printer and captures each
+      sheet for you to identify; nothing is printed on paper.</p>
+    <ol>
+      <li>Open <em>Services</em> and press <em>Start</em> on the <em>Print receiver</em> card.</li>
+      <li>Read its line <em>Point the modality at</em> (by default <code>CARINOPRINT</code>, this
+        machine's IP and port <code>11113</code>).</li>
+      <li>On the modality, add a DICOM printer — sometimes called a laser imager or film printer — with
+        those three values. Grayscale is always offered; if the modality only prints in colour, tick
+        <em>Also accept color print jobs</em> under <em>Configuration</em> → <em>Settings</em> →
+        <em>Printing</em>.</li>
+      <li>Press <em>Send a test print</em> on the card. A sheet marked
+        <strong>TEST PRINT — safe to discard</strong> appears in <em>Studies</em> → <em>Pending</em>
+        within a few seconds. That proves the receiver works; discard the sheet.</li>
+      <li>Print one film from the modality. The card shows <em>Last print</em> with the number of films,
+        the modality's AE title and its address, the <em>Captured</em> counter goes up, and the film
+        waits in <em>Pending</em> for you to approve (see below).</li>
+    </ol>
+    <p><em>Store each captured film as</em> (under <em>Printing</em>) decides what the film becomes when
+      you approve it. Many archives and viewers store a PDF but do not display it; choose
+      <em>Image</em> (Secondary Capture) if the film has to be read on the other side.</p>
+    <p>The printer AE title typed on the modality is not checked: a mistyped one still prints. Only the
+      modality's own AE title is filtered, and only if you fill in <em>Accept only these AEs</em>. If
+      a print fails, the card shows <em>Last problem</em>; the
+      <a href="#trouble-print">print troubleshooting table</a> lists every message and its fix.</p>
+
+    <h3 id="howto-worklist">…point a modality at it to pull its worklist</h3>
+    <ol>
+      <li>Make sure there are orders. Either the RIS sends HL7 orders to the <em>Emergency RIS</em>
+        service (port <code>2575</code>), or someone types them in <em>Orders</em> → <em>New
+        order</em>.</li>
+      <li>Under <em>Configuration</em> → <em>Modalities</em>, register the room with its exact station AE
+        title. An order's target is then picked from that list instead of typed.</li>
+      <li>Open <em>Services</em>, press <em>Start</em> on the <em>Worklist</em> card and read its line
+        <em>Point the modality at</em> (by default <code>CARINOMWL</code> and port <code>11114</code>).</li>
+      <li>On the modality, set the worklist provider (MWL, "HIS/RIS" or "worklist server") to those
+        values and query it.</li>
+    </ol>
+    <p>An order with no target appears on every station; an order with a target appears only on the
+      station whose AE title matches it exactly. When the study comes back it is matched to its order by
+      accession number and the order closes itself.</p>
+
+    <h3 id="howto-approve">…approve a pending film</h3>
+    <p>Captured films, and PDFs or images found beside a study, wait in <em>Studies</em> →
+      <em>Pending</em>. The 📎 count next to <em>Studies</em> says how many.</p>
+    <ol>
+      <li>Open <em>Preview</em> and look at the sheet.</li>
+      <li>If the patient has an open order, press <em>Match to order…</em> and pick it. Name, patient ID,
+        accession and study come from the order, and the order is closed as captured.</li>
+      <li>Otherwise type the identity yourself. <em>Patient ID</em> and <em>Patient name</em> are
+        required; accession, date and description are strongly recommended.</li>
+      <li>If the item arrived beside a study and you changed the patient, choose what it belongs to:
+        <em>Attach to the original study</em> only if that study really is this patient's, otherwise
+        <em>New study</em>. A wrong choice files one patient's sheet inside another patient's study.</li>
+      <li>Press <em>Approve &amp; send</em>. It is converted to DICOM and forwarded like any other
+        study.</li>
+    </ol>
+    <p>There is no undo: once approved, the original file is gone from Pending and the DICOM copy is on
+      its way. A mistake is fixed on the archive. <em>Discard</em> removes an item without sending it.</p>
+
+    <h3 id="howto-stuck">…fix a stuck forward</h3>
+    <p>Open <em>Studies</em> → <em>Stuck</em> (the ⚠ count next to <em>Studies</em>). Rows are grouped by
+      study, with the patient, accession and description, and sorted into three kinds:</p>
+    <ul>
+      <li><strong>Retrying automatically</strong> — a destination refused or did not answer. Read the
+        error on the row: it says whether the remote rejected us (and why, for example "add CARINOSCU to
+        the remote's allowed AE titles"), dropped the connection, or never answered. Fix that, press
+        <em>Echo</em> on the destination's row under <em>Configuration</em> → <em>Destinations</em>,
+        then <em>Retry now</em>.</li>
+      <li><strong>Held — nothing is being sent</strong> — a de-identification hold. No timer releases
+        it; use the two buttons on the row, and see <a href="#deid">De-identify on forward</a>.</li>
+      <li><strong>No destination left to retry</strong> — the files are routed to a destination that was
+        removed or turned off. Turn it back on, or press <em>Send to…</em> and pick another destination,
+        or <em>Remove from queue</em> (it asks first) to accept the loss.</li>
+    </ul>
+
+    <h3 id="howto-why">…find out why something failed</h3>
+    <ol>
+      <li>Look at the service's card. Every listener shows <em>Last problem</em> when something went
+        wrong; click it to open the log already filtered to that service.</li>
+      <li>On <em>Activity</em> → <em>Logs</em>, use the service chips (store, send, print, worklist,
+        Q/R, RIS…), <em>Errors and warnings only</em>, and the text filter — an AE title, an IP address
+        or an accession number narrows it fast.</li>
+      <li>To hand the problem to someone else, copy the visible lines, or download a whole day's
+        log.</li>
+      <li>Press <em>Test</em> on the card. If the test passes from this machine but the modality still
+        fails, look at the network between them.</li>
+      <li>If a setting changed and nobody knows who changed it, <em>Activity</em> → <em>Audit</em> names
+        the person and the sections they changed.</li>
+    </ol>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="trouble">4. When something goes wrong</h2>
+
+    <p>Symptom first, then where to look, then the fix. Almost every row starts in the same two places:
+      the service's card on <em>Services</em> (its <em>Last problem</em>) and <em>Activity</em> →
+      <em>Logs</em>.</p>
+
+    <h3 id="trouble-general">Sending, receiving and the worklist</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Symptom</th><th>Where to look</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>The modality cannot send to us at all</td><td>Receiver card; log lines starting
+            <code>Receiver: refused</code></td><td><code>its AE title is not in the allowed list</code>:
+            add the modality's AE under <em>Accept only these AEs</em>, or clear the list. Nothing in the
+            log: the connection never arrived — check the IP and port on the modality, the firewall, and
+            that the card is running. <em>Test</em> on the card separates "this machine" from "the
+            network".</td></tr>
+          <tr><td>The modality sent, but the study is not in History</td><td>Log, <em>store</em> chip;
+            Overview <em>Free space</em></td><td><code>Refused C-STORE — low disk space</code>: free disk
+            space or lower <code>scp.min_free_gb</code>. The modality can resend once there is room.</td></tr>
+          <tr><td>A card is amber: "Enabled but not running"</td><td>Log at the time it started</td><td>Its
+            port is taken by another program, or by another service here. Change the port or stop the other
+            program, then <em>Start</em>.</td></tr>
+          <tr><td>Studies do not reach the main PACS</td><td><em>Studies</em> → <em>Stuck</em></td><td>The
+            row's error says what the PACS did: <code>rejected permanently: calling AE title not
+            recognised</code> → add our sending AE (default <code>CARINOSCU</code>) on the PACS;
+            <code>connection refused</code> → wrong port or the PACS is stopped; <code>no reply</code> →
+            host off or a firewall; <code>aborted</code> → often a TLS mismatch.</td></tr>
+          <tr><td>Nothing is sent to one destination, and nothing retries</td><td><em>Stuck</em>, "Held"
+            section</td><td>A de-identification hold — see <a href="#deid">De-identify on forward</a>.</td></tr>
+          <tr><td>The modality does not see its worklist</td><td>Worklist card; log, <em>worklist</em>
+            chip</td><td><code>MWL: refused</code>: add its AE to the worklist's allow-list. No query in the
+            log: wrong IP/port/AE on the modality. Query arrives but the list is empty: the order's target
+            AE does not match the station exactly — fix it under <em>Modalities</em>.</td></tr>
+          <tr><td>The hospital's own RIS does not give the modality its list</td><td><em>Configuration</em>
+            → <em>Modalities</em> → <em>Test worklist</em></td><td>See
+            <a href="#probe">Worklist probe</a>; the answers land on <em>Activity</em> → <em>Worklist
+            probes</em>.</td></tr>
+          <tr><td>HL7 orders from the RIS do not appear</td><td>Emergency RIS card; log, <em>RIS</em>
+            chip</td><td>Check the RIS is sending to this IP on port <code>2575</code>, and that its address
+            is in <code>ris.allowed_hosts</code> if that list is set.</td></tr>
+          <tr><td>Everyone was signed out</td><td>—</td><td>Normal after a restart: sessions live in memory
+            by design. Sign in again.</td></tr>
+          <tr><td>The dashboard stops responding or its numbers stop changing</td><td>Reload the page</td><td>If
+            it does not come back, the engine is not answering: check that the service or container is running
+            (<code>systemctl status carino-pacs</code>, <code>docker compose ps</code>) and read its log.</td></tr>
+          <tr><td>The container dies with <code>EACCES</code></td><td><code>docker compose logs pacs</code></td><td><code>./data</code>
+            is not writable by the container's user: set <code>PACS_UID</code>/<code>PACS_GID</code> in
+            <code>.env</code> and rebuild (see Docker above).</td></tr>
+          <tr><td>Failover e-mail is on, but nobody got one</td><td><em>Configuration</em> → <em>People</em></td><td>Mail
+            goes to profiles with an e-mail address, not to a list. See
+            <a href="#notify">Notifications</a>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="trouble-print">Printing</h3>
+    <p>Every refusal and failure of the print receiver is a line in the log (the <em>print</em> chip),
+      counts in the card's <em>Errors</em>, and shows as its <em>Last problem</em>. A successful job shows
+      as <em>Last print</em>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Log line or symptom</th><th>What it means</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td><code>Print: refused X @ ip — its AE title is not in the allowed list (…)</code></td><td>The
+            modality's AE title is not on the print receiver's list.</td><td>Add it under <em>Printing</em> →
+            <em>Accept only these AEs</em>, or clear the list.</td></tr>
+          <tr><td><code>Print: refused X @ ip — too many connections at once</code></td><td>The modality, or
+            several, opened more connections than the receiver accepts at once.</td><td>Let the jobs finish
+            and print again; if it repeats, print one job at a time.</td></tr>
+          <tr><td><code>Print: X @ ip asked for Basic Color Print Management…, which this printer does not
+            offer</code></td><td>The modality wants colour and colour is off.</td><td>Tick <em>Also accept
+            color print jobs</em>. Not counted as an error: a modality that offers both prints in grayscale.</td></tr>
+          <tr><td><code>Print from X: nothing to print — no film was created first</code>, <code>… N film(s)
+            were created but no image was sent into them</code>, <code>… the film it named (…) was never
+            created here</code></td><td>The modality skipped a step of the print sequence. It was told
+            "empty page" (a warning, 0xB603).</td><td>A modality-side setting or fault: check its printer
+            configuration (film format, number of images) and print again.</td></tr>
+          <tr><td><code>Print: X sent an image for a box this printer never handed out (…); refused</code></td><td>The
+            modality referred to an image box from another session.</td><td>Restart the print from the
+            modality; if it repeats, report it with the log line.</td></tr>
+          <tr><td><code>Print: could not read image N from X (…); it is left blank on the film</code></td><td>One
+            image used a pixel format the receiver does not read; the rest of the sheet was kept.</td><td>Change
+            the modality's print settings (bit depth, colour) if it offers that; report the line otherwise.</td></tr>
+          <tr><td><code>Failed to render or queue the print job from X: …</code></td><td>The film arrived but
+            could not be written (status 0x0110).</td><td>Check free disk space and that the pending folder
+            (<code>scu.pending_dir</code>) is writable.</td></tr>
+          <tr><td>Other lines starting <code>Print: …</code></td><td>Passed through from the DICOM library's
+            own messages for that print connection.</td><td>Read with the line before it; report if
+            unclear.</td></tr>
+          <tr><td>Nothing in the log at all</td><td>The connection never arrived.</td><td>Is the card running
+            (not amber)? Is the modality using this machine's IP and port <code>11113</code>? Is a firewall
+            in the way? <em>Send a test print</em> on the card proves this side.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two things that are <em>not</em> the cause: the printer AE title typed on the modality (it is not
+      checked), and the modality leaving the film session and film box numbers to the printer (they are
+      created here when missing). A Presentation LUT is accepted and ignored, and a modality that first asks for the printer's configuration gets an answer.</p>
+
+    <figure class="shot">
+      <img src="img/en/logs.webp" width="1920" height="1200" loading="lazy" decoding="async"
+        alt="The Logs tab of Activity: above the stream, a chip per service, an errors-and-warnings-only box and a text filter; below, the day's timestamped lines, newest at the bottom, each tagged with the service that wrote it; under the stream, a line count, Copy visible, a day picker, Download day's log and Clear view." />
+      <figcaption>Where every row above starts. The log opens on its newest lines, at the bottom; errors are drawn in red and warnings in amber, and each line that matters says what it wants done about it. When the stream is busy, narrow it with the service chips (<em>Receiver</em>, <em>Auto-send</em>, <em>Printing</em>, …), <em>Errors and warnings only</em> and the text filter. <em>Copy visible</em> copies what the filters leave, <em>Download day's log</em> saves the whole file for the day picked beside it, and <em>Clear view</em> empties the screen, not the file.</figcaption>
+    </figure>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <h2 id="security">5. The security model and the token rule</h2>
 
     <figure class="shot">
       <img src="img/en/gate.webp" width="1150" height="950" loading="lazy" decoding="async"
@@ -245,7 +469,7 @@ journalctl -u carino-pacs -f</code></pre>
 
     <figure class="shot">
       <img src="img/en/people.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The People tab of Configuration, under a line reading four profiles: Administrator, IT, Radiologist and Reception. The Administrator's card is short — its “Administrator (everything, including future permissions)” box is ticked, so it carries no permission grid at all. The IT card below it shows its full Can do grid of tick boxes, and the screenshot cuts off partway through its Can see row. An Add someone button is pinned at the bottom right." />
+        alt="The People tab of Configuration, under a line reading “4 profiles.” The Administrator's card is short — its “Administrator (everything, including future permissions)” box is ticked, so it carries no permission grid at all, only its password field, Save and Delete. The IT card below it shows its Can do grid of tick boxes, and the screenshot cuts off partway through that grid, before its Can see row. An Add someone button is pinned at the bottom right." />
       <figcaption>Profiles, once they are on. Permissions are per person and enforced at every endpoint, not hidden in the browser — and <em>Can see</em> is separate from <em>Can do</em>: a profile can be allowed to re-route a study by its accession number without ever reading a patient's name. Anything unticked is shown as <code>***</code> wherever it would have appeared.</figcaption>
     </figure>
 
@@ -368,21 +592,27 @@ openssl rand -base64 32</code></pre>
     <!-- ─────────────────────────────────────────────────────────── -->
     <figure class="shot">
       <img src="img/en/audit.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The Audit tab of Activity: in the panel header, above the tab strip, a Clear view button, a Check integrity button and an Export button; under the tabs, a line giving the file count, the size on disk and the chain head digest; and below it five timestamped rows, each one the system logging in with an api token, each one ok." />
-      <figcaption>The audit trail, with the chain head printed above it — that digest is the value worth copying somewhere this machine cannot reach. The three buttons belong to the panel and not to the tab, so <em>Clear view</em>, <em>Check integrity</em> and <em>Export</em> are equally at hand on <em>Logs</em>. Refusals are recorded as faithfully as successes: a request that was turned down is a row here like any other.</figcaption>
+        alt="The Audit tab of Activity: a line giving the file count, the size on disk and the chain head digest; a filter row — everyone, every action, a Failed or refused only box — with Check integrity and Export buttons at its right; and timestamped rows, newest first, each Done and each with its details folded: the engine signing in with the access token, a row per sign-in, and below them the access token’s Tested a worklist for US_ROOM_2." />
+      <figcaption>The audit trail, with the chain head printed above it — that digest is the value worth copying somewhere this machine cannot reach. The tab has its own filter row — whose actions (everyone, or one person), which action, and <em>Failed or refused only</em> — with <em>Check integrity</em> and <em>Export</em> at its right; <em>Clear view</em> belongs to <em>Logs</em>, not here. Refusals are recorded as faithfully as successes: a request that was turned down is a row here like any other.</figcaption>
     </figure>
 
-    <h2 id="services">4. The services, one by one</h2>
+    <h2 id="services">6. The services, one by one</h2>
 
     <p>Everything that opens a port ships <strong>off</strong>. The right question is not "what can it
       do?" but "what does <em>this</em> machine need to do?" Every enabled service is one more open
       port. The index below is the one exception — it starts on its own, because it is a local sqlite
       cache that binds nothing.</p>
 
+    <p>Each service has one switch. <em>Start</em> on its card starts it and keeps it on after a
+      restart; <em>Stop</em> asks first, then stops it and keeps it off. In <em>Configuration</em> →
+      <em>Settings</em> the same switch is the box <em>Run this service (also at startup)</em>, so the
+      card and the setting can never disagree. Saving settings restarts only the services whose own
+      settings changed, and the dashboard says which.</p>
+
     <figure class="shot">
       <img src="img/en/services.webp" width="1920" height="1200" loading="lazy" decoding="async"
-        alt="The Services panel: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a green dot, a Stop button, its AE title, what it is listening on, and its counters." />
-      <figcaption>Each service starts and stops on its own, and each card carries the two numbers worth watching: what it has handled and what it has failed. The dashboard is not the engine — stopping one here stops that listener, not the appliance.</figcaption>
+        alt="The Services panel: a card per service — receiver, auto-send, print receiver, emergency RIS, worklist, Query/Retrieve — each with a status dot, a Stop button, a “Point the modality at” line giving AE title, IP address and port with a copy button, a Test button and its counters; the print receiver's card also shows its Last print line and a Send a test print button." />
+      <figcaption>Each service starts and stops on its own, and each card carries what a technologist needs: the address to type into the modality, a <em>Test</em> that checks the service from this machine, and the two numbers worth watching — what it has handled and what it has failed. When something fails, <em>Last problem</em> says what and links to the log. The dashboard is not the engine — stopping one here stops that listener, not the appliance.</figcaption>
     </figure>
 
     <figure class="shot">
@@ -407,8 +637,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/history.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The History tab of Studies, on its Received strip: a row per study with patient, ID, date, description, modality and image count, its series listed underneath, and per-row Send, Attach, Edit tags, Go to file and Delete actions." />
-        <figcaption>What arrived, newest first, with the series each study is made of. <em>Go to file</em> opens where it actually landed on disk — the filing is a real folder tree, not a database somebody has to export from.</figcaption>
+          alt="The History tab of Studies, on its Received strip: a filter box and modality chips above a row per study with patient, ID, date, accession number, description, modality and image count, its series listed underneath, and on each row a Send button and a ⋯ button that opens the rest of the row's actions." />
+        <figcaption>What arrived, newest first, with the series each study is made of; the filter box and the modality chips narrow the list. <em>Send</em> is the one action on the row — the <em>⋯</em> menu holds the rest: <em>Add PDF/image</em>, <em>Edit tags</em> (once an editor address is set), <em>Copy path</em>, <em>Open folder</em> (offered only when the dashboard runs on the machine itself) and <em>Delete</em>. The path is real: the filing is a folder tree, not a database somebody has to export from.</figcaption>
       </figure>
     </div>
 
@@ -443,7 +673,7 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/destinations.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Destinations tab of Configuration: three rows — Main archive, Reading room and Teaching archive — each with host, port, AE title, tick boxes for TLS, no RIS and emergency primary, and an Echo button." />
+          alt="The Destinations tab of Configuration: three rows — Main archive, Reading room and Teaching archive — each with host, port, AE title, tick boxes for TLS, no RIS and failover, and an Echo button." />
         <figcaption>Destinations are named here and referred to by name everywhere else, so renaming a node does not orphan the rules that point at it. <em>Echo</em> proves the association before any image depends on it.</figcaption>
       </figure>
 
@@ -455,13 +685,13 @@ openssl rand -base64 32</code></pre>
 
       <figure class="shot">
         <img src="img/en/stuck.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Stuck tab of Studies, under a banner reading “5 files need attention” and split in two: “Retrying automatically”, listing the teaching archive with two instances waiting, its last error in red, a Retry now button and a countdown to the next attempt; and “Held — nothing is being sent”, listing the main archive tagged profile off, with three instances waiting, the three .dcm files named, a paragraph giving the edit that releases them and two buttons, De-identification settings and The rule that asks for it." />
-        <figcaption>The two halves here are different problems and the tab keeps them apart. The top is a node that is down and will clear itself; the bottom is a de-identification hold, which no timer ever releases — so each row spells out the edit that does, and carries the two buttons that go and make it. A third section, <em>No destination left to retry</em>, is drawn only when it has something to hold: files routed to a name that is no longer an enabled destination. Nothing retries those, because there is no node left to dial — the remedy is to restore the destination or to accept the loss, and until one of the two happens they sit in the outgoing folder rather than being archived or deleted.</figcaption>
+          alt="The Stuck tab of Studies, under a banner reading “8 files need attention” and split in two: “Retrying automatically”, listing the teaching archive with two instances of the CR study waiting, its last error in red, a Retry now button and a countdown to the next attempt; and “Held — nothing is being sent”, listing the teaching archive tagged profile off, with six instances of the CT study waiting under its patient and accession number, the edit that releases them, the buttons De-identification settings and The rule that asks for it, and Send to… and Remove from queue." />
+        <figcaption>The two halves here are different problems and the tab keeps them apart. The top is a node that is down and will clear itself; the bottom is a de-identification hold, which no timer ever releases — so each row spells out the edit that does, and carries the two buttons that go and make it. Rows are grouped by study, so you see whose images are waiting, not just file names. A third section, <em>No destination left to retry</em>, is drawn only when it has something to hold: files routed to a name that is no longer an enabled destination. Nothing retries those, because there is no node left to dial — restore the destination, send them to another one with <em>Send to…</em>, or accept the loss with <em>Remove from queue</em>; until then they sit in the outgoing folder rather than being archived or deleted.</figcaption>
       </figure>
     </div>
 
     <div class="svc-doc">
-      <h3>De-identify on forward</h3>
+      <h3 id="deid">De-identify on forward</h3>
       <p class="port">PS3.15 Annex E profile · applied only to the copy that leaves</p>
       <dl>
         <dt>What it does</dt>
@@ -619,17 +849,23 @@ openssl rand -base64 32</code></pre>
         <dd>You are serving the worklist or hand-keying orders. Until one station is registered, an order's
           target is typed by hand and a typo cannot be caught.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/modalities.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Modalities tab of Configuration: three registered rooms — ER CT, Ultrasound 2 and Portable CR — each with its name, station AE title, modality code and station name, an enabled tick box and a Test worklist button, over a Save modalities button." />
+        <figcaption>The rooms this appliance serves. An order's target is picked from this list, and <em>Test worklist</em> on a row asks the hospital's other RIS what it would give that room.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
-      <h3>Worklist probe — asking the other RIS</h3>
+      <h3 id="probe">Worklist probe — asking the other RIS</h3>
       <p class="port">Outbound client · worklist C-FIND · <em>Configuration → Modalities</em></p>
       <dl>
         <dt>What it does</dt>
         <dd>Answers “why is this scanner not seeing its list?” without touching the scanner. Give the
           hospital's real RIS or its broker an address under <em>Settings</em>, then press <em>Test
           worklist</em> on a modality's row: Carino asks that RIS the question that modality would ask,
-          using that modality's own AE title, and files every answer under <em>Activity</em> → <em>Caught</em>.
+          using that modality's own AE title, and files every answer under <em>Activity</em> → <em>Worklist
+          probes</em>.
           One run asks the same question five times, widened a key at a time — station and date and modality,
           then without the modality, without the date, without the station — because the <em>difference</em>
           between the answers is what locates the fault. Nothing comes back to any of them and the other RIS
@@ -640,10 +876,15 @@ openssl rand -base64 32</code></pre>
           modality, and two things answering to one AE title on one RIS is a confusion somebody then has to
           go and undo.</dd>
         <dt>What it is not</dt>
-        <dd>Not a service, not a schedule and not a queue. What <em>Caught</em> holds is a record of what
+        <dd>Not a service, not a schedule and not a queue. What <em>Worklist probes</em> holds is a record of what
           somebody else answered: those orders are never served on this appliance's own worklist, and it
           claims none of them. <em>Clear</em> empties that record and does nothing else.</dd>
       </dl>
+      <figure class="shot">
+        <img src="img/en/probes.webp" width="1920" height="1200" loading="lazy" decoding="async"
+          alt="The Worklist probes tab of Activity: one probe round asked as US_ROOM_2 of the other RIS at pacs-peer, listing the five questions — station, date and modality, then each key dropped in turn — and what each one returned, which here is nothing every time, because the demo's other RIS holds no orders; Refresh and Clear buttons sit at the right." />
+        <figcaption>One round of <em>Test worklist</em>: the heading says whom it asked and as which AE title, and each row is one question with the keys it kept, followed by what came back. Read it from the narrowest question to the widest — if a wider question brings orders back where a narrower one did not, the key it dropped is the one that was wrong. Here every question answers <em>nothing</em>, which means the other RIS has nothing scheduled for that room, not that a key is wrong: the demo's peer holds no orders.</figcaption>
+      </figure>
     </div>
 
     <div class="svc-doc">
@@ -663,8 +904,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/orders.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The RIS orders panel: a New order (manual entry) disclosure, Open and Closed tabs, and three open orders each showing accession number, patient, modality, requested procedure, the HL7 sender and the time queued, with Capture study, Cancel and Delete actions." />
-        <figcaption>Orders that arrived over HL7, and the disclosure at the top for typing one in when nothing upstream is alive. Each closes itself when the matching study lands — and is archived rather than erased.</figcaption>
+          alt="The RIS orders panel: a New order (manual entry) disclosure, Open and Closed tabs, a search box, an Arm sound toggle, and three open orders from the RIS, each showing accession number, patient, modality, requested procedure, the HL7 sender and the time queued, with an Add PDF/image button." />
+        <figcaption>Orders that arrived over HL7, and the disclosure at the top for typing one in when nothing upstream is alive. Each closes itself when the matching study lands — and is archived rather than erased. Orders from the RIS can only be cancelled by the RIS, so they carry no Cancel. A new order flashes the <em>Orders</em> row, and this workstation can also beep for it: the toggle is per machine and remembered.</figcaption>
       </figure>
       <div class="warn">
         <p><b>No TLS, no credential.</b> See the security section: anyone who can open a socket to that
@@ -689,7 +930,7 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <div class="svc-doc">
-      <h3>Notifications — webhook and e-mail</h3>
+      <h3 id="notify">Notifications — webhook and e-mail</h3>
       <p class="port">Outbound only · HTTP webhook, SMTP</p>
       <dl>
         <dt>What it does</dt>
@@ -715,23 +956,47 @@ openssl rand -base64 32</code></pre>
           rather than an exception. Sent, failed, dropped, queued and the last error are all readable, so
           “enabled and has never actually delivered anything” is visible <em>before</em> the outage that
           depends on it. Test it on a quiet afternoon, not during one.</dd>
+        <dt>Where to set it</dt>
+        <dd>Not in the dashboard yet: in the <code>notify</code> section of <code>config.json</code> (the
+          webhook URL, the SMTP server, and the master switch <code>notify.enabled</code>). The webhook secret
+          and the SMTP password go through <code>POST /api/notify/secret</code>, never into the file by hand.
+          Every key is described in
+          <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CONFIGURATION.md#notify" target="_blank" rel="noopener">CONFIGURATION.md</a>.</dd>
       </dl>
     </div>
 
     <div class="svc-doc">
-      <h3>Virtual print</h3>
-      <p class="port">Port 11113 · DICOM Print, PDF output</p>
+      <h3 id="print">Virtual print</h3>
+      <p class="port">Port 11113 · DICOM Print, PDF or Secondary Capture output</p>
       <dl>
         <dt>What it does</dt>
-        <dd>Presents itself as a DICOM printer and captures whatever is sent to it as PDF. For equipment
-          whose only output is film, this is how you keep something filable.</dd>
+        <dd>Presents itself as a DICOM printer (AE title <code>CARINOPRINT</code> by default) and captures
+          every film sheet sent to it. For equipment whose only output is film, this is how you keep something
+          filable. A film carries no reliable patient identity, so each one waits in <em>Pending</em> for a
+          person to identify it; nothing printed is forwarded on its own.</dd>
         <dt>Turn it on when</dt>
-        <dd>You have a print-only modality whose output you want to rescue.</dd>
+        <dd>You have a print-only modality whose output you want to rescue. The steps are under
+          <a href="#howto-print">How do I… print</a>.</dd>
+        <dt>Settings</dt>
+        <dd>Under <em>Configuration</em> → <em>Settings</em> → <em>Printing</em>: the AE title and port,
+          <em>Accept only these AEs</em> (the modalities allowed to print; empty means any), <em>Also accept
+          color print jobs</em>, and <em>Store each captured film as</em> PDF or Image. Pick Image when the
+          receiving PACS or viewer does not display PDFs — many do not.</dd>
+        <dt>How you know it works</dt>
+        <dd><em>Send a test print</em> on the card runs a whole print through the receiver and drops a sheet
+          marked "TEST PRINT — safe to discard" into <em>Pending</em>. After a real job the card shows
+          <em>Last print</em> (how many films, from which AE and address) and the <em>Captured</em> counter.
+          A refusal or failure shows as <em>Last problem</em>; see the
+          <a href="#trouble-print">print troubleshooting table</a>.</dd>
+        <dt>What it tolerates</dt>
+        <dd>Modalities that leave the film session and film box numbers to the printer, a Presentation LUT
+          (accepted and ignored), and a printer AE title typed differently on the modality — the called AE
+          is not checked.</dd>
       </dl>
       <figure class="shot">
         <img src="img/en/pending.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Pending tab of Studies: two queued items, a PDF and a JPEG, each with patient name, patient ID, accession number, study date and study description already filled in from the study they arrived beside, a Preview link, and Approve &amp; send / Discard buttons." />
-        <figcaption>Captured film — and any PDF or image found beside a study — waits here with the study's own details filled in, rather than being converted to DICOM on a guess. You confirm the identity, then approve.</figcaption>
+          alt="The Pending tab of Studies, its tab reading 3: the JPEG and, below it, the PDF that arrived beside the MR study, each with patient name, patient ID, accession number, study date and study description already filled in from that study, a Preview link, a Match to order… button and Approve &amp; send / Discard buttons. The third item, the film captured from the print receiver, is further down the list, below the bottom of the screenshot." />
+        <figcaption>A JPEG and a PDF found beside the MR study, each with that study's details already filled in. Anything that is not DICOM waits here rather than being converted on a guess — film captured by the print receiver lands on this tab too, below these two in this list. Pick the open order it belongs to with <em>Match to order…</em>, or type the identity (patient ID and name are required), then approve. Change the patient on an item that arrived beside a study and you are asked whether it still belongs to that study or starts a new one.</figcaption>
       </figure>
     </div>
 
@@ -751,8 +1016,8 @@ openssl rand -base64 32</code></pre>
           <em>Configuration</em> — <em>Destinations</em>, <em>Routing</em>, <em>Settings</em>,
           <em>Modalities</em> and <em>People</em>, and it opens on <em>Destinations</em>, not on
           <em>Settings</em>; and the three records are the tabs of <em>Activity</em> — <em>Logs</em>,
-          <em>Audit</em> and <em>Caught</em>, the last being what another RIS answered when this appliance
-          asked it as one of your modalities. <em>Orders</em>
+          <em>Audit</em> and <em>Worklist probes</em>, the last being what another RIS answered when this
+          appliance asked it as one of your modalities. <em>Orders</em>
           keeps its own strip of open and closed. The <em>Studies</em> row carries two counts that are
           buttons in their own right, 📎 pending and ⚠ stuck, and each opens its own tab: so reaching
           <em>Stuck</em> is one click while something is stuck, and two — the row, then the tab — when
@@ -776,8 +1041,8 @@ openssl rand -base64 32</code></pre>
       </dl>
       <figure class="shot">
         <img src="img/en/settings.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The Settings tab of Configuration, its twelve fieldsets in three columns on a wide screen: the receiver's AE title, bind address, port, storage folder, free-space floor, AE allow-list and TLS fields; the auto-send calling AE, watch folder, poll interval, what to do after a file is sent and its TLS trust settings; and beside them the print receiver, failover, worklist, RIS, Query/Retrieve, DICOMweb, index, de-identification, API access and integration fieldsets." />
-        <figcaption>Everything in <code>config.json</code>, in a form. The file stays the source of truth — an edit here writes it, and a config the dashboard would refuse to save is refused with the reason, not silently rewritten.</figcaption>
+          alt="The Settings tab of Configuration, opened on its first group, This PACS, marked Receiver: running: the receiver's Run this service (also at startup) box, AE title, bind address, port, storage folder, an Organize by Patient / Study / Series box, the free-space floor, the AE allow-list and a Serve DICOM over TLS box. The other groups are further down, and Re-run service setup and Save configuration buttons sit at the bottom right." />
+        <figcaption>Everything in <code>config.json</code>, in a form, grouped by job: open the group you need and leave the rest folded. The file stays the source of truth — an edit here writes it, and a config the dashboard would refuse to save is refused with the reason and the field it is about, not silently rewritten. The groups are collapsible sections — <em>This PACS</em> open here, <em>Sending</em>, <em>Worklist and orders</em>, <em>Printing</em> and the rest folded below it — and <em>Shut down service</em> sits alone in the last one, <em>Danger zone</em>. <em>Re-run service setup</em> and <em>Save configuration</em> are the footer buttons, always in view.</figcaption>
       </figure>
 
       <figure class="shot">
@@ -788,7 +1053,7 @@ openssl rand -base64 32</code></pre>
 
       <figure class="shot">
         <img src="img/en/editor-tags.webp" width="1920" height="1200" loading="lazy" decoding="async"
-          alt="The editor's Edit tab: a toolbar with Anonymize all, Randomize all, add Tag, JSON, CSV, Print and Download all; a strip of the five loaded series; filter chips for patient, study, series, image, equipment, UIDs and private tags; the tag table itself, one row per attribute with its group and element numbers, description, VR and an editable value; and down the right-hand third an Image edits panel — rotate, flip, invert and redact burned-in text, written into the stored pixels — above the frame preview, a folded Window/Level reading and the drop zone." />
+          alt="The editor's Edit tab: a toolbar with Anonymize (PS3.15), Options, Fake patient (test data), undo and redo, + Tag, JSON, CSV, Print, This file and Download all; a strip of the five loaded series; filter chips for patient, study, series, image, equipment, UIDs and private tags; the tag table itself, one row per attribute with its group and element numbers, description, VR and an editable value; and down the right-hand third an Image edits panel — rotate, flip, invert and redact burned-in text, written into the stored pixels — above the frame preview, a folded Window/Level reading and the drop zone." />
         <figcaption>The tag table, where a header is corrected before a study is re-sent — a wrong accession number or a mistyped patient ID, fixed at the gateway rather than at the modality that has already moved on.</figcaption>
       </figure>
     </div>
@@ -835,7 +1100,7 @@ openssl rand -base64 32</code></pre>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────── -->
-    <h2 id="not">5. This is not a medical device</h2>
+    <h2 id="not">7. This is not a medical device</h2>
 
     <div class="danger">
       <p><b>Carino DICOM is not a medical device.</b> It is not certified, cleared or registered with any
@@ -872,7 +1137,7 @@ openssl rand -base64 32</code></pre>
       differently. But software can only answer for what it does; the rest is yours.</p>
 
     <!-- ─────────────────────────────────────────────────────────── -->
-    <h2 id="help">6. Licence and where to get help</h2>
+    <h2 id="help">8. Licence and where to get help</h2>
     <p>Carino DICOM is released under <strong>AGPL-3.0-or-later</strong>. Because it is a network server,
       §13 applies: if you run a modified version as a service, you must offer its source to the people
       who use it. Keep the <code>LICENSE</code> file and a pointer to the source with any modified
@@ -886,9 +1151,9 @@ openssl rand -base64 32</code></pre>
         to contribute</a></li>
     </ul>
     <p>Found an error in this manual — or a translation a radiologist would never say? Open an issue. The
-      Spanish and Portuguese documentation is part of the project, not an extra.</p>
+      Spanish, Portuguese, Japanese and Russian manuals are part of the project, not an extra.</p>
 
-    <p class="foot">Carino DICOM · <a href="../">landing page</a> · part of the
+    <p class="foot">Carino DICOM · <a href="https://dicom.carino.systems/" target="_blank" rel="noopener">landing page</a> · part of the
       <a href="https://carino.systems/" target="_blank" rel="noopener">carino.systems</a> workshop ·
       AGPL-3.0-or-later.</p>
   </main>

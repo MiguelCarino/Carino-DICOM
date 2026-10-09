@@ -8,10 +8,23 @@ If a ``log_dir`` is set, each entry is also appended to a dated file
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
+from typing import Optional
+
+
+_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DAY_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.log$")
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class LogBuffer:
@@ -32,12 +45,20 @@ class LogBuffer:
     have been the worse half of that trade.
     """
 
-    def __init__(self, capacity: int = 500, log_dir: str = ""):
+    # Big enough that a chatty print session or an index rescan does not push
+    # the one failure an operator is looking for out of the dashboard's reach;
+    # the dated files keep everything older.
+    def __init__(self, capacity: int = 2000, log_dir: str = ""):
         self._lock = threading.Lock()
         self._flock = threading.Lock()
         self._items: "deque[dict]" = deque(maxlen=capacity)
         self._seq = 0
         self.log_dir = log_dir
+        # kind -> {"message", "at"} of the newest warn/error of that kind. Kept
+        # beside the ring rather than searched for in it: a service card asks
+        # every two seconds, and its last problem must outlive both the ring
+        # rotating and the listener object being rebuilt by a Stop/Start.
+        self._problems: dict[str, dict] = {}
 
     def add(self, level: str, message: str, **fields) -> None:
         """Record one event. Extra keyword arguments ride along in the entry.
@@ -60,6 +81,8 @@ class LogBuffer:
                 **fields,
             }
             self._items.append(entry)
+            if level in ("warn", "error") and fields.get("kind"):
+                self._problems[str(fields["kind"])] = {"message": message, "at": entry["epoch"]}
         self._write_file(entry)
 
     def _write_file(self, entry: dict) -> None:
@@ -96,6 +119,48 @@ class LogBuffer:
         """Return every entry whose seq is greater than `seq` (for UI polling)."""
         with self._lock:
             return [it for it in self._items if it["seq"] > seq]
+
+    def query(self, since: int = 0, kinds=None, level: str = "", text: str = "",
+              limit: int = 0) -> list[dict]:
+        """since() with the Activity log's filters, newest ``limit`` kept.
+
+        ``level`` "warn" means warn and error, "error" only error. ``text`` is a
+        case-insensitive substring of the message."""
+        floor = {"warn": ("warn", "error"), "error": ("error",)}.get(level)
+        kinds = {k for k in (kinds or []) if k}
+        needle = text.lower()
+        after = _as_int(since)
+        with self._lock:
+            out = [it for it in self._items
+                   if it["seq"] > after
+                   and (not kinds or it.get("kind") in kinds)
+                   and (floor is None or it["level"] in floor)
+                   and (not needle or needle in str(it["message"]).lower())]
+        return out[-limit:] if limit and limit > 0 else out
+
+    def last_problem(self, *kinds: str) -> Optional[dict]:
+        """The newest warn/error logged under any of ``kinds``, or None."""
+        with self._lock:
+            found = [self._problems[k] for k in kinds if k in self._problems]
+        return dict(max(found, key=lambda p: p["at"])) if found else None
+
+    # ---- the dated files -----------------------------------------------------
+    def days(self) -> list[str]:
+        """The days that have a log file, newest first."""
+        try:
+            names = os.listdir(self.log_dir) if self.log_dir else []
+        except OSError:
+            return []
+        return sorted((n[:-4] for n in names if _DAY_FILE.fullmatch(n)), reverse=True)
+
+    def day_file(self, day: str) -> Optional[str]:
+        """Path of one day's file, or None. The day is matched against the
+        file-name pattern before it is joined, so nothing a caller sends can
+        name a file outside the log folder."""
+        if not self.log_dir or not _DAY.fullmatch(str(day or "")):
+            return None
+        path = os.path.join(self.log_dir, day + ".log")
+        return path if os.path.isfile(path) else None
 
     def tail(self, n: int = 100) -> list[dict]:
         with self._lock:

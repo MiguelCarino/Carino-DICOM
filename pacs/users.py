@@ -545,19 +545,26 @@ def redact(payload: Any, profile: Profile, *, fields: Optional[Iterable[str]] = 
             return profile.sees(_ALIASES.get(key, key))
         return profile.sees(key)
 
-    def walk(node: Any) -> Any:
+    def walk(node: Any, in_rules: bool = False) -> Any:
         if isinstance(node, dict):
             out = {}
             for key, value in node.items():
-                if isinstance(key, str) and (key in PHI_FIELDS or key in extra) and not visible(key):
+                if in_rules and key == "match" and isinstance(value, dict):
+                    # A routing rule's match block is keyed by the same field
+                    # names ("study_desc": "CHEST*") but holds configuration —
+                    # patterns an administrator wrote — not anybody's data.
+                    # Redacting it showed a config.write profile "***" and the
+                    # next Save wrote the placeholder back over the rule.
+                    out[key] = value
+                elif isinstance(key, str) and (key in PHI_FIELDS or key in extra) and not visible(key):
                     out[key] = REDACTED
                 else:
-                    out[key] = walk(value)
+                    out[key] = walk(value, key == "rules")
             return out
         if isinstance(node, list):
-            return [walk(v) for v in node]
+            return [walk(v, in_rules) for v in node]
         if isinstance(node, tuple):
-            return tuple(walk(v) for v in node)
+            return tuple(walk(v, in_rules) for v in node)
         return node
 
     return walk(payload)
@@ -592,6 +599,18 @@ _ALIASES: dict[str, str] = {
 # Every key redact() should treat as an identifier, so a caller can hand the
 # whole set over without knowing which spellings a given payload uses.
 ALL_PHI_KEYS = frozenset(PHI_FIELDS) | frozenset(_ALIASES)
+
+
+def withheld(keys: Iterable[str], profile: Profile) -> list:
+    """Which of *keys* redact() would replace for this profile, in input order.
+
+    For a form built from a redacted payload: the placeholder in a withheld
+    field is not a value, and the form has to know which fields to lock rather
+    than guess from the placeholder (a stored value may be "***" for real).
+    """
+    return [k for k in keys
+            if isinstance(k, str) and k in ALL_PHI_KEYS
+            and not profile.sees(_ALIASES.get(k, k))]
 
 
 # ---- the presets --------------------------------------------------------

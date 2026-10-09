@@ -51,6 +51,7 @@ from pynetdicom.sop_class import (
     Verification,
 )
 
+from .assocwords import caller_of, listener_refusal
 from .dicomfs import within_roots
 from .logbuf import LogBuffer
 from .netclaim import claim
@@ -705,6 +706,14 @@ class QrSCP:
                     "aet": str(d.get("aet") or dest_aet), "tls": bool(d.get("tls"))}
         return None
 
+    def _handle_rejected(self, event) -> None:
+        """Say why a caller was turned away, which pynetdicom does not."""
+        who, addr = caller_of(event)
+        with self._lock:
+            self.error_count += 1
+        self.log.warn(f"Q/R: refused {who or 'a caller'} @ {addr} — "
+                      f"{listener_refusal(event, self.allowed_aets)}", kind="qr")
+
     # ---- lifecycle ---------------------------------------------------------
     @property
     def running(self) -> bool:
@@ -734,6 +743,7 @@ class QrSCP:
             (evt.EVT_C_MOVE, self._handle_move),
             (evt.EVT_C_GET, self._handle_get),
             (evt.EVT_C_ECHO, self._handle_echo),
+            (evt.EVT_REJECTED, self._handle_rejected),
         ]
         ssl_context = None
         if self.tls:

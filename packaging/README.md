@@ -35,7 +35,7 @@ below is for the other case — a machine with no one logged in.
 
 ```
 git clone https://github.com/MiguelCarino/Carino-DICOM.git
-cd Carino-PACS
+cd Carino-DICOM
 sudo packaging/systemd/install.sh
 ```
 
@@ -79,7 +79,8 @@ lives.
 ### Turn the services on
 
 Everything ships disabled. Edit the config and set `"enabled": true` under the
-sections this box should run:
+sections this box should run (later, the Start and Stop buttons on the
+dashboard's service cards write this same flag):
 
 ```
 sudoedit /var/lib/carino-pacs/config.json
@@ -289,7 +290,7 @@ sudo restorecon -Rv /srv/pacs
 ### Upgrade
 
 ```
-cd Carino-PACS && git pull
+cd Carino-DICOM && git pull
 sudo packaging/systemd/install.sh
 sudo systemctl restart carino-pacs
 ```
@@ -356,6 +357,11 @@ system user with a nonexistent home produces confusing failures.
 | Dashboard "Save" returns 400 | The directory holding `config.json` is not writable by `carino-pacs`. It needs write access to the directory, not just the file — `Config.save()` writes a fresh `config.json.tmp.<pid>.<random>` beside it and renames it into place, and the watcher keeps `.carinopacs_state.json` there. |
 | The "Reveal" button does nothing | It shells out to `xdg-open`. There is no desktop on a server; the error is caught and ignored. Not a fault. |
 | Restart loop every 15 s | A config error. Read the preflight message, fix `config.json`; it will pick itself up without further action. |
+
+These are deployment problems. For problems with modalities, forwarding, the
+worklist or printing — once the service is up — see the manual's
+[When something goes wrong](https://dicom.carino.systems/manual/#trouble)
+chapter (also served by the appliance at `/manual/#trouble`).
 
 ---
 

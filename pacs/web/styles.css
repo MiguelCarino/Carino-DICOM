@@ -47,10 +47,8 @@ body {
 }
 /* The card is its kv grid's query container: its width depends on the sidebar, not the viewport. */
 .card { padding: 18px 20px; position: relative; container-type: inline-size; }
-/* opacity:0 keeps the hint's height reserved. One line in every language (translations are
-   capped), so cards stay the same height. */
-.drop-hint { margin-top: 10px; font-family: var(--mono); font-size: .6rem; color: #555; text-align: center; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card:hover .drop-hint { opacity: .7; }
+/* Always visible: hover-only guidance never reaches touch or keyboard users. Prose, so it wraps. */
+.drop-hint { margin-top: 10px; font-family: var(--mono); font-size: .6rem; color: #777; text-align: center; pointer-events: none; word-break: normal; overflow-wrap: break-word; }
 .card.drop-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(234,179,8,.22); }
 .card.drop-active .drop-hint { opacity: 1; color: var(--accent); }
 .card.drop-active * { pointer-events: none; }  /* let the drop land on the card, not children */
@@ -84,6 +82,8 @@ body {
    minmax(0, 1fr) drops the track's min-content floor so long values stay contained. */
 .kv { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
 .kv > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* display:flex would otherwise beat the UA [hidden] rule (the TLS-only Security rows). */
+.kv > div[hidden] { display: none; }
 /* escape hatch for values that deserve the whole row (paths, long identifiers) */
 .kv > div.wide { grid-column: 1 / -1; }
 .kv dt { color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .06em; line-height: 1.25; }
@@ -128,6 +128,8 @@ html[lang="ru"] .card-tag, html[lang="ja"] .card-tag {
    The same cards plus one class; the 2s poll keeps them live. These elements are revealed by the
    state class only, never by the hidden attribute, so there is a single switch. */
 .card-pick { display: none; }
+.card-problem { margin: 0 0 12px; font-size: .72rem; line-height: 1.4; color: var(--warn); overflow-wrap: anywhere; }
+.card-problem[hidden] { display: none; }
 .card-warn { display: none; margin: 0 0 12px; padding-left: 20px; font-size: .72rem; line-height: 1.4; color: var(--warn); word-break: normal; overflow-wrap: break-word; }
 .card-port { display: none; margin: 0 0 12px; padding-left: 20px; font-family: var(--mono); font-size: .68rem; color: var(--muted); word-break: normal; overflow-wrap: break-word; }
 .card-port.bad { color: var(--bad); }
@@ -190,7 +192,9 @@ html[lang="ru"] #dlgServices.setup .card-pick, html[lang="ja"] #dlgServices.setu
 .btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .btn.ghost { background: transparent; color: var(--muted); border-color: var(--border); }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); transform: none; }
-.btn.toggle[data-on="true"] { background: transparent; color: var(--bad); border-color: var(--bad); }
+/* Stop is a neutral ghost: six red outlines at rest read as six alarms. It asks before acting. */
+.btn.toggle[data-on="true"] { background: transparent; color: var(--muted); border-color: var(--border); }
+.btn.toggle[data-on="true"]:hover { color: var(--text); border-color: var(--muted); transform: none; }
 .btn.tiny { padding: 5px 10px; font-size: .68rem; }
 .btn.danger { background: transparent; color: var(--bad); border-color: transparent; }
 .btn.danger:hover { border-color: var(--bad); }
@@ -253,7 +257,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 }
 .net-info .v { color: var(--accent); font-weight: 700; }
 .net-info.offline { color: var(--bad); font-weight: 700; }
-@media (max-width: 760px) { .net-info { display: none; } }
+/* #carinoNav .net-info.cn-actions: the navbar injects its #carinoNav .cn-actions { display:flex }, later in the page, so it needs the extra class to lose. */
+@media (max-width: 760px) { .net-info, #carinoNav .net-info.cn-actions { display: none; } }
 
 /* ---- Service chips (top navbar) ----
    Mirror the Services cards: running = gold, stopped = grey. A click re-fires the card's Start/Stop. */
@@ -310,15 +315,16 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 
 /* ---- Sidebar shell: left nav + content pane ---- */
 .shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
-/* 210px fits a label plus two badges, incl. ru "Исследования" (~209px); the label may ellipsise. */
-.sidebar { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px;
+/* 232px fits a label plus two badges, incl. ru "Исследования" beside 📎 and ⚠ counts; a longer label ellipsises. */
+.sidebar { flex: 0 0 232px; display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto; min-height: 0; }
 /* Row = panel button + count badges (their own buttons, for keyboard reach). The row owns the gap:
    either badge may be hidden at zero. */
-.navrow { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
-/* max-content for the two-button row (Manual + Sign out): they wrap to a row each instead of
-   ellipsising to "Man…" / "Sig…". */
-.navrow .navbtn { flex: 1 1 auto; min-width: max-content; }
+/* nowrap + a shrinkable button keeps the count badges on their row; the label ellipsises instead. */
+.navrow { display: flex; align-items: stretch; gap: 6px; flex-wrap: nowrap; }
+.navrow .navbtn { flex: 1 1 0; min-width: 0; width: auto; }
+/* Manual + Sign out: one per line rather than two half-width buttons cut to "Man…" / "Sig…". */
+.navrow.navrow-stack { flex-direction: column; }
 /* text-decoration: the Manual row is a real <a> so middle-click / open-in-new-tab work. */
 .navbtn {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -334,13 +340,23 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .navbtn > span:not(.nav-ico) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navrow .badge {
   flex: 0 0 auto; align-self: stretch; display: flex; align-items: center; gap: 3px;
-  padding: 0 8px; text-align: center; cursor: pointer;
+  padding: 0 6px; text-align: center; cursor: pointer;
   font-family: var(--mono); font-size: .68rem; font-weight: 700;
   color: var(--on-accent); background: var(--accent); border: 1px solid var(--accent);
   border-radius: 10px; transition: .15s;
 }
 .navrow .badge:hover { filter: brightness(1.15); }
+/* Two count badges leave the sidebar ~90px; tighten the button beside them so "Studies" still fits. */
+.navrow:has(> .badge:not([hidden])) { gap: 4px; }
+.navrow:has(> .badge:not([hidden])) .navbtn { gap: 6px; padding-inline: 10px; }
 .navrow .badge.warn { background: var(--warn); border-color: var(--warn); }
+/* With BOTH badges up the label still lost ~30px in ru ("Исследования"); stacking the two badges in
+   one column gives back a badge's width. */
+.navrow:has(> .badge:not([hidden]) ~ .badge:not([hidden])) {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-auto-rows: 1fr; gap: 2px 4px;
+}
+.navrow:has(> .badge:not([hidden]) ~ .badge:not([hidden])) .navbtn { grid-row: 1 / span 2; }
+.navrow:has(> .badge:not([hidden]) ~ .badge:not([hidden])) .badge { justify-content: center; padding: 0 5px; line-height: 1.1; }
 /* display:flex would otherwise beat the UA [hidden] rule (as with .navbtn / .svc-chip). */
 .navrow .badge[hidden] { display: none; }
 /* A badge whose tab is forbidden keeps counting (not privileged) but stops acting as a control. */
@@ -364,7 +380,9 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 @media (max-width: 640px) {
   .shell { flex-direction: column; }
   .sidebar { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; }
-  .navrow { flex: 1 1 auto; }
+  /* Two rows a line, each allowed to shrink: a row's badges must stay on screen, not its full label. */
+  .navrow { flex: 1 1 calc(50% - 6px); min-width: 0; }
+  .navrow:has(> .badge:not([hidden])) { flex-basis: 100%; }
   .navbtn { width: auto; flex: 1 1 auto; }
 }
 
@@ -655,6 +673,106 @@ html[lang="ru"] .held-cause, html[lang="ja"] .held-cause { text-transform: none;
 html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: none; letter-spacing: 0; }
 .order-patient { font-weight: 700; }
 .order-sub { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 3px; }
+/* STAT: the one priority a desk must not miss. */
+.order-stat {
+  font-family: var(--mono); font-size: .6rem; font-weight: 700; letter-spacing: .08em;
+  padding: 2px 7px; border-radius: 999px; color: #fff; background: var(--bad); white-space: nowrap;
+}
+.order-stat[hidden] { display: none; }
+.order-editing { margin: 12px 14px 0; color: var(--accent); font-family: var(--mono); font-size: .72rem; }
+.order-editing[hidden] { display: none; }
+/* Optional order fields, folded under "More details". */
+.order-more > summary { cursor: pointer; font-family: var(--mono); font-size: .66rem; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted); user-select: none; }
+.order-more > summary:hover { color: var(--accent); }
+.order-form-more { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; padding-top: 9px; }
+@media (max-width: 620px) { .order-form-more { grid-template-columns: 1fr; } }
+
+/* ---- Studies / Orders: filters, counts, row menus ---- */
+/* Counts ride on a data attribute so textContent (the language pass, the panel subtitle) never holds them. */
+.hist-tab[data-n]::after { content: " " attr(data-n); font-variant-numeric: tabular-nums; }
+.list-filter {
+  flex: 1 1 200px; min-width: 0; max-width: 360px; background: var(--field); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 9px; color: var(--text); font-size: .8rem; font-family: inherit;
+}
+.list-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hist-mods { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 10px; }
+.hist-mods[hidden] { display: none; }
+.mod-chip {
+  font-family: var(--mono); font-size: .66rem; color: var(--muted); background: transparent;
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer;
+}
+.mod-chip:hover { color: var(--accent); border-color: var(--accent); }
+.mod-chip.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.mod-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hist-count { margin: -4px 0 10px; color: var(--muted); font-family: var(--mono); font-size: .7rem; }
+.hist-count[hidden] { display: none; }
+.hist-recv { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-recv:empty { display: none; }
+.hist-actions { align-items: center; }
+.hist-busy { font-family: var(--mono); font-size: .68rem; color: var(--accent); white-space: nowrap; }
+.hist-busy:empty { display: none; }
+/* Rows wrap before the action group can squeeze the patient name to nothing. */
+@media (max-width: 1000px) {
+  .hist-row { flex-wrap: wrap; }
+  .hist-main { flex-basis: 260px; }
+  .hist-actions { flex-wrap: wrap; }
+}
+
+/* "⋯" menus: <details>, so the keyboard opens them natively; js/09-studies.js closes them. */
+details.row-menu { position: relative; }
+details.row-menu[hidden] { display: none; }
+.row-menu > summary { list-style: none; }
+.row-menu > summary::-webkit-details-marker { display: none; }
+.row-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row-menu-pop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 190px;
+  display: flex; flex-direction: column; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.row-menu-pop button {
+  text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 7px 10px;
+  color: var(--text); font-family: inherit; font-size: .8rem; cursor: pointer; white-space: nowrap;
+}
+.row-menu-pop button:hover, .row-menu-pop button:focus-visible { background: var(--accent-faint); color: var(--accent); outline: none; }
+.row-menu-pop button.danger { color: var(--bad); }
+.row-menu-pop button[hidden] { display: none; }
+.row-menu-pop button:disabled { opacity: .5; cursor: default; }
+
+/* ---- Stuck: study grouping and the dead-end exits ---- */
+.stuck-err { cursor: pointer; }
+.stuck-err.open { white-space: normal; max-width: none; overflow-wrap: anywhere; }
+.stuck-files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.stuck-files:empty { display: none; }
+.stuck-study { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; }
+.stuck-study-who { font-size: .76rem; font-weight: 600; }
+.stuck-study-files { display: flex; flex-wrap: wrap; gap: 5px; }
+.stuck-study-files .hist-chip { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+.stuck-fix { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; }
+.stuck-fix [hidden] { display: none; }
+.stuck-pick { display: inline-flex; gap: 6px; align-items: center; }
+.stuck-dest-sel, .pend-order-pick {
+  background: var(--field); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  color: var(--text); font-size: .78rem; font-family: inherit; color-scheme: dark; min-width: 0; max-width: 100%;
+}
+
+/* ---- Pending: order match, locked and refused fields, the new-study question ---- */
+.pend-order { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pend-order [hidden] { display: none; }
+.pend-order-txt { color: var(--accent); font-family: var(--mono); font-size: .72rem; }
+.pend-fields input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pend-fields input[type="date"] { color-scheme: dark; }
+.pend-fields input.locked, .pend-fields input.from-order { opacity: .7; border-style: dashed; }
+.pend-fields input.pf-bad { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.pf-lock { margin-left: 5px; text-transform: none; }
+.pend-choice {
+  border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px; margin: 0;
+  display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .8rem;
+}
+.pend-choice[hidden] { display: none; }
+.pend-choice legend { color: var(--warn); font-family: var(--mono); font-size: .68rem; padding: 0 4px; }
+.pend-choice label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 
 /* ---- Emergency-failover banner + activation pop-up ---- */
 .emg-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1048,3 +1166,126 @@ html[lang="ru"] .rt-dests-h, html[lang="ja"] .rt-dests-h { text-transform: none;
 .rt-trace.held .rt-trace-name { color: var(--bad); font-weight: 700; }
 .rt-held { color: var(--bad); font-family: inherit; font-size: .8rem;
   word-break: normal; overflow-wrap: break-word; }
+
+/* ==== UI review: shell, Services, Configuration, Activity ==== */
+
+/* Lost contact with the engine: page-wide, red, and every live indicator greys out so nothing
+   frozen still looks current. */
+.lost-banner {
+  font-family: var(--mono); font-size: .8rem; font-weight: 700; color: #fff;
+  background: var(--bad); border: 1px solid var(--bad); border-radius: 10px; padding: 12px 16px; text-align: center;
+}
+.lost-banner[hidden] { display: none; }
+body.contact-lost .dot, body.contact-lost .svc-chip, body.contact-lost .ov-tile-v,
+body.contact-lost .kv dd { opacity: .35; filter: grayscale(1); }
+
+/* "Point the modality at: AE · IP · port" — what the other side needs, with a copy button. */
+.card-connect { margin: 0 0 12px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  font-size: .74rem; color: var(--muted); }
+.card-connect .cc-v { font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; min-width: 0; }
+.card-connect .cc-aet { color: var(--accent); }
+.card-connect.off .cc-v { color: var(--muted); text-decoration: line-through; }
+.card-connect .cc-off { color: var(--warn); font-family: var(--mono); }
+.card-connect .cc-off[hidden] { display: none; }
+/* A one-word button never wraps (ja split コピー over two lines); its row gives way instead. */
+.cc-copy { white-space: nowrap; flex: 0 0 auto; }
+.card-connect .cc-copy { padding: 2px 8px; }
+.card-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.card-tools [hidden] { display: none; }
+.card-test-result { margin: 8px 0 0; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+.card-test-result[hidden] { display: none; }
+.card-test-result.ok { color: var(--ok); }
+.card-test-result.bad { color: var(--bad); }
+.card-since { margin: 8px 0 0; font-size: .64rem; color: var(--muted); font-family: var(--mono); }
+.card-since:empty { display: none; }
+.card-problem { margin-top: 10px; }
+.card-problem .cp-log[hidden] { display: none; }
+/* The chooser decides what runs; counters and tests of services not yet running are noise there. */
+#dlgServices.setup .kv, #dlgServices.setup .card-problem, #dlgServices.setup .card-tools,
+#dlgServices.setup .card-test-result, #dlgServices.setup .card-since, #dlgServices.setup .card-connect,
+#dlgServices.setup .drop-hint { display: none; }
+.setup-done { margin: 0 0 16px; padding: 14px 16px; border: 1px solid var(--ok); border-radius: 10px; }
+.setup-done[hidden] { display: none; }
+.setup-done h3 { margin: 0 0 8px; font-size: 1rem; }
+.setup-done-list { margin: 0 0 10px; padding-left: 18px; font-size: .8rem; line-height: 1.6; }
+.setup-done-list b { font-family: var(--mono); color: var(--accent); }
+
+.linkish.cp-log, .linkish.inline { font-size: inherit; }
+
+/* Configuration: stale-save banner and read-only note. */
+.cfg-stale { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px;
+  padding: 10px 14px; border: 1px solid var(--bad); border-radius: 10px; color: #f8a5a5; font-size: .8rem; }
+.cfg-stale[hidden] { display: none; }
+.cfg-readonly[hidden] { display: none; }
+.cfg-readonly { margin: 0 0 10px; }
+
+/* Settings groups: one collapsible block per job; the summary carries the live state. */
+.set-group { border: 1px solid var(--border); border-radius: 12px; margin: 0 0 12px; }
+.set-group > summary { cursor: pointer; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  list-style-position: inside; }
+.set-group > summary .set-title { font-weight: 700; }
+.set-group[open] > summary { border-bottom: 1px solid var(--border); }
+.set-group > .settings { padding: 14px 16px; }
+.set-state { font-family: var(--mono); font-size: .66rem; color: var(--muted); }
+.set-state .on { color: var(--ok); }
+.set-state .off { color: var(--muted); }
+.set-group.flash > summary { box-shadow: inset 3px 0 0 var(--accent); }
+.tls-fields[hidden] { display: none; }
+.danger-zone { border-color: rgba(239, 68, 68, .45); }
+.danger-zone > summary .set-title { color: var(--bad); }
+.danger-body { padding: 14px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.danger-body .hint { max-width: 60ch; }
+.set-connect:empty { display: none; }
+.deid-keybox { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.deid-keybox[hidden] { display: none; }
+
+/* A field the server or the browser refused: outlined, with the reason under it. */
+.field-bad { border-color: var(--bad) !important; box-shadow: 0 0 0 1px var(--bad); }
+.field-err { margin: 2px 0 0; color: var(--bad); font-size: .72rem; text-transform: none; letter-spacing: 0; }
+.grid tr.row-bad td { background: rgba(239, 68, 68, .08); }
+
+/* Overview: a value with a copy button beside it. */
+.ov-copyrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ov-copyrow .ov-atomic { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Logs toolbar, kind tags, footer. */
+.log-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 10px; flex: 0 0 auto; }
+.log-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.log-chip { font-family: var(--mono); font-size: .64rem; text-transform: uppercase; letter-spacing: .06em;
+  padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+.log-chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-faint); }
+.log-errs { display: flex; align-items: center; gap: 6px; font-size: .74rem; color: var(--muted); }
+.log-q { flex: 1 1 180px; min-width: 0; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: .78rem; }
+.log .k { flex-shrink: 0; min-width: 5ch; color: var(--muted); font-size: .64rem; text-transform: uppercase; padding-top: .15em; }
+.log .line[hidden] { display: none; }
+.log-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; flex: 0 0 auto; }
+.log-count { margin-right: auto; font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+.log-foot select, .audit-bar select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 4px 8px; font-family: var(--mono); font-size: .72rem; color-scheme: dark; }
+
+/* Audit filters and expandable detail. */
+.audit-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 10px; }
+.audit-bar .check { display: flex; align-items: center; gap: 6px; font-size: .74rem; color: var(--muted); }
+.audit-bar .hist-tools { margin-left: auto; }
+.audit-row .audit-detail { grid-column: 1 / -1; }
+.audit-detail summary { cursor: pointer; font-size: .7rem; color: var(--muted); }
+.audit-detail pre { margin: 4px 0 0; font-size: .7rem; white-space: pre-wrap; overflow-wrap: anywhere; color: #b0b0b0; }
+.audit-state .verify-ok { color: var(--ok); }
+.audit-state .verify-bad { color: var(--bad); }
+
+/* People: capabilities grouped by area. */
+.cap-group { margin: 0 0 8px; }
+.cap-group h5 { margin: 0 0 4px; font-size: .68rem; color: var(--accent); font-weight: 600; }
+
+/* The probe round the operator just asked for. */
+.caught-round.fresh { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* "1 of 2 — Auto-send stopped" is a sentence, not a number: smaller, wrapping, amber when short. */
+#ovServices { font-size: .86rem; line-height: 1.3; overflow-wrap: anywhere; }
+#ovServices.warn { color: var(--warn); }
+
+/* Overview readouts that outgrow their box in some languages ("работает 6 из 6") or carry one
+   unbreakable UID file name: wrap them rather than cut them, and break the UID inside itself so
+   "CT ·" is not left alone on a line above it. */
+#ovServices { white-space: normal; overflow-wrap: anywhere; }
+#ovRxMeta { word-break: break-all; }

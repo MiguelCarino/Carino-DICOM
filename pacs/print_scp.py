@@ -22,20 +22,25 @@ PatientID / StudyInstanceUID.  So the render is staged into the review queue for
 an operator to identify + approve, never auto-sent.  That reuses the whole
 ingest/pending/approve pipeline already in the app.
 
-pynetdicom note: its generic N-CREATE response echoes the *request's* Affected
-SOP Instance UID, so we rely on the print SCU supplying the Film Session / Film
-Box UIDs (pynetdicom's own SCU and the great majority of modalities do).  The
-Image Box UIDs, by contrast, are ours to assign — we return them in the Film
-Box N-CREATE response's Referenced Image Box Sequence.
+Who names the objects: an N-CREATE may carry the Affected SOP Instance UID or
+leave it to the printer (PS3.7 10.1.5.1.4), and most modalities leave it — so
+the Film Session and Film Box UIDs are minted here whenever the request has
+none, and handed back in the response. pynetdicom refuses a create that
+returns no UID with a bare 0x0110 and says why only in its own logger, which is
+how a print that failed at the very first step left nothing in our log. The
+Image Box UIDs are always ours; they go back in the Film Box N-CREATE
+response's Referenced Image Box Sequence.
 """
 
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import tempfile
 import threading
+import time
 import uuid
 from typing import Callable, Optional
 
@@ -48,13 +53,17 @@ from pynetdicom.sop_class import (
     BasicFilmSession,
     BasicGrayscaleImageBox,
     BasicGrayscalePrintManagementMeta,
+    PresentationLUT,
     PrintJob,
+    PrinterConfigurationRetrieval,
     PrinterInstance,
     Verification,
 )
 
 from .logbuf import LogBuffer
 from .netclaim import claim
+
+_LOG = logging.getLogger(__name__)
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
 
@@ -152,6 +161,16 @@ def _layout_cells(fmt: str) -> list[tuple[float, float, float, float]]:
 
 
 # --------------------------------------------------------------- image decode
+def _describe_item(item) -> str:
+    """The geometry an image box claimed, for a log line about why it failed."""
+    def g(name):
+        return getattr(item, name, None)
+    size = len(bytes(g("PixelData") or b""))
+    return (f"{g('Rows') or '?'}x{g('Columns') or '?'}, {g('SamplesPerPixel') or 1} sample(s), "
+            f"{g('BitsAllocated') or '?'}-bit, {g('PhotometricInterpretation') or 'no photometric'}, "
+            f"{size} bytes of pixels")
+
+
 def _image_from_item(item):
     """A PIL image (mode 'L' or 'RGB') from a Basic Grayscale/Color Image
     Sequence item, or None if it can't be decoded."""
@@ -295,6 +314,51 @@ def uid_gen() -> str:
     return generate_uid()
 
 
+class _PynetdicomBridge(logging.Handler):
+    """Copies pynetdicom's own errors for this printer's connections into the
+    app log.
+
+    Some failures never reach a handler of ours: pynetdicom answers them itself
+    (an N-CREATE it considers incomplete, a reply it cannot encode, an
+    exception raised inside one of our handlers) and explains only in its
+    logger, which the dashboard does not show. Its association threads carry
+    the AE that accepted them, which is how a record is matched to this
+    printer and not to the receiver or the worklist running beside it.
+    """
+
+    # pynetdicom reports one failure as a burst of records on the association
+    # thread — "Exception in handler bound to ..." and then the exception itself
+    # — so records from one thread this close together are one failure: every
+    # line is logged, only the first is counted.
+    _BURST = 0.25
+
+    def __init__(self, ae, scp: "PrintSCP"):
+        super().__init__(level=logging.ERROR)
+        self._ae = ae
+        self._scp = scp
+        self._last: dict[int, float] = {}       # thread ident -> last counted record
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            thread = threading.current_thread()
+            if getattr(thread, "ae", None) is not self._ae:
+                return
+            msg = record.getMessage()
+            if record.exc_info and record.exc_info[1] is not None:
+                exc = record.exc_info[1]
+                msg = f"{msg}: {type(exc).__name__}: {exc}"
+            now = time.monotonic()
+            prev = self._last.get(thread.ident)
+            fresh = prev is None or now - prev > self._BURST
+            if fresh:
+                if len(self._last) > 256:       # association threads come and go
+                    self._last.clear()
+                self._last[thread.ident] = now
+            self._scp._problem(f"Print: {msg}", level="error", count=fresh)
+        except Exception:
+            pass
+
+
 class PrintSCP:
     """The listening printer, and the state machine behind it.
 
@@ -341,10 +405,13 @@ class PrintSCP:
         self.tls_key = tls_key
         self.tls_ca = tls_ca
         self._server = None
+        self._bridge: Optional[logging.Handler] = None
         self._lock = threading.Lock()
         self._jobs: dict[int, _Job] = {}
         self.printed_count = 0
         self.error_count = 0
+        self.last_problem: Optional[dict] = None     # {"message", "at"} for the card
+        self.last_print: Optional[dict] = None       # {"films", "source", "at"}
 
     # ---- per-association state --------------------------------------------
     def _job(self, event) -> _Job:
@@ -367,6 +434,21 @@ class PrintSCP:
         with self._lock:
             self._jobs.pop(id(event.assoc), None)
 
+    def _problem(self, message: str, level: str = "warn", count: bool = True) -> None:
+        """Log a print problem and keep it as the card's "last problem".
+
+        The modality only ever shows its user a status code, so the dashboard
+        card is where the reason has to be readable — and it has to count:
+        a print turned away at the door is as much a failed print as one that
+        could not be rendered, and an Errors counter stuck at 0 beside a
+        modality reporting failures says the opposite of what happened.
+        """
+        getattr(self.log, level)(message, kind="print")
+        with self._lock:
+            if count:
+                self.error_count += 1
+            self.last_problem = {"message": message, "at": time.time()}
+
     # ---- DIMSE handlers ----------------------------------------------------
     def _handle_echo(self, event) -> int:
         who = event.assoc.requestor.ae_title
@@ -385,6 +467,16 @@ class PrintSCP:
             ds.ExecutionStatusInfo = "NORMAL"
             ds.PrintJobID = str(getattr(req, "RequestedSOPInstanceUID", "") or "")[:16]
             ds.PrinterName = self.aet
+        elif sop_class == PrinterConfigurationRetrieval:
+            # Asked before printing by modalities that size their films to the
+            # printer. The bit depths are what the renderer actually keeps.
+            cfg = Dataset()
+            cfg.SOPClassesSupported = [BasicGrayscalePrintManagementMeta] + (
+                [BasicColorPrintManagementMeta] if self.color else []) + [
+                BasicAnnotationBox, PrintJob, PresentationLUT]
+            cfg.MemoryBitDepth = 16
+            cfg.PrintingBitDepth = 8
+            ds.PrinterConfigurationSequence = [cfg]
         else:
             ds.PrinterStatus = "NORMAL"
             ds.PrinterStatusInfo = "NORMAL"
@@ -405,13 +497,30 @@ class PrintSCP:
         except Exception:
             attrs = Dataset()
 
+        # The UID of the object being created: the SCU's if it sent one,
+        # otherwise ours. A minted one has to travel back in the response, or
+        # pynetdicom fails the create (see the module docstring).
+        given = str(getattr(req, "AffectedSOPInstanceUID", "") or "")
+        new_uid = given or uid_gen()
+
+        def _reply(ds):
+            if not given:
+                ds.AffectedSOPInstanceUID = new_uid
+            return 0x0000, ds
+
         if sop_class == BasicFilmSession:
             job.session_label = str(getattr(attrs, "FilmSessionLabel", "") or "")
             _scrape_identity(attrs, job.identity_hints)
-            return 0x0000, Dataset()
+            # The label stays on the job (it titles the pending item) but not in
+            # the log: modalities commonly put the patient's name in it, and the
+            # log is readable by profiles that may not see names.
+            self.log.info(
+                f"Print session from {event.assoc.requestor.ae_title} @ {_peer_addr(event)}",
+                kind="print")
+            return _reply(Dataset())
 
         if sop_class == BasicFilmBox:
-            film_uid = str(getattr(req, "AffectedSOPInstanceUID", "") or "") or uid_gen()
+            film_uid = new_uid
             fmt = str(getattr(attrs, "ImageDisplayFormat", "") or "STANDARD\\1,1")
             orientation = str(getattr(attrs, "FilmOrientation", "") or "PORTRAIT")
             _scrape_identity(attrs, job.identity_hints)
@@ -453,10 +562,12 @@ class PrintSCP:
                 f"Film box {fmt} ({len(fb.box_uids)} image(s)"
                 f"{', +annotations' if fb.anno_uids else ''}) from "
                 f"{event.assoc.requestor.ae_title}", kind="print")
-            return 0x0000, resp
+            return _reply(resp)
 
-        # Print Job / other creatable objects — acknowledge without state.
-        return 0x0000, Dataset()
+        # Presentation LUT / other creatable objects — acknowledge without
+        # state. A Presentation LUT only shapes the density curve of a real
+        # film; a captured document has none, so it is accepted and ignored.
+        return _reply(Dataset())
 
     def _handle_n_set(self, event):
         """Populate an Image Box (the bitmap for film) or an Annotation Box
@@ -485,23 +596,49 @@ class PrintSCP:
                     fb.annotations[box_uid] = (position or (len(fb.annotations) + 1), text)
             return 0x0000, Dataset()
 
+        # Film Session / Film Box / Presentation LUT — a modality may change
+        # copies, priority or the label after creating them. None of it shapes
+        # a captured document except the label and identity, which are kept.
+        if sop_class not in (BasicGrayscaleImageBox, BasicColorImageBox) \
+                and box_uid not in job.box_to_film:
+            if sop_class == BasicFilmSession:
+                label = str(getattr(mods, "FilmSessionLabel", "") or "")
+                if label:
+                    job.session_label = label
+                _scrape_identity(mods, job.identity_hints)
+            return 0x0000, Dataset()
+
         # Image box — the bitmap the modality wants on film.
         film_uid = job.box_to_film.get(box_uid)
-        if film_uid and film_uid in job.film_boxes:
-            fb = job.film_boxes[film_uid]
-            # Positions are 1-based in DICOM, so a zero or absent one is
-            # "unstated", not "the first cell". Those are given the next arrival
-            # slot instead, which keeps an unstated box sorting after the boxes
-            # that came before it rather than tying with every other unstated
-            # one — the render orders by this number and then fills the cells in
-            # that order.
-            position = int(getattr(mods, "ImageBoxPosition", 0) or 0)
-            seq = getattr(mods, _GRAYSCALE_IMAGE_SEQ, None) or getattr(mods, _COLOR_IMAGE_SEQ, None)
-            item = seq[0] if seq else None
-            if item is not None:
-                img = _image_from_item(item)
-                if img is not None:
-                    fb.images[box_uid] = (position or (len(fb.images) + 1), img)
+        if not (film_uid and film_uid in job.film_boxes):
+            # Answering success here would let the modality believe the image
+            # went onto film, and the print would end as "no image data" with
+            # nothing to say which step lost it.
+            self._problem(
+                f"Print: {event.assoc.requestor.ae_title} sent an image for a box this "
+                f"printer never handed out ({box_uid or 'no UID'}); refused")
+            return 0x0112, Dataset()   # no such SOP instance
+        fb = job.film_boxes[film_uid]
+        # Positions are 1-based in DICOM, so a zero or absent one is
+        # "unstated", not "the first cell". Those are given the next arrival
+        # slot instead, which keeps an unstated box sorting after the boxes
+        # that came before it rather than tying with every other unstated
+        # one — the render orders by this number and then fills the cells in
+        # that order.
+        position = int(getattr(mods, "ImageBoxPosition", 0) or 0)
+        seq = getattr(mods, _GRAYSCALE_IMAGE_SEQ, None) or getattr(mods, _COLOR_IMAGE_SEQ, None)
+        item = seq[0] if seq else None
+        if item is not None:
+            img = _image_from_item(item)
+            if img is not None:
+                fb.images[box_uid] = (position or (len(fb.images) + 1), img)
+            else:
+                # Not fatal (the rest of the sheet still prints), but said, so a
+                # film that comes out with a hole in it has a line explaining it.
+                self._problem(
+                    f"Print: could not read image {position or '?'} from "
+                    f"{event.assoc.requestor.ae_title} ({_describe_item(item)}); "
+                    f"it is left blank on the film")
         # Echo back the modified attributes (SCUs may re-read them).
         return 0x0000, Dataset()
 
@@ -531,12 +668,21 @@ class PrintSCP:
         else:  # Film Session (print the whole session) or anything else
             films = list(job.film_boxes.values())
 
+        who = event.assoc.requestor.ae_title
+        asked = len(films)
         films = [f for f in films if f.images]
         if not films:
-            self.log.warn("Print requested but no image data was received", kind="print")
+            # Say which of the three ways this happens, because each has a
+            # different fix on the modality's side.
+            if sop_class == BasicFilmBox and target not in job.film_boxes:
+                why = f"the film it named ({target or 'no UID'}) was never created here"
+            elif not asked:
+                why = "no film was created first"
+            else:
+                why = f"{asked} film(s) were created but no image was sent into them"
+            self._problem(f"Print from {who}: nothing to print — {why}")
             return 0xB603, Dataset()   # empty page warning (still a success-class status)
 
-        who = event.assoc.requestor.ae_title
         identity = {
             "source": f"{who} @ {_peer_addr(event)}",
             "series_desc": "Printed film",
@@ -563,12 +709,14 @@ class PrintSCP:
                 self.on_output(pdf_bytes, "pdf", identity, name)
             with self._lock:
                 self.printed_count += 1
+                self.last_print = {"films": len(films), "source": identity["source"],
+                                   "at": time.time()}
             self.log.info(f"Captured print job from {who} → {len(films)} film(s) queued for review",
                           kind="print", path=name)
         except Exception as exc:
-            with self._lock:
-                self.error_count += 1
-            self.log.error(f"Failed to render print job from {who}: {exc}", kind="print")
+            self._problem(f"Failed to render or queue the print job from {who}: "
+                          f"{type(exc).__name__}: {exc}", level="error")
+            _LOG.exception("print job from %s failed", who)
             return 0x0110, Dataset()   # processing failure
 
         # Clear the printed film boxes so a re-print in the same association is
@@ -611,6 +759,57 @@ class PrintSCP:
     def _handle_close(self, event) -> None:
         self._drop_job(event)
 
+    def _handle_accepted(self, event) -> None:
+        """Name every service the modality asked for and did not get.
+
+        The association still opens, so nothing failed yet — but a modality
+        that needs one of these (colour print on a grayscale-only printer is
+        the usual one) gives up a step later with an error of its own, and this
+        line is the only place the reason is visible from this side.
+        """
+        try:
+            refused = event.assoc.rejected_contexts
+        except Exception:
+            return
+        if not refused:
+            return
+        from pydicom.uid import UID
+        # A context is per (abstract syntax, transfer syntaxes) proposal, and a
+        # modality may propose one class several times; only a class with NO
+        # accepted context is actually missing.
+        try:
+            got = {str(cx.abstract_syntax) for cx in event.assoc.accepted_contexts}
+        except Exception:
+            got = set()
+        missing = {str(cx.abstract_syntax) for cx in refused} - got
+        if not missing:
+            return
+        who = f"{event.assoc.requestor.ae_title} @ {_peer_addr(event)}"
+        if missing == {BasicColorPrintManagementMeta} \
+                and BasicGrayscalePrintManagementMeta in got:
+            # Proposed colour and grayscale both and got grayscale: it prints,
+            # in grayscale. Worth a line, not a problem on the card.
+            self.log.info(f"Print: {who} offered colour too; printing in grayscale "
+                          f"(colour printing is off in the print receiver settings)",
+                          kind="print")
+            return
+        names = sorted(UID(a).name for a in missing)
+        hint = ""
+        if BasicColorPrintManagementMeta in missing:
+            hint = " — turn on colour printing in the print receiver settings if it needs colour"
+        # Not counted as an error: the association is up, and the modality may
+        # still manage with what it got.
+        self._problem(
+            f"Print: {who} asked for {', '.join(names)}, which this printer does not "
+            f"offer{hint}", count=False)
+
+    def _handle_rejected(self, event) -> None:
+        """Say why a modality was turned away, which pynetdicom does not."""
+        from .assocwords import caller_of, listener_refusal
+        who, addr = caller_of(event)
+        why = listener_refusal(event, self.allowed_aets)
+        self._problem(f"Print: refused {who or 'a modality'} @ {addr} — {why}")
+
     # ---- lifecycle ---------------------------------------------------------
     @property
     def running(self) -> bool:
@@ -627,6 +826,10 @@ class PrintSCP:
         # negotiate alongside the print meta (text overlays, job-status polling).
         ae.add_supported_context(BasicAnnotationBox)
         ae.add_supported_context(PrintJob)
+        # Many modalities propose a Presentation LUT with every print and some
+        # will not print without one; it costs nothing to accept and ignore.
+        ae.add_supported_context(PresentationLUT)
+        ae.add_supported_context(PrinterConfigurationRetrieval)
         ae.add_supported_context(Verification)
         if self.allowed_aets:
             ae.require_calling_aet = list(self.allowed_aets)
@@ -639,6 +842,8 @@ class PrintSCP:
             (evt.EVT_N_DELETE, self._handle_n_delete),
             (evt.EVT_RELEASED, self._handle_close),
             (evt.EVT_ABORTED, self._handle_close),
+            (evt.EVT_ACCEPTED, self._handle_accepted),
+            (evt.EVT_REJECTED, self._handle_rejected),
         ]
         ssl_context = None
         if self.tls:
@@ -651,6 +856,8 @@ class PrintSCP:
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )
+        self._bridge = _PynetdicomBridge(ae, self)
+        logging.getLogger("pynetdicom").addHandler(self._bridge)
         allow = ", ".join(self.allowed_aets) if self.allowed_aets else "any"
         proto = "DICOM-TLS" + (" (mutual)" if self.tls and self.tls_ca else "") if self.tls else "plain DICOM"
         mode = "grayscale+color" if self.color else "grayscale"
@@ -668,6 +875,9 @@ class PrintSCP:
             self._server.shutdown()
         finally:
             self._server = None
+            if self._bridge is not None:
+                logging.getLogger("pynetdicom").removeHandler(self._bridge)
+                self._bridge = None
             with self._lock:
                 self._jobs.clear()
             self.log.info("Print receiver stopped", kind="print")

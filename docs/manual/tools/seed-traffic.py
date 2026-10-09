@@ -1,8 +1,13 @@
 """Push the forged studies into the running instance the way a modality would.
 
-C-STORE for the archive, an HL7 ORM^O01 over MLLP for the order list. Nothing
-is written into the instance's folders by hand: the screenshots should show
-what the software did, not what a script staged.
+C-STORE for the archive, an HL7 ORM^O01 over MLLP for the order list, and —
+when a fourth argument names the published print port — one film printed the
+way a print-only ultrasound prints it, so the print card shows a real
+"Last print" and Pending holds a captured sheet. Nothing is written into the
+instance's folders by hand: the screenshots should show what the software did,
+not what a script staged.
+
+    seed-traffic.py <forged-dir> <scp-port> <ris-port> [<print-port>]
 """
 import pathlib
 import socket
@@ -15,6 +20,7 @@ from pynetdicom import AE
 FORGED = pathlib.Path(sys.argv[1])
 SCP_PORT = int(sys.argv[2])
 RIS_PORT = int(sys.argv[3])
+PRINT_PORT = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 
 # Which calling AE title each patient's study arrives under — the routing rules
 # in this instance key off ER_* for the CT-from-the-emergency-room case.
@@ -76,3 +82,48 @@ for i, (acc, pid, name, modality, desc) in enumerate(ORDERS):
         except socket.timeout:
             ack = b"(no ack)"
     print(f"  order {acc}: {ack[:40]!r}")
+
+# ---- one printed film, so the print card and Pending have something real ---
+# The same conversation test_print.py's _drive() holds, cut to its minimum: film
+# session, film box, one image box, print. The SCU supplies its own UIDs here
+# because pynetdicom's SCU does not hand back the ones a printer mints; the
+# minting path has its own test.
+if PRINT_PORT:
+    from pydicom.dataset import Dataset
+    from pydicom.uid import generate_uid
+    from pynetdicom.sop_class import (
+        BasicFilmBox, BasicFilmSession, BasicGrayscaleImageBox,
+        BasicGrayscalePrintManagementMeta,
+    )
+    meta = BasicGrayscalePrintManagementMeta
+    ae = AE(ae_title="US_ROOM_2")
+    ae.add_requested_context(meta)
+    assoc = ae.associate("127.0.0.1", PRINT_PORT, ae_title="CARINOPRINT")
+    if not assoc.is_established:
+        print("  ! print: association rejected")
+    else:
+        su, fu = generate_uid(), generate_uid()
+        fs = Dataset()
+        fs.FilmSessionLabel = "US ABDOMEN (demo film)"
+        assoc.send_n_create(fs, BasicFilmSession, su, meta_uid=meta)
+        fb = Dataset()
+        fb.ImageDisplayFormat = "STANDARD\\1,1"
+        st, created = assoc.send_n_create(fb, BasicFilmBox, fu, meta_uid=meta)
+        rows = cols = 256
+        img = Dataset()
+        img.SamplesPerPixel = 1
+        img.PhotometricInterpretation = "MONOCHROME2"
+        img.Rows, img.Columns = rows, cols
+        img.BitsAllocated = img.BitsStored = 8
+        img.HighBit = 7
+        img.PixelRepresentation = 0
+        # A plain diagonal ramp: obviously a test pattern, never an image of anyone.
+        img.PixelData = bytes((r + c) // 2 for r in range(rows) for c in range(cols))
+        m = Dataset()
+        m.ImageBoxPosition = 1
+        m.BasicGrayscaleImageSequence = [img]
+        box = created.ReferencedImageBoxSequence[0]
+        assoc.send_n_set(m, BasicGrayscaleImageBox, box.ReferencedSOPInstanceUID, meta_uid=meta)
+        st, _ = assoc.send_n_action(None, 1, BasicFilmBox, fu, meta_uid=meta)
+        assoc.release()
+        print(f"  print: one film as US_ROOM_2 (status {getattr(st, 'Status', '?')})")

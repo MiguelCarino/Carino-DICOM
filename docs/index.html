@@ -36,16 +36,16 @@
           <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
         </svg>
       </div>
-      <h1><span data-i18n>Your PACS systems are down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
-      <p class="lede">
-        <strong>Carino DICOM</strong> is a self-hosted <abbr title="the standard format and network protocol for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
-        gateway and continuity appliance. It receives studies, routes and forwards them by
-        rules you write, answers <em>Query/Retrieve</em> and <em>DICOMweb</em>, and serves the
-        worklist itself while your PACS is unreachable — holding everything that arrives and
-        back-filling it the moment the primary answers again. It can de-identify a copy on
-        the way out and keeps an audit trail of who did what. One config file, one process,
-        no cloud.
-      </p>
+      <h1><span data-i18n>Your PACS is down?</span><br><span class="gold" data-i18n>Urgent patients cannot wait.</span></h1>
+      <!-- One plain sentence, then the three situations it is for (README "Who
+           this is for"). The protocol list that used to sit here lives in the
+           Features and technical sheets, where the people who need it look. -->
+      <p class="lede"><strong>Carino DICOM</strong> sits between your imaging equipment and your archive, and keeps studies moving when something breaks — on your own hardware, with no cloud.</p>
+      <ul class="situations">
+        <li data-i18n>A scanner that can only print? It captures the film so it can be filed like any study.</li>
+        <li data-i18n>No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.</li>
+        <li data-i18n>The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.</li>
+      </ul>
 
       <!-- The version sits ABOVE the buttons: it is what they will hand you,
            and a label that follows the thing it labels is a label you read
@@ -78,6 +78,11 @@
           <b data-i18n>🖥 Server</b><span class="fmt">Docker · Podman · systemd</span></button>
       </div>
 
+      <!-- The honest half, one line under the buttons rather than behind a chip:
+           a visitor decides here, so this is where they need it. It opens the
+           same sheet, scrolled to "What it is not". -->
+      <p class="not-line"><button type="button" class="linkish" data-sheet="whatDialog" data-focus="notbox" data-i18n>Not a medical device · not a viewer · not an archive</button></p>
+
       <!-- The manual in the language the page is being read in. app.js keeps the
            href in step with the language switcher; without JS it is the English
            one, which is the same answer the switcher gives for a language the
@@ -87,18 +92,10 @@
       <p class="dl-all"><a href="https://github.com/MiguelCarino/Carino-DICOM/releases"
          target="_blank" rel="noopener" data-i18n>All versions and changelogs →</a></p>
 
-      <!-- One note, not two. It used to be a line about Docker followed by a
-           line about versions, and they are the same sentence: what you can
-           download, versus what you can run.
-           It carries no version number any more. The one it did carry went stale
-           the day the installers caught up with the page, and took four
-           hand-kept translations stale with it; the version belongs in the line
-           above the buttons, which app.js writes from the release rather than
-           from memory. What this note says instead is the thing the buttons
-           cannot say on their own. -->
-      <p class="dl-note release-note" id="dl-release">macOS and Linux ship <b>two builds each</b> — Apple Silicon and Intel, ARM64 and x86-64.
-        The buttons name both rather than guess: an Intel Mac cannot open an Apple Silicon build at all, and no browser can tell the two machines apart honestly.
-        These buttons only ever hand you a stable build; pre-release installers sit under <i>All versions</i> above.</p>
+      <!-- The buttons name both builds where an OS has two (app.js turns each
+           into two links once it reads the release); this line only has to say
+           why to look. Pre-releases stay under All versions. -->
+      <p class="dl-note release-note" id="dl-release" data-i18n>Intel Mac or ARM64 Linux? Use the second build named on that button.</p>
 
       <!-- What used to be three sections and a disclosure below the fold. They
            are dialogs now, opened from here, so the page is one screen and
@@ -142,9 +139,11 @@
         <h3>🐳 Docker</h3>
         <p data-i18n>Compose file, everything on loopback. The first boot prints an access token — open http://127.0.0.1:8042/ and paste it when the dashboard asks.</p>
 <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
-mkdir -p data &amp;&amp; sudo chown -R $(id -u):$(id -g) data
-docker compose up -d
+cd Carino-DICOM
+mkdir -p data
+echo "PACS_UID=$(id -u)" &gt;&gt; .env
+echo "PACS_GID=$(id -g)" &gt;&gt; .env
+docker compose up -d --build
 docker compose logs -f pacs</code></pre>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
@@ -153,7 +152,7 @@ docker compose logs -f pacs</code></pre>
         <h3>🦭 Podman</h3>
         <p data-i18n>Rootless, and systemd owns it. Needs no compose provider, and the token prints to the journal on first boot.</p>
 <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
+cd Carino-DICOM
 [ -d ~/CarinoPACS ] &amp;&amp; [ ! -d ~/CarinoDICOM ] &amp;&amp; mv ~/CarinoPACS ~/CarinoDICOM
 mkdir -p ~/CarinoDICOM
 podman build --format docker -t carino-dicom:local .
@@ -169,10 +168,10 @@ journalctl --user -u carino-dicom -f</code></pre>
         <h3>🐧 systemd</h3>
         <p data-i18n>From source, as a system service with an account of its own. The installer stops before starting it — opening listeners that accept patient data stays your decision.</p>
 <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS
+cd Carino-DICOM
 sudo packaging/systemd/install.sh
 # then edit /var/lib/carino-pacs/config.json and:
-sudo systemctl start carino-pacs</code></pre>
+sudo systemctl enable --now carino-pacs</code></pre>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
     </div>
@@ -323,11 +322,11 @@ sudo systemctl start carino-pacs</code></pre>
               retain options declared in (0012,0064). Pixels are not touched.</li>
             <li id="tl-tls"><b>DICOM-TLS</b> both sides (optional), incl. mutual TLS. Bearer-token auth on
               the HTTP API; non-loopback <code>web.host</code> with an empty token is a startup error.</li>
-            <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|echo|ris|mwl|qr</code>),
+            <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>),
               tray app, Docker image, or systemd unit. DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
           </ul>
           <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
+cd Carino-DICOM &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
 ./run.sh init                    # scaffold config.json + folders
 ./run.sh serve                   # dashboard → http://127.0.0.1:8042</code></pre>
           <div class="tech-links">

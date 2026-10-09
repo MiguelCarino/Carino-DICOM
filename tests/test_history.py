@@ -32,14 +32,15 @@ from pacs.history import delete_study, scan_studies, study_files
 # os.path.getmtime as an exact float and the ordering tests can compare ==.
 T0 = 1700000000.0
 
-FIELDS = ["instances", "modality", "mtime", "path", "patient", "patient_id",
-          "series", "study_date", "study_desc", "study_uid"]
+FIELDS = ["accession", "instances", "modality", "mtime", "path", "patient", "patient_id",
+          "series", "source_ae", "study_date", "study_desc", "study_uid"]
 
 
 def write_instance(path, *, patient_name="DOE^JANE", patient_id="P001",
                    study_uid="1.2.3", series_uid="1.2.3.1", modality="CT",
                    study_date="20240115", study_desc="Head CT",
-                   series_desc="Axial", series_number=1, instance_number=1):
+                   series_desc="Axial", series_number=1, instance_number=1,
+                   accession=None):
     """One real Part 10 file. Any keyword passed as None omits its tag, which is
     how the "no Modality" and "no StudyInstanceUID" cases are built."""
     meta = FileMetaDataset()
@@ -55,7 +56,7 @@ def write_instance(path, *, patient_name="DOE^JANE", patient_id="P001",
                        ("PatientID", patient_id), ("StudyDate", study_date),
                        ("StudyDescription", study_desc), ("Modality", modality),
                        ("SeriesDescription", series_desc),
-                       ("SeriesNumber", series_number)):
+                       ("SeriesNumber", series_number), ("AccessionNumber", accession)):
         if value is not None:
             setattr(ds, tag, value)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -83,6 +84,13 @@ def one(root, **kw):
 
 
 # ------------------------------------------------------------ the whole record
+def test_the_accession_comes_from_the_header_already_read():
+    with tempfile.TemporaryDirectory() as tmp:
+        write_instance(os.path.join(tmp, "P1", "s", "1.dcm"), accession="ACC-77")
+        assert one(tmp)["accession"] == "ACC-77"
+
+
+
 def test_a_study_in_one_directory_reports_every_field():
     with tempfile.TemporaryDirectory() as tmp:
         d = os.path.join(tmp, "P001", "study", "series")
@@ -99,12 +107,16 @@ def test_a_study_in_one_directory_reports_every_field():
         assert st["study_date"] == "2024-01-15"
         assert st["study_desc"] == "Head CT"
         assert st["study_uid"] == "1.2.3"
+        assert st["accession"] == ""          # none in the file, none invented
         assert st["series"] == [{"desc": "Axial", "modality": "CT",
                                  "number": "1", "count": 3}]
         assert st["instances"] == 3
         assert st["path"] == d
         assert st["modality"] == "CT"
         assert st["mtime"] == T0
+        # The receiver does not stamp a sending AE into the file, so a file
+        # without File Meta (0002,0016) has none to report.
+        assert st["source_ae"] == ""
         # SeriesNumber arrives as an int and leaves as a string.
         assert isinstance(st["series"][0]["number"], str)
         assert isinstance(st["mtime"], float)
@@ -178,6 +190,28 @@ def test_max_studies_caps_after_sorting_so_it_keeps_the_newest():
         # Zero is a real cap, not "unlimited".
         assert scan_studies(tmp, max_studies=0) == []
         assert len(scan_studies(tmp, max_studies=99)) == 3
+
+
+def test_scan_says_how_many_studies_the_cap_left_out():
+    with tempfile.TemporaryDirectory() as tmp:
+        _three_studies(tmp)
+        page = history.scan(tmp, max_studies=2)
+        assert [s["patient_id"] for s in page["studies"]] == ["P003", "P002"]
+        assert page["total"] == 3 and page["truncated"] is True
+        page = history.scan(tmp, max_studies=3)
+        assert page["total"] == 3 and page["truncated"] is False
+        assert history.scan(os.path.join(tmp, "nope")) == \
+            {"studies": [], "total": 0, "truncated": False}
+
+
+def test_the_source_ae_comes_from_the_file_meta_when_the_file_has_one():
+    with tempfile.TemporaryDirectory() as tmp:
+        p = write_instance(os.path.join(tmp, "P1", "s", "1.dcm"))
+        from pydicom import dcmread
+        ds = dcmread(p)
+        ds.file_meta.SourceApplicationEntityTitle = "CT_ROOM_1"
+        save_dicom(ds, p)
+        assert one(tmp)["source_ae"] == "CT_ROOM_1"
 
 
 # ------------------------------------------------------- what is and is not DICOM
