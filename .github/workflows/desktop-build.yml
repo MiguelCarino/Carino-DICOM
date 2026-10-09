@@ -174,11 +174,29 @@ jobs:
       # from its host. USE_SYSTEM_FPM renders as the literal "false" off the arm64
       # Linux leg — it must never render as the empty string, which app-builder's
       # IsEnvTrue() reads as true.
+      # Since the app is ad-hoc signed, the Intel mac leg failed twice in a row on
+      # `hdiutil detach … Resource busy`: macOS indexes and scans the freshly
+      # mounted image while electron-builder is trying to eject it. Spotlight
+      # off removes the indexer; the retry covers the scan, which cannot be
+      # turned off on a hosted runner and finishes on its own.
+      - name: Keep Spotlight off the disk images (macOS)
+        if: runner.os == 'macOS'
+        run: sudo mdutil -a -i off || true
+
       - name: Build installers (electron-builder)
         working-directory: desktop
+        shell: bash
         env:
           USE_SYSTEM_FPM: ${{ matrix.id == 'linux-arm64' }}
-        run: npx --no-install electron-builder ${{ matrix.eb }} --publish never
+        run: |
+          tries=1
+          [ "$RUNNER_OS" = macOS ] && tries=3
+          for i in $(seq "$tries"); do
+            npx --no-install electron-builder ${{ matrix.eb }} --publish never && exit 0
+            echo "::warning::electron-builder failed (attempt $i of $tries)"
+            [ "$i" -lt "$tries" ] && sleep 30
+          done
+          exit 1
 
       # if-no-files-found: error on the upload only catches a leg that produced
       # nothing at all; a Linux leg that built the AppImage and lost the deb and
