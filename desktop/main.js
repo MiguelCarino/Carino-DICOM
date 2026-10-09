@@ -195,11 +195,13 @@ function startEngine() {
   py.on("error", (err) => showError("Could not launch the engine:\n" + cmd + "\n\n" + err.message));
 }
 
+// Probes /api/auth, not /api/status: status needs a signed-in profile, so once
+// profiles exist it answers 401 forever and a running engine looked dead.
 function waitForServer(timeoutMs = 40000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     const probe = () => {
-      const req = http.get(serverUrl + "api/status", (res) => {
+      const req = http.get(serverUrl + "api/auth", (res) => {
         res.resume();
         if (res.statusCode === 200) return resolve(true);
         retry();

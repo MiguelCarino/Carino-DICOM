@@ -113,6 +113,11 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   inline-style cleanup; see the upstream CHANGELOG.
 
 ### Fixed
+- **Desktop app: no false "engine may have failed to start" once people sign in.**
+  The window waited for `/api/status` to answer 200, but that endpoint needs a
+  signed-in profile, so on any install with profiles it answered 401 for good and
+  the app showed the error after 40 seconds while the engine was running fine. It
+  now waits on the public `/api/auth`.
 - **Print receiver: a modality that leaves UIDs to the printer can print.**
   Most modalities send N-CREATE for the Film Session and Film Box without an
   Affected SOP Instance UID; the print SCP answered `0x0110 Processing failure`
