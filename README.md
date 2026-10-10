@@ -98,6 +98,23 @@ python3 -m pynetdicom storescu 127.0.0.1 11112 "$DCM" -v       # Status: 0x0000 
 The study appears in the dashboard right away, and on disk under
 `~/CarinoDICOM/received/<patient>/<study>/<series>/`.
 
+To check that a modality would catch an order, turn on the Modality Worklist, add
+the modality under **Configuration → Modalities** (e.g. AE `US_ROOM1`, modality
+`US`), key in an order for it under **Orders**, then ask as that modality would:
+
+```bash
+python3 -m pynetdicom findscu 127.0.0.1 11114 -W -aet US_ROOM1 -aec CARINOMWL -v \
+  -k PatientName -k PatientID -k AccessionNumber -k StudyInstanceUID \
+  -k "ScheduledProcedureStepSequence[0].Modality=US" \
+  -k "ScheduledProcedureStepSequence[0].ScheduledStationAETitle=US_ROOM1"
+```
+
+Each `Pending` response is one order the modality would see. Change `Modality` to
+`CT`, or the station to another AE, and the order should drop out; a blank value
+matches everything. An order with no station shows on every modality. If the order
+is missing, check the station AE spelling, the worklist's allowed AE titles, and
+that the modality uses port 11114 (11112 only takes images).
+
 ## What it does
 
 Every service that opens a port is **off by default**. Each one can run from the

@@ -662,6 +662,8 @@ Nothing in this section tunes matching. Matching is deliberately lenient in
 `pacs/mwl.py` and not configurable: an order that leaves a field blank matches any
 queried value for it, so an untargeted order appears on every modality's worklist.
 Target one station by setting the order's station AE, not by editing config.
+To see what a given modality would be served, query as it with `findscu` — the
+README's *Prove it works* has the command.
 
 ### `mwl.enabled`
 
