@@ -42,6 +42,11 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   suggests the same codes and still accepts any other.
 
 ### Fixed
+- **Desktop app icon on Linux docks and the Windows taskbar.** The launcher named a
+  window class (`Carino-DICOM`) the window never has, so GNOME/KDE docks showed a
+  generic icon. `StartupWMClass` now repeats the window's class (`Carino DICOM`, X11)
+  and `desktopName` sets its app ID to `carino-dicom` (Wayland). On Windows the window
+  now claims the installer's AppUserModelID, so it groups with its pinned shortcut.
 - **macOS: the unsigned desktop app runs on Apple Silicon.** Without a Developer
   ID, electron-builder skipped signing after it had already changed the bundle,
   so the app no longer matched Electron's signature and macOS refused it, even

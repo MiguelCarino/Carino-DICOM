@@ -572,6 +572,12 @@ function quitApp() {
 }
 
 // ---- lifecycle ---------------------------------------------------------
+// Windows groups a taskbar button by AppUserModelID. The installer's shortcut
+// carries build.appId, so the window must claim the same one, or a pinned
+// shortcut and the running window show as two buttons, one without our icon.
+// On Linux the same job is done by desktopName in package.json.
+if (process.platform === "win32") app.setAppUserModelId("systems.carino.dicom");
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
