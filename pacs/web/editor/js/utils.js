@@ -14,6 +14,7 @@ const fileNamePill = $('fileNamePill');
 const fileCountPill = $('fileCountPill');
 const anonymizeBtn = $('anonymizeBtn');
 const randomizeBtn = $('randomizeBtn');
+const swapPatientsBtn = $('swapPatientsBtn');
 const previewCard = $('previewCard');
 const previewBox = $('previewBox');
 const previewCanvas = $('preview');

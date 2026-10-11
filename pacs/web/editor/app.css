@@ -1511,6 +1511,25 @@
     .confirm-msg { font: 500 14px var(--font); color: var(--text); margin-bottom: 18px; line-height: 1.5; white-space: pre-line; }
     .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
+    /* ---- Swap patients dialog ---- */
+    .confirm-box.swap-box { max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    .swap-title { font: 700 15px var(--font); color: var(--text); margin-bottom: 8px; }
+    .swap-note { font: 400 12px var(--font); color: var(--text-dim); line-height: 1.5; margin: 6px 0; }
+    .swap-table-wrap { overflow-x: auto; margin: 10px 0; }
+    /* min-width undoes the tag table's global 640px; fixed layout makes a long name wrap. */
+    .swap-table { width: 100%; min-width: 0; border-collapse: collapse; font: 500 12px var(--font); table-layout: fixed; }
+    .swap-table th:first-child { width: 30%; }
+    .swap-table th, .swap-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+    .swap-table thead th { color: var(--text-dim); font-weight: 600; }
+    .swap-table tbody th { color: var(--text-dim); font-weight: 500; }
+    .swap-table td { color: var(--text); font-family: var(--mono); }
+    .swap-table tr.swap-moves th, .swap-table tr.swap-moves td { color: var(--accent); }
+    .swap-warn { margin: 8px 0; padding-left: 18px; color: var(--sev-warning); font: 500 12px var(--font); line-height: 1.5; }
+    .swap-warn.hidden { display: none; }
+    .swap-opt { display: flex; gap: 8px; align-items: center; font: 500 13px var(--font); color: var(--text); margin: 8px 0 2px; cursor: pointer; }
+    .swap-opt + .swap-opt { margin-top: 4px; }
+    .swap-box .confirm-actions { margin-top: 14px; }
+
     /* ---- Browser self-test (#selftest) ---- */
     /* Above the toast (3000), spinner and confirm dialog, which the suites raise while running. */
     .selftest { position: fixed; inset: 0; z-index: 3500; background: var(--surface-solid);

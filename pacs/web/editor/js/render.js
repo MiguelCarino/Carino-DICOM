@@ -460,6 +460,8 @@ function showDownload() {
   one?.classList.toggle('primary', has && !many);
   batchButtonsContainer.classList.toggle('hidden', !has || files.length <= 10);
   if (files.length > 10) rebuildBatch();
+  // A swap needs exactly two sides; with three studies there is no telling which two.
+  swapPatientsBtn.disabled = groupStudies().length !== 2;
 }
 
 function rebuildBatch() {

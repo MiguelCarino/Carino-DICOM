@@ -271,6 +271,7 @@
           <button id="anonymizeBtn" class="btn" title="De-identify every loaded file with the DICOM PS3.15 Basic Profile, plus any options ticked under ⚙" data-i18n>Anonymize (PS3.15)</button>
           <button id="deidOptsBtn" class="btn" title="PS3.15 de-identification options">⚙ <span data-i18n>Options</span><span id="deidOptsCount"></span></button>
           <button id="randomizeBtn" class="btn" title="Give every loaded file a made-up patient, for test data. This is not de-identification." data-i18n>Fake patient (test data)</button>
+          <button id="swapPatientsBtn" class="btn" disabled title="Swap the patient details between two loaded studies. Load exactly two studies." data-i18n>⇄ Swap patients</button>
           <button id="undoBtn" class="btn" disabled title="Undo (Ctrl+Z)">↩</button>
           <button id="redoBtn" class="btn" disabled title="Redo (Ctrl+Y)">↪</button>
           <button id="addTagBtn" class="btn" title="Add a new tag to this file" data-i18n>+ Tag</button>
@@ -735,6 +736,28 @@
       <div class="confirm-actions">
         <button class="btn" id="confirmCancel" data-i18n>Cancel</button>
         <button class="btn danger" id="confirmOk" data-i18n>Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay" id="swapOverlay">
+    <div class="confirm-box swap-box" role="dialog" aria-modal="true" aria-labelledby="swapTitle">
+      <div class="swap-title" id="swapTitle" data-i18n>Swap patients between two studies</div>
+      <div class="swap-note" data-i18n>Each study keeps its images, dates, times and description, and takes the other study's patient. Rows marked ⇄ are swapped.</div>
+      <div class="swap-table-wrap">
+        <table class="swap-table">
+          <thead><tr><th></th><th data-i18n>Study 1</th><th data-i18n>Study 2</th></tr></thead>
+          <tbody id="swapRows"></tbody>
+        </table>
+      </div>
+      <ul class="swap-warn hidden" id="swapWarn"></ul>
+      <label class="swap-opt"><input type="checkbox" id="swapAccession"><span data-i18n>Also swap Accession Number</span></label>
+      <label class="swap-opt"><input type="checkbox" id="swapNewUIDs" checked><span data-i18n>Give both studies new UIDs</span></label>
+      <div class="swap-note" data-i18n>New UIDs stop a PACS that hides studies instead of deleting them from merging the upload into the old study.</div>
+      <div class="swap-note" data-i18n>Undo cannot reverse a swap. Nothing is saved until you download.</div>
+      <div class="confirm-actions">
+        <button class="btn" id="swapCancel" data-i18n>Cancel</button>
+        <button class="btn danger" id="swapOk" data-i18n>⇄ Swap</button>
       </div>
     </div>
   </div>

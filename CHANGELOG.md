@@ -26,6 +26,11 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   version with an **Update** button that opens dicom.carino.systems. Nothing is
   downloaded or installed. `POST /api/update-check` needs `config.write` and is
   audited.
+- **Swap patients in the bundled editor** (re-synced to upstream `bffa4de`). For two
+  studies filed under each other's patient: with both loaded, Edit → **⇄ Swap
+  patients** gives each study the other's patient data (group 0010), with new UIDs by
+  default so the corrected copies do not merge into the old studies on re-upload.
+  Study, series and pixels stay put. See the upstream CHANGELOG.
 
 ### Changed
 - Bundled editor re-synced to upstream `da90b6b`: Create → Modality offers all 79

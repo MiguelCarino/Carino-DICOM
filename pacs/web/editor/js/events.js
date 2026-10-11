@@ -87,6 +87,107 @@ randomizeBtn.addEventListener('click', () => {
   }, 'Make fake patient');
 });
 
+// ---- Swap patients ----
+const SWAP_ROWS = [
+  // [label, tag, swapped: true always, 'acc' only with the Accession box, false never]
+  ['Patient Name', '00100010', true],
+  ['Patient ID', '00100020', true],
+  ['Date of Birth', '00100030', true],
+  ['Sex', '00100040', true],
+  ['Age', '00101010', true],
+  ['Accession Number', '00080050', 'acc'],
+  ['Study Date', '00080020', false],
+  ['Study Time', '00080030', false],
+  ['Study Description', '00081030', false],
+];
+let swapStudies = null;  // [indicesOfStudy1, indicesOfStudy2] while the dialog is open
+
+function swapFmt(tag, s) {
+  if (/^\d{8}$/.test(s) && (tag === '00080020' || tag === '00100030')) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  if (/^\d{6}/.test(s) && tag === '00080030') return `${s.slice(0,2)}:${s.slice(2,4)}:${s.slice(4,6)}`;
+  return s;
+}
+// Read through the pending edits, so the preview shows what the swap will actually move.
+function swapValue(i, tag) {
+  return elToString(lookupTag(withPendingEdits(files[i]), tag)).trim();
+}
+
+function renderSwapDialog() {
+  const [ia, ib] = swapStudies;
+  const withAcc = $('swapAccession').checked;
+  const rows = SWAP_ROWS.map(([label, tag, moves]) => {
+    const tr = document.createElement('tr');
+    const swapped = moves === true || (moves === 'acc' && withAcc);
+    tr.classList.toggle('swap-moves', swapped);
+    const th = document.createElement('th');
+    th.textContent = (swapped ? '⇄ ' : '') + T(label);
+    tr.append(th, ...[ia, ib].map(idx => {
+      const td = document.createElement('td');
+      td.textContent = swapFmt(tag, swapValue(idx[0], tag)) || '—';
+      return td;
+    }));
+    return tr;
+  });
+  const count = document.createElement('tr');
+  const th = document.createElement('th');
+  th.textContent = T('Files');
+  count.append(th, ...[ia, ib].map(idx => { const td = document.createElement('td'); td.textContent = idx.length; return td; }));
+  $('swapRows').replaceChildren(...rows, count);
+
+  // Warn, never block: the same ID with two spellings is still a swap someone may want.
+  const warn = [];
+  const idA = swapValue(ia[0], '00100020'), idB = swapValue(ib[0], '00100020');
+  if (idA && idA === idB) warn.push(T('Both studies already have Patient ID {id}, so only the way the details are written will change.').replace('{id}', () => idA));
+  [ia, ib].forEach((idx, k) => {
+    if (new Set(idx.map(i => swapValue(i, '00100020'))).size > 1)
+      warn.push(T('Study {n} holds files with different Patient IDs. Every file in it gets the other study\'s patient.').replace('{n}', k + 1));
+  });
+  const ul = $('swapWarn');
+  ul.replaceChildren(...warn.map(w => { const li = document.createElement('li'); li.textContent = w; return li; }));
+  ul.classList.toggle('hidden', !warn.length);
+}
+
+function closeSwapDialog() {
+  $('swapOverlay').classList.remove('visible');
+  document.removeEventListener('keydown', swapKey);
+  swapStudies = null;
+}
+function swapKey(e) { if (e.key === 'Escape') closeSwapDialog(); }
+
+swapPatientsBtn.addEventListener('click', () => {
+  const studies = groupStudies();
+  if (studies.length !== 2) return;
+  swapStudies = studies.map(s => s.indices);
+  $('swapAccession').checked = false;
+  $('swapNewUIDs').checked = true;
+  renderSwapDialog();
+  $('swapOverlay').classList.add('visible');
+  document.addEventListener('keydown', swapKey);
+  $('swapCancel').focus();
+});
+$('swapAccession').addEventListener('change', renderSwapDialog);
+$('swapCancel').addEventListener('click', closeSwapDialog);
+$('swapOk').addEventListener('click', () => {
+  const [ia, ib] = swapStudies;
+  const withAcc = $('swapAccession').checked, newUIDs = $('swapNewUIDs').checked;
+  closeSwapDialog();
+  // Undo only restores the open file's pending edits, so an undo step across the swap would
+  // put one file back on the old patient and split the study.
+  editHistory = []; editFuture = []; datasetDirty = true;
+  clearTimeout(editDebounceTimer); preEditSnapshot = null;
+  updateHistoryBtns();
+  try { renderTechRow(); } catch (_) {}
+  // Fold typed-but-unexported edits in first: reseedAllPending would otherwise drop them.
+  for (const f of files) Object.assign(f.dict, withPendingEdits(f));
+  swapPatients(ia, ib, withAcc);
+  if (newUIDs) remapUIDs();
+  reseedAllPending();
+  syncToUI();
+  log(`Swapped patients between 2 studies (${ia.length} + ${ib.length} files)`
+      + (withAcc ? ', Accession Number included' : '') + (newUIDs ? ', new UIDs' : ''));
+  toast?.(T('Patients swapped'));
+});
+
 
 $('compareWith')?.addEventListener('change', e => {
   compareIdx = e.target.value === '' ? null : Number(e.target.value);

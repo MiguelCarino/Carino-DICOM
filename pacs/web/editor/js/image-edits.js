@@ -355,6 +355,33 @@ function randomize(d) {
   setTag(d, 'x00080050', 'SH', randDigits(9));
 }
 
+// ---- Swap patients ----
+// The Patient Module (group 0010) belongs to the person; study, series, equipment and pixels
+// belong to the acquisition, so a swap trades group 0010 between two studies and nothing else.
+// Accession Number is opt-in: it names the order, and sometimes the order is what was mixed up.
+const SWAP_ACCESSION = ['00080050', '00080051'];
+function isSwappedTag(hex, withAccession) {
+  return (hex.startsWith('0010') && hex.slice(4) !== '0000') || (withAccession && SWAP_ACCESSION.includes(hex));
+}
+function swappedTagsOf(d, withAccession) {
+  const out = {};
+  for (const [k, el] of Object.entries(d)) if (isSwappedTag(canonTag(k), withAccession)) out[canonTag(k)] = el;
+  return out;
+}
+function writeSwappedTags(d, tags, withAccession) {
+  // Delete first so a tag only the old patient had (e.g. Patient Comments) does not stay behind.
+  for (const k of Object.keys(d)) if (canonTag(k).startsWith('0010') || isSwappedTag(canonTag(k), withAccession)) delete d[k];
+  for (const [hex, el] of Object.entries(tags)) d[hex] = structuredClone(el);
+}
+// ia, ib: the file indices of each study (groupStudies()). The first file of a study speaks for
+// it, and both blocks are read before either is written.
+function swapPatients(ia, ib, withAccession) {
+  const a = swappedTagsOf(files[ia[0]].dict, withAccession);
+  const b = swappedTagsOf(files[ib[0]].dict, withAccession);
+  ia.forEach(i => writeSwappedTags(files[i].dict, b, withAccession));
+  ib.forEach(i => writeSwappedTags(files[i].dict, a, withAccession));
+}
+
 function remapUIDs() {
   const map = new Map();
   for (const f of files) {

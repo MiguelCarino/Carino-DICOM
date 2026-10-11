@@ -6,7 +6,7 @@
 // Must match tests/suites (a browser cannot glob it); tests/suites/selftest.js checks this.
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
 const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'render', 'phone',
-                         'sequences', 'series', 'edits', 'imgedit', 'compare', 'deid',
+                         'sequences', 'series', 'edits', 'imgedit', 'compare', 'deid', 'swap',
                          'redact', 'samples', 'zip'];
 
 // PS3.6 Annex A names, kept in English so bug reports stay searchable.
