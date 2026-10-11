@@ -5,6 +5,8 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-10-11
+
 ### Added
 - **Modalities at this site** (`ris.modalities`). Pick the codes this site has (only
   US, say) in *Settings → Worklist and orders* or in the setup chooser, which now
