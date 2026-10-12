@@ -235,18 +235,34 @@ def test_tls_cert_command_enable_and_no_overwrite(tmp_path):
 
 
 def _serve(cfgp, port, extra=()):
+    # Output goes to files, not pipes: nobody reads a pipe while the test runs,
+    # and once the engine has logged a pipe buffer's worth (16 KB on macOS) it
+    # blocks on write and stops answering.
     env = dict(os.environ, PYTHONUNBUFFERED="1")
-    return subprocess.Popen([sys.executable, "-m", "pacs", "-c", cfgp, "serve", "--port", str(port), *extra],
-                            cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    base = os.path.join(os.path.dirname(cfgp), f"serve-{port}")
+    out, err = open(base + ".out", "w"), open(base + ".err", "w")
+    p = subprocess.Popen([sys.executable, "-m", "pacs", "-c", cfgp, "serve", "--port", str(port), *extra],
+                         cwd=ROOT, env=env, stdout=out, stderr=err, text=True)
+    out.close(); err.close()
+    p.logs = (base + ".out", base + ".err")
+    return p
+
+
+def _logs(p):
+    def read(path):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    return read(p.logs[0]), read(p.logs[1])
 
 
 def _stop(p):
     p.terminate()
     try:
-        return p.communicate(timeout=20)
+        p.wait(timeout=20)
     except subprocess.TimeoutExpired:
         p.kill()
-        return p.communicate()
+        p.wait()
+    return _logs(p)
 
 
 def test_serve_over_https_end_to_end(tmp_path):
@@ -270,7 +286,8 @@ def test_serve_over_https_end_to_end(tmp_path):
                     break
                 time.sleep(0.3)
         else:
-            pytest.fail(f"engine never answered over HTTPS: {last}")
+            o, e = _logs(p)
+            pytest.fail(f"engine never answered over HTTPS: {last!r}\n--- engine stdout ---\n{o[-2000:]}\n--- engine stderr ---\n{e[-3000:]}")
         assert p.poll() is None, "engine exited"
         # DICOMweb rides the same socket.
         req = urllib.request.Request(f"https://127.0.0.1:{port}/dicom-web/studies",
