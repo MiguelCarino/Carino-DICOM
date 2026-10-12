@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import ssl
 import stat
@@ -238,7 +239,7 @@ def _serve(cfgp, port, extra=()):
     # Output goes to files, not pipes: nobody reads a pipe while the test runs,
     # and once the engine has logged a pipe buffer's worth (16 KB on macOS) it
     # blocks on write and stops answering.
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONFAULTHANDLER="1")
     base = os.path.join(os.path.dirname(cfgp), f"serve-{port}")
     out, err = open(base + ".out", "w"), open(base + ".err", "w")
     p = subprocess.Popen([sys.executable, "-m", "pacs", "-c", cfgp, "serve", "--port", str(port), *extra],
@@ -286,8 +287,14 @@ def test_serve_over_https_end_to_end(tmp_path):
                     break
                 time.sleep(0.3)
         else:
+            if hasattr(signal, "SIGABRT") and os.name == "posix" and p.poll() is None:
+                p.send_signal(signal.SIGABRT)      # faulthandler: every thread's stack to stderr
+                try:
+                    p.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
             o, e = _logs(p)
-            pytest.fail(f"engine never answered over HTTPS: {last!r}\n--- engine stdout ---\n{o[-2000:]}\n--- engine stderr ---\n{e[-3000:]}")
+            pytest.fail(f"engine never answered over HTTPS: {last!r}\n--- engine stdout ---\n{o[-2000:]}\n--- engine stderr ---\n{e[-6000:]}")
         assert p.poll() is None, "engine exited"
         # DICOMweb rides the same socket.
         req = urllib.request.Request(f"https://127.0.0.1:{port}/dicom-web/studies",
