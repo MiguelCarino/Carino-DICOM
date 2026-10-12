@@ -158,12 +158,14 @@ function setTabCount(id, n, showZero) {
 // ---- Transaction history ----
 let histGroup = "received";
 let histStudies = [], histTotal = 0, histTruncated = false;
+// From the last listing: under on_success "keep" a forwarded study stays in Outgoing, so Sent says so.
+let histOnSuccess = "", histAutoSend = true;
 const histMods = new Set();           // modality chips switched on; empty = every modality
 let histReq = 0;
 
 async function loadHistory() {
   const list = $("histList");
-  // Received/Sent is a two-button toggle: aria-pressed follows whichever group is loading.
+  // Received/Outgoing/Sent is a toggle: aria-pressed follows whichever group is loading.
   document.querySelectorAll("#dlgHistory .hist-tab[data-group]").forEach((t) =>
     t.setAttribute("aria-pressed", t.dataset.group === histGroup ? "true" : "false"));
   capGate($("dlgHistory"));
@@ -171,6 +173,8 @@ async function loadHistory() {
   const delAll = $("histDeleteAll");
   if (delAll) delAll.closest("details").hidden = delAll.hidden;
   const req = ++histReq;
+  const hint = $("histKeepHint");
+  if (hint && histGroup !== "sent") hint.hidden = true;
   listLoading(list);
   try {
     const data = await api("/api/studies?group=" + histGroup);
@@ -178,6 +182,9 @@ async function loadHistory() {
     histStudies = data.studies || [];
     histTotal = Number(data.total != null ? data.total : histStudies.length);
     histTruncated = !!data.truncated;
+    histOnSuccess = data.on_success || "";
+    histAutoSend = data.auto_send !== false;
+    if (hint) hint.hidden = !(histGroup === "sent" && histOnSuccess === "keep");
     renderHistMods();
     renderHistory();
   } catch (e) {
@@ -225,17 +232,87 @@ function renderHistory() {
     const bits = [];
     if (histTruncated) bits.push(TF("Showing the newest {n} of {total} studies", { n: histStudies.length, total: histTotal }));
     if (q || histMods.size) bits.push(TF("{shown} of {n} match", { shown: shown.length, n: histStudies.length }));
+    // Nothing in the outgoing folder moves while the watcher is stopped, whatever the rows say.
+    if (histGroup === "outgoing" && !histAutoSend && histStudies.length) bits.push(T("Auto-send is stopped — nothing here is being sent."));
     count.textContent = bits.join(" · ");
     count.hidden = !bits.length;
   }
   list.innerHTML = "";
-  if (!histStudies.length) {
-    list.appendChild(emptyNote(histGroup === "sent" ? T("No archived studies yet.") : T("No received studies yet.")));
-    return;
-  }
+  if (!histStudies.length) { list.appendChild(emptyNote(histEmptyText())); return; }
   if (!shown.length) { list.appendChild(emptyNote(T("Nothing matches the filter."))); return; }
   shown.forEach((s) => list.appendChild(histRow(s)));
 }
+
+function histEmptyText() {
+  return histGroup === "sent" ? T("No archived studies yet.")
+    : histGroup === "outgoing" ? T("The outgoing folder is empty.") : T("No received studies yet.");
+}
+
+/* Outgoing rows: where the study has been delivered, one chip per destination, from the same send
+   record the Stuck tab reads. The worst file decides a chip; the ones that need an operator open Stuck. */
+const DEST_STATE = {
+  sent:     { icon: "✓", label: () => T("sent") },
+  sending:  { icon: "⏳", label: (d) => TF("sending {sent}/{n}", { sent: d.sent, n: d.files }) },
+  retrying: { icon: "⚠", label: (d) => TF("failed, retrying {sent}/{n}", { sent: d.sent, n: d.files }) },
+  stuck:    { icon: "⛔", label: () => T("stuck") },
+  held:     { icon: "⏸", label: () => T("held") },
+};
+function histDests(box, s) {
+  box.innerHTML = "";
+  (s.dests || []).forEach((d) => {
+    const st = DEST_STATE[d.state] || DEST_STATE.sending;
+    const needsOperator = d.state === "retrying" || d.state === "stuck" || d.state === "held";
+    const chip = document.createElement(needsOperator ? "button" : "span");
+    chip.className = "hist-chip dest-chip st-" + (DEST_STATE[d.state] ? d.state : "sending");
+    chip.textContent = st.icon + " " + (d.name || T("destinations")) + " · " + st.label(d);
+    const why = d.state === "retrying" ? [
+      d.last_error ? TF("last error: {err}", { err: d.last_error }) : "",
+      d.attempts ? TN(d.attempts, "{n} attempts") : "",
+      d.next_in != null ? fmtWait(d.next_in) : "",
+    ].filter(Boolean).join(" · ")
+      : d.state === "stuck" ? T("Routed to a name that is no longer an enabled destination — nothing retries these.")
+      : d.state === "held" ? T("A rule asks for a de-identified copy that cannot be made — one edit releases them.")
+      : "";
+    if (why) chip.title = why;
+    if (needsOperator) {
+      chip.type = "button";
+      chip.setAttribute("aria-label", chip.textContent + (why ? " — " + why : "") + " — " + T("Open Stuck"));
+      chip.addEventListener("click", () => goTo("dlgStudies", "stuck"));
+    }
+    box.appendChild(chip);
+  });
+  // Files no Auto-send pass has routed yet: it is stopped, or they are still settling.
+  if (s.unrouted) {
+    const wait = document.createElement("span");
+    wait.className = "hist-chip dest-chip st-waiting";
+    wait.textContent = TN(s.unrouted, "{n} images not yet picked up by Auto-send");
+    box.appendChild(wait);
+  }
+  histHand(box, s);
+  box.hidden = !box.childElementCount;
+}
+
+/* What the Send button delivered, in any group: Auto-send's record above never sees a study sent
+   by hand from Received. The latest press per destination is the answer. */
+function histHand(box, s) {
+  (s.hand || []).forEach((d) => {
+    const chip = document.createElement("span");
+    const n = (d.ok || 0) + (d.fail || 0) + (d.held || 0);
+    chip.className = "hist-chip dest-chip st-" + (d.state === "sent" ? "sent" : "retrying");
+    chip.textContent = (d.state === "sent" ? "✋ " : "⚠ ") + (d.name || T("destinations")) + " · " + (
+      d.state === "sent" ? TF("sent by hand {ts}", { ts: fmtWhen(d.epoch) })
+        : d.state === "partial" ? TF("sent by hand {ok}/{n}", { ok: d.ok || 0, n })
+        : T("hand send failed"));
+    const why = [
+      d.state !== "sent" ? TF("sent by hand {ts}", { ts: fmtWhen(d.epoch) }) : "",
+      d.held ? TN(d.held, "{n} held") : "",
+      d.last_error ? TF("last error: {err}", { err: d.last_error }) : "",
+    ].filter(Boolean).join(" · ");
+    if (why) chip.title = why;
+    box.appendChild(chip);
+  });
+}
+const allSent = (s) => !s.unrouted && (s.dests || []).length > 0 && s.dests.every((d) => d.state === "sent");
 
 function histRow(s) {
   const row = I18N_IN($("histRowTpl").content.cloneNode(true)).querySelector(".hist-row");
@@ -253,9 +330,11 @@ function histRow(s) {
   const src = s.source_ae || s.calling_aet || s.source || "";
   const when = s.received_at || s.mtime;
   row.querySelector(".hist-recv").textContent = [
-    !when ? "" : histGroup === "sent" ? TF("archived {ts}", { ts: fmtWhen(when) }) : TF("received {ts}", { ts: fmtWhen(when) }),
+    !when ? "" : histGroup === "sent" ? TF("archived {ts}", { ts: fmtWhen(when) })
+      : histGroup === "outgoing" ? TF("in outgoing since {ts}", { ts: fmtWhen(when) }) : TF("received {ts}", { ts: fmtWhen(when) }),
     src ? TF("from {src}", { src }) : "",
   ].filter(Boolean).join("  ·  ");
+  histDests(row.querySelector(".hist-dests"), s);
 
   const ser = row.querySelector(".hist-series");
   (s.series || []).slice(0, 8).forEach((se) => {
@@ -274,7 +353,7 @@ function histRow(s) {
   // Gated here: rows are built after applyCapabilities' sweep.
   capGate(row);
   const sendBtn = row.querySelector(".hist-send");
-  sendBtn.textContent = histGroup === "sent" ? T("Resend") : T("Send");
+  sendBtn.textContent = histGroup === "sent" || (histGroup === "outgoing" && allSent(s)) || (s.hand || []).length ? T("Resend") : T("Send");
   ariaWho(sendBtn, who);
   sendBtn.addEventListener("click", () => histSend(s, sendBtn));
   const menu = row.querySelector(".row-menu summary");
@@ -353,9 +432,11 @@ async function histDelete(s) {
 // Typed confirmation: the operator types the number of studies that will go.
 async function histDeleteAll() {
   const n = histTotal || histStudies.length;
-  if (!n) { flashNote(histGroup === "sent" ? T("No archived studies yet.") : T("No received studies yet."), false); return; }
+  if (!n) { flashNote(histEmptyText(), false); return; }
   const ask = histGroup === "sent"
     ? TF("Delete ALL {n} archived studies from disk? This cannot be undone.\n\nType {n} to confirm.", { n })
+    : histGroup === "outgoing"
+    ? TF("Delete ALL {n} studies in the outgoing folder from disk? Any not sent yet will never be sent. This cannot be undone.\n\nType {n} to confirm.", { n })
     : TF("Delete ALL {n} received studies from disk? This cannot be undone.\n\nType {n} to confirm.", { n });
   const typed = window.prompt(ask, "");
   if (typed == null) return;

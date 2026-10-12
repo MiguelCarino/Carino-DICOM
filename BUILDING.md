@@ -96,6 +96,17 @@ Output appears in **`desktop/dist/`**:
 > To build just one, e.g.: `npx electron-builder --linux rpm`. The CI workflow
 > installs whatever its runner needs.
 
+**The AppImage adds itself to the app menu.** Each time it starts it writes
+`~/.local/share/applications/carino-dicom.desktop` and
+`~/.local/share/icons/hicolor/512x512/apps/carino-dicom.png` (under
+`$XDG_DATA_HOME` if that is set). GNOME on Wayland shows a dock icon only
+through a `.desktop` file named after the window's app id, and an AppImage
+installs none, so without this it gets a generic icon. The entry follows the
+AppImage if you move it and disappears from the menu once the AppImage is
+deleted. Once the `.deb`/`.rpm` is installed, the next start removes it again, and a
+`carino-dicom.desktop` of your own (one without the `X-Carino-AppImage=true`
+line) is never overwritten. To remove it, delete those two files.
+
 **Always freeze the engine before packaging** (`python -m PyInstaller …`). A
 `beforeBuild` guard now aborts the build with a reminder if `desktop/engine/` is
 missing — otherwise the installer would ship without the DICOM engine and silently

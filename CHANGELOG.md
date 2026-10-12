@@ -5,6 +5,31 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Added
+- **History → Outgoing.** A third view between Received and Sent / Archived lists the
+  outgoing folder, with each destination's send state per study (sent, sending,
+  retrying, stuck, held) from Auto-send's own record. With `scu.on_success: keep`, a
+  forwarded study stays there and used to appear nowhere in History; Sent / Archived
+  now points to Outgoing in that case. Delete all on Outgoing spares a sent or pending
+  folder that sits inside the outgoing folder.
+- **History shows hand sends.** A study sent with the Send button now says where it went
+  and when, in every History view (✋ chips, kept in `.carinopacs_handsent.json` beside
+  the config, newest 2000 studies). A hand send from Received never enters the outgoing
+  folder, so Auto-send's record could not answer for it and History showed nothing.
+
+### Changed
+- **Destination names and errors in History need `routing.read`**, as on the Overview,
+  since an error can carry host:port. A profile with only `studies.read` sees one
+  nameless chip per study: whether it went out, never where to.
+
+### Fixed
+- **AppImage dock icon on GNOME Wayland.** GNOME on Wayland takes the dock icon only
+  from a `.desktop` file named after the window's app ID, and an AppImage run from
+  Downloads installed none. On each start the AppImage now writes
+  `~/.local/share/applications/carino-dicom.desktop` and its icon (marked
+  `X-Carino-AppImage=true`; `TryExec` hides it once the AppImage is gone). It never
+  touches an entry of your own, and removes its own once the .deb/.rpm is installed.
+
 ## [1.2.1] — 2026-10-11
 
 ### Added

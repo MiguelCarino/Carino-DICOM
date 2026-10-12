@@ -499,10 +499,13 @@
         <section class="tabpane" id="dlgHistory" role="tabpanel" aria-labelledby="tab_history">
           <p class="pane-lede" data-i18n-html>received &amp; sent studies</p>
           <div class="hist-bar">
-            <!-- A two-state toggle, not tabs: aria-pressed is kept by js/09-studies.js loadHistory(). -->
+            <!-- A toggle, not tabs: aria-pressed is kept by js/09-studies.js loadHistory(). In the order a
+                 study lives: it arrives, waits in the outgoing folder while it is forwarded, then is archived
+                 (only under on_success "move" — under "keep" it stays in Outgoing for good). -->
             <div class="hist-tabs sub">
               <button class="hist-tab active" data-group="received" aria-pressed="true" data-i18n>📥 Received</button>
-              <button class="hist-tab" data-group="sent" aria-pressed="false" data-i18n>📤 Sent / Archived</button>
+              <button class="hist-tab" data-group="outgoing" aria-pressed="false" data-i18n>📤 Outgoing</button>
+              <button class="hist-tab" data-group="sent" aria-pressed="false" data-i18n>🗄 Sent / Archived</button>
             </div>
             <input type="search" class="list-filter" id="histFilter" data-i18n-placeholder placeholder="Filter by patient, ID, accession or description" data-i18n-aria-label aria-label="Filter studies" />
             <div class="hist-tools">
@@ -516,6 +519,7 @@
               </details>
             </div>
           </div>
+          <p class="hint hint-b10" id="histKeepHint" hidden><span data-i18n>Auto-send keeps studies after sending them, so they stay in the outgoing folder and are not archived here.</span> <button type="button" class="linkish inline" id="histKeepGo" data-i18n>Show Outgoing</button></p>
           <div class="hist-mods" id="histMods" role="group" data-i18n-aria-label aria-label="Modality" hidden></div>
           <p class="hist-count" id="histCount" aria-live="polite" hidden></p>
           <div class="hist-list" id="histList"></div>
@@ -1130,6 +1134,7 @@
         <div class="hist-patient"></div>
         <div class="hist-meta"></div>
         <div class="hist-recv"></div>
+        <div class="hist-dests" hidden></div>
         <div class="hist-series"></div>
       </div>
       <!-- One primary action; the rest sit in a keyboard-reachable "⋯" menu (a <details>). -->

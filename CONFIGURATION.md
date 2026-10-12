@@ -413,7 +413,9 @@ What happens to a study once **every** DICOM file in it has been accepted by eve
 destination it was routed to.
 
 - **`keep`** — nothing happens. Files stay in the outgoing folder, and the archive
-  pass returns immediately without listing anything.
+  pass returns immediately without listing anything. Kept studies show in the
+  dashboard under *Studies* → *History* → *Outgoing*, with each destination's send
+  state, not under *Sent / Archived*.
 - **`move`** — the whole top-level item is moved to `sent_dir`, preserving its path
   relative to `watch_dir`. Everything goes: subfolders, non-DICOM files, the lot,
   so no empty directories are left behind. Name collisions are de-duplicated

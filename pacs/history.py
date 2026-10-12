@@ -79,28 +79,41 @@ def scan_studies(root: str, max_studies: int = 800) -> list[dict]:
     return scan(root, max_studies)["studies"]
 
 
-def scan(root: str, max_studies: int = 800) -> dict:
+def scan(root: str, max_studies: int = 800, skip=(), on_file=None) -> dict:
     """scan_studies() plus how many studies there were before the cap.
 
     ``{"studies": [...], "total": n, "truncated": bool}`` — the browser shows
     the newest *max_studies*, and has to be able to say so rather than present
     a cut list as the whole archive.
+
+    *skip* is folders under *root* that are not part of it — the sent and
+    pending trees may be configured inside the outgoing one, and the watcher
+    does not treat them as outgoing either. *on_file(study, path)* is called for
+    every DICOM file counted, so a caller can attach per-file facts to the study
+    row without walking the tree a second time.
     """
     if not root or not os.path.isdir(root):
         return {"studies": [], "total": 0, "truncated": False}
+    skip_abs = [os.path.abspath(d) for d in skip if d]
 
     studies: dict[str, dict] = {}
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        if skip_abs:
+            dirnames[:] = [d for d in dirnames
+                           if os.path.abspath(os.path.join(dirpath, d)) not in skip_abs]
         # One magic-byte test per file. Counting the folder and finding its
         # header were two loops over the same names, and a count cannot stop
         # early, so every file the hunt had already tested was tested again.
         hdr = None
         count = 0
+        paths = []
         for f in sorted(f for f in filenames if not f.startswith(".")):
             p = os.path.join(dirpath, f)
             if not is_dicom(p):
                 continue
             count += 1
+            if on_file is not None:
+                paths.append(p)
             if hdr is None:
                 hdr = _read_header(p)
         if hdr is None:
@@ -145,6 +158,8 @@ def scan(root: str, max_studies: int = 800) -> dict:
         })
         st["instances"] += count
         st["_dirs"].append(dirpath)
+        for p in paths:
+            on_file(st, p)
         try:
             # The DIRECTORY's mtime, never a file's: archiving copies files with
             # copy2 (which preserves their mtimes) into a freshly created folder,
@@ -229,15 +244,27 @@ def delete_study(root: str, path: str) -> None:
     prune_empty_dirs(os.path.dirname(real_path), real_root)
 
 
-def delete_all(root: str) -> int:
-    """Remove every study under *root* (keeps the root and any hidden sidecars)."""
+def delete_all(root: str, skip=()) -> int:
+    """Remove every study under *root* (keeps the root and any hidden sidecars).
+
+    *skip* is the same list scan() takes: folders under *root* that are not
+    part of it (the sent and pending trees nested in the outgoing folder).
+    They are kept, and a folder that holds one is emptied around it rather
+    than removed, so Delete all wipes exactly what the list showed."""
     if not root or not os.path.isdir(root):
         return 0
+    skip_abs = [os.path.abspath(d) for d in skip if d]
     removed = 0
     for name in os.listdir(root):
         if name.startswith("."):        # keep .carinopacs_state.json etc.
             continue
         p = os.path.join(root, name)
+        ap = os.path.abspath(p)
+        if ap in skip_abs:
+            continue
+        if any(d.startswith(ap + os.sep) for d in skip_abs) and os.path.isdir(p):
+            removed += delete_all(p, skip_abs)
+            continue
         try:
             if os.path.isdir(p):
                 shutil.rmtree(p)

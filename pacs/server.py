@@ -495,6 +495,10 @@ class PacsServer:
         # this department's modalities. See pacs/caught.py.
         self.caught = CaughtStore(store_dir=cfg.resolved("ris", "store_dir"), log=self.log)
         self.watcher = FolderWatcher(cfg, self.log, index=self.index)
+        # What the Send button delivered: Auto-send's record only covers the
+        # outgoing folder, and a study sent by hand from Received is not in it.
+        from .handsent import HandSends
+        self.handsent = HandSends(os.path.join(os.path.dirname(cfg.path), ".carinopacs_handsent.json"))
         # The watcher's router outlives every save, and it is the only router in
         # the process built without a Config. Bind it to the live one HERE, next
         # to the construction, so its routing decisions read the same
@@ -1703,7 +1707,13 @@ class PacsServer:
         from . import history
         root = self._group_root(group)
         if root is None:
-            raise ValueError("group must be received|sent")
+            raise ValueError("group must be received|outgoing|sent")
+        # Said with every list, so the Sent / Archived tab can tell an operator
+        # under "keep" that a forwarded study never comes here: it stays in the
+        # outgoing folder, and that is the tab to look in.
+        on_success = self.cfg.scu.get("on_success", "keep")
+        if group == "outgoing":
+            return self._outgoing_studies(root, on_success)
         # Walked, never read from the index, even though the index holds a row
         # per stored file and would answer without touching the disk. The list
         # is what the delete and send buttons are aimed at, and the index cannot
@@ -1711,13 +1721,119 @@ class PacsServer:
         # reads like a small archive, and a row outliving the folder it names
         # turns into a study that is not there. history.py's module docstring
         # has the full account, so nobody rebuilds it.
-        return {"group": group, "root": root, **history.scan(root)}
+        return self._with_hand_sends({"group": group, "root": root,
+                                      "on_success": on_success, **history.scan(root)})
+
+    def _with_hand_sends(self, res: dict) -> dict:
+        """Each study carries ``hand``: what the Send button delivered for it,
+        wherever it is listed. Auto-send's record cannot answer for a study
+        sent by hand from Received — it never entered the outgoing folder."""
+        from .handsent import study_key
+        for st in res.get("studies") or []:
+            st["hand"] = self.handsent.get(study_key(st.get("study_uid", ""), st.get("path", "")))
+        return res
+
+    # Per destination, the worst of a study's files wins: one held instance is a
+    # held study, whatever the other ninety-nine did.
+    _OUT_RANK = ("held", "stuck", "retrying", "sending", "sent")
+
+    @staticmethod
+    def _file_dest_states(e: dict, want: set) -> dict:
+        """{destination: state} for one outgoing file, read off its SendState
+        entry with the same rules stuck_sends applies, so this list and the
+        Stuck tab cannot disagree about a file.
+
+        sent      the destination accepted it (under this route or an earlier one)
+        held      a rule asks for a scrub nothing can perform; never dialled
+        stuck     routed to a name that is no longer enabled; nothing retries it
+        retrying  failed at least once, waiting out its backoff
+        sending   routed, not yet accepted, not yet failed"""
+        sent = set(e.get("sent") or [])
+        fails = e.get("fail") or {}
+        out = {n: "sent" for n in sent}
+        for n in e.get("held") or []:
+            out.setdefault(n, "held")
+        for n in e.get("route") or []:
+            if n in out:
+                continue
+            if n not in want:
+                out[n] = "stuck"
+            elif fails.get(n):
+                out[n] = "retrying"
+            else:
+                out[n] = "sending"
+        return out
+
+    def _watch_skip(self) -> list:
+        """Folders inside the outgoing folder that are not outgoing: the sent
+        and pending trees, when configured to live there."""
+        return [self.cfg.resolved("scu", "sent_dir"),
+                self.cfg.resolved("scu", "pending_dir")]
+
+    def _outgoing_studies(self, root: str, on_success: str) -> dict:
+        """The outgoing folder as History lists it, each study carrying where it
+        has been delivered.
+
+        Under on_success "keep" — the default — a forwarded study never leaves
+        this folder, so the sent list stays empty and this is the only place a
+        delivered study can be found. The per-destination answer is the
+        watcher's own SendState, the record stuck_sends reads: no second ledger,
+        so this tab and the Stuck tab describe the same files the same way.
+
+        A file whose entry is missing, has no route yet, or describes different
+        bytes (replaced under the same name) is counted in ``unrouted``: Auto-send
+        has not looked at it yet — it is stopped, or the file is still settling."""
+        from . import history
+        state = self.watcher.state
+        want = self._enabled_dest_names()
+        now = time.time()
+
+        def on_file(st: dict, path: str) -> None:
+            acc = st.setdefault("_send", {"dests": {}, "unrouted": 0})
+            e = state.peek(path)
+            try:
+                live = (os.path.getsize(path), os.path.getmtime(path))
+            except OSError:
+                live = None
+            if (not e or e.get("route") is None or live is None
+                    or (e.get("size"), e.get("mtime")) != live):
+                acc["unrouted"] += 1
+                return
+            fails = e.get("fail") or {}
+            for name, state_ in self._file_dest_states(e, want).items():
+                d = acc["dests"].setdefault(name, {
+                    "name": name, "files": 0, "sent": 0, "counts": {},
+                    "attempts": 0, "last_error": "", "next_try": float("inf")})
+                d["files"] += 1
+                d["counts"][state_] = d["counts"].get(state_, 0) + 1
+                if state_ == "sent":
+                    d["sent"] += 1
+                elif state_ == "retrying":
+                    f = fails.get(name) or {}
+                    d["attempts"] = max(d["attempts"], int(f.get("attempts", 0) or 0))
+                    d["last_error"] = f.get("last_error", "") or d["last_error"]
+                    d["next_try"] = min(d["next_try"], float(f.get("next_try", 0) or 0))
+
+        res = history.scan(root, skip=self._watch_skip(), on_file=on_file)
+        for st in res["studies"]:
+            acc = st.pop("_send", None) or {"dests": {}, "unrouted": 0}
+            dests = []
+            for d in sorted(acc["dests"].values(), key=lambda x: x["name"].lower()):
+                counts = d.pop("counts")
+                d["state"] = next(k for k in self._OUT_RANK if counts.get(k))
+                nt = d.pop("next_try")
+                d["next_in"] = max(0, int(nt - now)) if nt != float("inf") else None
+                dests.append(d)
+            st["dests"] = dests
+            st["unrouted"] = acc["unrouted"]
+        return self._with_hand_sends({"group": "outgoing", "root": root, "on_success": on_success,
+                                      "auto_send": bool(self.watcher.running), **res})
 
     def delete_study(self, group: str, path: str) -> dict:
         from . import history
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
         try:
             history.delete_study(root, path)
         except (ValueError, OSError) as exc:
@@ -1733,8 +1849,11 @@ class PacsServer:
         from . import history
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
-        n = history.delete_all(root)
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
+        # Outgoing skips the sent and pending trees when they sit inside it,
+        # exactly as its listing does, or confirming wipes the archive too.
+        skip = self._watch_skip() if group == "outgoing" else ()
+        n = history.delete_all(root, skip=skip)
         if self.index is not None:
             self.index.remove_group(self._index_group(group))
         self.log.info(f"Deleted all {group} studies ({n} removed)", kind="config")
@@ -1773,7 +1892,7 @@ class PacsServer:
         from .scu import Destination, c_store
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
         try:
             files = history.study_files(root, path)
         except (ValueError, OSError) as exc:
@@ -1783,6 +1902,8 @@ class PacsServer:
         dests = [Destination.from_dict(d) for d in self.cfg.enabled_destinations()]
         if not dests:
             return {"ok": False, "message": "no enabled destinations — add one in Destinations first"}
+        from .handsent import study_key
+        key = study_key(history.study_identity(root, path).get("study_uid", ""), path)
         ctx = None
         if any(d.tls for d in dests):
             try:
@@ -1835,7 +1956,19 @@ class PacsServer:
                        "the new ones for it. They are held instead; press Send again to "
                        "deliver the whole study under the current settings.")
 
+        # Per destination, for the hand-send record History shows.
+        tally: dict = {}
+
+        def _tally(dname: str) -> dict:
+            return tally.setdefault(dname, {"ok": 0, "fail": 0, "held": 0, "last_error": ""})
+
         def _record(fp: str, dname: str, res) -> bool:
+            t = _tally(dname)
+            if res.ok:
+                t["ok"] += 1
+            else:
+                t["fail"] += 1
+                t["last_error"] = res.message or t["last_error"]
             with self.watcher._lock:
                 if res.ok:
                     self.watcher.sent_count += 1
@@ -1866,6 +1999,8 @@ class PacsServer:
                 said nothing at all, on any channel, and forwarded identified."""
                 nonlocal held
                 held += len(names)
+                for n in names:
+                    _tally(n)["held"] += 1
                 key = ";".join(sorted(names)) + "|" + why
                 if key in said:
                     return
@@ -1991,6 +2126,9 @@ class PacsServer:
                                 fail += 1
                 except Exception as exc:
                     fail += len([x for x in todo if x.name in scrub])
+                    for n in scrub:
+                        _tally(n)["fail"] += 1
+                        _tally(n)["last_error"] = f"de-identification failed ({exc})"
                     self.log.error(
                         f"Send {os.path.basename(fp)}: de-identification failed ({exc}) — "
                         f"not forwarded to {', '.join(sorted(scrub))}",
@@ -2022,6 +2160,8 @@ class PacsServer:
                 self.log.warn(summary, kind="send")
             else:
                 self.log.info(summary, kind="send")
+            for dname, t in tally.items():
+                self.handsent.record(key, dname, **t)
 
         threading.Thread(target=_run, name="pacs-send", daemon=True).start()
         return {"ok": True, "message": f"Sending {len(files)} instance(s) to their routed destination(s)…"}
@@ -2053,7 +2193,7 @@ class PacsServer:
         from . import history, routing
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
         try:
             files = history.study_files(root, path)
         except (ValueError, OSError) as exc:
@@ -2077,7 +2217,7 @@ class PacsServer:
         from .dicomfs import safe_within
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
         if not safe_within(root, path):
             return {"ok": False, "message": "path is outside the storage folder"}
         kind = ingest.detect_kind_bytes(data, filename)
@@ -2113,7 +2253,7 @@ class PacsServer:
         from urllib.parse import urlencode
         root = self._group_root(group)
         if root is None:
-            return {"ok": False, "message": "group must be received|sent"}
+            return {"ok": False, "message": "group must be received|outgoing|sent"}
         try:
             files = history.study_files(root, path)
         except (ValueError, OSError) as exc:

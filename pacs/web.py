@@ -1471,9 +1471,40 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         group = request.args.get("group", "received")
         try:
-            return jsonify(server.list_studies(group))
+            body = server.list_studies(group)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
+        if not guard.current().can("routing.read"):
+            for st in body.get("studies") or []:
+                _anonymise_sends(st)
+        return jsonify(body)
+
+    # The rank a merged chip takes: the worst of what it merges.
+    _SEND_RANK = ("held", "stuck", "retrying", "failed", "partial", "sending", "sent")
+
+    def _anonymise_sends(st: dict) -> None:
+        """Destination names and their errors are routing.read, as on the
+        Overview: an error carries host:port. A profile without it still sees
+        whether a study went out — one nameless chip per kind, the worst state
+        of what it merges, counts summed — and never where to."""
+        for key in ("dests", "hand"):
+            rows = st.get(key) or []
+            if not rows:
+                continue
+            m = {"name": "", "last_error": "",
+                 "state": min((r.get("state", "sent") for r in rows),
+                              key=lambda x: _SEND_RANK.index(x) if x in _SEND_RANK else 0)}
+            for f in ("files", "sent", "ok", "fail", "held"):
+                if any(f in r for r in rows):
+                    m[f] = sum(int(r.get(f) or 0) for r in rows)
+            if any("attempts" in r for r in rows):
+                m["attempts"] = max(int(r.get("attempts") or 0) for r in rows)
+            if any("epoch" in r for r in rows):
+                m["epoch"] = max(int(r.get("epoch") or 0) for r in rows)
+            if key == "dests":
+                waits = [r["next_in"] for r in rows if r.get("next_in") is not None]
+                m["next_in"] = min(waits) if waits else None
+            st[key] = [m]
 
     def _study_action(fn):
         d = request.get_json(silent=True) or {}

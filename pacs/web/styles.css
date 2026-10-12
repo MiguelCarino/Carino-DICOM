@@ -520,7 +520,9 @@ html[lang="ru"] .pane-lede, html[lang="ja"] .pane-lede { text-transform: none; l
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px;
 }
 .hist-row:hover { border-color: #3a3a3a; }
-.hist-main { min-width: 0; flex: 1; }
+/* max-width: a wrapping row (narrow screens) sizes its line to the longest nowrap meta line, which
+   pushed every row past the list's edge; capped, the ellipsis on that line does its job. */
+.hist-main { min-width: 0; max-width: 100%; flex: 1; }
 .hist-patient { font-weight: 700; font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-meta { color: var(--muted); font-family: var(--mono); font-size: .72rem; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-series { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -710,6 +712,17 @@ html[lang="ru"] .order-origin, html[lang="ja"] .order-origin { text-transform: n
 .hist-recv { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-recv:empty { display: none; }
+/* Outgoing: one chip per destination with its send state; the colour carries the state, the text says it. */
+.hist-dests { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.hist-dests[hidden] { display: none; }
+.dest-chip { font-size: .66rem; white-space: normal; overflow-wrap: anywhere; max-width: 100%; text-align: left; }
+.dest-chip.st-sent { color: var(--ok); border-color: rgba(34, 197, 94, .45); }
+.dest-chip.st-sending, .dest-chip.st-waiting { color: var(--muted); }
+.dest-chip.st-retrying, .dest-chip.st-held { color: var(--warn); border-color: var(--warn); }
+.dest-chip.st-stuck { color: var(--bad); border-color: var(--bad); }
+button.dest-chip { cursor: pointer; }
+button.dest-chip:hover { background: var(--accent-faint); }
+button.dest-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hist-actions { align-items: center; }
 .hist-busy { font-family: var(--mono); font-size: .68rem; color: var(--accent); white-space: nowrap; }
 .hist-busy:empty { display: none; }

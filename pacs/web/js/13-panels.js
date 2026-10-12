@@ -165,7 +165,7 @@ function goTo(panelId, tabId) {
     panelId = legacy[0];
     tabId = tabId || legacy[1] || null;
   }
-  if (tabId === "received" || tabId === "sent") {
+  if (tabId === "received" || tabId === "outgoing" || tabId === "sent") {
     showPanel(panelId, { tab: "history", silent: true });
     setHistGroup(tabId);
     writeHash();

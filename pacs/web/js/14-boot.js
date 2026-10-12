@@ -201,11 +201,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (panel) { selectTab(panel.id, next.dataset.tab); writeHash(); next.focus(); }
     }));
 
-  // History Received/Sent, inside the Studies History pane.
+  // History Received/Outgoing/Sent, inside the Studies History pane.
   document.querySelectorAll("#dlgHistory .hist-tab[data-group]").forEach((tab) =>
     tab.addEventListener("click", () => {
       setHistGroup(tab.dataset.group);
     }));
+  $("histKeepGo").addEventListener("click", () => setHistGroup("outgoing"));
   $("histRefresh").addEventListener("click", loadHistory);
   $("histDeleteAll").addEventListener("click", histDeleteAll);
   // RIS orders: Open/Closed sub-tabs + form + actions.
