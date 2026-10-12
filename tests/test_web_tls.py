@@ -235,6 +235,12 @@ def test_tls_cert_command_enable_and_no_overwrite(tmp_path):
     assert tlsutil.cert_fingerprint(doc["web"]["tls_cert"]) == fp
 
 
+# How long a spawned `serve` may take to answer. http.server's server_bind()
+# calls socket.getfqdn() on the bind address, and on GitHub's macOS runners
+# that reverse lookup of 127.0.0.1 alone has taken over 30 s.
+SERVE_START_S = 120
+
+
 def _serve(cfgp, port, extra=()):
     # Output goes to files, not pipes: nobody reads a pipe while the test runs,
     # and once the engine has logged a pipe buffer's worth (16 KB on macOS) it
@@ -273,7 +279,7 @@ def test_serve_over_https_end_to_end(tmp_path):
     port = _free_port()
     p = _serve(cfgp, port)
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + SERVE_START_S
         last = None
         while time.monotonic() < deadline:
             try:
@@ -357,7 +363,7 @@ def test_forwarded_headers_are_trusted_only_behind_proxy(tmp_path, behind):
     port = _free_port()
     p = _serve(cfgp, port)
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + SERVE_START_S
         while True:
             try:
                 cookie = _login_cookie(port, token)
