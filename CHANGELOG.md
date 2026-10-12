@@ -6,6 +6,30 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 ## [Unreleased]
 
 ### Added
+- **HTTPS for the dashboard and DICOMweb.** `web.tls`, `web.tls_cert` and `web.tls_key`
+  serve both over TLS 1.2 or newer with forward-secret AEAD suites only. A missing,
+  unreadable or mismatched certificate or key stops `serve` (exit 2) with a message
+  naming the file; it never falls back to plain HTTP. The handshake runs in the request
+  thread, so a client that connects and says nothing no longer holds the accept loop.
+  The desktop app opens `https://` when it is on and accepts the configured certificate,
+  and only that one. The container healthcheck probes over HTTPS.
+- **`pacs tls-cert`** makes a self-signed ECDSA certificate for `localhost`, `127.0.0.1`,
+  `::1` and the names given (`--name`, `--lan`), writes the key `0600`, prints the
+  SHA-256 fingerprint, and with `--enable` turns `web.tls` on. Needs the `cryptography`
+  package, now in requirements.txt; without it, the command prints the equivalent
+  `openssl` line.
+- **Reverse-proxy configs**, `deploy/caddy/Caddyfile` and `deploy/nginx/carino-dicom.conf`:
+  TLS termination, HSTS, 1 GiB STOW-RS bodies, half-hour timeouts, no patient data
+  spooled to the proxy's temp files (nginx). Both were run against a live engine.
+- **`web.behind_proxy`** trusts one hop of `X-Forwarded-For` / `-Proto` / `-Host`, so
+  behind the proxy the login rate limit counts real clients, the session cookie is
+  `Secure` and DICOMweb `RetrieveURL`s say `https://` and the public name.
+- **docs/ENCRYPTION-AT-REST.md**: LUKS2 (with TPM2 unlock and its trade-offs),
+  BitLocker and FileVault, key custody, rotation, leavers, backups, and what to show an
+  auditor.
+- **The systemd unit says `RequiresMountsFor=/var/lib/carino-pacs`**, so the service
+  never starts against an empty mountpoint when the data lives on its own volume.
+
 - **History → Outgoing.** A third view between Received and Sent / Archived lists the
   outgoing folder, with each destination's send state per study (sent, sending,
   retrying, stuck, held) from Auto-send's own record. With `scu.on_success: keep`, a
@@ -18,6 +42,8 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   folder, so Auto-send's record could not answer for it and History showed nothing.
 
 ### Changed
+- **A dashboard with a token, served over plain HTTP on a non-loopback address, logs a
+  warning at every start.** It still starts.
 - **Destination names and errors in History need `routing.read`**, as on the Overview,
   since an error can carry host:port. A profile with only `studies.read` sees one
   nameless chip per study: whether it went out, never where to.

@@ -17,6 +17,18 @@ Documentation=file:/opt/carino-pacs/packaging/README.md
 Wants=network-online.target
 After=network-online.target
 
+# Never start against an empty mountpoint. When /var/lib/carino-pacs (or a
+# parent) is its own encrypted volume — docs/ENCRYPTION-AT-REST.md — this makes
+# the service wait for that mount and refuse to start without it, instead of
+# receiving studies into the bare directory underneath, where they would sit
+# unencrypted and vanish from view the moment the volume is mounted over them.
+# StateDirectory= below already implies the same dependency (systemd.exec(5),
+# "Implicit Dependencies"); it is written out so the guarantee does not hang on
+# a side effect. If scp.storage_dir or any other data path is moved to a
+# different mount, add that path here — and to ReadWritePaths= — in a drop-in:
+#   systemctl edit carino-pacs.service
+RequiresMountsFor=/var/lib/carino-pacs
+
 StartLimitIntervalSec=0
 # Pairs with Restart=always in [Service]; see the reasoning there. It lives up
 # here because the start rate limiter is a property of the unit, not of the

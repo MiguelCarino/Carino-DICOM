@@ -7,3 +7,9 @@ pynetdicom>=3.0
 flask>=2.2
 pillow>=9
 psutil>=5.9
+# Only `pacs tls-cert` imports it, to write a self-signed certificate for the
+# HTTPS dashboard; serving HTTPS is the standard library's ssl module. The
+# standard library cannot create a certificate, the openssl CLI is not on a
+# stock Windows machine, and PyCA cryptography ships wheels for every platform
+# this runs on. If it is missing, tls-cert prints the equivalent openssl line.
+cryptography>=42

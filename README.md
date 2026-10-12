@@ -199,8 +199,8 @@ release a `no-deidentifier` hold.
 | Virtual print receiver | End-to-end tests against real print SCUs |
 | De-identification | Well covered; pixel data out of scope |
 | Index, routing, auth, DICOMweb, Query/Retrieve | Newer, each with its own suite |
-| Failover monitor | One regression test |
-| HL7 listener, Modality Worklist | Tested by hand only; the thinnest coverage |
+| Failover monitor | Two suites: who may answer a failover, and the worklist hand-over |
+| HL7 listener, Modality Worklist | Automated suites for order handling (through the listener's message handler, not yet over a live MLLP socket) and for the worklist (real C-FIND against the real SCP). Still the thinnest coverage, and not tried against a real RIS |
 | Desktop tray app | Runs; installers unsigned unless you add signing secrets |
 
 **Nothing here has been validated against clinical equipment.** It is developed
@@ -211,10 +211,13 @@ or fails with it, please open an issue.
 
 - **Not a medical device** (no CE mark or FDA clearance), and **not for primary
   diagnosis**. Whoever deploys it is responsible for validating it.
-- **No encryption at rest.** Studies, the index, orders, captured prints and
-  `config.json` (tokens, `deid.secret`, password hashes) are plain files. Use
-  full-disk encryption and restrict access to the data directory. See
-  [SECURITY.md](SECURITY.md#why-encryption-at-rest-is-deferred) for why.
+- **No encryption at rest in the application.** Studies, the index, orders,
+  captured prints and `config.json` (tokens, `deid.secret`, password hashes) are
+  plain files. Put the data directory on an encrypted volume and restrict access
+  to it: [docs/ENCRYPTION-AT-REST.md](docs/ENCRYPTION-AT-REST.md) is the
+  step-by-step for LUKS, BitLocker and FileVault, including who holds the
+  recovery keys. [SECURITY.md](SECURITY.md#why-encryption-at-rest-is-deferred)
+  explains why it is done there and not in the application.
 - **Profiles are off until you turn them on.** Until then, one shared token can
   do everything.
 - **The audit trail can be truncated** from the end, and someone with write
@@ -223,8 +226,9 @@ or fails with it, please open an issue.
 - **Burned-in patient data is not removed** by de-identification.
 - **The HL7 listener has no authentication or encryption.** Bind it to a trusted
   network segment and set `ris.allowed_hosts`.
-- **The dashboard uses plain HTTP.** Put a reverse proxy with TLS in front of it
-  if it is reachable from other machines.
+- **The dashboard is plain HTTP until you turn on HTTPS.** Anything reachable
+  from other machines should use one of the two options under
+  [Security](#security): built-in HTTPS, or the shipped reverse-proxy configs.
 
 Throughout the design, **a visible failure is better than an image that silently
 never arrives.** The AGPL warranty disclaimer is meant literally.
@@ -242,6 +246,32 @@ either. The container generates a token on first boot. Failed sign-ins are
 rate-limited, state-changing calls need an `X-Carino` header, the config file is
 written `0600`, and every DICOM listener supports TLS (including mutual TLS)
 and AE/host allow-lists.
+
+**HTTPS for the dashboard and DICOMweb.** Two ways, pick one:
+
+- **Built in.** `web.tls`, `web.tls_cert` and `web.tls_key`. TLS 1.2 or newer,
+  forward-secret ciphers only. Without a certificate from your own CA, make a
+  self-signed one:
+
+  ```bash
+  ./run.sh tls-cert --lan --name pacs.radiology.local --enable
+  ```
+
+  It writes `tls/web-cert.pem` and `tls/web-key.pem` (the key mode `0600`)
+  beside the config, covers `localhost`, `127.0.0.1` and the names you give, and prints the
+  SHA-256 fingerprint. Compare that with the browser before you trust it. A
+  certificate or key that is missing, unreadable or mismatched stops the
+  dashboard with a message naming the file; it never falls back to plain HTTP.
+- **Behind a reverse proxy.** [deploy/caddy/Caddyfile](deploy/caddy/Caddyfile)
+  and [deploy/nginx/carino-dicom.conf](deploy/nginx/carino-dicom.conf) terminate
+  TLS, send HSTS, allow 1 GiB STOW-RS uploads and long timeouts. Keep
+  `web.host` at `127.0.0.1`, set `web.behind_proxy` to `true`, and **set
+  `web.auth_token`**: behind a proxy the engine is on loopback and cannot tell
+  that it is reachable from the network. Both files were run against a live
+  engine (QIDO-RS, STOW-RS of a 30 MB instance, TLS 1.1 refused).
+
+Plain HTTP on `127.0.0.1` keeps working as before. A dashboard with a token,
+served over plain HTTP on a non-loopback address, logs a warning at every start.
 
 ## No telemetry
 
@@ -296,6 +326,7 @@ file, and invalid combinations are refused at save time with an explanation.
 ./run.sh print | ris | mwl | qr     # each listener on its own
 ./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS [--tls]
 ./run.sh init [--token]             # create the config and folders; --token generates the API token
+./run.sh tls-cert [--name H] [--lan] [--enable]   # self-signed HTTPS certificate for the dashboard
 ```
 
 `-c / --config <path>` is a global option and goes **before** the subcommand.
@@ -320,6 +351,8 @@ temporary loopback test archive for bench testing.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Threads, ownership and failure paths |
 | [CONFIGURATION.md](CONFIGURATION.md) | Every `config.json` key |
 | [SECURITY.md](SECURITY.md) | Threat model and disclosure |
+| [docs/ENCRYPTION-AT-REST.md](docs/ENCRYPTION-AT-REST.md) | Encrypting the volume that holds the studies, and who keeps the keys |
+| [deploy/](deploy/) | Reverse-proxy configs (Caddy, nginx) for HTTPS in front of the dashboard |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, conventions, tests |
 | [packaging/README.md](packaging/README.md) | systemd / Podman on a headless box |
 | [BUILDING.md](BUILDING.md) | Desktop app, installers, signing |

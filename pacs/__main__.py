@@ -9,10 +9,12 @@
     python -m pacs qr         # Query/Retrieve SCP (C-FIND/C-MOVE/C-GET), headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
+    python -m pacs tls-cert   # self-signed HTTPS certificate for the dashboard
 
 Every subcommand loads the config named by -c/--config as its first act, and
-only one of them writes it back on its own: `init --token`, which mints
-web.auth_token and saves. (`serve` rewrites it too, but through the dashboard —
+only two of them write it back on their own: `init --token`, which mints
+web.auth_token and saves, and `tls-cert --enable`, which points web.tls_cert /
+web.tls_key at the pair it just made. (`serve` rewrites it too, but through the dashboard —
 the Settings pages save the same Config object this process is holding.) The
 per-command overrides (--port, --aet, --out, --watch-dir) change the loaded
 document in memory for the life of that process and nothing else — enrolling a
@@ -136,6 +138,30 @@ def cmd_init(args) -> int:
     return 0
 
 
+def web_transport_warnings(host: str, web: dict, tls: bool) -> list:
+    """What `serve` should warn about how the dashboard is exposed. Never a refusal.
+
+    * A token over plain HTTP on a reachable bind — allowed (a lab network, a
+      proxy on another box) but never silent: the token and every session
+      cookie cross the wire in clear.
+    * behind_proxy on a reachable bind — anything that can reach the port
+      directly can forge X-Forwarded-For and dodge the login rate limit.
+    """
+    out = []
+    if is_loopback_host(host):
+        return out
+    if not tls and auth_token_of(web):
+        out.append(f"The dashboard is served over plain HTTP on '{host}', which is reachable from the "
+                   f"network: the access token and session cookies travel unencrypted. Turn on web.tls "
+                   f"(python -m pacs tls-cert --enable) or bind 127.0.0.1 behind a TLS reverse proxy "
+                   f"(see deploy/).")
+    if isinstance(web, dict) and web.get("behind_proxy") is True:
+        out.append(f"web.behind_proxy is on but the dashboard is bound to '{host}': anything that can reach "
+                   f"this port directly can forge X-Forwarded-For and dodge the login rate limit. Bind "
+                   f"127.0.0.1 and let the proxy be the only way in.")
+    return out
+
+
 def cmd_serve(args) -> int:
     """Run the dashboard plus whatever the config enables; block until it stops.
 
@@ -166,7 +192,27 @@ def cmd_serve(args) -> int:
               file=sys.stderr)
         return 2
 
+    # HTTPS is built BEFORE anything binds, for the same reason as the gate
+    # above: a configured certificate that cannot be loaded must stop the start
+    # rather than fall back to plain HTTP, which on a LAN bind would hand the
+    # token to anyone listening. The error names the file and what is wrong.
+    ssl_ctx = None
+    if cfg.web.get("tls") is True:
+        from .tlsutil import web_server_context
+        try:
+            ssl_ctx = web_server_context(cfg.resolve_path(str(cfg.web.get("tls_cert", ""))),
+                                         cfg.resolve_path(str(cfg.web.get("tls_key", ""))))
+        except ValueError as exc:
+            print(f"Refusing to serve the dashboard: {exc}\n"
+                  f"  Fix the paths in {cfg.path}, make a new pair with "
+                  f"`python -m pacs -c {cfg.path} tls-cert --enable --force`,\n"
+                  f"  or set web.tls to false.", file=sys.stderr)
+            return 2
+
     server = PacsServer(cfg, dev_peer=args.dev_peer)
+    for msg in web_transport_warnings(host, cfg.web, tls=ssl_ctx is not None):
+        server.log.warn(msg, kind="web")
+        print(f"WARNING: {msg}", file=sys.stderr)
     # Before the services: the receiver hands every stored instance to the index
     # writer, and a cold boot answers its first query out of whatever the rescan
     # has reached by then rather than out of an empty database.
@@ -245,13 +291,24 @@ def cmd_serve(args) -> int:
     sweep_stale(log=server.log, cfg=cfg)
 
     app = create_app(server)
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
+    if cfg.web.get("behind_proxy") is True:
+        # One proxy hop, trusted for the client address, the scheme and the
+        # host it was asked for. That is what makes the login rate limit count
+        # per real client instead of per proxy, marks the session cookie Secure
+        # behind an HTTPS proxy, and makes DICOMweb's RetrieveURLs say https://
+        # and the public name.
+        # Trusting these headers is only safe when nothing but the proxy can
+        # reach this port; web_transport_warnings() says so when it can.
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+    scheme = "https" if ssl_ctx is not None else "http"
+    url = f"{scheme}://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
     print(f"{APP_NAME} {__version__} dashboard → {url}")
     print(f"Config: {cfg.path}")
     if args.dev_peer:
         print("Dev peer enabled — the dashboard may create a second, disposable archive.")
     try:
-        app.run(host=host, port=port, threaded=True, use_reloader=False)
+        app.run(host=host, port=port, threaded=True, use_reloader=False, ssl_context=ssl_ctx)
     finally:
         server.shutdown()
     return 0
@@ -379,6 +436,66 @@ def cmd_echo(args) -> int:
     return 0 if res.ok else 1
 
 
+def cmd_tls_cert(args) -> int:
+    """Make a self-signed certificate + key for the HTTPS dashboard.
+
+    Bootstrap only: a self-signed certificate encrypts the connection, but each
+    browser has to be told to trust it, and the fingerprint printed here is how
+    the operator checks that what the browser shows is this one. A certificate
+    from the site's own CA is the better answer wherever one exists.
+
+    Writes next to the config (tls/web-cert.pem, tls/web-key.pem) unless told
+    otherwise, never overwrites without --force, and with --enable saves
+    web.tls / web.tls_cert / web.tls_key — the second command, after
+    `init --token`, that writes the config on its own.
+    """
+    from .tlsutil import generate_self_signed, lan_ip
+
+    cfg = Config(args.config)
+    base = os.path.dirname(cfg.path)
+    cert = os.path.abspath(args.cert or os.path.join(base, "tls", "web-cert.pem"))
+    key = os.path.abspath(args.key or os.path.join(base, "tls", "web-key.pem"))
+    existing = [p for p in (cert, key) if os.path.exists(p)]
+    if existing and not args.force:
+        print(f"{' and '.join(existing)} already exist{'s' if len(existing) == 1 else ''} — left alone. "
+              f"Pass --force to replace {'it' if len(existing) == 1 else 'them'}.", file=sys.stderr)
+        return 2
+    names = list(args.name or [])
+    if args.lan:
+        ip = lan_ip()
+        if ip:
+            names.append(ip)
+        else:
+            print("WARNING: --lan: could not work out this machine's LAN address; name it with --name.",
+                  file=sys.stderr)
+    bind = cfg.web.get("host", "")
+    if isinstance(bind, str) and bind.strip() and bind.strip() not in ("0.0.0.0", "::"):
+        names.append(bind.strip())
+    try:
+        fp = generate_self_signed(cert, key, names, days=args.days)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(f"Wrote {cert}")
+    print(f"Wrote {key}  (mode 0600 — keep it that way)")
+    shown = [n for n in dict.fromkeys(names) if n.lower() not in ("localhost", "127.0.0.1", "::1")]
+    print(f"  names: localhost, 127.0.0.1, ::1{''.join(', ' + n for n in shown)}")
+    print(f"  valid: {args.days} days")
+    print(f"  SHA-256 fingerprint: {fp}")
+    print("  Compare it with what the browser shows before you accept the certificate.")
+    if args.enable:
+        with cfg.mutate():
+            cfg.web["tls"] = True
+            cfg.web["tls_cert"] = cert
+            cfg.web["tls_key"] = key
+            cfg.save()
+        print(f"  web.tls is on in {cfg.path} — restart `pacs serve` to use it.")
+    else:
+        print(f"  To use it, set web.tls to true, web.tls_cert and web.tls_key to these paths in {cfg.path},"
+              " or re-run with --enable.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pacs", description=f"{APP_NAME} — simple DICOM store PACS")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
@@ -449,6 +566,19 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--calling", help="calling (local) AE title")
     e.add_argument("--tls", action="store_true", help="connect over TLS (uses scu TLS settings from config)")
     e.set_defaults(func=cmd_echo)
+
+    tc = sub.add_parser("tls-cert", help="make a self-signed HTTPS certificate for the dashboard")
+    tc.add_argument("--name", action="append", metavar="HOST_OR_IP",
+                    help="a host name or IP the dashboard is reached by (repeatable); "
+                         "localhost, 127.0.0.1 and ::1 are always included")
+    tc.add_argument("--lan", action="store_true", help="also include this machine's LAN IP address")
+    tc.add_argument("--days", type=int, default=825, help="validity in days (default 825)")
+    tc.add_argument("--cert", help="certificate path (default: tls/web-cert.pem beside the config)")
+    tc.add_argument("--key", help="private key path (default: tls/web-key.pem beside the config)")
+    tc.add_argument("--force", action="store_true", help="replace an existing certificate/key")
+    tc.add_argument("--enable", action="store_true",
+                    help="also set web.tls, web.tls_cert and web.tls_key in the config")
+    tc.set_defaults(func=cmd_tls_cert)
 
     i = sub.add_parser("init", help="scaffold config.json and its folders")
     # store_true, not a value: a token typed on a command line lands in shell

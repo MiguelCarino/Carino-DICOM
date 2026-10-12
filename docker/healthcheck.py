@@ -37,14 +37,24 @@ def check_dashboard(web: dict) -> None:
     token = str(web.get("auth_token", "")).strip()
     # Always talk to the container's own loopback: web.host may be 0.0.0.0, and
     # this check should never leave the container.
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/status")
+    # web.tls on: the same loopback probe over HTTPS. The certificate is not
+    # verified — it names the host the operator reaches, not 127.0.0.1, and this
+    # request asks only whether this container's own engine answers.
+    scheme = "https" if web.get("tls") is True else "http"
+    ctx = None
+    if scheme == "https":
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(f"{scheme}://127.0.0.1:{port}/api/status")
     if token:
         # Sent both ways on purpose — the API's header name is settling, and a
         # healthcheck that fails on a rename would take the container down.
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("X-Auth-Token", token)
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
             body = resp.read(65536)
             code = resp.status
     except urllib.error.HTTPError as exc:

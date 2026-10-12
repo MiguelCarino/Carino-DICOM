@@ -173,7 +173,13 @@
     "port": 8042,
     "editor_url": "/editor/",
     "auth_token": "",
-    "update_check": false
+    "update_check": false,
+    "_comment_tls": "tls: serve the dashboard and DICOMweb over HTTPS (TLS 1.2 or newer) with tls_cert / tls_key (PEM; relative paths resolve against this file's folder). `python -m pacs tls-cert --enable` makes a self-signed pair and fills these in. Read once at start: a renewed certificate is in use after a restart. Or leave it off and put the reverse proxy from deploy/ in front.",
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": "",
+    "_comment_behind_proxy": "behind_proxy: true only when this engine sits behind the reverse proxy in deploy/ and is bound to 127.0.0.1. It trusts one hop of X-Forwarded-For / -Proto / -Host, so the login rate limit counts real clients, the session cookie is Secure and DICOMweb links say https://. Anything that can reach the port directly could forge those headers.",
+    "behind_proxy": false
   },
   "logs_dir": "./logs",
   "setup_completed": ""

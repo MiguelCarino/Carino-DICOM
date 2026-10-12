@@ -1,0 +1,81 @@
+# Carino DICOM behind Caddy: HTTPS for the dashboard and DICOMweb.
+#
+# What this file assumes about Carino DICOM (config.json):
+#
+#   "web": { "host": "127.0.0.1", "port": 8042, "behind_proxy": true,
+#            "auth_token": "<set one: python -m pacs init --token>" }
+#
+# * host 127.0.0.1: Caddy is the only way in. Nothing else on the network can
+#   reach the engine, so nothing else can forge the X-Forwarded-* headers that
+#   behind_proxy tells it to trust.
+# * auth_token: SET IT. The engine only insists on a token when web.host is not
+#   loopback, and behind a proxy it IS loopback, so it cannot tell that it is in
+#   fact on the network. Without a token, this file publishes an unauthenticated
+#   archive to everyone who can reach Caddy.
+# * behind_proxy: the login rate limit then counts real clients instead of
+#   Caddy, the session cookie is marked Secure, and DICOMweb RetrieveURLs say
+#   https:// and this site's name.
+#
+# Two values come from the environment so this file can ship unedited (or edit
+# the defaults after the colon):
+#
+#   CARINO_DOMAIN    the name users type, e.g. pacs.radiology.example.org
+#   CARINO_UPSTREAM  where the engine listens, default 127.0.0.1:8042
+#
+# Certificates: with a public DNS name Caddy gets one from Let's Encrypt on its
+# own. On a LAN with no public name, uncomment `tls internal` below: Caddy then
+# signs with its own local CA, whose root (in Caddy's data directory,
+# pki/authorities/local/root.crt) you install on the workstations once. Or point
+# `tls` at a certificate from the hospital's CA:  tls /etc/caddy/pacs.crt /etc/caddy/pacs.key
+#
+# Tested with Caddy 2 against a live engine: QIDO-RS and STOW-RS through it,
+# HSTS present, TLS 1.1 refused, plain HTTP redirected. See SECURITY.md.
+
+{$CARINO_DOMAIN:pacs.example.org} {
+	# tls internal
+
+	# Caddy already refuses anything older than TLS 1.2 and picks modern
+	# suites; stated here so nobody has to look it up.
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	header {
+		# One year, this host only. Add includeSubDomains only if every
+		# subdomain of this name already serves HTTPS.
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# STOW-RS: a whole CT study can arrive in one POST. The engine caps a STOW
+	# body at 1 GiB; this sits just above that so the engine, not the proxy, is
+	# the one that answers "too large" with a DICOM-shaped error.
+	request_body {
+		max_size 1100MB
+	}
+
+	# No compression on purpose: DICOM pixel data does not shrink, and gzip on
+	# a 500 MB WADO-RS response is CPU spent for nothing.
+
+	reverse_proxy {$CARINO_UPSTREAM:127.0.0.1:8042} {
+		# Caddy sends X-Forwarded-For / -Proto / -Host by default.
+		# Big studies: allow half an hour for the engine to finish answering
+		# (a large STOW is parsed in memory before the response starts).
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 30m
+			read_timeout 30m
+			write_timeout 30m
+		}
+		# Stream responses as they come; nothing is spooled to disk.
+		flush_interval -1
+	}
+
+	log {
+		output stderr
+		# The access log carries client IPs and study UIDs in paths; keep it
+		# with the same care as the engine's own logs.
+	}
+}

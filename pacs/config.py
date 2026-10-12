@@ -258,6 +258,10 @@ DEFAULTS: dict[str, Any] = {
         "editor_url": "/editor/",   # DICOM-editor for ✎ Edit; "/editor/" = the bundled same-origin copy, or a full URL, or "" to hide
         "auth_token": "",       # "" = no auth, allowed ONLY while host is loopback; non-empty = required on every /api call
         "update_check": False,  # opt-in: ask GitHub once a day whether a newer release exists (pacs/updates.py)
+        "tls": False,           # serve the dashboard + DICOMweb over HTTPS (TLS 1.2+); `pacs tls-cert` makes a self-signed pair
+        "tls_cert": "",         # server certificate chain (PEM); relative paths resolve against this file's folder
+        "tls_key": "",          # its private key (PEM, unencrypted — the service starts unattended)
+        "behind_proxy": False,  # true ONLY behind the reverse proxy in deploy/: trust its X-Forwarded-For/-Proto/-Host
     },
     "logs_dir": "./logs",       # dated log files (one per day) live here
     "setup_completed": "",      # UTC stamp of the run that finished the service chooser; "" = never, so the chooser is offered
@@ -1287,6 +1291,10 @@ def validate(data: dict) -> None:
             "use \"\" for no token (loopback only), or a real one: "
             "python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
         )
+    if data["web"].get("tls") is True and (
+            not str(data["web"].get("tls_cert", "")).strip() or not str(data["web"].get("tls_key", "")).strip()):
+        raise ValueError("web.tls is on but web.tls_cert / web.tls_key are not set. "
+                         "Make a self-signed pair with: python -m pacs tls-cert --enable")
     web_host = web_host_of(data["web"])
     reachable = not is_loopback_host(web_host)
     if reachable and not auth_token_of(data["web"]):

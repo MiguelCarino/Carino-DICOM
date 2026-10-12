@@ -765,8 +765,10 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
 
     def _client_ip() -> str:
         # remote_addr only. X-Forwarded-For is attacker-controlled when there
-        # is no proxy in front of us — and there is not — so trusting it would
-        # hand every brute-forcer a fresh rate-limit bucket per request.
+        # is no proxy in front of us, so trusting it here would hand every
+        # brute-forcer a fresh rate-limit bucket per request. Behind the proxy
+        # in deploy/, web.behind_proxy makes `serve` wrap the app in Werkzeug's
+        # ProxyFix (one hop), which rewrites remote_addr itself before this runs.
         return request.remote_addr or "unknown"
 
     def _reject(verdict: Verdict):

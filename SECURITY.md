@@ -113,7 +113,8 @@ The Flask app serves the dashboard, `/api/*`, and DICOMweb under `/dicom-web`.
   continuously hammering Savers, none reverted on disk or in memory, and a live
   session cookie stopped being accepted on the next request after each one. The
   cookie is `HttpOnly`
-  and `SameSite=Strict`, and `Secure` only when the request arrived over HTTPS —
+  and `SameSite=Strict`, and `Secure` only when the request arrived over HTTPS
+  (directly with `web.tls`, or through a proxy when `web.behind_proxy` is on) —
   because a `Secure` cookie on a plain-HTTP LAN deployment is silently never
   sent, which presents as a login that appears to work and then fails every
   request.
@@ -376,6 +377,9 @@ network you control.
   filesystem. If you need encryption at rest, use full-disk or filesystem-level
   encryption underneath — LUKS, BitLocker, FileVault — and set restrictive
   permissions on the data directory.
+  [docs/ENCRYPTION-AT-REST.md](docs/ENCRYPTION-AT-REST.md) is the step-by-step
+  runbook, including key custody and how to prove to an auditor that the
+  volume is encrypted.
 - **The HL7 MLLP listener has no transport security and no authentication.** It
   is a plain TCP socket speaking MLLP framing; there is no TLS option for it, no
   credential of any kind, and the HL7 parser is deliberately lenient because
@@ -385,10 +389,47 @@ network you control.
   connection to that port can inject orders that appear on the modality
   worklist. **Bind it only to a trusted clinical network segment, and firewall
   it.** Default port is 2575; it is disabled by default.
-- **The dashboard speaks plain HTTP.** There is no built-in TLS for the web
-  layer. If you must expose the dashboard beyond loopback, put it behind a
-  reverse proxy that terminates HTTPS — a token sent over cleartext HTTP on a
-  shared network is a token you have given away.
+- **The dashboard is plain HTTP until HTTPS is turned on, and the engine
+  cannot always tell when that matters.** A token sent over cleartext HTTP on a
+  shared network is a token you have given away, so anything reachable from
+  another machine should use one of two options:
+  - **Built-in HTTPS:** `web.tls` with `web.tls_cert` / `web.tls_key`. The
+    dashboard and DICOMweb share the one socket. TLS 1.2 is the floor, TLS 1.2
+    suites are limited to ECDHE/DHE with AES-GCM or ChaCha20-Poly1305, and
+    compression is off. `pacs tls-cert` makes a self-signed ECDSA P-256 pair for
+    the names you give plus `localhost`, `127.0.0.1` and `::1`, writes the key
+    `0600`, and prints the SHA-256 fingerprint so an operator can check the
+    certificate the browser shows before accepting it. A certificate from the
+    site's own CA is better wherever one exists. A missing, unreadable or
+    mismatched certificate or key stops `serve` with exit code 2 and a message
+    naming the file — it never falls back to plain HTTP, because on a LAN bind
+    that fallback would publish the token. The TLS handshake runs in the
+    request's worker thread, not in the accept loop, so a client that connects
+    and says nothing holds one thread rather than the whole dashboard. Like the
+    DICOM listeners, the certificate is read at start; a renewal is in use after
+    a restart.
+  - **A reverse proxy:** [deploy/caddy/Caddyfile](deploy/caddy/Caddyfile) and
+    [deploy/nginx/carino-dicom.conf](deploy/nginx/carino-dicom.conf). Both
+    terminate TLS 1.2+, send HSTS, redirect plain HTTP, allow STOW-RS bodies up
+    to the engine's own 1 GiB cap with half-hour timeouts, and expect the engine
+    on `127.0.0.1`. The nginx file streams uploads straight through and never
+    spools a response to a temp file, so no patient data lands in nginx's temp
+    directory. Both were run against a live engine through rootless Podman:
+    QIDO-RS, STOW-RS of a small and a 30 MB instance, WADO-RS (nginx), HSTS
+    present, TLS 1.1 refused, unauthenticated requests answered 401. **Behind a
+    proxy the engine is bound to loopback, so the "no token, no network" refusal
+    cannot fire — set `web.auth_token` yourself, or the proxy publishes an
+    unauthenticated archive.** Set `web.behind_proxy: true` as well. It makes
+    `serve` trust one hop of `X-Forwarded-For` / `-Proto` / `-Host` (Werkzeug's
+    `ProxyFix`), so the login rate limit counts real clients instead of putting
+    everyone in the proxy's bucket, the session cookie is marked `Secure`, and
+    DICOMweb `RetrieveURL`s carry `https://` and the public name. It is safe only
+    while nothing but the proxy can reach the port, and `serve` warns when it is
+    on with a non-loopback bind.
+
+  Plain HTTP on loopback is unchanged. A dashboard that has a token and is
+  served over plain HTTP on a non-loopback address starts, but logs a warning
+  every time.
 - **The DICOM listeners bind `0.0.0.0` by default** (though every listener —
   Storage, Print, MWL, Q/R, HL7 and DICOMweb — is *disabled* by default and must
   be enabled explicitly; the instance index is the only thing that starts on its
@@ -433,6 +474,10 @@ of the complexity and with none of the cost to Q/R and WADO performance.
 
 What it does not protect against is a live box that somebody has compromised.
 Neither would the alternative.
+
+How to do that on each platform, who should hold the recovery keys, and how to
+show an auditor the result is in
+[docs/ENCRYPTION-AT-REST.md](docs/ENCRYPTION-AT-REST.md).
 
 If a deployment has a requirement that genuinely needs application-level
 encryption — a defined threat model, a key custody arrangement, somebody to type
@@ -523,12 +568,16 @@ The short version:
 - If you bind it anywhere else — including any container, which binds `0.0.0.0`
   inherently — **set `web.auth_token`** to a freshly generated random token. The
   software will refuse to start otherwise, and that refusal is the feature.
-- Put HTTPS in front of any non-loopback dashboard.
+- Give any non-loopback dashboard HTTPS: `web.tls` (`pacs tls-cert` for a
+  self-signed start), or a proxy from `deploy/` with the engine on `127.0.0.1`,
+  `web.behind_proxy` on and `web.auth_token` set.
 - Enable only the listeners you actually use; every one of them is off by
   default.
 - Firewall the DICOM and MLLP ports to the modality network.
 - Encrypt the volume holding the data directory, and restrict its permissions to
-  the account that runs the service.
+  the account that runs the service. Follow
+  [docs/ENCRYPTION-AT-REST.md](docs/ENCRYPTION-AT-REST.md), and encrypt the
+  backups too.
 - Use DICOM TLS, with client certificates, wherever the peer supports it.
 - Treat `deid.profile` and the rules that ask for de-identification as one
   setting edited in one visit. Turning the profile `off` while a rule still asks

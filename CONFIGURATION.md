@@ -2370,6 +2370,43 @@ Integrations; both need `config.write`, and `POST /api/update-check`
 (`{"action": "enable" | "disable" | "check"}`) is the API behind them. A failed check is
 shown on Overview and is not logged. Anything but `true` or `false` is refused.
 
+### `web.tls`, `web.tls_cert`, `web.tls_key`
+
+`boolean` · default `false` / `string` · default `""` / `string` · default `""`
+
+Serve the dashboard and DICOMweb over HTTPS on `web.port`. Both paths are PEM files and
+resolve against the config file's folder when relative; `tls_cert` may hold the full
+chain, and `tls_key` must be unencrypted, because the service starts unattended. TLS 1.2
+is the minimum; TLS 1.2 suites are ECDHE/DHE with AES-GCM or ChaCha20-Poly1305 only.
+
+`python -m pacs tls-cert` makes a self-signed pair (`tls/web-cert.pem`, `tls/web-key.pem`
+beside the config, key mode `0600`) for `localhost`, `127.0.0.1`, `::1`, `web.host` and
+whatever `--name` / `--lan` add, prints its SHA-256 fingerprint, and with `--enable` sets
+all three keys. It refuses to overwrite an existing pair without `--force`.
+
+`tls: true` with either path empty is refused at save time. A file that is missing,
+unreadable, not PEM, or a key that does not belong to the certificate stops `serve` with
+exit code 2 and a message naming the file; it does not fall back to plain HTTP. The files
+are read once at start, so a renewed certificate is in use after a restart. The desktop
+app follows the setting: it opens `https://` and accepts the certificate only when it is
+exactly the one `tls_cert` names.
+
+### `web.behind_proxy`
+
+`boolean` · default `false`
+
+Set it to `true` only when the engine sits behind one of the reverse proxies in
+[deploy/](deploy/) and `web.host` is `127.0.0.1`. `serve` then trusts one hop of
+`X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` (Werkzeug's `ProxyFix`): the
+login rate limit counts each client instead of the proxy, the session cookie is `Secure`,
+and DICOMweb `RetrieveURL`s say `https://` and the public name. Anything that can reach the
+port directly can forge those headers, so `serve` logs a warning when this is on with a
+non-loopback `web.host`.
+
+Behind a proxy, set `web.auth_token` too. The engine only demands a token when `web.host`
+is not loopback, and behind a proxy it is, so it cannot know that the proxy has put it on
+the network.
+
 ### `web.editor_url`
 
 `string` · default `"/editor/"`

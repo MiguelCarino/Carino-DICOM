@@ -277,7 +277,7 @@ leniency is deliberate and belongs only to worklists.)
 
 **`pacs/dicomweb.py`** — DICOMweb (PS3.18) as a Flask blueprint: QIDO-RS,
 WADO-RS and STOW-RS under `/dicom-web`, so OHIF, Weasis and similar viewers work
-over plain HTTP. Queries come from the index, retrievals stream off disk, and
+over HTTP or HTTPS. Queries come from the index, retrievals stream off disk, and
 stores go through the same filing a C-STORE uses. `/rendered`, `/thumbnail`,
 bulkdata URIs and transfer-syntax transcoding are deliberately absent, and
 anything the server cannot produce is answered 406 rather than faked — a

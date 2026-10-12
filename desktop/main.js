@@ -139,13 +139,32 @@ async function firstRunSetup() {
 function configPath() { return path.join(dataDir, "config.json"); }
 
 function webConfig() {
-  let host = "127.0.0.1", port = 8042;
+  let host = "127.0.0.1", port = 8042, tls = false, cert = "";
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     if (cfg.web && cfg.web.port) port = cfg.web.port;
     if (cfg.web && cfg.web.host && cfg.web.host !== "0.0.0.0") host = cfg.web.host;
+    // web.tls: the engine serves HTTPS, so the window has to ask for it. A
+    // relative path resolves against the config's folder, as in pacs/config.py.
+    if (cfg.web && cfg.web.tls === true && typeof cfg.web.tls_cert === "string" && cfg.web.tls_cert) {
+      tls = true;
+      cert = path.resolve(path.dirname(configPath()), cfg.web.tls_cert.replace(/^~(?=$|[\\/])/, os.homedir()));
+    }
   } catch (e) { /* first run / no config yet → defaults */ }
-  return { host, port };
+  return { host, port, tls, cert };
+}
+
+// The certificate the engine was configured with, as Electron names it in
+// certificate-error ("sha256/<base64 of the DER digest>"). A self-signed
+// certificate is accepted for the engine's own origin only when it is exactly
+// this one — never "any certificate on 127.0.0.1".
+let pinnedFingerprint = "";
+function fingerprintOf(certPath) {
+  try {
+    const { X509Certificate, createHash } = require("crypto");
+    const x = new X509Certificate(fs.readFileSync(certPath));
+    return "sha256/" + createHash("sha256").update(x.raw).digest("base64");
+  } catch (e) { return ""; }
 }
 
 // A bundled PyInstaller binary in a packaged app, or `python -m pacs` in dev.
@@ -165,8 +184,9 @@ function engineCommand(host, port) {
 }
 
 function startEngine() {
-  const { host, port } = webConfig();
-  serverUrl = `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}/`;
+  const { host, port, tls, cert } = webConfig();
+  serverUrl = `${tls ? "https" : "http"}://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}/`;
+  pinnedFingerprint = tls ? fingerprintOf(cert) : "";
   const { cmd, args, cwd } = engineCommand(host, port);
   try { fs.mkdirSync(cwd, { recursive: true }); } catch (e) {}
 
@@ -201,7 +221,13 @@ function waitForServer(timeoutMs = 40000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     const probe = () => {
-      const req = http.get(serverUrl + "api/auth", (res) => {
+      // Over HTTPS the probe does not verify: it only asks whether the engine
+      // this shell started is answering. The window is what trusts or refuses
+      // the certificate (see certificate-error).
+      const getter = serverUrl.startsWith("https:")
+        ? (u, cb) => https.get(u, { rejectUnauthorized: false }, cb)
+        : http.get;
+      const req = getter(serverUrl + "api/auth", (res) => {
         res.resume();
         if (res.statusCode === 200) return resolve(true);
         retry();
@@ -441,7 +467,7 @@ function createWindow() {
       // combination neither guard is allowed to admit. Protocol and port are
       // checked too: the engine this shell started is at serverUrl and nothing
       // else on this machine is the bundled editor, whatever it calls its path.
-      const local = u.protocol === "http:" && u.origin === new URL(serverUrl).origin;
+      const local = u.protocol === new URL(serverUrl).protocol && u.origin === new URL(serverUrl).origin;
       if (local && /^\/editor(\/|$)/.test(u.pathname)) {
         return {
           action: "allow",
@@ -691,6 +717,18 @@ if (!app.requestSingleInstanceLock()) {
     setTimeout(startUpdateChecks, FIRST_CHECK_DELAY_MS);
   });
 
+  // web.tls with a self-signed certificate: trust it for the engine's own
+  // origin, and only when it is the very certificate config.json names. A CA
+  // the OS already trusts never reaches this handler.
+  app.on("certificate-error", (event, _wc, url, _err, certificate, callback) => {
+    let ok = false;
+    try {
+      ok = !!pinnedFingerprint && new URL(url).origin === new URL(serverUrl).origin
+        && certificate && certificate.fingerprint === pinnedFingerprint;
+    } catch (e) { ok = false; }
+    if (ok) event.preventDefault();
+    callback(ok);
+  });
   app.on("window-all-closed", () => { /* keep running in the tray */ });
   app.on("activate", showWindow);
   app.on("before-quit", () => { app.isQuitting = true; if (py) { try { py.kill(); } catch (e) {} } });
