@@ -736,6 +736,19 @@ is built.**
   data)`, behind `POST /api/ris/capture` (`orders.write`), reusing
   `ingest.build_from_bytes` / `save_instance`.
 
+**Eye photos are the same path with the editor in the middle (built).** An order
+whose modality is OP (or blank, where a room here is registered as OP) offers
+**👁 Add eye photos**. It opens the bundled editor's Create → Eye photo over the
+Carino Bridge with the order's identity *as the worklist serves it to a modality*
+(`eye_photo_prefill`, from `mwl.build_worklist_item`, so the `TMP-` patient-ID
+stand-in and the step IDs match a scanner's exam), plus a reply token. The editor
+posts the Ophthalmic Photography files it makes back to the dashboard, which
+files them with its own session: `GET`/`POST /api/ris/orders/photos`
+(`orders.write`), `add_eye_photos_to_order`. All or nothing: every file must be
+an OP image carrying the order's Study Instance UID, Patient ID and Accession
+Number, or none is written. The bytes go into the outgoing folder unchanged and
+the order closes as `captured`.
+
 **Not built:** the **"Assign to order"** picker for print jobs in Pending. A
 print job carries no identity, so it is still approved and sent as itself; the
 capture path above is the one that inherits an order's.

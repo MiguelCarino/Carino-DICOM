@@ -125,9 +125,14 @@ function renderOrders() {
     capGate(row);
     const who = whoOf(o);
     const captureBtn = row.querySelector(".order-capture");
+    const eyeBtn = row.querySelector(".order-eye");
     const cancelBtn = row.querySelector(".order-cancel");
     const editBtn = row.querySelector(".order-edit");
     const delBtn = row.querySelector(".order-del");
+    // After capGate has applied orders.write: offered only where an editor is configured and the
+    // order can take Ophthalmic Photography at all.
+    eyeBtn.hidden = eyeBtn.hidden || o.status !== "open" || !editorUrl || !isEyeOrder(o);
+    if (!eyeBtn.hidden) eyeBtn.addEventListener("click", () => eyePhotosForOrder(o, eyeBtn));
     if (o.status === "closed") {
       captureBtn.hidden = true;
       cancelBtn.hidden = true;
@@ -149,7 +154,7 @@ function renderOrders() {
       orderAction("delete", o, o.status === "closed"
         ? T("Delete this order permanently? It is removed from the Closed list.")
         : T("Delete this order permanently? It is removed from this list and from the worklist.")));
-    [captureBtn, cancelBtn, editBtn, delBtn].forEach((b) => ariaWho(b, who));
+    [captureBtn, eyeBtn, cancelBtn, editBtn, delBtn].forEach((b) => ariaWho(b, who));
     list.appendChild(row);
   });
 }
@@ -407,6 +412,78 @@ function captureForOrder(o, btn) {
     } finally { btn.disabled = false; btn.textContent = old; }
   });
 }
+
+/* Eye photos: the editor's Create → Eye photo opens on the order (a *.carino-create.json over the
+   Carino Bridge, with the identity the worklist would serve a modality) and posts the files it
+   makes back here, carrying the reply token made for that order. They are filed with this page's
+   own session by POST /api/ris/orders/photos (orders.write, as 📎 above), so the editor is given
+   no credential and no CORS. Only the editor's origin is listened to, and a token names the one
+   order its files may go to. */
+const eyeReplies = new Map();            // reply token → { order, origin, busy }
+
+function isEyeOrder(o) {
+  const mod = String((o && o.modality) || "").trim().toUpperCase();
+  // OP is the only Modality an eye photo carries (PS3.3 C.8.17.1). A blank order is aimed at every
+  // worklist, so it is offered only where a room here is registered as OP.
+  return mod === "OP" || (!mod && configuredModalityCodes().has("OP"));
+}
+
+function replyToken() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);              // works on plain-http LAN dashboards too, unlike randomUUID
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function eyePhotosForOrder(o, btn) {
+  let target;
+  try { target = new URL(editorUrl, location.origin); }
+  catch (e) { flashNote(T("Editor URL is not valid"), false); return; }
+  if (!window.CarinoBridge) { flashNote(T("Bridge script missing — reload the page"), false); return; }
+  const token = replyToken();
+  btn.disabled = true;
+  // The prefill is fetched once the editor is listening, as ✎ Edit does with a study.
+  CarinoBridge.send(target.href, async () => {
+    const r = await api("/api/ris/orders/photos?id=" + encodeURIComponent(o.id));
+    eyeReplies.set(token, { order: o, origin: target.origin, busy: false });
+    const order = Object.assign({ carinoCreate: 1, kind: "eye", reply: token }, r.prefill || {});
+    return new File([JSON.stringify(order)], "order.carino-create.json", { type: "application/json" });
+  })
+    .then(() => flashNote(T("Add the photos in the editor, then press “Create and send back”."), true))
+    .catch((err) => {
+      eyeReplies.delete(token);
+      flashNote(/pop-up/i.test(err.message) ? T("Pop-up blocked — allow pop-ups to open the editor")
+                                            : TF("Editor hand-off failed: {err}", { err: err.message }), false);
+    })
+    .finally(() => { btn.disabled = false; });
+}
+
+window.addEventListener("message", async (e) => {
+  const d = e.data;
+  if (!d || typeof d !== "object" || d.carinoCreate !== "files") return;
+  const pending = eyeReplies.get(d.reply);
+  if (!pending || e.origin !== pending.origin || pending.busy || !e.source) return;
+  const answer = (ok, message) => {
+    try { e.source.postMessage({ carinoCreate: "stored", reply: d.reply, ok, message }, e.origin); } catch (_) {}
+  };
+  const files = (Array.isArray(d.files) ? d.files : []).filter((f) => f && f.body);
+  if (!files.length) { answer(false, T("No files arrived from the editor")); return; }
+  pending.busy = true;
+  const fd = new FormData();
+  fd.append("id", pending.order.id);
+  files.forEach((f, i) => fd.append("file", new Blob([f.body], { type: "application/dicom" }),
+                                    String(f.name || "photo-" + (i + 1) + ".dcm")));
+  try {
+    const r = await studyForm("/api/ris/orders/photos", fd);
+    eyeReplies.delete(d.reply);            // the order is closed; the token has done its job
+    flashNote(r.message || T("Done"), r.ok !== false);
+    answer(true, r.message || "");
+    loadOrders(); pollStatus();
+  } catch (err) {
+    const msg = failText(err) || T("Eye photos could not be filed");
+    flashNote(msg, false);
+    answer(false, msg);
+  } finally { pending.busy = false; }
+});
 
 async function purgeClosedOrders() {
   if (!confirm(T("Delete ALL closed orders?\n\nThis permanently empties the Closed list."))) return;

@@ -246,7 +246,10 @@ function renderStatus(s) {
   renderNetInfo(s, rx);
   const ips = hostIps(s);
 
-  editorUrl = (s.editor_url || "").trim();
+  const edUrl = (s.editor_url || "").trim();
+  // Order rows offer 👁 Add eye photos only with an editor, and the first list can be drawn
+  // before the first status arrives, so a change redraws them.
+  if (edUrl !== editorUrl) { editorUrl = edUrl; if (ordersCache.length) renderOrders(); }
 
   /* Order-form targets follow the ungated `modalities` registry (see _STATUS_GATES in web.py).
      Rebuilt only on change, so a <select> is never refilled under an operator using it. */

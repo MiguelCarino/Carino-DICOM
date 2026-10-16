@@ -70,6 +70,18 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   fails. A node that takes only Implicit VR Little Endian is told apart from one that
   wants uncompressed images. Nothing is sent. `POST /api/connections/check`, gated like the Test
   (`services.control`).
+- **Eye photos for ordered studies.** An open order for OP (Ophthalmic Photography), or
+  one with no modality where a room here is registered as OP, offers **👁 Add eye
+  photos**. It opens the bundled editor's Create → Eye photo with the order's identity as
+  the worklist serves it to a modality (the `TMP-` patient ID stand-in, Study Instance UID,
+  step and procedure IDs) over the Carino Bridge, so nothing reaches the URL. The editor
+  sends the images back to the dashboard, which files them with its own session. They go
+  into the outgoing folder unchanged, and the order closes as captured. All or nothing:
+  every file must be an OP image (PS3.4 B.5) carrying the order's Study Instance UID,
+  Patient ID and Accession Number, or none is filed. `GET`/`POST /api/ris/orders/photos`
+  both need `orders.write`, as 📎 Add PDF/image does, and the POST is audited. No CORS
+  rule and no setting changes. Covered by `tests/test_eye_photos.py` and
+  `pacs/web/tests/eye-photos.e2e.mjs`.
 - **Eye photos, burned-in text finder and send-back in the bundled editor** (re-synced to
   upstream `5a6059c`). Create → **Eye photo** writes Ophthalmic Photography 8 Bit images
   (Modality OP) from camera JPEGs and PNGs, with a Right / Left / Both picker per photo, the

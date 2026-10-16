@@ -157,6 +157,11 @@ dashboard or from the command line without the dashboard.
   study arrives. Images are sent whether or not a matching order exists. The
   **worklist probe** asks the real RIS what a modality would ask, which helps
   find why a scanner sees an empty list.
+- **Eye photos for an order:** an order for OP (Ophthalmic Photography) offers
+  *Add eye photos*. The bundled editor opens on that order, makes OP images from
+  the camera's JPEGs or PNGs with the eye marked on each, and sends them back.
+  They are filed as the order's study and the order closes. A photo for another
+  patient, study or accession is refused, and then none of them is filed.
 - **Connection doctor:** *Activity → Connections* lists recent DICOM connections
   in both directions and says in one sentence why one failed and what to change,
   on which machine — a closed port, swapped AE titles, an AE missing from an

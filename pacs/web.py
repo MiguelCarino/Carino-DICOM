@@ -25,6 +25,7 @@ import time
 from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from . import APP_NAME, __version__, audit, auth, users
 from .config import (DEFAULTS, auth_token_of, deid_secret_of, is_loopback_host,
@@ -1354,6 +1355,47 @@ def create_app(server: PacsServer) -> Flask:
         if not oid or up is None or not up.filename:
             return jsonify(ok=False, message="need an order 'id' and a 'file'"), 400
         res = server.create_study_from_order(oid, up.filename, up.read())
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    # ---- eye photos for an order (bundled editor → Create → Eye photo) ----
+    # The dashboard opens the editor with the order's worklist identity, and
+    # the files Create makes come back to the dashboard over postMessage, which
+    # posts them here with its own session. Nothing about the editor's origin
+    # is trusted or widened: no CORS, and the same orders.write gate as the
+    # capture above for both halves (the prefill is the patient's identity,
+    # handed out only to someone who may file images against the order).
+    _EYE_PHOTOS_MAX_BYTES = 512 * 1024 * 1024
+
+    @app.get("/api/ris/orders/photos")
+    def api_ris_eye_prefill():
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
+        oid = request.args.get("id")
+        if not oid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        res = server.eye_photo_prefill(oid)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/ris/orders/photos")
+    def api_ris_eye_photos():
+        """Multipart: an order 'id' and one or more 'file' parts, each an
+        Ophthalmic Photography Part 10 file made for that order."""
+        denied = guard.deny("orders.write")
+        if denied:
+            return denied
+        # Bounded before the form is parsed, as STOW-RS does (dicomweb.py):
+        # werkzeug enforces it while reading, which a check afterwards cannot.
+        request.max_content_length = _EYE_PHOTOS_MAX_BYTES
+        try:
+            oid = request.form.get("id")
+            ups = request.files.getlist("file")
+        except RequestEntityTooLarge:
+            return jsonify(ok=False, message="the photos are larger than "
+                           f"{_EYE_PHOTOS_MAX_BYTES // (1024 * 1024)} MB together"), 413
+        if not oid or not ups:
+            return jsonify(ok=False, message="need an order 'id' and at least one 'file'"), 400
+        res = server.add_eye_photos_to_order(oid, [(u.filename, u.read()) for u in ups])
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/watcher")

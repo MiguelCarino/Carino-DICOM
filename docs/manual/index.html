@@ -905,7 +905,7 @@ openssl rand -base64 32</code></pre>
       <figure class="shot">
         <img src="img/en/orders.webp" width="1920" height="1200" loading="lazy" decoding="async"
           alt="The RIS orders panel: a New order (manual entry) disclosure, Open and Closed tabs, a search box, an Arm sound toggle, and three open orders from the RIS, each showing accession number, patient, modality, requested procedure, the HL7 sender and the time queued, with an Add PDF/image button." />
-        <figcaption>Orders that arrived over HL7, and the disclosure at the top for typing one in when nothing upstream is alive. Each closes itself when the matching study lands — and is archived rather than erased. Orders from the RIS can only be cancelled by the RIS, so they carry no Cancel. A new order flashes the <em>Orders</em> row, and this workstation can also beep for it: the toggle is per machine and remembered.</figcaption>
+        <figcaption>Orders that arrived over HL7, and the disclosure at the top for typing one in when nothing upstream is alive. Each closes itself when the matching study lands — and is archived rather than erased. Orders from the RIS can only be cancelled by the RIS, so they carry no Cancel. A new order flashes the <em>Orders</em> row, and this workstation can also beep for it: the toggle is per machine and remembered. An eye-photo order (modality OP) also offers <em>Add eye photos</em>: the editor opens on that order, and the photos it makes come back as the order's study, which closes it.</figcaption>
       </figure>
       <div class="warn">
         <p><b>No TLS, no credential.</b> See the security section: anyone who can open a socket to that

@@ -417,6 +417,7 @@ node pacs/web/tests/i18n-parity.mjs               # four locales at parity
 node pacs/web/tests/dashboard-auth.e2e.mjs        # the login flow, in a real DOM
 node pacs/web/tests/stuck-panel.e2e.mjs
 node pacs/web/tests/connections-panel.e2e.mjs  # Activity → Connections, real refusals
+node pacs/web/tests/eye-photos.e2e.mjs         # order → editor Create → photos filed back
 node pacs/web/editor/tests/pn-roundtrip.e2e.mjs   # PN survives the bundled editor
 node docs/tests/check-i18n.js                     # the project website's own locales
 ```

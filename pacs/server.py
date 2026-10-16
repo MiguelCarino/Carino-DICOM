@@ -32,6 +32,13 @@ from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
 from .watcher import FolderWatcher
 
+# Ophthalmic Photography 8 Bit and 16 Bit Image Storage (PS3.4 Table B.5-1):
+# what "Add eye photos" files. The editor writes the 8-bit one.
+OP_PHOTO_CLASSES = frozenset({"1.2.840.10008.5.1.4.1.1.77.1.5.1",
+                              "1.2.840.10008.5.1.4.1.1.77.1.5.2"})
+EYE_PHOTO_MODALITY = "OP"
+EYE_PHOTO_MAX = 100                  # photos in one go; a visit is a handful
+
 # The build that offers the service chooser. It is reported next to the marker
 # so the dashboard can say WHICH engine ran setup; it is deliberately never
 # compared against the marker — re-offering setup because the version moved
@@ -1533,6 +1540,125 @@ class PacsServer:
         else:
             msg = "Study created in the outgoing folder — start Auto-send to forward it."
         return {"ok": True, "message": msg, "file": os.path.basename(out)}
+
+    # ---- eye photos for an order (the bundled editor's Create → Eye photo) ----
+    def _eye_order(self, order_id: str):
+        """(order, worklist item, "") for an order eye photos may be filed under,
+        or (None, None, refusal)."""
+        order = self.orders.get(order_id)
+        if not order:
+            return None, None, "order not found"
+        if order.get("status") != "open":
+            return None, None, "order is already closed"
+        mod = str(order.get("modality") or "").strip().upper()
+        # OP is the only Modality the Ophthalmic Photography IODs allow (PS3.3
+        # C.8.17.1); a blank order is aimed at every worklist and may be one.
+        if mod and mod != EYE_PHOTO_MODALITY:
+            return None, None, f"this order is for {mod}, not eye photos (OP)"
+        return order, mwl.build_worklist_item(order), ""
+
+    def eye_photo_prefill(self, order_id: str) -> dict:
+        """What the editor's Create is opened with for this order: the identity a
+        modality querying the worklist would be given for it (patient ID stand-in,
+        fitted name, Study Instance UID, the step and procedure IDs), so photos
+        made in the browser carry the same keys as an exam made on a scanner."""
+        order, item, why = self._eye_order(order_id)
+        if not order:
+            return {"ok": False, "message": why}
+        sps = item.ScheduledProcedureStepSequence[0]
+        prefill = {
+            "patient_name": str(item.PatientName or ""),
+            "patient_id": str(item.PatientID or ""),
+            "patient_birthdate": str(item.PatientBirthDate or ""),
+            "patient_sex": str(item.PatientSex or ""),
+            "accession": str(item.AccessionNumber or ""),
+            "study_desc": str(item.get("RequestedProcedureDescription", "") or ""),
+            "procedure_id": str(item.get("RequestedProcedureID", "") or ""),
+            "sps_id": str(sps.get("ScheduledProcedureStepID", "") or ""),
+            "study_uid": str(item.StudyInstanceUID or ""),
+            "referring": str(item.ReferringPhysicianName or ""),
+        }
+        return {"ok": True, "prefill": {k: v for k, v in prefill.items() if v}}
+
+    def add_eye_photos_to_order(self, order_id: str, files: list) -> dict:
+        """File the Ophthalmic Photography instances the editor made for an order
+        (*files* is [(filename, bytes)]) and close the order, as the capture
+        bridge does: into the outgoing folder for Auto-send, close reason
+        "captured". The bytes are written as they came, never re-encoded (a
+        camera JPEG is in there byte for byte).
+
+        All or nothing. Every file must be a Part 10 OP image carrying the
+        order's Study Instance UID, Patient ID and Accession Number as the
+        worklist serves them, or none is filed: a photo of another patient in
+        this patient's study is the one mistake that cannot be sent on and
+        fixed later."""
+        from io import BytesIO
+        from pydicom import dcmread
+        order, item, why = self._eye_order(order_id)
+        if not order:
+            return {"ok": False, "message": why}
+        if not files:
+            return {"ok": False, "message": "no files"}
+        if len(files) > EYE_PHOTO_MAX:
+            return {"ok": False, "message": f"at most {EYE_PHOTO_MAX} photos at a time"}
+        want = {"StudyInstanceUID": str(item.StudyInstanceUID or ""),
+                "PatientID": str(item.PatientID or ""),
+                "AccessionNumber": str(item.AccessionNumber or "")}
+        checked, seen = [], set()
+        for name, data in files:
+            label = os.path.basename(str(name or "file"))
+            if len(data) < 132 or data[128:132] != b"DICM":
+                return {"ok": False, "message": f"{label} is not a DICOM file"}
+            try:
+                ds = dcmread(BytesIO(data), stop_before_pixels=True)
+            except Exception as exc:
+                return {"ok": False, "message": f"{label} could not be read: {exc}"}
+            if str(ds.get("SOPClassUID", "")) not in OP_PHOTO_CLASSES:
+                return {"ok": False, "message": f"{label} is not an Ophthalmic Photography image"}
+            for key, value in want.items():
+                got = str(ds.get(key, "") or "").strip()
+                if value and got != value:
+                    return {"ok": False, "message": f"{label} is not for this order ({key} {got or 'empty'})"}
+            sop = str(ds.get("SOPInstanceUID", "") or "")
+            # The file is named after it, so it has to be a UID and nothing else.
+            if not sop or len(sop) > 64 or not mwl._is_uid(sop) or sop in seen:
+                return {"ok": False, "message": f"{label} has no usable SOP Instance UID"}
+            seen.add(sop)
+            checked.append((sop, data, ds))
+        watch = self.cfg.resolved("scu", "watch_dir")
+        written = []
+        try:
+            os.makedirs(watch, exist_ok=True)
+            for sop, data, _ds in checked:
+                out = os.path.join(watch, f"{sop}.dcm")
+                with open(out, "xb") as fh:          # never over an instance already there
+                    fh.write(data)
+                written.append(out)
+        except OSError as exc:
+            for out in written:
+                try:
+                    os.remove(out)
+                except OSError:
+                    pass
+            return {"ok": False, "message": f"could not store the photos: {exc}"}
+        if self.index is not None:
+            for out in written:
+                self.index.enqueue_file(out, "outgoing")
+        self.orders.close(order_id, reason=ris.CLOSE_CAPTURED, matched_study=want["StudyInstanceUID"])
+        self.log.info(
+            f"Eye photos for order [acc {order.get('accession') or '—'}]: "
+            f"{len(written)} OP image(s) into outgoing; order closed",
+            kind="ris",
+        )
+        # Same reason as create_study_from_order: a closing path must let the
+        # worklist go once nobody is left on it.
+        self.release_worklist()
+        n = len(written)
+        if self.watcher.running:
+            msg = f"{n} eye photo(s) filed and queued — Auto-send will forward them."
+        else:
+            msg = f"{n} eye photo(s) filed in the outgoing folder — start Auto-send to forward them."
+        return {"ok": True, "message": msg, "count": n}
 
     # ---- watcher (auto-send) ----------------------------------------------
     def start_watcher(self) -> None:
