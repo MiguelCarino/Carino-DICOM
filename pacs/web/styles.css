@@ -421,6 +421,42 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .caught-a.good { color: var(--ok); }
 .caught-a.bad { color: var(--bad); }
 
+/* Activity → Connections: one row per distinct association outcome, worst finding sets the colour. */
+.conn-row { border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+  padding: 10px 14px; margin-bottom: 8px; }
+.conn-row.error { box-shadow: inset 3px 0 0 var(--bad); }
+.conn-row.warn { box-shadow: inset 3px 0 0 var(--warn); }
+.conn-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+  font-family: var(--mono); font-size: .72rem; }
+.conn-badge { padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.conn-badge.ok { color: var(--ok); }
+.conn-badge.info { color: var(--accent); }
+.conn-badge.warn { color: var(--warn); }
+.conn-badge.error { color: var(--bad); }
+.conn-dir, .conn-svc, .conn-when { color: var(--muted); }
+/* AE titles and addresses wrap at their separators, never mid-title. */
+.conn-who { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.conn-finding { margin-top: 8px; font-size: .8rem; line-height: 1.45; }
+.conn-say { color: var(--text); }
+.conn-fix { color: var(--muted); margin-top: 2px; }
+.conn-fix::before { content: "→ "; color: var(--accent); }
+.conn-ctx { margin-top: 8px; font-family: var(--mono); font-size: .7rem; color: var(--muted); }
+.conn-ctx summary { cursor: pointer; }
+.conn-ctx-line { padding: 2px 0; overflow-wrap: anywhere; }
+.conn-ctx-line.good { color: var(--ok); }
+.conn-ctx-line.bad { color: var(--bad); }
+.conn-check { margin: 12px 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+.conn-check-head { font-weight: 600; }
+.conn-check-head.ok { color: var(--ok); }
+.conn-check-head.bad { color: var(--bad); }
+/* With a check result open, the destination table stops filling the pane so the answer sits under it. */
+#dlgDests .pane-scroll:has(#destCheck:not([hidden])) > .table-scroll,
+.workpanel .modal-body .conn-check .table-scroll { flex: 0 0 auto; }
+#connPeer { min-width: 24ch; }
+.conn-pairs { margin-top: 10px; }
+.conn-pairs tr.bad td:last-child { color: var(--bad); }
+.conn-pairs tr.good td:last-child { color: var(--ok); }
+
 /* The two jumps on a held-back row; the engine's sentence above is the message. */
 .held-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .held-jump [hidden] { display: none; }

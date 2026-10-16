@@ -60,6 +60,7 @@ from pynetdicom.sop_class import (
     Verification,
 )
 
+from .connections import listener_handlers
 from .logbuf import LogBuffer
 from .netclaim import claim
 
@@ -391,8 +392,11 @@ class PrintSCP:
         tls_cert: str = "",
         tls_key: str = "",
         tls_ca: str = "",
+        journal=None,
     ):
         self.aet = aet
+        # connections.ConnectionJournal, or None outside PacsServer.
+        self.journal = journal
         self.bind = bind
         self.port = port
         self.log = log
@@ -845,6 +849,7 @@ class PrintSCP:
             (evt.EVT_ACCEPTED, self._handle_accepted),
             (evt.EVT_REJECTED, self._handle_rejected),
         ]
+        handlers += listener_handlers(self.journal, "printer", self.aet, self.port, bool(self.tls))
         ssl_context = None
         if self.tls:
             from .tlsutil import server_context

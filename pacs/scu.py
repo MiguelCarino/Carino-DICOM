@@ -8,6 +8,7 @@ store fails loudly rather than silently corrupting data.
 
 from __future__ import annotations
 
+import errno
 import os
 import socket
 import ssl
@@ -21,7 +22,8 @@ from pydicom.uid import ImplicitVRLittleEndian
 from pynetdicom import AE, evt
 from pynetdicom.sop_class import Verification
 
-from .assocwords import describe_reject
+from .assocwords import describe_reject, reject_parts
+from .connections import TS_NOT_SUPPORTED, note_outgoing, requested_contexts, ts_name
 
 # C-STORE statuses that are "stored, with a caveat" — treat as success.
 # Reading them as failure would cost more than the caveat: the sender never
@@ -91,12 +93,21 @@ _DIAG_TTL = 30.0
 _DIAG_TIMEOUT = 4.0 if os.name == "nt" else 2.0
 _diag_cache: dict = {}
 _diag_lock = threading.Lock()
+# No route, network down, host down: "unreachable" to the journal, the same
+# remedy as a connect that times out.
+_UNREACHABLE = {getattr(errno, n) for n in ("EHOSTUNREACH", "ENETUNREACH", "EHOSTDOWN", "ENETDOWN")
+                if hasattr(errno, n)}
 
 
 def _why_no_connection(dest: "Destination", timeout) -> str:
-    """The socket never opened, and pynetdicom kept the reason in its own
-    logger. One short plain connect recovers it — at most once per node per
-    _DIAG_TTL, reusing the last answer in between."""
+    return _no_connection(dest, timeout)[1]
+
+
+def _no_connection(dest: "Destination", timeout) -> tuple:
+    """(kind, words) for a socket that never opened, and pynetdicom kept the
+    reason in its own logger. One short plain connect recovers it — at most
+    once per node per _DIAG_TTL, reusing the last answer in between. *kind* is
+    the connection journal's outcome: refused, unreachable, tls or error."""
     key = (dest.host, dest.port, bool(dest.tls))
     now = time.monotonic()
     with _diag_lock:
@@ -108,26 +119,27 @@ def _why_no_connection(dest: "Destination", timeout) -> str:
                                       timeout=min(float(timeout), _DIAG_TIMEOUT)):
             pass
     except ConnectionRefusedError:
-        why = (f"connection refused by {dest.host}:{dest.port} — nothing is listening "
-               f"there; check that the remote is running and the port is right")
+        found = ("refused", f"connection refused by {dest.host}:{dest.port} — nothing is listening "
+                 f"there; check that the remote is running and the port is right")
     except (socket.timeout, TimeoutError):
-        why = (f"no reply from {dest.host}:{dest.port} — the host is off, unreachable, "
-               f"or a firewall is dropping the connection")
+        found = ("unreachable", f"no reply from {dest.host}:{dest.port} — the host is off, unreachable, "
+                 f"or a firewall is dropping the connection")
     except OSError as exc:
-        why = f"could not connect to {dest.host}:{dest.port}: {exc}"
+        found = ("unreachable" if getattr(exc, "errno", None) in _UNREACHABLE else "error",
+                 f"could not connect to {dest.host}:{dest.port}: {exc}")
     else:
         if dest.tls:
-            why = (f"TLS handshake with {dest.host}:{dest.port} failed — check the "
-                   f"certificates and that the remote expects TLS")
+            found = ("tls", f"TLS handshake with {dest.host}:{dest.port} failed — check the "
+                     f"certificates and that the remote expects TLS")
         else:
             # Not cached: the node is back, and the next try should say so
             # or, better, succeed.
-            return f"could not connect to {dest.host}:{dest.port} (it answers now — try again)"
+            return ("error", f"could not connect to {dest.host}:{dest.port} (it answers now — try again)")
     with _diag_lock:
         if len(_diag_cache) > 256:
             _diag_cache.clear()
-        _diag_cache[key] = (now, why)
-    return why
+        _diag_cache[key] = (now, found)
+    return found
 
 
 def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) -> str:
@@ -145,6 +157,15 @@ def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) 
     prim = getattr(getattr(assoc, "acceptor", None), "primitive", None)
     if getattr(assoc, "is_aborted", False):
         if prim is not None and getattr(prim, "result", None) == 0:
+            ctx = requested_contexts(assoc)
+            if ctx and all(c["result"] == TS_NOT_SUPPORTED for c in ctx):
+                # PS3.8 9.3.3.2 reason 4: the kind of object is fine, its
+                # encoding is not — a different fix from a wrong port.
+                tss = ", ".join(dict.fromkeys(ts_name(t) for c in ctx for t in c["proposed"]))
+                return (f"{scheme}association with {where} accepted this kind of object but not as "
+                        f"{tss}, and this PACS sends images as they were received (it does not "
+                        f"convert them) — enable {tss} on {dest.aet}, or have the modality send "
+                        f"uncompressed")
             return (f"{scheme}association with {where} accepted but nothing we proposed was "
                     f"(no common presentation context), so it was aborted — it does not take this "
                     f"kind of object. If {dest.port} is a worklist or query port rather than its "
@@ -152,6 +173,52 @@ def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) 
         return (f"{scheme}association aborted by {where} — it took the connection and then "
                 f"dropped it{' (often a TLS mismatch)' if not dest.tls else ''}")
     return (f"no answer to the association request from {where} within {timeout}s")
+
+
+def _outcome(assoc, dest: "Destination", timeout) -> str:
+    """The connection journal's word for an association that did not come up,
+    read off the same flags _why_not_established() words."""
+    if getattr(assoc, "is_rejected", False):
+        return "rejected"
+    if not getattr(assoc, "_carino_opened", True):
+        return _no_connection(dest, timeout)[0]
+    if getattr(assoc, "is_aborted", False):
+        prim = getattr(getattr(assoc, "acceptor", None), "primitive", None)
+        return "none_accepted" if prim is not None and getattr(prim, "result", None) == 0 else "aborted"
+    return "no_answer"
+
+
+def _open(ae: AE, dest: "Destination", calling_aet: str, tls_context, timeout, service: str,
+          annotate=None):
+    """associate(), record it in the connection journal, and word a failure.
+
+    ``(assoc, "", contexts)`` when the association is up, ``(assoc_or_None,
+    why, contexts)`` when it is not. The contexts are the per-presentation-
+    context answers (connections.requested_contexts), which outlive an
+    association aborted because none was accepted — exactly the case whose
+    reason is in them. *annotate(contexts)* may mark them before they are
+    journaled."""
+    try:
+        assoc = _associate(ae, dest, tls_context)
+    except (ssl.SSLError, OSError) as exc:
+        note_outgoing(service=service, dest=dest, calling=calling_aet,
+                      outcome="tls" if isinstance(exc, ssl.SSLError) else "error", detail=str(exc))
+        return None, f"TLS/connection error: {exc}", []
+    contexts = requested_contexts(assoc)
+    if annotate is not None:
+        annotate(contexts)
+    if assoc.is_established:
+        note_outgoing(service=service, dest=dest, calling=calling_aet, outcome="accepted",
+                      contexts=contexts)
+        return assoc, "", contexts
+    why = _why_not_established(assoc, dest, calling_aet, timeout)
+    outcome = _outcome(assoc, dest, timeout)
+    prim = getattr(getattr(assoc, "acceptor", None), "primitive", None)
+    note_outgoing(service=service, dest=dest, calling=calling_aet, outcome=outcome,
+                  reject=reject_parts(prim) if outcome == "rejected" else None,
+                  contexts=contexts if outcome == "none_accepted" else [],
+                  detail=why if outcome == "error" else "")
+    return assoc, why, contexts
 
 
 # What "can it take images?" is asked with: the storage classes a department
@@ -170,7 +237,7 @@ _PROBE_STORAGE = (
 
 def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
            tls_context: Optional[ssl.SSLContext] = None,
-           check_storage: bool = False) -> SendResult:
+           check_storage: bool = False, record: bool = True) -> SendResult:
     """C-ECHO *dest* and report whether it answered, as a SendResult.
 
     Refusal, timeout, a TLS handshake that fails and a host that is simply off
@@ -185,6 +252,9 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     reported as a failure: it is a worklist or a query port, not somewhere a
     study can be sent. The destination Test uses this; the failover monitor's
     reachability probe does not.
+
+    *record* False keeps it out of the connection journal: the failover
+    monitor asks every 30 seconds, and its answers belong to its own card.
     """
     ae = AE(ae_title=calling_aet)
     ae.add_requested_context(Verification)
@@ -194,12 +264,10 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
-    try:
-        assoc = _associate(ae, dest, tls_context)
-    except (ssl.SSLError, OSError) as exc:
-        return SendResult(False, f"TLS/connection error: {exc}")
-    if not assoc.is_established:
-        return SendResult(False, _why_not_established(assoc, dest, calling_aet, timeout))
+    assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout,
+                             "echo" if record else "")
+    if why:
+        return SendResult(False, why)
     try:
         status = assoc.send_c_echo()
         if status and status.Status == 0x0000:
@@ -270,14 +338,9 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
         pr.calling_key, pr.modality_key = calling_aet, modality
         return pr
 
-    try:
-        assoc = _associate(ae, dest, tls_context)
-    except (ssl.SSLError, OSError) as exc:
-        return _probe(label, False, f"TLS/connection error: {exc}", [], station_aet, date)
-    if not assoc.is_established:
-        return _probe(label, False,
-                             _why_not_established(assoc, dest, calling_aet, timeout),
-                             [], station_aet, date)
+    assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "worklist-probe")
+    if why:
+        return _probe(label, False, why, [], station_aet, date)
 
     # The identifier a modality sends: a few match keys filled, the rest present
     # and empty so the provider returns them. Sending the return keys matters —
@@ -399,12 +462,9 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
-    try:
-        assoc = _associate(ae, dest, tls_context)
-    except (ssl.SSLError, OSError) as exc:
-        return SendResult(False, f"TLS/connection error: {exc}")
-    if not assoc.is_established:
-        return SendResult(False, _why_not_established(assoc, dest, calling_aet, timeout))
+    assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "send")
+    if why:
+        return SendResult(False, why)
     try:
         status = assoc.send_c_store(ds)
         if not status:
@@ -430,3 +490,84 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         return SendResult(False, f"cannot send this instance ({exc})")
     finally:
         assoc.release()
+
+
+# PS3.8 9.3.2.2: a presentation context ID is an odd number from 1 to 255, so
+# one association can propose at most 128 of them.
+MAX_CONTEXTS = 128
+# Enough for every SOP class / transfer syntax pair a department plausibly
+# stores; past this the check says it stopped rather than opening associations
+# without end against somebody else's PACS.
+MAX_CHECK_ASSOCIATIONS = 8
+
+
+def c_check(dest: Destination, calling_aet: str, pairs, timeout: int = 10,
+            tls_context: Optional[ssl.SSLContext] = None) -> dict:
+    """Ask *dest* which of these (SOP class, transfer syntax) pairs it would take.
+
+    Association negotiation only — nothing is sent. Each pair is proposed in a
+    presentation context of its own, because an acceptor answers a context
+    with one transfer syntax at most (PS3.8 9.3.3.2): offering a SOP class with
+    all its syntaxes at once would say which one it prefers, not which ones it
+    refuses, and c_store proposes only the file's own. Every SOP class is also
+    offered once in Implicit VR Little Endian, the syntax every SCP must take
+    (PS3.5 10.1), marked ``reference`` — it tells "refuses JPEG Lossless" from
+    "refuses CT", which have different fixes.
+
+    ``{"ok", "message", "contexts", "batches", "truncated"}``: *ok* is whether
+    the node answered at all; what it refused is in *contexts*, read by
+    connections.diagnose().
+    """
+    wanted = []
+    seen = set()
+    for sop, ts in pairs:
+        if (sop, ts) not in seen:
+            seen.add((sop, ts))
+            wanted.append((sop, ts, False))
+    for sop in dict.fromkeys(sop for sop, _ts in pairs):
+        if (sop, str(ImplicitVRLittleEndian)) not in seen:
+            wanted.append((sop, str(ImplicitVRLittleEndian), True))
+    # Pairs of one SOP class stay in one association, so its reference answer
+    # is never in a different batch from the syntaxes it explains.
+    by_sop: dict = {}
+    for sop, ts, ref in wanted:
+        by_sop.setdefault(sop, []).append((sop, ts, ref))
+    batches, cur = [], []
+    for group in by_sop.values():
+        if cur and len(cur) + len(group) > MAX_CONTEXTS:
+            batches.append(cur)
+            cur = []
+        cur.extend(group[:MAX_CONTEXTS])
+    if cur:
+        batches.append(cur)
+    truncated = len(batches) > MAX_CHECK_ASSOCIATIONS
+    batches = batches[:MAX_CHECK_ASSOCIATIONS]
+
+    found: list = []
+    for batch in batches:
+        ae = AE(ae_title=calling_aet)
+        try:
+            for sop, ts, _ref in batch:
+                ae.add_requested_context(sop, ts)
+        except ValueError as exc:
+            return {"ok": False, "message": f"cannot propose these contexts ({exc})",
+                    "contexts": found, "batches": len(batches), "truncated": truncated}
+        ae.acse_timeout = timeout
+        ae.dimse_timeout = timeout
+        ae.network_timeout = timeout
+        refs = [ref for _sop, _ts, ref in batch]
+
+        def mark(ctx, refs=refs):
+            for c, ref in zip(ctx, refs):
+                if ref:
+                    c["reference"] = True
+        assoc, why, ctx = _open(ae, dest, calling_aet, tls_context, timeout, "check", annotate=mark)
+        if why and not (ctx and all(c["result"] is not None for c in ctx)):
+            # Not an answer about contexts: refused, unreachable, wrong AE.
+            return {"ok": False, "message": why, "contexts": found, "batches": len(batches),
+                    "truncated": truncated}
+        found.extend(ctx)
+        if not why:
+            assoc.release()
+    return {"ok": True, "message": "", "contexts": found, "batches": len(batches),
+            "truncated": truncated}

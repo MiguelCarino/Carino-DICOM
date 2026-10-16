@@ -441,8 +441,8 @@ async function main() {
   check(!(await reachedByHash("#configuration/people", "dlgPeople")),
         "…which #configuration/people cannot get around either");
   check(it.nav.indexOf("dlgOrders") < 0, "IT has no Orders panel");
-  check(it.tabs.dlgActivity.join() === "logs,audit,caught",
-        "IT reads the log, the audit trail and the worklist probes: " + JSON.stringify(it.tabs.dlgActivity));
+  check(it.tabs.dlgActivity.join() === "logs,connections,audit,caught",
+        "IT reads the log, the connections, the audit trail and the worklist probes: " + JSON.stringify(it.tabs.dlgActivity));
   const itStatus = await statusFor();
   const itRaw = JSON.stringify(itStatus);
   check(itRaw.indexOf("10.99.0.5") >= 0, "IT does get the destination address — they are not blind");
@@ -529,8 +529,8 @@ async function main() {
         "…nor does the legacy #dlgSettings bookmark");
   check(await cdp.eval("document.getElementById('killSvc').closest('.tabpane').hidden"),
         "…so the shutdown control is inside a pane that stays shut");
-  check(rad.tabs.dlgActivity.join() === "logs",
-        "Activity gives them the log only — not the audit trail, not the probes: "
+  check(rad.tabs.dlgActivity.join() === "logs,connections",
+        "Activity gives them the log and its connections only — not the audit trail, not the probes: "
         + JSON.stringify(rad.tabs.dlgActivity));
   // A worklist probe borrows a scanner's identity and returns another system's
   // patients. It follows config.read, like the registry it is run from.

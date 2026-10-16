@@ -587,6 +587,8 @@
               </table>
             </div>
             <p class="hint dest-warn-note" id="destWarn" role="status" hidden></p>
+            <!-- The last "What it accepts" answer, filled by renderDestCheck() in js/08-actions.js. -->
+            <div class="conn-check" id="destCheck" role="status" hidden></div>
             <p class="hint" data-i18n-html>New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
             <!-- Visible legend: the two column tooltips do not exist on touch. -->
             <p class="hint" data-i18n-html><em>No RIS</em> — that PACS has no RIS of its own, so this PC runs the worklist for it permanently. <em>Failover</em> — watch that node and offer the emergency worklist if it goes offline.</p>
@@ -968,6 +970,7 @@
         <div class="hist-bar panel-tabs">
           <div class="hist-tabs" role="tablist">
             <button class="hist-tab active" id="tab_logs" data-tab="logs" data-cap="logs.read" role="tab" aria-selected="true" tabindex="0" aria-controls="dlgLogs"><span data-i18n>Logs</span></button>
+            <button class="hist-tab" id="tab_connections" data-tab="connections" data-cap="logs.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgConnections"><span data-i18n>Connections</span></button>
             <button class="hist-tab" id="tab_audit" data-tab="audit" data-cap="audit.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgAudit"><span data-i18n>Audit</span></button>
             <button class="hist-tab" id="tab_caught" data-tab="caught" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgCaught"><span data-i18n>Worklist probes</span></button>
           </div>
@@ -988,6 +991,19 @@
             <button class="btn ghost tiny" id="logDownload" type="button" data-i18n>Download day's log</button>
             <button class="btn ghost tiny" id="clearLog" type="button" data-i18n>Clear view</button>
           </div>
+        </section>
+        <!-- Recent DICOM associations both ways, each with the reason it failed and the fix (pacs/connections.py).
+             In memory only: the last few hundred distinct situations, folded with a count. -->
+        <section class="tabpane" id="dlgConnections" role="tabpanel" aria-labelledby="tab_connections" hidden>
+          <p class="pane-lede" data-i18n>why a transfer worked or did not</p>
+          <div class="hist-bar">
+            <p class="hint hint-flush hint-70ch" data-i18n>Every recent connection to and from this PC: who called whom, what was offered, what was accepted, and — when it failed — what to change and on which machine. Identical attempts are shown once, with a count.</p>
+            <div class="hist-tools">
+              <input class="log-q" id="connPeer" type="search" data-i18n-placeholder placeholder="AE title, address or destination" data-i18n-aria-label aria-label="Show one peer" />
+              <button class="btn ghost tiny" id="connRefresh" data-i18n>↻ Refresh</button>
+            </div>
+          </div>
+          <div class="hist-list" id="connList"></div>
         </section>
         <!-- What another RIS answered when queried as one of our modalities. A record, never a queue; see
              pacs/caught.py. -->
@@ -1320,6 +1336,7 @@
       <td class="cell-center"><input type="checkbox" class="d-emg" data-i18n-title title="Trigger emergency failover if this node goes offline" data-i18n-aria-label aria-label="Failover" /></td>
       <td class="row-actions">
         <button class="btn tiny echo" data-i18n-title title="Checks that it answers and accepts images" data-i18n>Test</button>
+        <button class="btn tiny accepts" data-i18n-title title="Offers it every kind of image stored here, in the encoding it is stored in, and lists what it would refuse. Nothing is sent." data-i18n>What it accepts</button>
         <button class="btn tiny danger del" data-i18n-title title="Remove" data-i18n-aria-label aria-label="Remove this row">✕</button>
       </td>
     </tr>

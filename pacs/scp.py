@@ -19,6 +19,7 @@ from pynetdicom import AE, evt, AllStoragePresentationContexts, ALL_TRANSFER_SYN
 from pynetdicom.sop_class import Verification
 
 from .assocwords import caller_of, listener_refusal
+from .connections import listener_handlers
 from .dicomfs import save_dicom
 from .logbuf import LogBuffer
 from .netclaim import claim
@@ -94,8 +95,11 @@ class StorageSCP:
         tls_key: str = "",
         tls_ca: str = "",
         min_free_mb: int = 2048,
+        journal=None,
     ):
         self.aet = aet
+        # connections.ConnectionJournal, or None outside PacsServer.
+        self.journal = journal
         self.bind = bind
         self.port = port
         self.storage_dir = storage_dir
@@ -244,6 +248,7 @@ class StorageSCP:
             (evt.EVT_C_ECHO, self._handle_echo),
             (evt.EVT_REJECTED, self._handle_rejected),
         ]
+        handlers += listener_handlers(self.journal, "receiver", self.aet, self.port, bool(self.tls))
         ssl_context = None
         if self.tls:
             from .tlsutil import server_context

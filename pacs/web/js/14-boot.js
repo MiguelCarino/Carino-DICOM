@@ -228,6 +228,12 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("ordAdd").addEventListener("click", () => addOrder($("ordAdd")));
   $("ordTest").addEventListener("change", (e) => applyTestDefaults(e.target.checked));
+  $("connRefresh").addEventListener("click", loadConnections);
+  // Asked of the engine, which matches AE titles, addresses and destination names alike.
+  $("connPeer").addEventListener("input", () => {
+    clearTimeout(connPeerTimer);
+    connPeerTimer = setTimeout(loadConnections, 300);
+  });
   $("caughtRefresh").addEventListener("click", loadCaught);
   $("caughtClear").addEventListener("click", async () => {
     if (!confirm(T("Clear every probe round? They are a record of what the other RIS said."))) return;

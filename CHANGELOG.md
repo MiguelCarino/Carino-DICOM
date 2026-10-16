@@ -40,8 +40,35 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   and when, in every History view (✋ chips, kept in `.carinopacs_handsent.json` beside
   the config, newest 2000 studies). A hand send from Received never enters the outgoing
   folder, so Auto-send's record could not answer for it and History showed nothing.
+- **Activity → Connections, a connection doctor.** Recent DICOM associations in both
+  directions — our listeners' incoming ones and every outgoing send, Test and worklist
+  probe — with who called whom, each proposed SOP class and transfer syntax, and the
+  PS3.8 per-context answer (abstract syntax not supported, transfer syntaxes not
+  supported, user rejection, no reason). Each row says in one sentence what went wrong
+  and what to change, on which machine: a closed port, an unreachable host, a TLS
+  mismatch, AE titles swapped on the modality or on a destination row, a calling AE not
+  in an allowed list, a busy remote, images sent to the worklist port, a class or a
+  transfer syntax the other side refuses. A fix names only settings that exist here;
+  when the remedy is on the other system it says so. Translated in all four locales.
+  Kept in memory (the newest 200 distinct situations, identical attempts folded into
+  one row with a count), UIDs, AE titles and addresses only — no patient data.
+  `GET /api/connections` (`logs.read`, `?peer=` filters by AE title, address or
+  destination name). The failover monitor's polling and the listeners' own self-test
+  calls are left out.
+- **"What it accepts" on each destination row**, next to Test. It offers the node every
+  SOP class / transfer syntax pair this archive holds (from the index; the common image
+  types when there is none), each in a presentation context of its own and batched at
+  128 contexts per association, plus Implicit VR Little Endian per class as a reference,
+  and lists what it would refuse — "OLD_PACS accepts CT Image Storage only
+  uncompressed; images stored here as JPEG Lossless are refused" — before a real study
+  fails. Nothing is sent. `POST /api/connections/check`, gated like the Test
+  (`services.control`).
 
 ### Changed
+- **A send refused for its transfer syntax says so.** When a remote accepts the kind of
+  object but not its encoding (PS3.8 reason 4), the send error now names the syntax and
+  says this PACS sends images as received, instead of "no common presentation context
+  … if this is a worklist port, fix the destination".
 - **A dashboard with a token, served over plain HTTP on a non-loopback address, logs a
   warning at every start.** It still starts.
 - **Destination names and errors in History need `routing.read`**, as on the Overview,

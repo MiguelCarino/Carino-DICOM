@@ -440,6 +440,11 @@ class PacsServer:
         # event rather than here: an appliance with notification off should not
         # be carrying a worker thread for it.
         self.notifier = Notifier(cfg, log=self.log, audit=self.audit)
+        # Recent associations in both directions, for Activity → Connections.
+        # The sending half is process-wide (see connections.install_sender_journal).
+        from .connections import ConnectionJournal, install_sender_journal
+        self.journal = ConnectionJournal()
+        install_sender_journal(self.journal)
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
         self.print_scp: Optional[PrintSCP] = None
@@ -650,6 +655,7 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(s.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(s.get("tls_ca", "")),
                 min_free_mb=int(float(s.get("min_free_gb", 2) or 0) * 1024),
+                journal=self.journal,
             )
             self.scp.start()
 
@@ -680,7 +686,7 @@ class PacsServer:
                 ctx = self._scu_tls_context()
             except Exception as exc:
                 return False, f"TLS config error: {exc}"
-        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx)
+        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx, record=False)
         return res.ok, res.message
 
     # ---- print receiver (virtual DICOM film printer) ----------------------
@@ -720,6 +726,7 @@ class PacsServer:
                 tls_cert=self.cfg.resolve_path(p.get("tls_cert", "")),
                 tls_key=self.cfg.resolve_path(p.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(p.get("tls_ca", "")),
+                journal=self.journal,
             )
             # The card's evidence — how many films, the last one, the last
             # problem — is what an operator checks after a modality reports a
@@ -776,6 +783,7 @@ class PacsServer:
                 tls_cert=self.cfg.resolve_path(m.get("tls_cert", "")),
                 tls_key=self.cfg.resolve_path(m.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(m.get("tls_ca", "")),
+                journal=self.journal,
             )
             self._counter_since["mwl"] = time.time()
             self.mwl_scp.start()
@@ -835,6 +843,7 @@ class PacsServer:
                 tls_cert=self.cfg.resolve_path(q.get("tls_cert", "")),
                 tls_key=self.cfg.resolve_path(q.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(q.get("tls_ca", "")),
+                journal=self.journal,
             )
             self.qr_scp.start()
 
@@ -1549,6 +1558,89 @@ class PacsServer:
         )
         return res
 
+    # ---- connection doctor -------------------------------------------------
+    def _here(self) -> dict:
+        """What connections.diagnose() has to know about this PACS to tell a
+        swapped AE title or a wrong port from a remote's own refusal."""
+        c = self.cfg
+        aets = {"receiver": c.scp.get("aet", ""), "printer": c.printer.get("aet", ""),
+                "worklist": c.mwl.get("aet", ""), "qr": c.qr.get("aet", "")}
+        ports = {"receiver": c.scp.get("port"), "printer": c.printer.get("port"),
+                 "worklist": c.mwl.get("port"), "qr": c.qr.get("port")}
+        running = {svc: bool(obj and obj.running) for svc, obj in (
+            ("receiver", self.scp), ("printer", self.print_scp), ("worklist", self.mwl_scp),
+            ("qr", self.qr_scp))}
+        return {"aets": aets, "own_aets": [a for a in aets.values() if a],
+                "scu_aet": c.scu.get("aet", ""), "ports": ports, "running": running}
+
+    def connections(self, peer: str = "", limit: int = 100) -> dict:
+        from .connections import describe
+        here = self._here()
+        return {"entries": [describe(e, here) for e in self.journal.entries(peer, limit)]}
+
+    def check_destination(self, dest: dict) -> dict:
+        """C-ECHO's bigger sibling: offer *dest* every SOP class / transfer
+        syntax this archive holds and report what it would refuse, before a
+        real study fails on it. Nothing is sent."""
+        from .connections import describe, diagnose, sop_name, ts_name, EXPLICIT_LE
+        from .scu import _PROBE_STORAGE, c_check
+        d = Destination.from_dict(dest)
+        aet = self.cfg.scu.get("aet", "CARINOSCU")
+        ctx = None
+        if d.tls:
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return {"ok": False, "reachable": False, "message": f"TLS config error: {exc}",
+                        "findings": [], "pairs": []}
+        stored = []
+        if self.index is not None:
+            try:
+                stored = self.index.syntax_pairs()
+            except Exception as exc:
+                self.log.warn(f"Connection check: could not read the index ({exc})", kind="index")
+        # Nothing indexed (index off, or an empty archive): the common image
+        # types uncompressed, which is the C-ECHO Test's question asked properly.
+        from_archive = bool(stored)
+        pairs = [(r["sop"], r["ts"]) for r in stored] or [(s, EXPLICIT_LE) for s in _PROBE_STORAGE]
+        counts = {(r["sop"], r["ts"]): r["count"] for r in stored}
+        self.log.info(f"Connection check -> {d.name} ({d.host}:{d.port}): offering "
+                      f"{len(pairs)} kind(s) of object", kind="echo")
+        res = c_check(d, aet, pairs, tls_context=ctx)
+        here = self._here()
+        if not res["ok"]:
+            # The association never got as far as contexts; the journal holds
+            # the entry _open() wrote for it, which diagnose() reads like any other.
+            latest = next((e for e in self.journal.entries(d.name)
+                           if e["service"] == "check" and e["dest"] == d.name), None)
+            findings = describe(latest, here)["findings"] if latest else []
+            self.log.warn(f"Connection check {d.name}: {res['message']}", kind="echo")
+            return {"ok": False, "reachable": False, "message": res["message"],
+                    "findings": findings, "pairs": [], "from_archive": from_archive}
+        entry = {"direction": "out", "service": "check", "dest": d.name, "calling": aet,
+                 "called": d.aet, "peer": d.host, "port": d.port, "tls": d.tls,
+                 "outcome": "accepted", "reject": None, "contexts": res["contexts"]}
+        findings = [f for f in diagnose(entry, here) if f["level"] != "ok"]
+        rows = []
+        for c in res["contexts"]:
+            ts = c["proposed"][0] if c["proposed"] else ""
+            rows.append({"sop": c["sop"], "sop_name": sop_name(c["sop"]), "ts": ts,
+                         "ts_name": ts_name(ts), "instances": counts.get((c["sop"], ts), 0),
+                         "reference": bool(c.get("reference")), "result": c["result"],
+                         "accepted": c["result"] == 0})
+        real = [r for r in rows if not r["reference"]]
+        refused = [r for r in real if not r["accepted"]]
+        what = "stored here" if from_archive else "of the common image types"
+        if refused:
+            msg = f"{d.name} would refuse {len(refused)} of {len(real)} kind(s) of object {what}"
+        else:
+            msg = f"{d.name} accepts all {len(real)} kind(s) of object {what}"
+        if res["truncated"]:
+            msg += f" (stopped after {res['batches']} associations)"
+        (self.log.warn if refused else self.log.info)(f"Connection check {d.name}: {msg}", kind="echo")
+        return {"ok": not refused, "reachable": True, "message": msg, "findings": findings,
+                "pairs": rows, "from_archive": from_archive, "truncated": res["truncated"]}
+
     def selftest(self, service: str, do_print: bool = False) -> dict:
         """Test one of our own listeners from the inside: C-ECHO for the DICOM
         ones (and, for the printer, optionally a real one-sheet print that lands
@@ -1592,7 +1684,7 @@ class PacsServer:
                                     self.cfg.resolve_path(scu.get("tls_key", "")))
             dest = Destination(name=label, host=host, port=int(obj.port), aet=obj.aet,
                                tls=bool(obj.tls))
-            res = c_echo(dest, calling, timeout=5, tls_context=ctx)
+            res = c_echo(dest, calling, timeout=5, tls_context=ctx, record=False)
             where = f"{obj.aet} at {host}:{obj.port}{' over TLS' if obj.tls else ''}"
             if not res.ok:
                 return done(False, f"The {label} did not answer C-ECHO ({where}): {res.message}.{as_whom}")
@@ -3869,6 +3961,9 @@ class PacsServer:
         self.stop_ris()
         self.stop_mwl()
         self.stop_qr()
+        from .connections import install_sender_journal, sender_journal
+        if sender_journal() is self.journal:
+            install_sender_journal(None)
         # Last: the index writer drains its backlog on stop, and everything
         # above is still feeding it until it is down.
         self.stop_index()

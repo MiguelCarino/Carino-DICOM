@@ -157,6 +157,12 @@ dashboard or from the command line without the dashboard.
   study arrives. Images are sent whether or not a matching order exists. The
   **worklist probe** asks the real RIS what a modality would ask, which helps
   find why a scanner sees an empty list.
+- **Connection doctor:** *Activity → Connections* lists recent DICOM connections
+  in both directions and says in one sentence why one failed and what to change,
+  on which machine — a closed port, swapped AE titles, an AE missing from an
+  allowed list, images sent to the worklist port, a transfer syntax the other
+  side refuses. *What it accepts* on a destination asks it about every kind of
+  image stored here before a real study fails on one.
 - **Emergency failover:** checks the primary PACS with C-ECHO. If it stays down,
   Carino offers to start the local worklist, holds incoming studies, and
   back-fills the primary once it answers. You choose who may activate failover

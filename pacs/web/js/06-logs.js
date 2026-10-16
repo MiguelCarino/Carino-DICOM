@@ -201,3 +201,200 @@ async function pollLog() {
     firstLog = false;
   } catch (e) { /* the status poll reports lost contact; this one just tries again */ }
 }
+
+// ---- Connections (Activity → Connections) ----
+/* Recent DICOM associations both ways (pacs/connections.py), each with what went wrong and the fix.
+   The engine sends a code and its blanks; the sentences are said here so they can be translated.
+   Same table as connections._TEXT — tests/test_connections.py fails if the two drift. */
+const CONN_TEXT = {
+  in_ok: [
+    "{calling} at {peer} connected and was accepted.",
+    ""],
+  in_ae_swapped: [
+    "{peer} called in as {calling}, which is this PACS's own AE title, and asked for {called}.",
+    "The two AE titles are swapped on that device: its own AE title goes in the local (calling) field, and {calling} goes in the remote (called) field."],
+  in_not_allowed: [
+    "{calling} at {peer} was turned away: its AE title is not in the allowed list.",
+    "If {calling} should be able to connect, add it under Configuration → Settings → {group} → Accept only these AEs."],
+  in_busy: [
+    "{calling} at {peer} was turned away for now: too many connections at once.",
+    "Nothing to change if it is rare — the sender retries. If it keeps happening, the sender may be leaving connections open."],
+  in_rejected: [
+    "{calling} at {peer} was turned away: {reason}.",
+    ""],
+  in_wrong_port: [
+    "{calling} tried to send images to port {port}, which is not where this PACS receives images.",
+    "On {calling}, set the storage destination to port {rx_port} with AE title {rx_aet}."],
+  in_wrong_port_off: [
+    "{calling} tried to send images to port {port}, which is not where this PACS receives images.",
+    "Turn the receiver on under Services, then point {calling} at its port."],
+  in_other_port: [
+    "{calling} asked port {port} for {sops}, which this PACS offers on another port.",
+    "On {calling}, set that service's port to {right_port} with AE title {right_aet}."],
+  in_other_port_off: [
+    "{calling} asked port {port} for {sops}, which this PACS offers on another port.",
+    "That service is not running here. Turn it on under Services, then point {calling} at its port."],
+  in_sop_refused: [
+    "{calling} offered {sops}, which this service does not accept.",
+    "This PACS has no setting to accept it. Ask the vendor whether {calling} can send it as a standard object (for example Secondary Capture), or send it to a system that takes it."],
+  in_ts_refused: [
+    "{calling} offered {sop} only as {tss}, which this PACS does not accept.",
+    "This PACS has no setting to add a transfer syntax. On {calling}, choose an uncompressed (Explicit VR Little Endian) or JPEG Lossless export for it."],
+  in_called_mismatch: [
+    "{calling} calls this PACS {called}, but its AE title is {aet}. It works only because this PACS does not check the called AE title.",
+    "On {calling}, set the remote AE title to {aet}."],
+  in_aborted: [
+    "{calling} at {peer} dropped the connection part-way through.",
+    "Usually a network drop or a transfer cancelled on {calling}; check its queue for that study."],
+  out_ok: [
+    "{dest} ({called} at {host}:{port}) accepted the connection.",
+    ""],
+  out_refused: [
+    "Nothing is listening at {host}:{port}.",
+    "Check that {dest} is running and that its port is right under Configuration → Destinations (a PACS usually receives on 104 or 11112)."],
+  out_unreachable: [
+    "{host}:{port} did not answer: the machine is off, unreachable, or a firewall is dropping the connection.",
+    "Check the address of {dest}, and that any firewall between the two allows port {port}."],
+  out_tls_failed: [
+    "The TLS handshake with {dest} at {host}:{port} failed.",
+    "Check the certificates under Configuration → Settings → Sending, and that {dest} expects TLS on port {port}. If it does not, untick TLS on its row under Destinations."],
+  out_maybe_tls: [
+    "{dest} at {host}:{port} took the connection and dropped it without answering.",
+    "That is what a TLS-only port does with a plain connection. If {dest} uses DICOM-TLS, tick TLS on its row under Configuration → Destinations."],
+  out_dropped: [
+    "{dest} at {host}:{port} took the connection and dropped it without answering.",
+    "Check the log on {dest}: it may not trust this PC's certificate."],
+  out_no_answer: [
+    "{dest} at {host}:{port} took the connection but never answered the association request.",
+    "{dest} may be overloaded or hung. Check that it is working, then try again."],
+  out_ae_swapped: [
+    "{dest} refused the connection, and the AE titles look swapped: the destination is set to {called}, which is an AE title of this PACS.",
+    "Under Configuration → Destinations, set {dest}'s AE title to the remote's own AE title. This PACS calls as {calling}; that is the title {dest} must accept."],
+  out_calling_refused: [
+    "{dest} does not accept calls from {calling}, the AE title this PACS sends as.",
+    "On {dest}, add {calling} (at this PC's address) to the AE titles it accepts."],
+  out_called_unknown: [
+    "{dest} does not answer to the AE title {called}.",
+    "Check {dest}'s AE title under Configuration → Destinations: it must match what {dest} calls itself, exactly, including case."],
+  out_busy: [
+    "{dest} turned the connection away for now: it is busy.",
+    "Nothing to change here — sends are retried. If it keeps happening, ask whoever runs {dest} to allow more connections."],
+  out_rejected: [
+    "{dest} refused the connection: {reason}.",
+    ""],
+  out_not_storage: [
+    "{dest} answers C-ECHO but accepts none of the image types offered — it is probably a worklist or query port.",
+    "Check the port under Configuration → Destinations; a PACS usually receives images on 104 or 11112."],
+  out_sop_refused: [
+    "{dest} does not accept {sops}.",
+    "Check that {host}:{port} is the right service on {dest}. If it is, ask whoever runs it to enable this, or stop routing these images to {dest} (Configuration → Routing)."],
+  out_ts_only_uncompressed: [
+    "{dest} accepts {sop} only uncompressed; images stored here as {tss} are refused.",
+    "This PACS sends each image exactly as it was received and cannot convert it, so these cannot be sent as they are. Enable {tss} on {dest}, or have the modality send uncompressed images."],
+  out_ts_refused: [
+    "{dest} accepts {sop}, but not as {tss}.",
+    "This PACS sends each image exactly as it was received and cannot convert it, so it cannot be sent as it is. Enable {tss} on {dest}, or have the modality send it in a transfer syntax {dest} accepts."],
+  out_ctx_refused: [
+    "{dest} refused {sops} ({reason}).",
+    ""],
+};
+// Blanks that are themselves dashboard words (a Settings group's title), translated like a label.
+const CONN_T_VARS = ["group"];
+const CONN_OUTCOME = {
+  accepted: "Accepted", none_accepted: "Nothing in common", rejected: "Turned away",
+  aborted: "Dropped", refused: "Nothing listening", unreachable: "No reply", tls: "TLS failed",
+  no_answer: "No answer", error: "Error",
+};
+const CONN_SERVICE = {
+  receiver: "Receiver", printer: "Printer", worklist: "Worklist", qr: "Query/Retrieve",
+  send: "Send", echo: "Test", check: "What it accepts", "worklist-probe": "Worklist probes",
+};
+// One finding as two lines: the sentence, then the fix (if there is one), in the operator's language.
+function connFinding(f) {
+  const text = CONN_TEXT[f.code];
+  const vals = Object.assign({}, f.vars || {});
+  CONN_T_VARS.forEach((k) => { if (vals[k]) vals[k] = T(vals[k]); });
+  const box = document.createElement("div");
+  box.className = "conn-finding " + (f.level || "error");
+  const say = document.createElement("div");
+  say.className = "conn-say";
+  // An engine newer than this page may send a code it does not know: show the engine's English.
+  say.textContent = text ? TF(text[0], vals) : (f.say || f.code);
+  box.appendChild(say);
+  const fixText = text ? (text[1] ? TF(text[1], vals) : "") : (f.fix || "");
+  if (fixText) {
+    const fix = document.createElement("div");
+    fix.className = "conn-fix";
+    fix.textContent = fixText;
+    box.appendChild(fix);
+  }
+  return box;
+}
+let connPeerTimer = null;
+async function loadConnections() {
+  const list = $("connList");
+  if (!list || !can("logs.read")) return;
+  const peer = (($("connPeer") || {}).value || "").trim();
+  let data;
+  try {
+    data = await api("/api/connections" + (peer ? "?peer=" + encodeURIComponent(peer) : ""));
+  } catch (e) {
+    list.textContent = ""; list.appendChild(emptyNote(e.message)); return;
+  }
+  list.textContent = "";
+  const rows = (data && data.entries) || [];
+  if (!rows.length) {
+    list.appendChild(emptyNote(peer ? T("No connections match.") : T("No connections yet.")));
+    return;
+  }
+  rows.forEach((e) => list.appendChild(connRow(e)));
+}
+function connRow(e) {
+  const worst = (e.findings || [])[0] || { level: "ok" };
+  const row = document.createElement("div");
+  row.className = "conn-row " + (worst.level || "error");
+  const head = document.createElement("div");
+  head.className = "conn-head";
+  const badge = document.createElement("span");
+  badge.className = "conn-badge " + (worst.level || "error");
+  badge.textContent = T(CONN_OUTCOME[e.outcome] || e.outcome);
+  const dir = document.createElement("span");
+  dir.className = "conn-dir";
+  dir.textContent = e.direction === "in" ? T("Incoming") : T("Outgoing");
+  const svc = document.createElement("span");
+  svc.className = "conn-svc";
+  svc.textContent = T(CONN_SERVICE[e.service] || e.service);
+  // Who called whom, as the wire said it: the AE titles are what both sides' settings are matched on.
+  const who = document.createElement("span");
+  who.className = "conn-who";
+  const where = e.direction === "in" ? e.peer : (e.dest ? e.dest + " · " : "") + e.peer + ":" + e.port;
+  who.textContent = (e.calling || "?") + " → " + (e.called || "?") + " · " + where;
+  const when = document.createElement("span");
+  when.className = "conn-when";
+  when.textContent = fmtLogTs(e.last * 1000, "") + (e.count > 1 ? " · ×" + e.count : "");
+  head.append(badge, dir, svc, who, when);
+  row.appendChild(head);
+  (e.findings || []).forEach((f) => { if (f.level !== "ok") row.appendChild(connFinding(f)); });
+  if ((e.contexts || []).length) row.appendChild(connContexts(e.contexts));
+  return row;
+}
+// What was offered and what came back, per presentation context — what a vendor's support line asks for.
+const CONN_RESULT = { 0: "accepted", 1: "refused by the remote", 2: "no reason given",
+                      3: "kind of object not supported", 4: "transfer syntax not supported" };
+function connContexts(ctx) {
+  const d = document.createElement("details");
+  d.className = "conn-ctx";
+  const s = document.createElement("summary");
+  s.textContent = TN(ctx.length, "{n} presentation contexts");
+  d.appendChild(s);
+  ctx.forEach((c) => {
+    const line = document.createElement("div");
+    line.className = "conn-ctx-line" + (c.result === 0 ? " good" : (c.result == null ? "" : " bad"));
+    const ts = c.result === 0 ? c.accepted_name : (c.proposed_names || []).join(", ");
+    const res = c.result == null ? "—" : T(CONN_RESULT[c.result] || String(c.result));
+    line.textContent = (c.sop_name || c.sop) + " · " + ts + " — " + res;
+    line.title = c.sop + "\n" + (c.proposed || []).join("\n");
+    d.appendChild(line);
+  });
+  return d;
+}

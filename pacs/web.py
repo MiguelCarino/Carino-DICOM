@@ -1372,6 +1372,37 @@ def create_app(server: PacsServer) -> Flask:
         res = server.echo(dest)
         return jsonify(ok=res.ok, message=res.message)
 
+    @app.get("/api/connections")
+    def api_connections():
+        """Recent DICOM associations both ways, each with a diagnosis. Gated
+        like the log: it holds the AE titles and addresses every log line
+        already carries, and no patient data at all."""
+        denied = guard.deny("logs.read")
+        if denied:
+            return denied
+        try:
+            limit = max(1, min(200, int(request.args.get("limit", 100) or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+        return jsonify(server.connections(peer=str(request.args.get("peer", ""))[:64], limit=limit))
+
+    @app.post("/api/connections/check")
+    def api_connections_check():
+        """The destination row's "What it accepts": the same gate as its Test
+        (POST /api/echo), because it is the same act — association negotiation
+        with a node already in the configuration, sending nothing."""
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
+        dest = request.get_json(silent=True) or {}
+        for k in ("host", "port", "aet"):
+            if k not in dest:
+                return jsonify(error=f"destination missing '{k}'"), 400
+        try:
+            return jsonify(server.check_destination(dest))
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=f"bad destination: {exc}"), 400
+
     @app.post("/api/selftest")
     def api_selftest():
         """Test one of our own listeners from the inside (see
@@ -2307,8 +2338,8 @@ def create_app(server: PacsServer) -> Flask:
 
     # Endpoints whose body is genuinely uninteresting and high-volume enough
     # that recording each one would bury the records that matter.
-    _AUDIT_SKIP = frozenset({"/api/portcheck", "/api/echo", "/api/login",
-                             "/api/logout", "/api/routing/test"})
+    _AUDIT_SKIP = frozenset({"/api/portcheck", "/api/echo", "/api/connections/check",
+                             "/api/login", "/api/logout", "/api/routing/test"})
 
     # Body fields safe to record as the target of an action. Deliberately a
     # whitelist: an order POST body is nothing but demographics and a login body

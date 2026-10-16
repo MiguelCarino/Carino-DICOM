@@ -11,7 +11,7 @@ const PANEL_TABS = {
   dlgStudies:  { history: "dlgHistory", pending: "dlgPending", stuck: "dlgStuck" },
   dlgConfig:   { destinations: "dlgDests", routing: "dlgRouting", settings: "dlgSettings",
                  modalities: "dlgModalities", people: "dlgPeople" },
-  dlgActivity: { logs: "dlgLogs", audit: "dlgAudit", caught: "dlgCaught" },
+  dlgActivity: { logs: "dlgLogs", connections: "dlgConnections", audit: "dlgAudit", caught: "dlgCaught" },
 };
 // Configuration opens on Destinations, not Settings (densest pane, holds the shutdown control).
 const DEFAULT_TAB = { dlgStudies: "history", dlgConfig: "destinations", dlgActivity: "logs" };
@@ -44,6 +44,7 @@ const tabLoaders = {
   // No fetch: registry comes with the config; redraw in case another tab's Save rewrote it.
   dlgModalities: () => renderMods(loadedModalities),
   dlgCaught: loadCaught,
+  dlgConnections: loadConnections,
 };
 let activePanel = "dlgServices";
 

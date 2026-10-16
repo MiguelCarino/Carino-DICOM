@@ -1179,6 +1179,16 @@ class InstanceIndex:
             "rebuilt": self._rebuilt,
         }
 
+    def syntax_pairs(self) -> list[dict]:
+        """Every (SOP class, transfer syntax) the archive holds, with how many
+        files carry it, commonest first — what a destination has to accept for
+        everything here to be sendable (the sender never transcodes)."""
+        return [{"sop": r["sop_class_uid"], "ts": r["transfer_syntax_uid"], "count": int(r["n"])}
+                for r in self._read(
+                    "SELECT sop_class_uid, transfer_syntax_uid, COUNT(*) AS n FROM instances "
+                    "WHERE sop_class_uid != '' AND transfer_syntax_uid != '' "
+                    "GROUP BY sop_class_uid, transfer_syntax_uid ORDER BY n DESC")]
+
     # ------------------------------------------------------------------ output
     @staticmethod
     def _page(limit: Optional[int], offset: int) -> str:

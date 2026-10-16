@@ -78,6 +78,7 @@ from pynetdicom.sop_class import (
 )
 
 from .assocwords import caller_of, listener_refusal
+from .connections import listener_handlers
 from .logbuf import LogBuffer
 from .netclaim import claim
 
@@ -1159,8 +1160,11 @@ class MwlSCP:
         tls_cert: str = "",
         tls_key: str = "",
         tls_ca: str = "",
+        journal=None,
     ):
         self.aet = aet
+        # connections.ConnectionJournal, or None outside PacsServer.
+        self.journal = journal
         self.bind = bind
         self.port = port
         self.log = log
@@ -1295,6 +1299,7 @@ class MwlSCP:
             (evt.EVT_C_ECHO, self._handle_echo),
             (evt.EVT_REJECTED, self._handle_rejected),
         ]
+        handlers += listener_handlers(self.journal, "worklist", self.aet, self.port, bool(self.tls))
         ssl_context = None
         if self.tls:
             from .tlsutil import server_context

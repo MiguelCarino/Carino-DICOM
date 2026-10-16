@@ -342,6 +342,16 @@ accepts only `multipart/related`, which is not a CORS-safelisted content type,
 so a cross-site POST already needs a preflight — and that preflight is answered
 only for the origins in `dicomweb.cors_origins`, which is empty by default.
 
+**`pacs/connections.py`** — the connection doctor. A journal of recent
+associations in both directions (the listeners register handlers through
+`listener_handlers()`, the sender records through one process-wide journal so
+`c_store`'s signature stays what its test stubs expect), and `diagnose()`, which
+turns an entry into a sentence and a fix. The sentences are mirrored in
+`js/06-logs.js` so the dashboard can translate them; `tests/test_connections.py`
+fails if the two drift. A fix may only name a setting that exists — this PACS
+has no transfer-syntax setting and never transcodes, so those remedies are on
+the other machine and say so.
+
 **`pacs/logbuf.py`** — one thread-safe ring buffer every component logs through,
 so the dashboard can poll a single stream. Also appends to a dated file per day,
 `<logs_dir>/YYYY-MM-DD.log` in UTC.
@@ -406,6 +416,7 @@ none are quoted here to go stale:
 node pacs/web/tests/i18n-parity.mjs               # four locales at parity
 node pacs/web/tests/dashboard-auth.e2e.mjs        # the login flow, in a real DOM
 node pacs/web/tests/stuck-panel.e2e.mjs
+node pacs/web/tests/connections-panel.e2e.mjs  # Activity → Connections, real refusals
 node pacs/web/editor/tests/pn-roundtrip.e2e.mjs   # PN survives the bundled editor
 node docs/tests/check-i18n.js                     # the project website's own locales
 ```

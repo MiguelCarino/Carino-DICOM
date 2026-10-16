@@ -22,6 +22,73 @@ async function echoRow(tr) {
   } finally { btn.textContent = old; btn.disabled = false; }
 }
 
+/* "What it accepts": offer the row's node every SOP class / transfer syntax this archive holds and
+   show what it would refuse, under the table — a toast is too small for a list of refusals. */
+async function checkRow(tr) {
+  const dest = {
+    name: tr.querySelector(".d-name").value.trim(),
+    host: tr.querySelector(".d-host").value.trim(),
+    port: parseInt(tr.querySelector(".d-port").value, 10),
+    aet: tr.querySelector(".d-aet").value.trim(),
+    tls: tr.querySelector(".d-tls").checked,
+  };
+  if (!dest.host || !dest.port || !dest.aet) { flashNote(T("Fill host, port and AE first"), false); return; }
+  const btn = tr.querySelector(".accepts");
+  const box = $("destCheck");
+  const old = btn.textContent; btn.textContent = "…"; btn.disabled = true;
+  try {
+    const r = await post("/api/connections/check", dest);
+    renderDestCheck(box, dest, r);
+  } catch (e) {
+    flashNote(`${dest.host}: ${e.message}`, false);
+  } finally { btn.textContent = old; btn.disabled = false; }
+}
+function renderDestCheck(box, dest, r) {
+  if (!box) return;
+  box.textContent = "";
+  box.hidden = false;
+  const head = document.createElement("div");
+  head.className = "conn-check-head " + (r.ok ? "ok" : "bad");
+  const name = dest.name || dest.host;
+  const real = (r.pairs || []).filter((p) => !p.reference);
+  const refused = real.filter((p) => !p.accepted).length;
+  if (!r.reachable) head.textContent = TF("{name} could not be checked", { name: name });
+  else if (refused && r.from_archive) head.textContent = TF("{name} would refuse {k} of {n} kinds of object stored here", { name: name, k: refused, n: real.length });
+  else if (refused) head.textContent = TF("{name} would refuse {k} of the {n} common image types", { name: name, k: refused, n: real.length });
+  else if (r.from_archive) head.textContent = TF("{name} accepts every kind of object stored here ({n})", { name: name, n: real.length });
+  else head.textContent = TF("Nothing is stored here yet; {name} accepts the common image types", { name: name });
+  box.appendChild(head);
+  (r.findings || []).forEach((f) => box.appendChild(connFinding(f)));
+  if (!real.length) return;
+  const tbl = document.createElement("table");
+  tbl.className = "grid conn-pairs";
+  const hr = document.createElement("tr");
+  [T("Kind of object"), T("Transfer syntax"), T("Stored"), T("Answer")].forEach((h) => {
+    const th = document.createElement("th"); th.textContent = h; hr.appendChild(th);
+  });
+  const thead = document.createElement("thead"); thead.appendChild(hr); tbl.appendChild(thead);
+  const body = document.createElement("tbody");
+  real.forEach((p) => {
+    const tr = document.createElement("tr");
+    tr.className = p.accepted ? "good" : "bad";
+    const ref = (r.pairs || []).find((q) => q.reference && q.sop === p.sop);
+    const cells = [p.sop_name || p.sop, p.ts_name || p.ts, String(p.instances || 0),
+      p.accepted ? T("accepted") : T(CONN_RESULT[p.result] || String(p.result))];
+    cells.forEach((c, i) => {
+      const td = document.createElement("td"); td.textContent = c;
+      if (i === 0) td.title = p.sop;
+      if (i === 1) td.title = p.ts;
+      tr.appendChild(td);
+    });
+    // The Implicit VR Little Endian answer for the same class, which tells "not this encoding" from "not this class".
+    if (ref && !p.accepted) tr.lastChild.textContent += " · " + (ref.accepted ? T("uncompressed accepted") : T("uncompressed refused too"));
+    body.appendChild(tr);
+  });
+  tbl.appendChild(body);
+  const wrap = document.createElement("div"); wrap.className = "table-scroll"; wrap.appendChild(tbl);
+  box.appendChild(wrap);
+}
+
 /* A toast: `ok` = green/red. `opts.warn` = must-not-miss: announced assertively (role="alert",
    so it interrupts #ordAlertLive), never times out. The role is set BEFORE the text because
    several screen readers skip text that arrives together with its live region.

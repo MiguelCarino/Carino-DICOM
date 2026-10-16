@@ -183,7 +183,7 @@ function setConfigReadOnly(ro) {
   configReadOnly = ro;
   const note = $("cfgReadOnly");
   if (note) note.hidden = !ro;
-  ["#dlgDests input", "#dlgDests .del", "#dlgDests .echo", "#rtRules input", "#rtRules button", "#rtEnabled"]
+  ["#dlgDests input", "#dlgDests .del", "#dlgDests .echo", "#dlgDests .accepts", "#rtRules input", "#rtRules button", "#rtEnabled"]
     .forEach((sel) => document.querySelectorAll(sel).forEach((el) => { el.disabled = ro; }));
 }
 
@@ -248,6 +248,7 @@ function addDestRow(d) {
   }
   tr.querySelector(".del").addEventListener("click", () => { tr.remove(); checkDestPorts(); });
   tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
+  tr.querySelector(".accepts").addEventListener("click", () => checkRow(tr));
   [".d-name", ".d-host", ".d-port", ".d-aet", ".d-en"].forEach((sel) =>
     tr.querySelector(sel).addEventListener("input", checkDestPorts));
   $("destBody").appendChild(tr);
