@@ -54,14 +54,21 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   one row with a count), UIDs, AE titles and addresses only — no patient data.
   `GET /api/connections` (`logs.read`, `?peer=` filters by AE title, address or
   destination name). The failover monitor's polling and the listeners' own self-test
-  calls are left out.
+  calls are left out, on both the calling and the listening side. Verification offered
+  beside the real request does not hide a wrong port; a peer Carino PACS left on the
+  default AE titles is not mistaken for a swap (a refusal of our calling AE, PS3.8
+  diagnostic 3, says so even when the remote is also called CARINODICOM); a refused
+  worklist probe names the modality title it borrowed; an A-ABORT after this PACS had
+  answered the requests is a quiet "ended abruptly", not a red "dropped".
 - **"What it accepts" on each destination row**, next to Test. It offers the node every
   SOP class / transfer syntax pair this archive holds (from the index; the common image
-  types when there is none), each in a presentation context of its own and batched at
+  types when there is none, and it says when that is because the index is off or
+  unreadable rather than the archive empty), each in a presentation context of its own and batched at
   128 contexts per association, plus Implicit VR Little Endian per class as a reference,
   and lists what it would refuse — "OLD_PACS accepts CT Image Storage only
   uncompressed; images stored here as JPEG Lossless are refused" — before a real study
-  fails. Nothing is sent. `POST /api/connections/check`, gated like the Test
+  fails. A node that takes only Implicit VR Little Endian is told apart from one that
+  wants uncompressed images. Nothing is sent. `POST /api/connections/check`, gated like the Test
   (`services.control`).
 
 ### Changed

@@ -246,6 +246,9 @@ const CONN_TEXT = {
   in_aborted: [
     "{calling} at {peer} dropped the connection part-way through.",
     "Usually a network drop or a transfer cancelled on {calling}; check its queue for that study."],
+  in_ended_abort: [
+    "{calling} at {peer} ended the connection abruptly (an abort, not a normal release) after this PACS had answered its requests.",
+    "Usually harmless: some devices end every transfer this way, and this PACS drops a connection left idle. If {calling} reports a failed send, check its queue."],
   out_ok: [
     "{dest} ({called} at {host}:{port}) accepted the connection.",
     ""],
@@ -273,6 +276,9 @@ const CONN_TEXT = {
   out_calling_refused: [
     "{dest} does not accept calls from {calling}, the AE title this PACS sends as.",
     "On {dest}, add {calling} (at this PC's address) to the AE titles it accepts."],
+  out_calling_refused_probe: [
+    "{dest} does not accept calls from {calling}, the modality AE title this probe asked as.",
+    "Check that {calling} is exactly the AE title that modality uses. If it is, {dest} does not know it: add {calling} there."],
   out_called_unknown: [
     "{dest} does not answer to the AE title {called}.",
     "Check {dest}'s AE title under Configuration → Destinations: it must match what {dest} calls itself, exactly, including case."],
@@ -302,7 +308,7 @@ const CONN_TEXT = {
 const CONN_T_VARS = ["group"];
 const CONN_OUTCOME = {
   accepted: "Accepted", none_accepted: "Nothing in common", rejected: "Turned away",
-  aborted: "Dropped", refused: "Nothing listening", unreachable: "No reply", tls: "TLS failed",
+  aborted: "Dropped", ended_abort: "Ended abruptly", refused: "Nothing listening", unreachable: "No reply", tls: "TLS failed",
   no_answer: "No answer", error: "Error",
 };
 const CONN_SERVICE = {

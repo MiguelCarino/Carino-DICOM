@@ -251,8 +251,14 @@ print("rejected" if a.is_rejected else "other")
   })()`);
   await cdp.waitFor("!document.getElementById('destCheck').hidden && document.querySelector('#destCheck .conn-check-head')", 20000, "the check result");
   const head = await cdp.eval("document.querySelector('#destCheck .conn-check-head').textContent");
-  check(head === "Nothing is stored here yet; Self accepts the common image types",
-        "an empty archive is checked against the common image types: " + JSON.stringify(head));
+  // This engine runs with the index off: the archive was not read, and the page must not call it empty.
+  check(head === "Self accepts the common image types",
+        "with the index off, the common image types are asked about: " + JSON.stringify(head));
+  const note = await cdp.eval("(document.querySelector('#destCheck .conn-finding.info') || {}).textContent || ''");
+  check(note === "The instance index is off, so only the common image types were asked about.",
+        "and it says why: " + JSON.stringify(note));
+  const cols = await cdp.eval("[].map.call(document.querySelectorAll('#destCheck .conn-pairs th'), (t) => t.textContent)");
+  check(cols.indexOf("Stored") < 0 && cols.length === 3, "no Stored column without the index: " + JSON.stringify(cols));
   const pairs = await cdp.eval("document.querySelectorAll('#destCheck .conn-pairs tbody tr.good').length");
   check(pairs === 6, "all six are listed as accepted: " + pairs);
   if (process.env.SHOT) {

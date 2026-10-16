@@ -56,14 +56,27 @@ function renderDestCheck(box, dest, r) {
   else if (refused && r.from_archive) head.textContent = TF("{name} would refuse {k} of {n} kinds of object stored here", { name: name, k: refused, n: real.length });
   else if (refused) head.textContent = TF("{name} would refuse {k} of the {n} common image types", { name: name, k: refused, n: real.length });
   else if (r.from_archive) head.textContent = TF("{name} accepts every kind of object stored here ({n})", { name: name, n: real.length });
-  else head.textContent = TF("Nothing is stored here yet; {name} accepts the common image types", { name: name });
+  else if (r.basis === "empty") head.textContent = TF("Nothing is stored here yet; {name} accepts the common image types", { name: name });
+  else head.textContent = TF("{name} accepts the common image types", { name: name });
   box.appendChild(head);
+  // The common types stand in for the archive only when it is empty; otherwise say why it was not read.
+  const why = { index_off: "The instance index is off, so only the common image types were asked about.",
+                index_error: "The instance index could not be read, so only the common image types were asked about." }[r.basis];
+  if (r.reachable && why) {
+    const note = document.createElement("div");
+    note.className = "conn-finding info";
+    note.textContent = T(why);
+    box.appendChild(note);
+  }
   (r.findings || []).forEach((f) => box.appendChild(connFinding(f)));
   if (!real.length) return;
   const tbl = document.createElement("table");
   tbl.className = "grid conn-pairs";
   const hr = document.createElement("tr");
-  [T("Kind of object"), T("Transfer syntax"), T("Stored"), T("Answer")].forEach((h) => {
+  // Counts come from the index; without it every row would say 0.
+  const cols = r.from_archive ? [T("Kind of object"), T("Transfer syntax"), T("Stored"), T("Answer")]
+    : [T("Kind of object"), T("Transfer syntax"), T("Answer")];
+  cols.forEach((h) => {
     const th = document.createElement("th"); th.textContent = h; hr.appendChild(th);
   });
   const thead = document.createElement("thead"); thead.appendChild(hr); tbl.appendChild(thead);
@@ -72,8 +85,9 @@ function renderDestCheck(box, dest, r) {
     const tr = document.createElement("tr");
     tr.className = p.accepted ? "good" : "bad";
     const ref = (r.pairs || []).find((q) => q.reference && q.sop === p.sop);
-    const cells = [p.sop_name || p.sop, p.ts_name || p.ts, String(p.instances || 0),
+    const cells = [p.sop_name || p.sop, p.ts_name || p.ts,
       p.accepted ? T("accepted") : T(CONN_RESULT[p.result] || String(p.result))];
+    if (r.from_archive) cells.splice(2, 0, String(p.instances || 0));
     cells.forEach((c, i) => {
       const td = document.createElement("td"); td.textContent = c;
       if (i === 0) td.title = p.sop;

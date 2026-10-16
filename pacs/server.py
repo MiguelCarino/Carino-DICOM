@@ -1594,14 +1594,21 @@ class PacsServer:
                 return {"ok": False, "reachable": False, "message": f"TLS config error: {exc}",
                         "findings": [], "pairs": []}
         stored = []
+        # Why the common types were asked about instead, when they were: the
+        # dashboard must not say "nothing is stored here" of a full archive
+        # whose index is off or unreadable.
+        basis = "index_off" if self.index is None else "empty"
         if self.index is not None:
             try:
                 stored = self.index.syntax_pairs()
             except Exception as exc:
+                basis = "index_error"
                 self.log.warn(f"Connection check: could not read the index ({exc})", kind="index")
-        # Nothing indexed (index off, or an empty archive): the common image
-        # types uncompressed, which is the C-ECHO Test's question asked properly.
+        # Nothing indexed: the common image types uncompressed, which is the
+        # C-ECHO Test's question asked properly.
         from_archive = bool(stored)
+        if from_archive:
+            basis = "archive"
         pairs = [(r["sop"], r["ts"]) for r in stored] or [(s, EXPLICIT_LE) for s in _PROBE_STORAGE]
         counts = {(r["sop"], r["ts"]): r["count"] for r in stored}
         self.log.info(f"Connection check -> {d.name} ({d.host}:{d.port}): offering "
@@ -1616,7 +1623,7 @@ class PacsServer:
             findings = describe(latest, here)["findings"] if latest else []
             self.log.warn(f"Connection check {d.name}: {res['message']}", kind="echo")
             return {"ok": False, "reachable": False, "message": res["message"],
-                    "findings": findings, "pairs": [], "from_archive": from_archive}
+                    "findings": findings, "pairs": [], "from_archive": from_archive, "basis": basis}
         entry = {"direction": "out", "service": "check", "dest": d.name, "calling": aet,
                  "called": d.aet, "peer": d.host, "port": d.port, "tls": d.tls,
                  "outcome": "accepted", "reject": None, "contexts": res["contexts"]}
@@ -1639,7 +1646,8 @@ class PacsServer:
             msg += f" (stopped after {res['batches']} associations)"
         (self.log.warn if refused else self.log.info)(f"Connection check {d.name}: {msg}", kind="echo")
         return {"ok": not refused, "reachable": True, "message": msg, "findings": findings,
-                "pairs": rows, "from_archive": from_archive, "truncated": res["truncated"]}
+                "pairs": rows, "from_archive": from_archive, "basis": basis,
+                "truncated": res["truncated"]}
 
     def selftest(self, service: str, do_print: bool = False) -> dict:
         """Test one of our own listeners from the inside: C-ECHO for the DICOM
@@ -1684,13 +1692,17 @@ class PacsServer:
                                     self.cfg.resolve_path(scu.get("tls_key", "")))
             dest = Destination(name=label, host=host, port=int(obj.port), aet=obj.aet,
                                tls=bool(obj.tls))
-            res = c_echo(dest, calling, timeout=5, tls_context=ctx, record=False)
-            where = f"{obj.aet} at {host}:{obj.port}{' over TLS' if obj.tls else ''}"
-            if not res.ok:
-                return done(False, f"The {label} did not answer C-ECHO ({where}): {res.message}.{as_whom}")
-            if service == "printer" and do_print:
-                ok, said = st.test_print(host, int(obj.port), obj.aet, calling, ctx)
-                return done(ok, f"Test print to {where}: {said}.{as_whom}")
+            # record=False keeps the calling side out of the journal; quiet()
+            # keeps the listener's side out, which would otherwise show
+            # allowed[0] connecting from loopback.
+            with self.journal.quiet(host, int(obj.port)):
+                res = c_echo(dest, calling, timeout=5, tls_context=ctx, record=False)
+                where = f"{obj.aet} at {host}:{obj.port}{' over TLS' if obj.tls else ''}"
+                if not res.ok:
+                    return done(False, f"The {label} did not answer C-ECHO ({where}): {res.message}.{as_whom}")
+                if service == "printer" and do_print:
+                    ok, said = st.test_print(host, int(obj.port), obj.aet, calling, ctx)
+                    return done(ok, f"Test print to {where}: {said}.{as_whom}")
             return done(True, f"The {label} answered C-ECHO ({where}).{as_whom}")
         except Exception as exc:          # a bad client certificate path, say
             return done(False, f"The test could not run: {exc}")

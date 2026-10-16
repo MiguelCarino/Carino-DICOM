@@ -25,6 +25,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import Optional
 
 from .assocwords import reject_parts, reject_reason
@@ -106,6 +107,8 @@ class ConnectionJournal:
         self._items: "OrderedDict[tuple, dict]" = OrderedDict()
         self._seq = 0
         self.capacity = capacity
+        # (host, port) -> [self-tests running, journal-quiet until]: see quiet().
+        self._quiet: dict = {}
 
     def record(self, *, direction: str, service: str, calling: str, called: str,
                peer: str, port: int, outcome: str, dest: str = "", tls: bool = False,
@@ -147,6 +150,32 @@ class ConnectionJournal:
     def clear(self) -> None:
         with self._lock:
             self._items.clear()
+
+    # A listener's acceptor thread fires EVT_REJECTED / EVT_ABORTED after it
+    # has answered, so the self-test's call can return before its row is
+    # written. The window stays shut that long after the test ends.
+    QUIET_GRACE = 2.0
+
+    @contextmanager
+    def quiet(self, host: str, port: int):
+        """Leave out the incoming side of our own self-test: calls from
+        *host* to *port* while it runs. Without it every Test press is a row
+        claiming the first allowed modality connected from loopback."""
+        key = (str(host), int(port))
+        with self._lock:
+            self._quiet.setdefault(key, [0, 0.0])[0] += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                q = self._quiet[key]
+                q[0] -= 1
+                q[1] = time.monotonic() + self.QUIET_GRACE
+
+    def is_quiet(self, peer: str, port: int) -> bool:
+        with self._lock:
+            q = self._quiet.get((str(peer), int(port or 0)))
+            return bool(q) and (q[0] > 0 or time.monotonic() < q[1])
 
 
 # The sending side has one journal per process, installed by PacsServer. It is
@@ -242,34 +271,53 @@ def listener_handlers(journal: Optional[ConnectionJournal], service: str, aet: s
         return dict(direction="in", service=service, calling=calling, called=called or aet,
                     peer=peer, port=port, tls=tls)
 
+    def record(event, **kw):
+        b = base(event)
+        if not journal.is_quiet(b["peer"], port):
+            journal.record(**kw, **b)
+
     def accepted(event):
         try:
             ctx = offered_contexts(event.assoc)
             ok = any(c["result"] == ACCEPTED for c in ctx)
-            journal.record(outcome="accepted" if ok else "none_accepted", contexts=ctx,
-                           **base(event))
+            record(event, outcome="accepted" if ok else "none_accepted", contexts=ctx)
         except Exception:
             pass                    # bookkeeping must never cost an association
 
     def rejected(event):
         try:
             prim = getattr(event.assoc.acceptor, "primitive", None)
-            journal.record(outcome="rejected", reject=reject_parts(prim), **base(event))
+            record(event, outcome="rejected", reject=reject_parts(prim))
+        except Exception:
+            pass
+
+    def answered(event):
+        # An acceptor sends a DIMSE message only to answer one (or, for
+        # C-GET, to deliver what was asked), so this counts finished work.
+        try:
+            a = event.assoc
+            a._carino_answered = getattr(a, "_carino_answered", 0) + 1
         except Exception:
             pass
 
     def aborted(event):
-        # Only an abort after something was agreed is news: with nothing
-        # accepted the requestor has nothing to send and aborts at once
-        # (pynetdicom does), and the accepted entry already says why.
+        # A-ABORT (PS3.8 7.3) after work was done is how some devices end every
+        # transfer, and how our own acceptor drops an idle association at its
+        # network timeout: worth a line, not an alarm. Before any work, only
+        # an abort after something useful was agreed is news: with nothing but
+        # Verification accepted the requestor has nothing to send and aborts at
+        # once (pynetdicom does), and the accepted entry already says why.
         try:
-            if event.assoc.accepted_contexts:
-                journal.record(outcome="aborted", **base(event))
+            a = event.assoc
+            if getattr(a, "_carino_answered", 0):
+                record(event, outcome="ended_abort")
+            elif any(str(cx.abstract_syntax) != VERIFICATION for cx in a.accepted_contexts):
+                record(event, outcome="aborted")
         except Exception:
             pass
 
     return [(evt.EVT_ACCEPTED, accepted), (evt.EVT_REJECTED, rejected),
-            (evt.EVT_ABORTED, aborted)]
+            (evt.EVT_DIMSE_SENT, answered), (evt.EVT_ABORTED, aborted)]
 
 
 # ---- the diagnoser ----------------------------------------------------------
@@ -323,6 +371,11 @@ _TEXT = {
         "{calling} at {peer} dropped the connection part-way through.",
         "Usually a network drop or a transfer cancelled on {calling}; check its queue for that "
         "study."),
+    "in_ended_abort": (
+        "{calling} at {peer} ended the connection abruptly (an abort, not a normal release) "
+        "after this PACS had answered its requests.",
+        "Usually harmless: some devices end every transfer this way, and this PACS drops a "
+        "connection left idle. If {calling} reports a failed send, check its queue."),
     "out_ok": ("{dest} ({called} at {host}:{port}) accepted the connection.", ""),
     "out_refused": (
         "Nothing is listening at {host}:{port}.",
@@ -354,6 +407,10 @@ _TEXT = {
     "out_calling_refused": (
         "{dest} does not accept calls from {calling}, the AE title this PACS sends as.",
         "On {dest}, add {calling} (at this PC's address) to the AE titles it accepts."),
+    "out_calling_refused_probe": (
+        "{dest} does not accept calls from {calling}, the modality AE title this probe asked as.",
+        "Check that {calling} is exactly the AE title that modality uses. If it is, {dest} does "
+        "not know it: add {calling} there."),
     "out_called_unknown": (
         "{dest} does not answer to the AE title {called}.",
         "Check {dest}'s AE title under Configuration → Destinations: it must match what {dest} "
@@ -386,7 +443,7 @@ _TEXT = {
 }
 
 # How loud each one is on the dashboard.
-_LEVEL = {"in_ok": "ok", "out_ok": "ok", "in_called_mismatch": "info",
+_LEVEL = {"in_ok": "ok", "out_ok": "ok", "in_called_mismatch": "info", "in_ended_abort": "info",
           "in_busy": "warn", "out_busy": "warn"}
 
 # The Settings group each listener's allow-list lives in, by its dashboard title.
@@ -431,7 +488,8 @@ def diagnose(entry: dict, here: Optional[dict] = None) -> list[dict]:
     if entry["direction"] == "in":
         return _diagnose_in(entry, here, own)
     # Our sending AE counts as ours on the way out only: the listeners' own
-    # self-test calls in as it, and that is not a swap.
+    # self-test calls in as it, and so does another Carino PACS left on the
+    # default title, and neither is a swap.
     scu = str(here.get("scu_aet") or "").strip()
     return _diagnose_out(entry, own | ({scu} if scu else set()))
 
@@ -441,10 +499,15 @@ def _diagnose_in(e: dict, here: dict, own: set) -> list[dict]:
     v = {"calling": e["calling"] or "?", "called": e["called"], "peer": e["peer"] or "?",
          "port": e["port"], "aet": listener_aet or e["called"]}
     out = []
-    # Checked before the refusal it usually causes: "not in the allowed list"
-    # is true and points at the wrong machine.
-    if e["calling"] and e["calling"] in own and e["called"] != e["calling"]:
-        out.append(_finding("in_ae_swapped", v))
+    # A swap puts our title in the calling field and the device's own in the
+    # called one. Our title as calling alone is not enough: another Carino
+    # PACS on the defaults calls as the same titles (its Q/R serves a C-MOVE
+    # as CARINOQR) and asks for ours correctly. Checked before the refusal it
+    # usually causes: "not in the allowed list" is true and points at the
+    # wrong machine. When it was accepted anyway, it works and is worth a word.
+    if (e["calling"] and e["calling"] in own and e["called"] != e["calling"]
+            and e["called"] != listener_aet):
+        out.append(_finding("in_ae_swapped", v, "info" if e["outcome"] == "accepted" else ""))
     if e["outcome"] == "rejected":
         _result, source, diag = e["reject"] or (0, 0, 0)
         if (source, diag) == (1, 3):
@@ -457,11 +520,16 @@ def _diagnose_in(e: dict, here: dict, own: set) -> list[dict]:
         return out
     if e["outcome"] == "aborted":
         return out + [_finding("in_aborted", v)]
+    if e["outcome"] == "ended_abort":
+        return out + [_finding("in_ended_abort", v)]
     refused = _refused_sops(e["contexts"])
-    # Nothing accepted, and what was asked for is what another of our
+    # Every listener here accepts Verification, and many modalities offer it
+    # beside their real request, so "accepted" can mean only C-ECHO got through.
+    useful = any(c["result"] == ACCEPTED and c["sop"] != VERIFICATION for c in e["contexts"])
+    # Nothing useful accepted, and what was asked for is what another of our
     # listeners does: the device has the right machine and the wrong port.
     wanted = {_service_for(s) for s in refused} - {None}
-    if e["outcome"] == "none_accepted" and len(wanted) == 1 and e["service"] not in wanted:
+    if not useful and len(wanted) == 1 and e["service"] not in wanted:
         (svc,) = wanted
         running = here.get("running", {}).get(svc, False)
         right = {"right_port": here.get("ports", {}).get(svc, ""),
@@ -473,7 +541,7 @@ def _diagnose_in(e: dict, here: dict, own: set) -> list[dict]:
             out.append(_finding("in_other_port" if running else "in_other_port_off",
                                 {**v, **right, "sops": _names(refused, sop_name)}))
         return out
-    level = "" if e["outcome"] == "none_accepted" else "warn"
+    level = "warn" if useful else ""
     no_sop = [s for s, cs in refused.items() if any(c["result"] == SOP_NOT_SUPPORTED for c in cs)]
     if no_sop:
         out.append(_finding("in_sop_refused", {**v, "sops": _names(no_sop, sop_name)}, level))
@@ -525,11 +593,19 @@ def _diagnose_out(e: dict, own: set) -> list[dict]:
         return [_finding("out_rejected", {**v, "reason": e.get("detail") or "connection error"})]
     if oc == "rejected":
         _result, source, diag = e["reject"] or (0, 0, 0)
-        swapped = e["called"] in own or (e["calling"] and e["calling"] == e["called"])
-        if (source, diag) in ((1, 3), (1, 7)) and swapped:
+        # PS3.8 9.3.4: diagnostic 3 is "calling AE title not recognized", 7
+        # "called AE title not recognized". A destination row carrying our own
+        # title makes the remote answer 7; with 3 the called title was fine, so
+        # it is a swap only if both fields hold the same title. Another Carino
+        # PACS on the defaults really is called CARINODICOM. A worklist probe
+        # calls as a borrowed modality title, so a swap there is not ours.
+        probe = e["service"] == "worklist-probe"
+        same = bool(e["calling"]) and e["calling"] == e["called"]
+        if not probe and (((source, diag) in ((1, 3), (1, 7)) and same)
+                          or ((source, diag) == (1, 7) and e["called"] in own)):
             return [_finding("out_ae_swapped", v)]
         if (source, diag) == (1, 3):
-            return [_finding("out_calling_refused", v)]
+            return [_finding("out_calling_refused_probe" if probe else "out_calling_refused", v)]
         if (source, diag) == (1, 7):
             return [_finding("out_called_unknown", v)]
         if source == 3:
@@ -580,9 +656,14 @@ def _context_findings(e: dict, v: dict) -> list[dict]:
 
 
 def _ts_finding(v: dict, sop: str, bad: list, good: list) -> dict:
-    tss = _names([t for c in bad for t in c["proposed"] if not c.get("reference")]
-                 or [t for c in bad for t in c["proposed"]], ts_name)
-    only_plain = good and all(c["accepted"] in UNCOMPRESSED for c in good)
+    uids = ([t for c in bad for t in c["proposed"] if not c.get("reference")]
+            or [t for c in bad for t in c["proposed"]])
+    tss = _names(uids, ts_name)
+    # "Only uncompressed" is the answer only when what was refused is
+    # compressed: a node taking Implicit VR LE alone refuses Explicit VR LE,
+    # and telling the modality to send uncompressed would change nothing.
+    only_plain = (good and all(c["accepted"] in UNCOMPRESSED for c in good)
+                  and not any(t in UNCOMPRESSED for t in uids))
     code = "out_ts_only_uncompressed" if only_plain else "out_ts_refused"
     return _finding(code, {**v, "sop": sop_name(sop), "tss": tss})
 

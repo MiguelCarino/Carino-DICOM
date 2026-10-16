@@ -307,6 +307,103 @@ def test_images_sent_to_the_worklist_port():
         _done(srv, tmp)
 
 
+def test_images_and_verification_sent_to_the_worklist_port():
+    """Many modalities offer Verification beside their storage class. The
+    worklist accepts it, so the association is "accepted", but nothing it
+    came for was: still the wrong port, not a class nobody here takes."""
+    from pynetdicom.sop_class import CTImageStorage
+    srv, client, tmp = _pacs(mwl={"enabled": True})
+    try:
+        srv.sync_services()
+        ae = AE(ae_title="CT1")
+        ae.add_requested_context(Verification)
+        ae.add_requested_context(CTImageStorage)
+        assoc = ae.associate("127.0.0.1", srv.cfg.mwl["port"], ae_title=srv.cfg.mwl["aet"])
+        assert assoc.is_established
+        assoc.release()
+        time.sleep(0.2)
+        e = next(x for x in _incoming(srv) if x["service"] == "worklist")
+        assert e["outcome"] == "accepted", e
+        (f,) = C.diagnose(e, srv._here())
+        assert f["code"] == "in_wrong_port" and f["level"] == "error", f
+    finally:
+        _done(srv, tmp)
+
+
+def test_two_carino_pacs_on_default_titles():
+    """Both installs keep CARINODICOM / CARINOQR. That is not a swap either way."""
+    here = {"aets": {"receiver": "CARINODICOM", "qr": "CARINOQR"},
+            "own_aets": ["CARINODICOM", "CARINOQR"], "scu_aet": "CARINOSCU"}
+    # Site B has an allow-list without us: PS3.8 diagnostic 3, calling AE not recognised.
+    out = {"direction": "out", "service": "send", "dest": "SiteB", "calling": "CARINOSCU",
+           "called": "CARINODICOM", "peer": "10.0.0.2", "port": 104, "tls": False,
+           "outcome": "rejected", "reject": [1, 1, 3], "contexts": []}
+    (f,) = C.diagnose(out, here)
+    assert f["code"] == "out_calling_refused" and "add CARINOSCU" in f["fix"], f
+    # A real swap on our destination row makes the remote answer 7.
+    assert _codes({**out, "reject": [1, 1, 7], "called": "CARINOQR"}, here) == ["out_ae_swapped"]
+    # Site B's Q/R serving a C-MOVE to our receiver calls as its own CARINOQR.
+    inc = {"direction": "in", "service": "receiver", "dest": "", "calling": "CARINOQR",
+           "called": "CARINODICOM", "peer": "10.0.0.2", "port": 104, "tls": False,
+           "outcome": "accepted", "reject": None,
+           "contexts": [{"sop": SecondaryCaptureImageStorage, "proposed": [ExplicitVRLittleEndian],
+                         "accepted": ExplicitVRLittleEndian, "result": C.ACCEPTED}]}
+    assert _codes(inc, here) == ["in_ok"]
+
+
+def test_a_refused_worklist_probe_names_the_borrowed_title():
+    e = {"direction": "out", "service": "worklist-probe", "dest": "RIS", "calling": "US_ROOM2",
+         "called": "RISMWL", "peer": "10.0.0.3", "port": 104, "tls": False,
+         "outcome": "rejected", "reject": [1, 1, 3], "contexts": []}
+    (f,) = C.diagnose(e, {"scu_aet": "CARINOSCU"})
+    assert f["code"] == "out_calling_refused_probe", f
+    assert "this PACS sends as" not in f["say"] and "US_ROOM2" in f["say"], f["say"]
+
+
+def test_an_abort_after_the_work_is_done_is_not_an_alarm():
+    srv, client, tmp = _pacs()
+    try:
+        port, aet = srv.cfg.scp["port"], srv.cfg.scp["aet"]
+        ae = AE(ae_title="CT1")
+        ae.add_requested_context(Verification)
+        ae.add_requested_context(SecondaryCaptureImageStorage, ExplicitVRLittleEndian)
+        a = ae.associate("127.0.0.1", port, ae_title=aet)
+        assert a.send_c_echo().Status == 0
+        a.abort()                           # how some devices end every transfer
+        time.sleep(0.3)
+        (e,) = [x for x in _incoming(srv) if x["outcome"] not in ("accepted",)]
+        assert e["outcome"] == "ended_abort", e
+        (f,) = C.diagnose(e, srv._here())
+        assert f["code"] == "in_ended_abort" and f["level"] == "info", f
+        # Aborting before anything was answered is still the error it was.
+        srv.journal.clear()
+        a = ae.associate("127.0.0.1", port, ae_title=aet)
+        a.abort()
+        time.sleep(0.3)
+        (e,) = [x for x in _incoming(srv) if x["outcome"] not in ("accepted",)]
+        assert e["outcome"] == "aborted" and _codes(e, srv._here()) == ["in_aborted"], e
+    finally:
+        _done(srv, tmp)
+
+
+def test_the_self_test_leaves_no_incoming_row():
+    """It calls as the first allowed AE, which would otherwise read as that
+    modality connecting from loopback."""
+    srv, client, tmp = _pacs(scp={"allowed_aets": ["CT_ER_01"]})
+    try:
+        assert srv.selftest("receiver")["ok"]
+        time.sleep(0.3)
+        assert _incoming(srv) == [], _incoming(srv)
+        # And the hush ends with it: a real call from loopback afterwards is kept.
+        time.sleep(C.ConnectionJournal.QUIET_GRACE)
+        c_echo(Destination("R", "127.0.0.1", srv.cfg.scp["port"], srv.cfg.scp["aet"]),
+               "CT_ER_01", timeout=5, record=False)
+        time.sleep(0.2)
+        assert [x["calling"] for x in _incoming(srv)] == ["CT_ER_01"]
+    finally:
+        _done(srv, tmp)
+
+
 # ------------------------------------------------- the check, over HTTP
 def test_check_names_what_a_destination_would_refuse():
     """Two kinds of object in the archive; the destination takes Secondary
@@ -320,7 +417,7 @@ def test_check_names_what_a_destination_would_refuse():
         assert srv.index is not None and srv.index.flush()
         dest = {"name": "OLD_PACS", "host": "127.0.0.1", "port": remote.port, "aet": "REMOTE"}
         r = client.post("/api/connections/check", json=dest, headers=_H).get_json()
-        assert r["reachable"] and not r["ok"] and r["from_archive"], r
+        assert r["reachable"] and not r["ok"] and r["from_archive"] and r["basis"] == "archive", r
         assert r["message"] == "OLD_PACS would refuse 1 of 2 kind(s) of object stored here", r["message"]
         assert [f["code"] for f in r["findings"]] == ["out_ts_only_uncompressed"], r["findings"]
         assert "JPEG Lossless SV1" in r["findings"][0]["say"]
@@ -328,6 +425,36 @@ def test_check_names_what_a_destination_would_refuse():
         assert [(p["ts"], p["instances"]) for p in refused] == [(JPEGLosslessSV1, 1)], r["pairs"]
         body = json.dumps(client.get("/api/connections", headers=_H).get_json())
         assert SECRET not in body and "P-SECRET-1" not in body
+    finally:
+        remote.close()
+        _done(srv, tmp)
+
+
+def test_a_node_that_takes_only_implicit_little_endian():
+    """Old SCPs take only the PS3.5 10.1 default. Refusing Explicit VR LE is
+    not "only uncompressed": the images already are."""
+    remote = Remote([(SecondaryCaptureImageStorage, [ImplicitVRLittleEndian])])
+    try:
+        with _Journal():
+            res = c_check(remote.dest(), "CARINOSCU",
+                          [(SecondaryCaptureImageStorage, ExplicitVRLittleEndian)], timeout=5)
+        e = {"direction": "out", "service": "check", "dest": "OLD_PACS", "calling": "CARINOSCU",
+             "called": "REMOTE", "peer": "127.0.0.1", "port": remote.port, "tls": False,
+             "outcome": "accepted", "reject": None, "contexts": res["contexts"]}
+        (f,) = C.diagnose(e)
+        assert f["code"] == "out_ts_refused", f
+        assert "Explicit VR Little Endian" in f["say"], f["say"]
+    finally:
+        remote.close()
+
+
+def test_check_with_the_index_off_says_so():
+    srv, client, tmp = _pacs()             # index off
+    remote = Remote([(SecondaryCaptureImageStorage, [ExplicitVRLittleEndian])])
+    try:
+        dest = {"name": "OLD_PACS", "host": "127.0.0.1", "port": remote.port, "aet": "REMOTE"}
+        r = client.post("/api/connections/check", json=dest, headers=_H).get_json()
+        assert r["reachable"] and not r["from_archive"] and r["basis"] == "index_off", r
     finally:
         remote.close()
         _done(srv, tmp)
