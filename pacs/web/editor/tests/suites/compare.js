@@ -114,6 +114,21 @@
     ok('the bar counts one tag on each side alone',
        stats.includes(`1 ${T('only here')}`) && stats.includes(`1 ${T('only there')}`), stats);
 
+    // The printed report covers the same tags the bar counts; the print itself is stubbed out.
+    {
+      const realPrint = window.carinoBrandedPrint;
+      let printed = null;
+      window.carinoBrandedPrint = arg => { printed = arg; };
+      let n = null;
+      try { $('cmpReport').click(); n = printed && printCompareReport(); }
+      finally { window.carinoBrandedPrint = realPrint; }
+      ok('Comparison report prints a titled document naming both files',
+         printed?.title === 'DICOM Comparison Report' && /first\.dcm ↔ second\.dcm/.test(printed?.subtitle), printed?.subtitle);
+      ok('and lists the differing, one-sided and matching tags',
+         !!n && n.onlyA >= 1 && n.onlyB >= 1 && n.diff >= 1 && n.match >= 1 &&
+         /\(0008,0018\)/.test(printed.body) && /Only in B/.test(printed.body), JSON.stringify(n));
+    }
+
     // Both copy-all confirms overwrite a whole file, so they must name it in the reader's language.
     for (const [btn, key, label] of [
       ['cmpApplyToB', 'Copy every differing value onto {name}? This overwrites its values.', 'Copy →'],

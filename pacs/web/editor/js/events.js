@@ -203,6 +203,14 @@ $('cmpClose')?.addEventListener('click', () => {
 $('cmpDiffOnly')?.addEventListener('change', e => {
   cmpDiffOnly = e.target.checked; renderTable();
 });
+// Export menu: close after a pick, on an outside click and on Escape.
+{
+  const menu = $('exportMenu');
+  menu?.querySelector('.tb-menu-list')?.addEventListener('click', e => { if (e.target.closest('button')) menu.open = false; });
+  document.addEventListener('click', e => { if (menu?.open && !menu.contains(e.target)) menu.open = false; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu?.open) { menu.open = false; menu.querySelector('summary').focus(); } });
+}
+$('cmpReport')?.addEventListener('click', () => printCompareReport());
 $('cmpDownloadB')?.addEventListener('click', () => {
   const other = compareEntry(); if (other) downloadOne(other);
 });

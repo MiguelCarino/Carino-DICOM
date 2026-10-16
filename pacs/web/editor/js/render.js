@@ -186,6 +186,73 @@ function cmpApplyAll(toOther) {
   toast?.(`${T('Copied')} ${n}`);
 }
 
+// Print the comparison as a report: both pictures, a summary, then every difference and every match.
+// Walks the whole tree (sequences included) and ignores the table's filters, so it covers the files, not the view.
+function printCompareReport() {
+  const other = compareEntry();
+  if (!other) return;
+  const a = files[currentFileIdx], b = other;
+  const tree = rowTree(tagsOf(a), tagsOf(b), '', 0, true, pendingOf(b));
+  const groups = { diff: [], onlyA: [], onlyB: [], match: [] };
+  const key = { 'cmp-diff': 'diff', 'cmp-only-a': 'onlyA', 'cmp-only-b': 'onlyB', 'cmp-match': 'match' };
+  (function walk(nodes) {
+    for (const n of nodes) {
+      if (n.kind === 'el') groups[key[tableRowCmpClass(n, b)]].push(n);
+      walk(n.kids);
+    }
+  })(tree);
+
+  const cell = v => v == null ? '<td class="empty">absent</td>' : v === '' ? '<td class="empty">—</td>' : `<td>${_pesc(v)}</td>`;
+  const row = n => `<tr><td class="c-tag" style="padding-left:${n.depth * 6}px">${_pesc(fmtPath(n.path))}</td>` +
+    `<td class="c-desc">${_pesc(descFor(n.tag) || 'Unknown tag')}</td><td class="c-vr">${_pesc(n.vr)}</td>${cell(n.valA)}${cell(n.valB)}</tr>`;
+  const head = `<thead><tr><th class="c-tag">Tag</th><th class="c-desc">Description</th><th class="c-vr">VR</th>` +
+    `<th>A — ${_pesc(a.name)}</th><th>B — ${_pesc(b.name)}</th></tr></thead>`;
+  const section = (title, list) => list.length ? `<section class="tagsec"><h2>${title} — ${list.length}</h2>` +
+    `<table class="tags cmp">${head}<tbody>${list.map(row).join('')}</tbody></table></section>` : '';
+
+  // Key identity rows, read from what each side shows (edits included).
+  const pick = (entry, pend, tag) => shownValue(tag, tagsOf(entry).get(tag), pend) ?? '—';
+  const ident = [['00100010', 'Patient Name'], ['00100020', 'Patient ID'], ['00080020', 'Study Date'],
+                 ['00080060', 'Modality'], ['0008103E', 'Series Description'], ['00080018', 'SOP Instance UID'],
+                 ['00020010', 'Transfer Syntax UID']]
+    .map(([t, l]) => `<tr><th>${l}</th><td>${_pesc(pick(a, pendingEdits, t))}</td><td>${_pesc(pick(b, pendingOf(b), t))}</td></tr>`).join('');
+
+  const shot = id => { try { const c = $(id); return c && c.width > 1 ? `<img class="ov-shot" src="${c.toDataURL('image/png')}" alt="">` : ''; } catch (_) { return ''; } };
+  const shots = [shot('preview'), shot('previewB')];
+  const pics = shots.some(Boolean) ? `<div class="cmp-shots"><figure>${shots[0]}<figcaption>A — ${_pesc(a.name)}</figcaption></figure>` +
+    `<figure>${shots[1]}<figcaption>B — ${_pesc(b.name)}</figcaption></figure></div>` : '';
+
+  const n = { diff: groups.diff.length, onlyA: groups.onlyA.length, onlyB: groups.onlyB.length, match: groups.match.length };
+  const body = `<style>
+      .cmp-shots{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}
+      .cmp-shots figure{margin:0;text-align:center;} .cmp-shots .ov-shot{max-width:100%;max-height:260px;margin:0 auto 4px;}
+      .cmp-shots figcaption{font:10px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);word-break:break-all;}
+      .tally{display:flex;gap:18px;flex-wrap:wrap;font:600 12px ui-monospace,Menlo,Consolas,monospace;margin:0 0 6px;}
+      .t-diff{color:#b45309;} .t-match{color:#127a2f;} .t-only{color:var(--muted);}
+      table.ident th{width:26%;} table.ident thead th{color:var(--muted);font-size:10px;text-transform:uppercase;}
+      table.tags.cmp .c-desc{width:24%;}
+    </style>
+    ${pics}
+    <section><h2>Summary</h2>
+      <p class="tally"><span class="t-diff">${n.diff} differ</span><span class="t-only">${n.onlyA} only in A</span>
+        <span class="t-only">${n.onlyB} only in B</span><span class="t-match">${n.match} match</span></p>
+      <p class="valcounts">Every tag of both files, sequences included, with this session's unsaved edits applied. Sequences compare by item count.</p>
+    </section>
+    <section><h2>Files</h2><table class="kv ident"><thead><tr><th></th><th>A</th><th>B</th></tr></thead>
+      <tbody><tr><th>File</th><td>${_pesc(a.name)}</td><td>${_pesc(b.name)}</td></tr>${ident}</tbody></table></section>
+    ${section('Differences', groups.diff)}
+    ${section('Only in A', groups.onlyA)}
+    ${section('Only in B', groups.onlyB)}
+    ${section('Matching', groups.match)}`;
+
+  const now = new Date(), p2 = v => String(v).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}`;
+  carinoBrandedPrint({ title: 'DICOM Comparison Report', subtitle: `${a.name} ↔ ${b.name} · generated ${stamp}`,
+                       meta: 'Carino DICOM Editor', body });
+  return n;
+}
+window.printCompareReport = printCompareReport;
+
 // Every tag of a file (File Meta + dataset), keyed as the file keys them. Dataset wins on collision.
 function tagsOf(entry) {
   const isHex = t => t.startsWith('x') || /^[0-9a-f]{8}$/i.test(t);

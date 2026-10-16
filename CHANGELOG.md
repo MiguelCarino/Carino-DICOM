@@ -79,6 +79,11 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   version with an **Update** button that opens dicom.carino.systems. Nothing is
   downloaded or installed. `POST /api/update-check` needs `config.write` and is
   audited.
+- **Comparison report in the bundled editor** (re-synced to upstream `3233c7d`). While
+  two files are compared, **🖨 Comparison report** prints both pictures, a summary and
+  every differing, one-sided and matching tag, sequences and unsaved edits included.
+  The Edit toolbar is slimmer: buttons are grouped and JSON/CSV/Print sit under one
+  **Export** menu.
 - **Swap patients in the bundled editor** (re-synced to upstream `bffa4de`). For two
   studies filed under each other's patient: with both loaded, Edit → **⇄ Swap
   patients** gives each study the other's patient data (group 0010), with new UIDs by

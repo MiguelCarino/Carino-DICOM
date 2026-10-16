@@ -683,11 +683,42 @@
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       flex-shrink: 0;
     }
     .actions-spacer { flex: 1; }
     .batch-buttons { display: flex; align-items: center; gap: 6px; }
+    /* Toolbar buttons are a size down from the sidebar's, so the row fits on one line at 1440px. */
+    .actions-row .btn, .cmp-bar .btn { padding: 5px 10px; font-size: 12px; border-radius: 7px; min-height: 30px; }
+    .actions-row .btn:hover, .cmp-bar .btn:hover { box-shadow: none; }
+    .actions-row .btn:disabled { opacity: .4; cursor: not-allowed; border-color: var(--border); background: var(--surface); }
+    .actions-row .btn.tb-icon { padding: 5px 8px; font-size: 14px; }
+    .tb-sep { width: 1px; align-self: stretch; margin: 4px 0; background: var(--border); }
+    /* Joined buttons: one outline, inner seams only. */
+    .tb-seg { display: inline-flex; }
+    .tb-seg > .btn { border-radius: 0; }
+    .tb-seg > .btn:first-child { border-radius: 7px 0 0 7px; }
+    .tb-seg > .btn:last-child { border-radius: 0 7px 7px 0; }
+    .tb-seg > .btn + .btn { margin-left: -1px; }
+    .tb-seg > .btn:hover { position: relative; z-index: 1; }
+    .tb-seg > .btn.active { border-color: var(--accent); color: var(--accent); position: relative; z-index: 1; }
+    /* Export menu: a <details> so it works without script; events.js closes it after a pick. */
+    .tb-menu { position: relative; }
+    .tb-menu > summary { list-style: none; user-select: none; }
+    .tb-menu > summary::-webkit-details-marker { display: none; }
+    .tb-menu[open] > summary { border-color: var(--accent); }
+    .tb-caret { font-size: 10px; color: var(--text-muted); }
+    .tb-menu-list {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 150px;
+      display: flex; flex-direction: column; padding: 4px;
+      background: var(--surface-solid); border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    }
+    .tb-menu-item {
+      text-align: left; padding: 7px 10px; border: 0; border-radius: 5px; background: none;
+      color: var(--text); font: 500 12px var(--font); cursor: pointer;
+    }
+    .tb-menu-item:hover, .tb-menu-item:focus-visible { background: var(--surface-hover); color: var(--accent); outline: none; }
     
     /* ---- Right sidebar ---- */
     /* The column never scrolls: tools keep their height, the tail (Load Files, Log) shrinks first and
