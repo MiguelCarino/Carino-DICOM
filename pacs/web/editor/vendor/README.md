@@ -16,6 +16,10 @@ map, not a `fetch()` to anything but a path the operator's own engine serves.
 The two `fetch()` calls in `js/deeplink.js` that take a URL are the PACS deep-link
 manifest handler; the URL there comes from the operator's own `#load=` link and
 points at their own engine.
+The one place an off-origin URL is *written* is the tesseract.js bundles under
+`tesseract/`: three jsDelivr defaults that never resolve, because `js/ocr.js`
+always overrides all three (see "OCR, for Find burned-in text" below). A grep for
+`https://` in those two files finds them; that is expected.
 
 ## What is here, and under what licence
 
@@ -74,6 +78,50 @@ and IBM Plex Mono) and `../fonts/LICENSE-RedHat.txt` (Red Hat Text and Red Hat
 Display). The OFL requires the licence to be distributed with the font files, so
 those two files are not optional bookkeeping.
 
+### OCR, for Find burned-in text
+
+Everything under `tesseract/` is loaded only when someone presses **Find burned-in
+text** in the redaction view (`js/ocr.js`), never at page load. It adds 7.8 MB to
+the tree and about 3.1 MB to the first Find in a browser. The licence texts sit
+beside the files, in `tesseract/`, and travel inside the installer and the image
+with them:
+
+| File | Package | Version | Licence | Text |
+| --- | --- | --- | --- | --- |
+| `tesseract/tesseract.min.js`, `tesseract/worker.min.js` | [tesseract.js](https://github.com/naptha/tesseract.js) | 7.0.0 | Apache-2.0 | `tesseract/LICENSE-tesseract-js.txt` |
+| `tesseract/tesseract-core-simd-lstm.js` + `.wasm` | [tesseract.js-core](https://github.com/naptha/tesseract.js-core) | 7.0.0 | Apache-2.0 | `tesseract/LICENSE-tesseract-js-core.txt` |
+| `tesseract/tesseract-core-lstm.js` + `.wasm` | [tesseract.js-core](https://github.com/naptha/tesseract.js-core) | 7.0.0 | Apache-2.0 | `tesseract/LICENSE-tesseract-js-core.txt` |
+| `tesseract/eng.traineddata.gz` | [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) `eng.traineddata` | 4.0.0 fast | Apache-2.0 | `tesseract/LICENSE-tessdata-fast.txt` |
+
+The two bundles carry webpack's extracted notices for what they compile in
+(regenerator-runtime and buffer, MIT; ieee754, BSD-3-Clause; zlib.js, MIT) in
+`tesseract/tesseract.min.js.LICENSE.txt` and `tesseract/worker.min.js.LICENSE.txt`.
+The `.wasm` files are the Tesseract engine (Apache-2.0, `tesseract/LICENSE-tesseract.txt`)
+compiled together with these libraries, whose notices are all in
+`tesseract/LICENSE-tesseract-core-libs.txt`, one section each:
+
+| Compiled inside both `.wasm` | Licence |
+| --- | --- |
+| [Leptonica](https://github.com/DanBloomberg/leptonica) | BSD 2-Clause |
+| [zlib](https://github.com/madler/zlib) | zlib |
+| [libpng](https://github.com/glennrp/libpng) | libpng / PNG Reference Library licence |
+| [libjpeg](https://github.com/LuaDist/libjpeg) (IJG 9a) | IJG |
+| [libtiff](https://gitlab.com/libtiff/libtiff) | libtiff (BSD style) |
+| [libwebp](https://github.com/webmproject/libwebp) | BSD 3-Clause |
+| [giflib](https://github.com/mirrorer/giflib) | MIT |
+| [OpenLibm](https://github.com/JuliaMath/openlibm) | MIT, BSD and ISC by file, some public domain |
+
+Apache-2.0 sits with AGPL-3.0 without difficulty in this direction (the FSF lists
+Apache-2.0 as compatible with GPLv3 and its AGPL sibling); §4 asks for the licence
+and the NOTICE-style attributions to travel with the files, which is what the
+texts above are.
+
+`pacs/web.py` serves `eng.traineddata.gz` with `Content-Encoding: gzip` (Python's
+`mimetypes` reads `.gz` as an encoding), so the browser hands the worker the model
+already unzipped. That is fine: the worker unzips only data that starts with the
+gzip signature. Do not "fix" it by renaming the file; upstream's name is what keeps
+the two trees identical.
+
 ## Refreshing a bundle
 
 Fetch the exact version, and take the licence in the same breath — the licence
@@ -117,7 +165,8 @@ already local there, so nothing has to move to make this copy offline-clean.
 both:
 
 1. **The licensing and provenance in this directory** — this README and the nine
-   `LICENSE-*.txt` files here, plus the two in `../fonts/`. Carino DICOM
+   `LICENSE-*.txt` files here, plus the two in `../fonts/`. (The OCR licence texts
+   under `tesseract/` are upstream's and are copied with the files.) Carino DICOM
    redistributes these bundles inside a shipped binary and a container image,
    which upstream (a static site users visit) does not; that is why the
    obligation lands here, and why this file is not upstream's with the paths
@@ -157,8 +206,8 @@ report that the files are missing instead of hanging — but it does remove two
 features an operator can see. The self-test in particular is worth keeping: it
 answers "does the browser on this reading-room workstation decode our studies
 correctly", in that browser, with the failures named. `tests/run.sh`,
-`tests/README.md` and `tests/fixtures/` are development-only and are
-deliberately not vendored.
+`tests/README.md`, `tests/realtime.py` and `tests/fixtures/` are development-only
+and are deliberately not vendored.
 
 Everything else should be copied verbatim. The two trees are meant to be
 byte-identical: a divergence here is a divergence in what a hospital is running.

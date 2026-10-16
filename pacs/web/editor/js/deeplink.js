@@ -24,6 +24,10 @@ window.addEventListener('load', () => {
     }),
     onFiles: async (incoming, info) => {
       clearTimeout(giveUp);
+      // An order for Create (js/create.js, "Prefill") rather than a study to open.
+      try {
+        if (await takeCreateHandoff(incoming, info)) { showLoading?.(false); return; }
+      } catch (err) { showLoading?.(false); toast?.(err.message || String(err)); return false; }
       showLoading?.(true, 'Copying study from Carino DICOM…');
       try {
         const n = await handleFiles(incoming);   // shows its own per-image progress
@@ -40,6 +44,16 @@ window.addEventListener('load', () => {
   if (armed) {
     showLoading?.(true, 'Copying study from Carino DICOM…');       // spinner until the bytes arrive
     giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino DICOM'); }, 60000);
+    return;
+  }
+
+  // ---- (A1a) Create prefill: #create[=eye]&patient_id=… (format in js/create.js) ----
+  // From the hash only (parseCreateHash refuses a query string, which reaches server logs).
+  const order = parseCreateHash(location.hash);
+  if (order) {
+    // Read once, then gone from the address bar and from history.
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+    applyCreatePrefill(order);
     return;
   }
 

@@ -306,6 +306,7 @@ Third-party files keep their own terms:
 | --- | --- | --- | --- |
 | [`pacs/web/editor/fonts/`](pacs/web/editor/fonts/) | IBM Plex Sans/Mono, Red Hat Display/Text | SIL OFL 1.1 | [`OFL.txt`](pacs/web/editor/fonts/OFL.txt) + per-family texts |
 | [`pacs/web/editor/vendor/`](pacs/web/editor/vendor/) | `dcmjs`, `lossless-min.js`, OpenJPEG and CharLS WASM decoders | MIT / BSD, per package | `LICENSE-*.txt` in that directory |
+| [`pacs/web/editor/vendor/tesseract/`](pacs/web/editor/vendor/tesseract/) | Tesseract.js 7.0.0 OCR engine and the tessdata_fast English model, for Find burned-in text | Apache-2.0, with BSD / MIT / zlib / IJG / libpng libraries compiled in | `LICENSE-*.txt` in that directory; [`vendor/README.md`](pacs/web/editor/vendor/README.md) lists each |
 
 `pynetdicom` and `pydicom` (MIT) are installed from PyPI and are not included in
 this repository. A frozen bundle that includes them must also include their

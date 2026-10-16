@@ -70,6 +70,16 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   fails. A node that takes only Implicit VR Little Endian is told apart from one that
   wants uncompressed images. Nothing is sent. `POST /api/connections/check`, gated like the Test
   (`services.control`).
+- **Eye photos, burned-in text finder and send-back in the bundled editor** (re-synced to
+  upstream `5a6059c`). Create → **Eye photo** writes Ophthalmic Photography 8 Bit images
+  (Modality OP) from camera JPEGs and PNGs, with a Right / Left / Both picker per photo, the
+  camera's JPEG kept byte for byte, and can be opened with an order. The redaction view's
+  **Find burned-in text** reads every frame with on-device OCR and proposes boxes over the
+  patient's own details. Create can send what it makes back to the page that sent the order
+  instead of downloading it. `pacs/web/editor/vendor/` gains `tesseract/` (Tesseract.js
+  7.0.0 and the tessdata_fast English model, Apache-2.0, 7.8 MB, loaded only when Find is
+  pressed); its licences are listed in `vendor/README.md` and the README. See the upstream
+  CHANGELOG.
 
 ### Changed
 - **A send refused for its transfer syntax says so.** When a remote accepts the kind of

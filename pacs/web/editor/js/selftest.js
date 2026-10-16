@@ -7,7 +7,11 @@
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
 const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'render', 'phone',
                          'sequences', 'series', 'edits', 'imgedit', 'compare', 'deid', 'swap',
-                         'redact', 'samples', 'zip'];
+                         'redact', 'samples', 'eyephoto', 'zip'];
+// Suites the visitor's self-test leaves out, and why; tests/suites/selftest.js counts these as
+// listed. ocr: it would fetch the ~8 MB OCR engine and model, which the page promises to load
+// only when someone asks to find text, to report nothing about decoding in this browser.
+const SELFTEST_SKIPPED = { ocr: 'downloads the OCR engine; run by tests/run.sh only' };
 
 // PS3.6 Annex A names, kept in English so bug reports stay searchable.
 const TS_NAMES = {
@@ -345,7 +349,7 @@ function runSelfTest(names) {
 window.__selftest = {
   run: runSelfTest, summarize: selftestSummarize, reportText: selftestReportText,
   render: renderSelfTest, describe: selftestDescribe, mentions: selftestMentions,
-  wanted: selftestWanted, tsName, suites: SELFTEST_SUITES,
+  wanted: selftestWanted, tsName, suites: SELFTEST_SUITES, skipped: SELFTEST_SKIPPED,
   // Indirect so the suite can stub it; location.reload itself cannot be replaced.
   reload: () => { unloadConfirmed = true; location.hash = 'selftest'; location.reload(); },
 };

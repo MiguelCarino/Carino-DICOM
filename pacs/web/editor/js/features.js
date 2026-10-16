@@ -498,14 +498,24 @@ function redactDraw() {
   const ctx = fullscreenCanvas.getContext('2d');
   ctx.putImageData(redactUI.base, 0, 0);
   const live = redactUI.drag && redactUI.drag.mode === 'new' ? [redactUI.drag.box] : [];
-  ctx.lineWidth = Math.max(1, fullscreenCanvas.width / 300);
+  const lw = Math.max(1, fullscreenCanvas.width / 300);
+  ctx.lineWidth = lw;
   for (const b of redactUI.boxes.concat(live)) {
-    ctx.fillStyle = 'rgba(220, 38, 38, .35)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeStyle = '#ef4444';
+    // Found text left unselected (b.on === false) is outlined only: it will not be filled.
+    const off = b.on === false;
+    ctx.setLineDash(off ? [lw * 3, lw * 2] : []);
+    if (!off) {
+      ctx.fillStyle = 'rgba(220, 38, 38, .35)';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx.strokeStyle = off ? '#eab308' : '#ef4444';
     ctx.strokeRect(b.x, b.y, b.w, b.h);
   }
+  ctx.setLineDash([]);
 }
+
+// What Apply will fill: drawn boxes, plus found text the user left selected.
+const redactSelected = () => redactUI.boxes.filter(b => b.on !== false);
 
 function redactPointToImage(clientX, clientY, box) {
   const c = fullscreenCanvas;
@@ -539,7 +549,7 @@ function redactBoxAt(pt) {
 
 function redactUpdateCount() {
   const el = $('redactCount');
-  if (el) el.textContent = String(redactUI.boxes.length);
+  if (el) el.textContent = String(redactSelected().length);
 }
 
 function openRedactWorkspace() {
@@ -554,6 +564,7 @@ function openRedactWorkspace() {
   redactUI.drag = null;
   redactUI.boxes = [];
   redactUI.metrics = null;
+  if (typeof ocrResetWorkspace === 'function') ocrResetWorkspace();
   // Background is the previewed frame; redaction still applies to every frame.
   redactUI.base = previewImageData.data;
   fullscreenCanvas.width  = previewImageData.width;
@@ -567,6 +578,7 @@ function openRedactWorkspace() {
 }
 
 function closeRedactWorkspace() {
+  if (typeof ocrResetWorkspace === 'function') ocrResetWorkspace();
   redactUI.active = false;
   redactUI.drag = null;
   redactUI.boxes = [];
@@ -600,7 +612,7 @@ fullscreenCanvas.addEventListener('pointerdown', e => {
   redactUI.metrics = metrics;
   const hit = redactBoxAt(pt);
   redactUI.drag = hit
-    ? { mode: 'move', box: hit, dx: pt.x - hit.x, dy: pt.y - hit.y }
+    ? { mode: 'move', box: hit, dx: pt.x - hit.x, dy: pt.y - hit.y, cx: e.clientX, cy: e.clientY }
     : { mode: 'new', box: { x: pt.x, y: pt.y, w: 0, h: 0 }, ox: pt.x, oy: pt.y };
   try { fullscreenCanvas.setPointerCapture(e.pointerId); } catch (_) {}
 });
@@ -618,7 +630,7 @@ fullscreenCanvas.addEventListener('pointermove', e => {
   redactClamp(dr.box);
   redactDraw();
 });
-const endRedactDrag = () => {
+const endRedactDrag = (e) => {
   const dr = redactUI.drag;
   redactUI.drag = null;
   if (!dr) return;
@@ -626,6 +638,9 @@ const endRedactDrag = () => {
   if (dr.mode === 'new') {
     const box = redactClamp(dr.box);
     if (box.w >= MIN_BOX && box.h >= MIN_BOX) redactUI.boxes.push(box);
+  } else if (dr.box.ocr && e?.type === 'pointerup' && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) < 4) {
+    // A click (not a drag) on found text selects or unselects it.
+    dr.box.on = dr.box.on === false;
   }
   redactUpdateCount(); redactDraw();
 };
@@ -648,10 +663,15 @@ document.addEventListener('keydown', e => {
 $('redactApply')?.addEventListener('click', () => {
   const entry = files[currentFileIdx];
   if (!entry) return;
-  if (!redactUI.boxes.length) { toast(T('Draw at least one box first.')); return; }
+  if (!redactSelected().length) {
+    // Find's proposals may all be unselected (a de-identified file, or the user's clicks).
+    toast(T(redactUI.boxes.some(b => b.ocr) ? 'Click a yellow box to select it, or draw a box.'
+                                            : 'Draw at least one box first.'));
+    return;
+  }
   const sup = redactionSupport(entry.meta);
   // Copy now: closeRedactWorkspace() empties the array while applyRedaction is async.
-  const boxes = redactUI.boxes.map(b => ({ ...b }));
+  const boxes = redactSelected().map(({ x, y, w, h }) => ({ x, y, w, h }));
   const go = async () => {
     if (sup.depthLoss) {
       log(`⚠ ${T('This image was compressed with lossy JPEG; redacting it will store 8 bits per sample.')}`);
@@ -804,52 +824,51 @@ document.addEventListener('keydown', e => {
 // ---- Create DICOM from images ----
 createDicomBtn.addEventListener('click', async () => {
   if (!createImages.length) { alert(T('No images loaded.')); return; }
-
-  const studyDate = ($('cdStudyDate').value || '').replace(/-/g, '') || nowDA();
-  const commonMeta = {
-    patientName:      $('cdPatientName').value.trim() || 'UNKNOWN',
-    patientID:        $('cdPatientID').value.trim(),
-    patientDOB:       ($('cdPatientDOB').value || '').replace(/-/g, ''),
-    patientSex:       $('cdPatientSex').value,
-    studyUID:         newUID(),
-    studyDate,
-    studyTime:        nowTM(),
-    studyDescription: $('cdStudyDesc').value.trim(),
-    modality:         $('cdModality').value || 'OT',
-  };
-
-  // Each series gets its own Series Instance UID.
-  const seriesMetaMap = {};
-  for (const s of createSeries) {
-    seriesMetaMap[s.id] = { ...commonMeta, seriesUID: newUID(), seriesDescription: s.description };
-  }
+  // Said beside the button as well as in a toast: the toast is gone before the photos are fixed.
+  const blocked = createBlockReason();
+  showCreateBlock(blocked);
+  if (blocked) { toast(blocked, 4000); return; }
 
   createDicomBtn.disabled = true;
   createDicomBtn.textContent = T('Creating…');
 
-  const instanceCount = {};
-  for (const s of createSeries) instanceCount[s.id] = 0;
+  // An order that came with a way back sends its files there; a closed worklist window
+  // cannot take them, so they are downloaded as usual.
+  const sendBack = !!createReturn;
+  const closed = sendBack && !createReturnOpen();
+  if (closed) { createReturn = null; renderCreateOrder(); }
+  const made = [];
+  for await (const out of createDicomOutputs()) {
+    if (out.error) { alert(`Failed for ${out.name}: ${out.error}`); continue; }
+    if (createReturn) { made.push(out); continue; }
+    const blob = new Blob([out.buf], { type: 'application/dicom' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = out.name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+  if (closed) toast(T('The worklist window was closed, so the files were downloaded instead.'), 5000);
 
-  for (let i = 0; i < createImages.length; i++) {
-    const img = createImages[i];
-    const seriesId = img.series || createSeries[0].id;
-    const meta = seriesMetaMap[seriesId] || seriesMetaMap[createSeries[0].id];
-    instanceCount[seriesId] = (instanceCount[seriesId] || 0) + 1;
+  if (made.length) {
+    createDicomBtn.textContent = T('Sending…');
     try {
-      const buf  = await buildDicomFromImage(img.file, meta, instanceCount[seriesId]);
-      const blob = new Blob([buf], { type: 'application/dicom' });
-      const a    = document.createElement('a');
-      a.href     = URL.createObjectURL(blob);
-      a.download = img.file.name.replace(/\.[^.]+$/, '') + '.dcm';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
-    } catch (e) {
-      alert(`Failed for ${img.file.name}: ${e.message || e}`);
+      await sendCreatedBack(made);
+      showCreateBlock('');
+      toast(T('Sent {n} file(s) back to the worklist.').replace('{n}', made.length), 4000);
+      // The order is filled now; another press would be another study for it.
+      createOrder = {};
+      renderCreateOrder();
+    } catch (err) {
+      // Kept, not downloaded: the usual cause (signed out, a refusal) is fixed and retried.
+      const msg = T('Not sent: {err}. Press the button again to try again.').replace('{err}', err.message || String(err));
+      showCreateBlock(msg);
+      toast(msg, 5000);
     }
   }
 
   createDicomBtn.disabled = false;
-  createDicomBtn.textContent = T('⬇ Create DICOM');
+  setCreateButtonLabel();
 });
 

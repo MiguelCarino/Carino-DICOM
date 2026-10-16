@@ -545,6 +545,33 @@
         <button id="createSideAddBtn" class="btn btn-block" data-i18n>+ Browse Files</button>
       </div>
       <div class="card">
+        <div class="card-title" data-i18n>File type</div>
+        <select class="form-input form-select" id="cdKind" aria-label="File type">
+          <option value="general" data-i18n>Picture (Secondary Capture)</option>
+          <option value="eye" data-i18n>Eye photo (Ophthalmic Photography)</option>
+        </select>
+      </div>
+      <div class="card hidden" id="cdEyeCard">
+        <div class="card-title" data-i18n>Eye photos</div>
+        <div class="meta-form">
+          <div class="form-group">
+            <label class="form-label" for="cdEyeDevice" data-i18n>Camera</label>
+            <select class="form-input form-select" id="cdEyeDevice">
+              <option value="fundus" data-i18n>Fundus camera</option>
+              <option value="slitlamp" data-i18n>Slit lamp</option>
+              <option value="external" data-i18n>External eye camera</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="cdEyeFov" data-i18n>Field of view (degrees)</label>
+            <input class="form-input" id="cdEyeFov" type="number" min="1" max="200" step="any" inputmode="decimal" />
+            <span class="form-hint" data-i18n>Printed on the camera or in its manual, often 45 or 50. Fundus photos need it.</span>
+          </div>
+          <label class="form-check"><input type="checkbox" id="cdEyeBurnedIn" checked /><span data-i18n>The photos show the patient's name or the date</span></label>
+          <span class="form-hint" data-i18n>Choose Right, Left or Both on every photo. A file name with OD, OS, OU, right or left fills it in.</span>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title" data-i18n>Quick Fill</div>
         <div class="btn-pair">
           <button class="btn" id="cdAnonymizeBtn" data-i18n>Anonymize</button>
@@ -583,6 +610,14 @@
           <div class="form-group">
             <label class="form-label" data-i18n>Study Date</label>
             <input class="form-input" id="cdStudyDate" type="date" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n>Accession Number</label>
+            <input class="form-input" id="cdAccession" maxlength="16" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n>Referring Physician</label>
+            <input class="form-input" id="cdReferring" maxlength="64" />
           </div>
           <div class="form-group">
             <label class="form-label" data-i18n>Modality</label>
@@ -673,6 +708,12 @@
             <label class="form-label" data-i18n>Study Description</label>
             <input class="form-input" id="cdStudyDesc" placeholder="e.g. Chest X-Ray" />
           </div>
+          <div class="create-order hidden" id="cdOrder">
+            <span data-i18n>Adding to an ordered study</span>
+            <span class="create-order-uid" id="cdOrderUID"></span>
+            <span class="hidden" id="cdReturn" data-i18n>The files go back to the worklist that sent this order instead of being downloaded.</span>
+            <button class="btn" id="cdOrderClear" data-i18n>Make a new study instead</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -680,6 +721,7 @@
         <div class="series-list" id="seriesList"></div>
         <button class="series-add-btn" id="addSeriesBtn" data-i18n>+ Add Series</button>
       </div>
+      <div class="create-block hidden" id="cdBlock" role="alert"></div>
       <button class="btn primary" id="createDicomBtn" data-i18n>⬇ Create DICOM</button>
     </div>
   </div>
@@ -801,6 +843,14 @@
       <div class="redact-hint" data-i18n>Drag a box over any burned-in text. Drag a box to move it; double-click to delete it.</div>
       <div class="redact-hint" data-i18n>Redaction covers every frame of this image.</div>
       <div class="redact-hint" data-i18n>Redaction cannot be undone once the file is exported.</div>
+      <!-- On-device OCR (js/ocr.js) proposes boxes; Apply below is still the only pixel write. -->
+      <div class="redact-row redact-find-row">
+        <button class="redact-btn" id="redactFind" data-i18n>Find burned-in text</button>
+        <button class="redact-btn hidden" id="redactFindStop" data-i18n>Stop</button>
+        <span class="redact-find-status" id="redactFindStatus" role="status" aria-live="polite"></span>
+      </div>
+      <div class="redact-hint" data-i18n>Find burned-in text reads every frame on this device; nothing is uploaded. It can miss text, so check the whole image before you apply.</div>
+      <div class="redact-hint" data-i18n>Text that matches this patient (name, ID, dates, accession) is selected in red. Other text, such as measurements and markers, is outlined in yellow and left alone. Click a box to select or unselect it.</div>
       <div class="redact-row">
         <label for="redactFill" data-i18n>Fill</label>
         <select class="redact-sel" id="redactFill">
@@ -836,6 +886,7 @@
 <script src="js/extractor.js"></script>
 <script src="js/create.js"></script>
 <script src="js/features.js"></script>
+<script src="js/ocr.js"></script>
 <script src="js/validator.js"></script>
 <script src="js/selftest.js"></script>
 <script src="js/deeplink.js"></script>

@@ -257,6 +257,8 @@
       ok('the self-test knows about some suites', listed.length >= 10, String(listed.length));
       ok('and not about itself, which would run forever', !listed.includes('selftest'));
       ok('no suite is listed twice', new Set(listed).size === listed.length);
+      const skipped = Object.keys(ST.skipped || {});
+      ok('a suite it skips is not also listed', skipped.every(n => !listed.includes(n)), skipped.join(', '));
 
       const present = await Promise.all(listed.map(n =>
         fetch('tests/suites/' + n + '.js', { method: 'GET' }).then(r => r.ok).catch(() => false)));
@@ -270,7 +272,7 @@
       try { const r = await fetch('tests/suites/'); if (r.ok) index = await r.text(); } catch (_) { /* static host */ }
       const onDisk = [...index.matchAll(/href="([\w-]+)\.js"/g)].map(m => m[1]).filter(n => n !== 'selftest');
       if (onDisk.length) {
-        const absent = onDisk.filter(n => !listed.includes(n));
+        const absent = onDisk.filter(n => !listed.includes(n) && !skipped.includes(n));
         ok('and it lists every suite in the directory', absent.length === 0, absent.join(', '));
       } else {
         ok('and it lists every suite in the directory', true, 'no directory index served here');

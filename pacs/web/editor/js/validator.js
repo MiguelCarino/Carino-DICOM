@@ -29,6 +29,7 @@ const CS_ENUMS = {
                          'PT','PX','REG','RESP','RF','RG','RTDOSE','RTIMAGE','RTPLAN',
                          'RTRECORD','RTSTRUCT','RWV','SEG','SM','SMR','SR','SRF','STAIN',
                          'TG','US','VA','XA','XC']),
+  'x00200062': new Set(['R','L','U','B']),
   'x00400a040': new Set(['TEXT','NUM','CODE','DATETIME','DATE','TIME','UIDREF','PNAME',
                           'COMPOSITE','IMAGE','WAVEFORM','SCOORD','SCOORD3D','TCOORD','CONTAINER']),
 };
@@ -53,7 +54,7 @@ const KNOWN_SOP_UIDS = new Set([
   '1.2.840.10008.5.1.4.1.1.66.2','1.2.840.10008.5.1.4.1.1.66.3','1.2.840.10008.5.1.4.1.1.66.4',
   '1.2.840.10008.5.1.4.1.1.66.5',
   '1.2.840.10008.5.1.4.1.1.77.1','1.2.840.10008.5.1.4.1.1.77.1.1','1.2.840.10008.5.1.4.1.1.77.1.2',
-  '1.2.840.10008.5.1.4.1.1.77.1.3','1.2.840.10008.5.1.4.1.1.77.1.4','1.2.840.10008.5.1.4.1.1.77.1.5',
+  '1.2.840.10008.5.1.4.1.1.77.1.3','1.2.840.10008.5.1.4.1.1.77.1.4','1.2.840.10008.5.1.4.1.1.77.1.5','1.2.840.10008.5.1.4.1.1.77.1.5.1',
   '1.2.840.10008.5.1.4.1.1.77.1.6',
   '1.2.840.10008.5.1.4.1.1.88.11','1.2.840.10008.5.1.4.1.1.88.22','1.2.840.10008.5.1.4.1.1.88.33',
   '1.2.840.10008.5.1.4.1.1.88.34','1.2.840.10008.5.1.4.1.1.88.35','1.2.840.10008.5.1.4.1.1.88.50',
@@ -137,6 +138,19 @@ const SOP_ATTRS = {
     name:'Ultrasound Multiframe Image Storage',
     attrs:{ ...COMMON_IMAGE_ATTRS, 'x00280008':1 }
   },
+  // Ophthalmic Photography 8 Bit (PS3.3 A.41): its own Type 1/2 attributes, and Image Laterality
+  // is Type 1 and R, L or B only (C.8.17.5), so a photo of no particular eye is an error.
+  '1.2.840.10008.5.1.4.1.1.77.1.5.1': {
+    name:'Ophthalmic Photography 8 Bit Image Storage',
+    attrs:{ ...COMMON_IMAGE_ATTRS,
+      'x00080008':1,'x00200013':1,'x00080023':1,'x00080033':1,'x0008002a':'1C',
+      'x00200200':1,'x0018106a':1,'x00181800':1,'x00080070':2,
+      'x00280008':1,'x00280009':1,'x00282110':1,'x00280301':1,
+      'x00200062':1,'x00082218':1,
+      'x00220005':2,'x0022000c':2,'x0022001b':2,'x0022000a':2,'x0022000b':2,'x0022000d':2,
+      'x00220015':1,'x00220016':2,'x00220017':2,'x00220018':2,'x00220019':2,'x00187004':2 },
+    enums:{ 'x00080060':['OP'], 'x00200062':['R','L','B'] },
+  },
   // Secondary Capture
   '1.2.840.10008.5.1.4.1.1.7': {
     name:'Secondary Capture Image Storage',
@@ -202,6 +216,8 @@ function makeValidatorContext(d, meta) {
     if (!v?.length) return '';
     // OB/OW values are ArrayBuffers; the string mapping below would turn them into ''.
     if (Array.isArray(v) && v.some(x => x instanceof ArrayBuffer || ArrayBuffer.isView(x))) return '<binary>';
+    // A sequence with items has a value; the item objects would otherwise read as ''.
+    if (el.vr === 'SQ') return '<sequence>';
     return Array.isArray(v) ? v.map(x => typeof x === 'object' ? (x?.Alphabetic ?? '') : String(x ?? '')).join('\\') : String(v);
   };
   const getEl = tag => getTag(d, tag);
@@ -229,6 +245,11 @@ function validateSopConformance({ push, getVal }) {
     } else if (type === '1C') {
       if (val === null) push('info', tag, `Conditionally required — verify if applicable for ${sopDef.name}`, '', null);
     }
+  }
+  for (const [rawTag, allowed] of Object.entries(sopDef.enums || {})) {
+    const tag = validatorStripX(rawTag);
+    const val = getVal(tag)?.trim();
+    if (val && !allowed.includes(val)) push('error', tag, `"${val}" is not allowed in ${sopDef.name} (only ${allowed.join(', ')})`, val, null);
   }
 }
 
