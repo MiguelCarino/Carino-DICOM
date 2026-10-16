@@ -5,6 +5,8 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-16
+
 ### Added
 - **HTTPS for the dashboard and DICOMweb.** `web.tls`, `web.tls_cert` and `web.tls_key`
   serve both over TLS 1.2 or newer with forward-secret AEAD suites only. A missing,

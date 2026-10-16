@@ -210,7 +210,7 @@ tag starting with `v`. So the mental model is:
 
 ```
 edit code → commit → push to main        (nothing builds)
-git tag v1.2.1 → git push origin v1.2.1   (⇢ builds all 3 OSes)
+git tag v1.3.0 → git push origin v1.3.0   (⇢ builds all 3 OSes)
 ```
 
 Bump the number each release (`v1.0.0`, `v1.0.1`, `v1.1.0`, …). Use the manual

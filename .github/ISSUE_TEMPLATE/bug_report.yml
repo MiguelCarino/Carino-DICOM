@@ -65,7 +65,7 @@ body:
         Shown in the dashboard, or run `python -m pacs --version`
         (`./run.sh --version`). If you built from source, the commit hash is
         even better.
-      placeholder: "1.2.1"
+      placeholder: "1.3.0"
     validations:
       required: true
 
