@@ -23,6 +23,7 @@ const https = require("https");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const hosts = require("./hosts");
 // Shell-side dictionary (dialogs, tray, engine-failed page). The dashboard and
 // the bundled editor translate themselves in the renderer; nothing here can.
 // Loaded defensively: every other layer falls back to English when its
@@ -139,16 +140,22 @@ async function firstRunSetup() {
 function configPath() { return path.join(dataDir, "config.json"); }
 
 function webConfig() {
-  let host = "127.0.0.1", port = 8042, tls = false, cert = "";
+  // host: what the CONFIG says the engine binds (never rewritten: a 0.0.0.0
+  // bind with a token is how the dashboard is reached from another PC).
+  // The window's own address is derived from it in startEngine().
+  let host = "", port = 8042, tls = false, cert = "";
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     if (cfg.web && cfg.web.port) port = cfg.web.port;
-    if (cfg.web && cfg.web.host && cfg.web.host !== "0.0.0.0") host = cfg.web.host;
+    if (cfg.web && typeof cfg.web.host === "string") host = hosts.bindHostFor(cfg.web.host);
     // web.tls: the engine serves HTTPS, so the window has to ask for it. A
-    // relative path resolves against the config's folder, as in pacs/config.py.
-    if (cfg.web && cfg.web.tls === true && typeof cfg.web.tls_cert === "string" && cfg.web.tls_cert) {
+    // relative path resolves against the config's folder, as in pacs/config.py,
+    // and "~" / "~user" expand as Python's expanduser does — the pin has to
+    // name the file the engine actually loaded.
+    if (cfg.web && cfg.web.tls === true && cfg.web.tls_cert) {
       tls = true;
-      cert = path.resolve(path.dirname(configPath()), cfg.web.tls_cert.replace(/^~(?=$|[\\/])/, os.homedir()));
+      cert = path.resolve(path.dirname(configPath()),
+                          hosts.expandUser(String(cfg.web.tls_cert), os.homedir(), path));
     }
   } catch (e) { /* first run / no config yet → defaults */ }
   return { host, port, tls, cert };
@@ -173,7 +180,10 @@ function engineCommand(host, port) {
   // NB: --config is a global flag, so it must precede the `serve` subcommand.
   // No --receive/--watch: those are headless overrides, and forcing them here
   // would silently undo every "off" the user picks in the setup chooser.
-  const common = ["--config", configPath(), "serve", "--host", host, "--port", String(port)];
+  // --host only when the config names one; otherwise the engine binds what
+  // its own config (or its default, 127.0.0.1) says.
+  const common = ["--config", configPath(), "serve",
+                  ...(host ? ["--host", host] : []), "--port", String(port)];
   if (app.isPackaged) {
     const bin = path.join(process.resourcesPath, "engine", "pacs-engine", isWin ? "pacs-engine.exe" : "pacs-engine");
     return { cmd: bin, args: common, cwd: dataDir };
@@ -185,7 +195,14 @@ function engineCommand(host, port) {
 
 function startEngine() {
   const { host, port, tls, cert } = webConfig();
-  serverUrl = `${tls ? "https" : "http"}://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}/`;
+  try {
+    serverUrl = hosts.serverUrlFor(tls ? "https" : "http", host, port);
+  } catch (err) {
+    serverUrl = "";
+    showError("web.host in the configuration is not an address this window can open: " +
+              JSON.stringify(host) + "\n\n" + err.message);
+    return;
+  }
   pinnedFingerprint = tls ? fingerprintOf(cert) : "";
   const { cmd, args, cwd } = engineCommand(host, port);
   try { fs.mkdirSync(cwd, { recursive: true }); } catch (e) {}
@@ -227,11 +244,18 @@ function waitForServer(timeoutMs = 40000) {
       const getter = serverUrl.startsWith("https:")
         ? (u, cb) => https.get(u, { rejectUnauthorized: false }, cb)
         : http.get;
-      const req = getter(serverUrl + "api/auth", (res) => {
-        res.resume();
-        if (res.statusCode === 200) return resolve(true);
-        retry();
-      });
+      let req;
+      try {
+        req = getter(serverUrl + "api/auth", (res) => {
+          res.resume();
+          if (res.statusCode === 200) return resolve(true);
+          retry();
+        });
+      } catch (err) {
+        // An unusable URL is an answer, not a rejection: the caller shows the
+        // error page instead of leaving loading.html up forever.
+        return resolve(false);
+      }
       req.on("error", retry);
       req.setTimeout(1500, () => req.destroy());
     };
@@ -509,6 +533,19 @@ function createWindow() {
   win.webContents.on("will-frame-navigate", (e) => {
     if (!e.isMainFrame) stayHome(e, e.url);
   });
+  // The in-app editor window gets the same guards: without them its own links
+  // (GitHub, LinkedIn, carino.systems) opened as new Electron windows or
+  // navigated the editor away from the engine.
+  win.webContents.on("did-create-window", (child) => {
+    child.webContents.setWindowOpenHandler(({ url }) => {
+      openExternally(url);
+      return { action: "deny" };
+    });
+    child.webContents.on("will-navigate", stayHome);
+    child.webContents.on("will-frame-navigate", (e) => {
+      if (!e.isMainFrame) stayHome(e, e.url);
+    });
+  });
   win.on("close", (e) => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
 }
 
@@ -707,6 +744,7 @@ if (!app.requestSingleInstanceLock()) {
     showWindow();     // visible right away — no black screen
 
     startEngine();
+    if (!serverUrl) return;   // startEngine has already shown why
     const up = await waitForServer();
     if (up) win.loadURL(serverUrl);
     else showError("The dashboard did not respond in time. The engine may have failed to start.");

@@ -100,6 +100,13 @@ The Flask app serves the dashboard, `/api/*`, and DICOMweb under `/dicom-web`.
   machine can reach the API. This is deliberate: it is frictionless for the
   single-workstation case that most installs are, and it becomes impossible the
   moment the operator points it at the network.
+- **…and it answers only to its own name.** "Only a process on this machine" is
+  not true of a *browser* on this machine: a page whose DNS name rebinds to
+  127.0.0.1 is same-origin to itself and can set any header. So while no
+  credential is required, a request whose `Host` is not a loopback name, the bind
+  address or a `web.allowed_hosts` entry is refused with 421 — before
+  authentication, for `/api` and `/dicom-web` alike. A browser `Origin` on a
+  `/dicom-web` write must also be this server or a `dicomweb.cors_origins` entry.
 - **Session cookies do not contain the token.** The cookie carries an HMAC over
   a secret generated at startup and held only in memory, plus a keyed
   fingerprint of the token that was presented at login. Consequences worth
@@ -133,6 +140,13 @@ The Flask app serves the dashboard, `/api/*`, and DICOMweb under `/dicom-web`.
   capacity bound so it cannot be grown until the process runs out of memory, and
   the client is identified by the socket's remote address only — `X-Forwarded-For`
   is attacker-controlled when there is no proxy in front, and there is not.
+  For the 256-bit token a correct credential still beats a block. For a profile
+  **password** it does not: profile logins are limited per (client, account) and
+  per client, a blocked attempt is refused before the password is checked (so
+  429-versus-200 is not an oracle), an unknown name costs the same PBKDF2 as a
+  known one, at most four hashes run at once, and a password needs at least 8
+  characters. Logging out ends the session on the server, not only in the
+  browser.
 - **Cross-site write protection.** Every non-GET request to `/api` must carry
   the header `X-Carino: 1`. This forces a CORS preflight that no foreign origin
   passes, so a page the operator happens to have open cannot fire a write at
@@ -155,7 +169,19 @@ The Flask app serves the dashboard, `/api/*`, and DICOMweb under `/dicom-web`.
   reaches no study on its own.
 - **Destructive filesystem operations are gated** to the configured storage
   roots by a realpath-based containment check, which defeats both `..` traversal
-  and symlink escapes.
+  and symlink escapes. Every file a study hands out, sends or attaches to is held
+  to the root individually (a planted symlink is skipped), a delete refuses a
+  folder holding more than one study or another configured folder, and the
+  forwarder never follows a symlink in the outgoing folder.
+- **Responses are not sniffed, framed or cached.** Every response carries
+  `X-Content-Type-Options: nosniff` and `X-Frame-Options: SAMEORIGIN`; `/api`
+  answers carry `Cache-Control: no-store`. The pending-review preview is served
+  with the type its bytes are (PDF/JPEG/PNG), a `sandbox` CSP, and only to a
+  profile that may see every identifier.
+- **The dashboard's HTTP server is bounded**: at most 64 connections are served
+  at once and an idle one is closed after 30 seconds, so silent sockets cannot
+  exhaust the process that also runs the receiver. The DIMSE listeners hold 50
+  associations (20 per host) and drop a socket that says nothing after 10 s.
 
 ### Profiles, capabilities and identifier visibility
 
@@ -199,11 +225,23 @@ behaves exactly as it did before they existed.
   `auth.manage` edits profiles; `deid.manage` changes what gets scrubbed.
   Neither is in any preset except Administrator, and `POST /api/config` — which
   IT can reach — refuses to touch the profile list at all and re-checks
-  `deid.manage` against what a save actually changes.
+  `deid.manage` against what a save actually changes. The same Save also needs
+  `destinations.write` for every field that decides where PHI leaves the box
+  (`qr.move_destinations`, an absolute `web.editor_url`, `dicomweb.cors_origins`,
+  `notify.webhook.url`), `studies.delete` to make the forwarder move/delete or to
+  re-point any folder, and `auth.manage` to change the audit trail.
+- **Actions are not reads.** The worklist probe (which borrows a modality's AE
+  title towards another RIS) and its clear, and "reveal in file manager" (which
+  opens a window on the engine's console), need `services.control`. The dated log
+  file, like the DICOM download, needs every identifier field: a plain-text file
+  cannot be redacted on the way out. Log messages name orders by id and
+  accession, never by patient or description, and a profile that may not see the
+  Patient ID is shown storage paths only as opaque handles.
 - **Passwords are optional per profile, and that is bounded.** An open profile
   is a reasonable thing on a loopback appliance or for a read-only waiting-room
   display. Config validation refuses an open profile that can change anything
-  when `web.host` is reachable from the network.
+  when `web.host` is reachable from the network; seeding the presets there takes
+  `{"admin_password": …}` and creates the other write-capable presets disabled.
 - **Sessions bind to the credential that opened them.** Changing one profile's
   password ends that profile's sessions and nobody else's; disabling or deleting
   a profile takes effect on its next request, because the lookup happens per
@@ -229,7 +267,13 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   page cache when the machine loses power is a record that did not happen.
 - **Recording reads is opt-in** (`audit.log_reads`). "Who viewed this patient"
   is required in some jurisdictions and multiplies the size of the file by how
-  often somebody refreshes a dashboard, so it is the operator's decision.
+  often somebody refreshes a dashboard, so it is the operator's decision. It
+  covers DICOMweb retrievals; STOW-RS writes and DICOMweb refusals are always
+  recorded, and so is every export of the trail (with the head it ended at).
+- **A crash cannot poison it.** A torn last line is cut into a `.torn` sidecar
+  and recorded as `audit.recovered`, archives are ordered by the records' own
+  sequence numbers rather than a wall clock, and records are hashed in the form
+  they read back as.
 - Read the limits in *What is not protected* below before relying on it as
   evidence.
 
@@ -242,7 +286,10 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   outbound side (Storage SCU) can verify the remote against a CA or the system
   trust store, present its own certificate for mutual TLS, or — for self-signed
   test setups — skip verification, which you should not do on a real network.
-  TLS 1.2 is the enforced floor.
+  TLS 1.2 is the enforced floor. A destination marked `tls` is **never** dialled
+  in plaintext: when no client TLS context can be built, the send, the C-MOVE
+  and every probe fail (and are retried, and show as stuck) instead of falling
+  back to an unencrypted association.
 - **Calling AE title allow-lists.** Each DIMSE listener accepts an
   `allowed_aets` list; when it is non-empty, associations from any other calling AE are
   rejected. Treat this as a configuration guard, not a security boundary: an AE
@@ -265,7 +312,12 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   whose series disagreed on one came back short with a final status of Success.
   A Unique Key carrying a wildcard is refused outright rather than expanded:
   the index would otherwise match it as a pattern and retrieve every study it
-  hit, again reporting Success.
+  hit, again reporting Success. Text keys (Patient ID, accession, descriptions)
+  match case-sensitively as PS3.4 requires — only Patient Name ignores case — so
+  `ab123` no longer retrieves the studies of patient `AB123`. A C-MOVE target found
+  through the ordinary destination list must match its AE title exactly (or
+  uniquely ignoring case), and is refused if any routing rule de-identifies for
+  that destination, because a retrieve sends the stored, identified file.
 - **Every listener claims its port exclusively before binding it.** This matters
   on Windows and nowhere else. Winsock's `SO_REUSEADDR` means *sharing
   permitted* rather than the POSIX "rebind through TIME_WAIT", and every
@@ -289,6 +341,17 @@ performed. They are edited on two different cards, so "a rule asks for a scrub
 that cannot happen" is a state that two perfectly valid saves arrive at, and
 something has to decide what that means.
 
+- **De-identification belongs to the destination, not to the rule that fired.**
+  A destination named by any enabled `deidentify` rule is scrubbed (or held) on
+  every route to it — the all-destinations fallback, an unreadable header, a
+  rule with a typo'd match key, and a route another rule produced included.
+  It used to be scrubbed only when that particular rule matched, so an MR study
+  reached a "CT → Research, de-identified" node identified while the dashboard
+  listed Research as de-identified-for. A mid-send change to the rules or the
+  de-identification settings stops a manual send delivering to every such node.
+- **A scrub without a site key is labelled as reversible.** With no
+  `deid.secret`, output is marked `PatientIdentityRemoved=NO` and does not claim
+  the Basic Profile; `pacs init` generates a key for a new config.
 - **A destination a rule asks to de-identify for is not sent to at all unless
   the scrub can actually be performed.** It is *held*. Nothing is forwarded
   identified to a node the operator configured as receiving de-identified data,

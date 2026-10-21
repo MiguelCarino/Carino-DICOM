@@ -414,6 +414,69 @@ async function loadCaught(markNewest) {
   if (first) { first.classList.add("fresh"); first.scrollIntoView({ block: "nearest" }); }
 }
 
+// What each modality's worklist query asks for, missing attributes first (pacs/mwlasks.py).
+// Literals inside T() so i18n-parity can see them.
+const askStatus = (s) => ({
+  not_sent: [T("not sent"), "bad"], empty: [T("sent empty"), "warn"],
+  sent: [T("sent"), ""], filled: [T("filled"), "good"],
+})[s] || ["?", ""];
+async function loadAsks() {
+  const list = $("asksList");
+  if (!list) return;
+  let data;
+  try {
+    data = await api("/api/worklist/asks");
+  } catch (e) {
+    list.textContent = ""; list.appendChild(emptyNote(e.message)); return;
+  }
+  list.textContent = "";
+  const stations = (data && data.stations) || [];
+  if (!stations.length) {
+    list.appendChild(emptyNote(T("No worklist queries yet. They appear here once a modality pulls its worklist from this PC.")));
+    return;
+  }
+  stations.forEach((st) => {
+    const box = document.createElement("div");
+    box.className = "caught-round asks-station";
+    const head = document.createElement("div");
+    head.className = "caught-head";
+    head.textContent = TF("{aet} · {host} · {n} queries · last {ts}", {
+      aet: st.aet, host: st.address || "?", n: st.queries, ts: fmtStamp(st.last),
+    });
+    const c = st.counts || {};
+    const sum = document.createElement("div");
+    sum.className = "asks-sum";
+    sum.textContent = TF("Asks for {n} attributes: {f} filled, {e} sent empty, {x} not sent.", {
+      n: st.tags.length, f: (c.filled || 0) + (c.sent || 0), e: c.empty || 0, x: c.not_sent || 0,
+    }) + (st.dropped ? " " + TF("{n} more were not recorded (limit reached).", { n: st.dropped }) : "");
+    box.append(head, sum);
+    const table = document.createElement("table");
+    table.className = "asks-table";
+    const thead = document.createElement("tr");
+    [T("Attribute"), T("Tag"), T("Asked as"), T("Our answer")].forEach((h) => {
+      const th = document.createElement("th"); th.textContent = h; thead.appendChild(th);
+    });
+    table.appendChild(thead);
+    st.tags.forEach((t) => {
+      const tr = document.createElement("tr");
+      if (!t.in_last) { tr.className = "stale"; tr.title = T("Not in this modality's latest query"); }
+      const asked = t.filter && t.fill ? T("filter and fill-in") : t.filter ? T("filter") : T("fill-in");
+      const [label, cls] = askStatus(t.status);
+      const cells = [t.name, t.tag, asked, label];
+      cells.forEach((v, i) => {
+        const td = document.createElement("td");
+        td.textContent = v;
+        if (i === 1) td.className = "mono";
+        if (i === 3 && cls) td.className = "ask-" + cls;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+    list.appendChild(box);
+  });
+}
+
 function collectMods() {
   return [...$("modBody").querySelectorAll("tr")]
     .map((tr) => ({

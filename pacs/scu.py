@@ -54,9 +54,21 @@ class Destination:
                    aet=d["aet"], tls=bool(d.get("tls", False)))
 
 
+class TLSRequired(OSError):
+    """A destination marked tls=true was about to be dialled without a TLS
+    context. Raised instead of falling back to plaintext (fail closed)."""
+
+
 def _tls_args(dest: "Destination", tls_context: Optional[ssl.SSLContext]):
-    """pynetdicom associate() tls_args tuple, or None for a plaintext link."""
-    if dest.tls and tls_context is not None:
+    """pynetdicom associate() tls_args tuple, or None for a plaintext link.
+
+    A TLS node with no context is refused, never dialled in the clear: that
+    used to send the whole study unencrypted to a node the operator had
+    configured for DICOM-TLS whenever the client context could not be built."""
+    if dest.tls:
+        if tls_context is None:
+            raise TLSRequired(f"{dest.name or dest.host} requires TLS but no TLS context is "
+                              f"available (check the scu TLS settings)")
         return (tls_context, dest.host)
     return None
 
@@ -65,6 +77,28 @@ def _tls_args(dest: "Destination", tls_context: Optional[ssl.SSLContext]):
 class SendResult:
     ok: bool
     message: str
+    # True when the failure was the LINK (no association, timeout/abort)
+    # rather than this one instance — the watcher stops dialling that node for
+    # the rest of a pass on it.
+    link: bool = False
+
+
+# A transfer is allowed this many bytes per second on top of the base timeout
+# before it is declared stalled: a 400 MB object on a slow WAN takes minutes,
+# and a flat 30 s DIMSE/network timeout aborted it on every attempt forever.
+_MIN_RATE = 256 * 1024
+
+
+def _make_ae(calling_aet: str, timeout) -> AE:
+    """An SCU AE with every timeout set, including the TCP connect one (whose
+    default None meant ~2 minutes on a host that drops SYNs). Raises ValueError
+    for a calling AE title pynetdicom will not take."""
+    ae = AE(ae_title=calling_aet)
+    ae.acse_timeout = timeout
+    ae.dimse_timeout = timeout
+    ae.network_timeout = timeout
+    ae.connection_timeout = timeout
+    return ae
 
 
 def _associate(ae: AE, dest: "Destination", tls_context):
@@ -202,8 +236,16 @@ def _open(ae: AE, dest: "Destination", calling_aet: str, tls_context, timeout, s
         assoc = _associate(ae, dest, tls_context)
     except (ssl.SSLError, OSError) as exc:
         note_outgoing(service=service, dest=dest, calling=calling_aet,
-                      outcome="tls" if isinstance(exc, ssl.SSLError) else "error", detail=str(exc))
+                      outcome="tls" if isinstance(exc, (ssl.SSLError, TLSRequired)) else "error",
+                      detail=str(exc))
         return None, f"TLS/connection error: {exc}", []
+    except (ValueError, TypeError) as exc:
+        # An AE title pynetdicom will not put on the wire (empty, a backslash,
+        # over 16 characters). A result, never an exception: callers run on a
+        # manual-send thread and in the failover monitor's loop.
+        note_outgoing(service=service, dest=dest, calling=calling_aet, outcome="error",
+                      detail=str(exc))
+        return None, f"invalid AE title: {exc}", []
     contexts = requested_contexts(assoc)
     if annotate is not None:
         annotate(contexts)
@@ -256,20 +298,31 @@ def c_echo(dest: Destination, calling_aet: str, timeout: int = 10,
     *record* False keeps it out of the connection journal: the failover
     monitor asks every 30 seconds, and its answers belong to its own card.
     """
-    ae = AE(ae_title=calling_aet)
+    try:
+        ae = _make_ae(calling_aet, timeout)
+    except (ValueError, TypeError) as exc:
+        return SendResult(False, f"invalid calling AE title: {exc}")
     ae.add_requested_context(Verification)
     if check_storage:
         for uid in _PROBE_STORAGE:
             ae.add_requested_context(uid)
-    ae.acse_timeout = timeout
-    ae.dimse_timeout = timeout
-    ae.network_timeout = timeout
     assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout,
                              "echo" if record else "")
     if why:
-        return SendResult(False, why)
+        return SendResult(False, why, link=True)
     try:
-        status = assoc.send_c_echo()
+        if check_storage and not any(str(c.abstract_syntax) == str(Verification)
+                                     for c in assoc.accepted_contexts):
+            if any(str(c.abstract_syntax) in _PROBE_STORAGE for c in assoc.accepted_contexts):
+                return SendResult(True, (
+                    f"{dest.aet} at {dest.host}:{dest.port} accepts images but refuses C-ECHO "
+                    f"(Verification) — studies can be sent; the echo itself cannot be tested"))
+            return SendResult(False, f"{dest.aet} accepted the association but neither C-ECHO "
+                                     f"nor any image type offered")
+        try:
+            status = assoc.send_c_echo()
+        except Exception as exc:            # noqa: BLE001 - a result, never an exception
+            return SendResult(False, f"C-ECHO could not be sent ({exc})")
         if status and status.Status == 0x0000:
             if check_storage and not any(
                     str(c.abstract_syntax) in _PROBE_STORAGE for c in assoc.accepted_contexts):
@@ -298,6 +351,11 @@ class WorklistProbe:
     # language instead of showing `label`, which is English.
     calling_key: str = ""       # the calling AE title we asked as
     modality_key: str = ""      # the modality we asked for ("" = any)
+    total: int = 0              # how many items the provider returned (items is capped)
+
+
+# Items kept per probe question; the true count is still reported in .total.
+MAX_PROBE_ITEMS = 200
 
 
 def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
@@ -320,12 +378,6 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
     from pydicom.dataset import Dataset
     from pynetdicom.sop_class import ModalityWorklistInformationFind
 
-    ae = AE(ae_title=calling_aet)
-    ae.add_requested_context(ModalityWorklistInformationFind)
-    ae.acse_timeout = timeout
-    ae.dimse_timeout = timeout
-    ae.network_timeout = timeout
-
     # The label is what the operator reads down the table, so it has to name
     # every key that varies — including the modality, or the first two questions
     # print identically and the one difference between them is invisible.
@@ -338,6 +390,11 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
         pr.calling_key, pr.modality_key = calling_aet, modality
         return pr
 
+    try:
+        ae = _make_ae(calling_aet, timeout)
+    except (ValueError, TypeError) as exc:
+        return _probe(label, False, f"invalid calling AE title: {exc}", [], station_aet, date)
+    ae.add_requested_context(ModalityWorklistInformationFind)
     assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "worklist-probe")
     if why:
         return _probe(label, False, why, [], station_aet, date)
@@ -367,24 +424,38 @@ def c_find_worklist(dest: Destination, calling_aet: str, station_aet: str = "",
     ds.ScheduledProcedureStepSequence = [step]
 
     items: list = []
+    total = [0]
+
+    def _probe_n(*args):
+        pr = _probe(*args)
+        pr.total = total[0]
+        return pr
     try:
         for status, identifier in assoc.send_c_find(ds, ModalityWorklistInformationFind):
             if not status:
-                return _probe(label, False, "connection lost during the query",
-                                     items, station_aet, date)
+                return _probe_n(label, False, "connection lost during the query",
+                                items, station_aet, date)
             code = status.Status
             if code in (0xFF00, 0xFF01) and identifier is not None:
-                items.append(_worklist_item(identifier))
+                # Counted always, kept only up to the cap: a universal question
+                # returns the other site's whole worklist, and every item kept
+                # is another hospital's patient written to caught.json.
+                total[0] += 1
+                if len(items) < MAX_PROBE_ITEMS:
+                    items.append(_worklist_item(identifier))
             elif code == 0x0000:
                 break                       # success, no more matches
             elif code not in (0xFF00, 0xFF01):
-                return _probe(label, False, f"C-FIND failed (0x{code:04X})",
-                                     items, station_aet, date)
+                return _probe_n(label, False, f"C-FIND failed (0x{code:04X})",
+                                items, station_aet, date)
     except Exception as exc:                # a malformed response must not take the probe down
-        return _probe(label, False, f"query error: {exc}", items, station_aet, date)
+        return _probe_n(label, False, f"query error: {exc}", items, station_aet, date)
     finally:
         assoc.release()
-    return _probe(label, True, f"{len(items)} item(s)", items, station_aet, date)
+    msg = f"{total[0]} item(s)"
+    if total[0] > len(items):
+        msg += f" (first {len(items)} kept)"
+    return _probe_n(label, True, msg, items, station_aet, date)
 
 
 def _worklist_item(ds) -> dict:
@@ -451,7 +522,10 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     if not sop_class:
         return SendResult(False, "no SOPClassUID")
 
-    ae = AE(ae_title=calling_aet)
+    try:
+        ae = _make_ae(calling_aet, timeout)
+    except (ValueError, TypeError) as exc:
+        return SendResult(False, f"invalid calling AE title: {exc}")
     try:
         ae.add_requested_context(sop_class, ts)
     except ValueError as exc:
@@ -459,16 +533,21 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         # is opened. dcmread accepted it and is_dicom accepted it, so a file
         # that reaches this line can still be one pynetdicom will not describe.
         return SendResult(False, f"cannot propose a context for this instance ({exc})")
-    ae.acse_timeout = timeout
-    ae.dimse_timeout = timeout
-    ae.network_timeout = timeout
+    # The DIMSE and idle timers run while the dataset is still being written
+    # (pynetdicom only restarts the idle timer on RECEIVED data), so they get
+    # the transfer time on top of the base timeout. ACSE and connect keep it.
+    try:
+        size = os.path.getsize(filepath)
+    except OSError:
+        size = 0
+    ae.dimse_timeout = ae.network_timeout = timeout + size / _MIN_RATE
     assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "send")
     if why:
-        return SendResult(False, why)
+        return SendResult(False, why, link=True)
     try:
         status = assoc.send_c_store(ds)
         if not status:
-            return SendResult(False, "no C-STORE response (timeout/abort)")
+            return SendResult(False, "no C-STORE response (timeout/abort)", link=True)
         code = status.Status
         if code == 0x0000 or code in _WARNING_STATUSES:
             return SendResult(True, "stored" if code == 0x0000 else f"stored (warning 0x{code:04X})")
@@ -545,16 +624,13 @@ def c_check(dest: Destination, calling_aet: str, pairs, timeout: int = 10,
 
     found: list = []
     for batch in batches:
-        ae = AE(ae_title=calling_aet)
         try:
+            ae = _make_ae(calling_aet, timeout)
             for sop, ts, _ref in batch:
                 ae.add_requested_context(sop, ts)
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             return {"ok": False, "message": f"cannot propose these contexts ({exc})",
                     "contexts": found, "batches": len(batches), "truncated": truncated}
-        ae.acse_timeout = timeout
-        ae.dimse_timeout = timeout
-        ae.network_timeout = timeout
         refs = [ref for _sop, _ts, ref in batch]
 
         def mark(ctx, refs=refs):

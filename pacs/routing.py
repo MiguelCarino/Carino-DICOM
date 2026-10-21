@@ -74,12 +74,16 @@ def attributes_from_dataset(ds, extra: Optional[dict] = None) -> dict:
 
     ``extra`` wins over the header. The receiver knows the true calling AE title
     from the association, which is more trustworthy than the copy the sender may
-    or may not have written into the file meta."""
+    or may not have written into the file meta. No caller passes it today, so
+    calling_aet is whatever (0002,0016) the FILE carries — read from the file
+    meta only (a group-0002 element in the dataset body is not allowed there by
+    PS3.10 and is ignored). AE titles are unauthenticated: matching on
+    calling_aet is routing, never a security boundary."""
     meta = getattr(ds, "file_meta", None)
     attrs = {
         "modality": _text(getattr(ds, "Modality", "")),
         "calling_aet": _text(getattr(meta, "SourceApplicationEntityTitle", "")
-                             or getattr(ds, "SourceApplicationEntityTitle", "")),
+                             if meta is not None else ""),
         "station": _text(getattr(ds, "StationName", "")),
         "patient_id": _text(getattr(ds, "PatientID", "")),
         "study_desc": _text(getattr(ds, "StudyDescription", "")),
@@ -110,10 +114,14 @@ class HeaderCache:
         """Routable attributes for *path*, or None if it will not parse."""
         key = os.path.abspath(path)
         try:
-            size = os.path.getsize(key)
-            mtime = os.path.getmtime(key)
+            st = os.stat(key)
         except OSError:
             return None
+        # size + nanosecond mtime + inode + ctime: a same-size replacement that
+        # keeps its mtime (cp -p, rsync -t, unzip, a 2 s FAT clock) is still a
+        # new inode or a moved ctime, and must not be routed on the old header.
+        size = (st.st_size, st.st_ino, st.st_ctime_ns)
+        mtime = st.st_mtime_ns
         hit = self._data.get(key)
         if hit is not None and hit[0] == size and hit[1] == mtime:
             self.hits += 1
@@ -301,8 +309,11 @@ def _patterns(raw: Any) -> list[str]:
         return []
     if isinstance(raw, (list, tuple)):
         return [str(p).strip() for p in raw if str(p).strip()]
-    raw = str(raw).strip()
-    return [raw] if raw else []
+    # A comma-separated string means a list, exactly as the dashboard's rule
+    # editor reads and saves it — so a hand-written "CT,MR" and the same rule
+    # saved once from the dashboard route identically. A pattern that really
+    # contains a comma has to be written as a one-element list.
+    return [p.strip() for p in str(raw).split(",") if p.strip()]
 
 
 def _field_matches(value: str, patterns: list[str]) -> bool:
@@ -424,15 +435,7 @@ class Router:
         Rules that cannot fire are not counted: routing switched off, or a rule
         naming a destination that is not enabled, means nothing is scrubbed for
         that name and nothing is held either."""
-        asked: set[str] = set()
-        if self.enabled_flag:
-            for rule in self.rules:
-                if not rule.get("deidentify"):
-                    continue
-                for d in (rule.get("destinations") or []):
-                    name = str(d).strip()
-                    if name in self._enabled_set:
-                        asked.add(name)
+        asked: set[str] = set(self.deid_nodes)
         available = self.deid_available
         return {"profile": self.deid_profile,
                 "destinations": sorted(asked) if available else [],
@@ -464,6 +467,23 @@ class Router:
         self._enabled_set = frozenset(names)
         self.rules = rules
         self.enabled_flag = bool(cfg.get("enabled"))
+        # De-identification is a property of the NODE (PS3.15 Annex E: the
+        # guarantee belongs to the recipient): every enabled destination named by
+        # any enabled deidentify rule is scrubbed — or held — on EVERY decision,
+        # including the fallbacks and routes some other rule produced. Matched by
+        # name case-insensitively, so a 'research' typo in the rule still protects
+        # 'Research'.
+        low = {n.lower(): n for n in names}
+        deid_nodes: set[str] = set()
+        if self.enabled_flag:
+            for rule in rules:
+                if not rule.get("deidentify"):
+                    continue
+                for d in (rule.get("destinations") or []):
+                    hit = low.get(str(d).strip().lower())
+                    if hit:
+                        deid_nodes.add(hit)
+        self.deid_nodes = frozenset(deid_nodes)
         self._deid_seen = profile
         if changed:
             self._warned.clear()
@@ -531,9 +551,41 @@ class Router:
         }
 
     # ------------------------------------------------------------------ internals
-    def _all(self, attrs: dict, reason: str) -> Decision:
-        return Decision(destinations=self.enabled, rules=(), fallback=True,
-                        reason=reason, attributes=dict(attrs))
+    def _all(self, attrs: dict, reason: str, unresolved: tuple = ()) -> Decision:
+        return self._settle(self.enabled, set(), (), True, reason, unresolved, attrs, [])
+
+    def _settle(self, destinations, asked, matched_rules, fallback, reason,
+                unresolved, attrs, trace) -> Decision:
+        """Put the two halves of the de-identification decision together — the
+        one place it happens (see deid_profile). Every reader downstream — the
+        watcher, the manual send, the explain endpoint, /api/status, the
+        dashboard — takes the answer from here rather than re-deriving it.
+
+        *asked* (the rules that fired) is widened by the node-level set, so a
+        destination some deidentify rule names is never sent an identified copy
+        because the study happened to reach it by another route."""
+        want = set(asked) | (set(destinations) & set(getattr(self, "deid_nodes", ())))
+        available = self.deid_available
+        deid = frozenset(want) if available else frozenset()
+        held = frozenset() if available else frozenset(want)
+        if held:
+            reason += ("; HELD, not sent to %s — a rule asks for de-identification "
+                       "and deid.profile is 'off'" % ", ".join(sorted(held)))
+            # The trace is what the dashboard draws rule by rule, so the rule
+            # that caused the hold has to carry it: a row still reading
+            # "matched → Research" would say the study went there.
+            for row in trace:
+                blocked = [d for d in row["destinations"] if d in held]
+                if blocked:
+                    row["held"] = blocked
+                    row["action"] += (" — HELD, not sent to %s (deid.profile is 'off')"
+                                      % ", ".join(blocked))
+        elif deid and fallback:
+            reason += "; de-identified for %s (a rule scrubs for that node)" % ", ".join(sorted(deid))
+        return Decision(destinations=tuple(destinations), deid_dests=deid, held=held,
+                        rules=tuple(matched_rules), fallback=fallback,
+                        reason=reason, hold_cause=HOLD_PROFILE_OFF if held else "",
+                        unresolved=tuple(unresolved), attributes=dict(attrs))
 
     def _evaluate(self, attrs: dict) -> tuple[Decision, list[dict]]:
         """Walk the rules. Returns the decision plus a per-rule trace (shared by
@@ -620,37 +672,16 @@ class Router:
             trace.append(row)
 
         if not picked:
-            return Decision(destinations=self.enabled, rules=(), fallback=True,
-                            reason="no rule matched — all enabled destinations",
-                            unresolved=tuple(unresolved), attributes=dict(attrs)), trace
+            return self._settle(self.enabled, set(), (), True,
+                                "no rule matched — all enabled destinations",
+                                unresolved, attrs, trace), trace
 
         # Ordered by the destinations list, not by rule order, so two files that
         # end up at the same nodes always report the same route string.
         ordered = tuple(n for n in self.enabled if n in set(picked))
-        # The one place the two halves of the de-identification decision are put
-        # together (see deid_profile above). Every reader downstream — the
-        # watcher, the manual send, the explain endpoint, /api/status, the
-        # dashboard — takes the answer from here rather than re-deriving it.
-        available = self.deid_available
-        deid = frozenset(asked) if available else frozenset()
-        held = frozenset() if available else frozenset(asked)
         reason = "matched: " + ", ".join(matched_rules)
-        if held:
-            reason += ("; HELD, not sent to %s — a rule asks for de-identification "
-                       "and deid.profile is 'off'" % ", ".join(sorted(held)))
-            # The trace is what the dashboard draws rule by rule, so the rule
-            # that caused the hold has to carry it: a row still reading
-            # "matched → Research" would say the study went there.
-            for row in trace:
-                blocked = [d for d in row["destinations"] if d in held]
-                if blocked:
-                    row["held"] = blocked
-                    row["action"] += (" — HELD, not sent to %s (deid.profile is 'off')"
-                                      % ", ".join(blocked))
-        return Decision(destinations=ordered, deid_dests=deid, held=held,
-                        rules=tuple(matched_rules), fallback=False,
-                        reason=reason, hold_cause=HOLD_PROFILE_OFF if held else "",
-                        unresolved=tuple(unresolved), attributes=dict(attrs)), trace
+        return self._settle(ordered, asked, matched_rules, False, reason,
+                            unresolved, attrs, trace), trace
 
     def _emit_warnings(self, decision: Decision, trace: list[dict], path) -> None:
         if not self.log:

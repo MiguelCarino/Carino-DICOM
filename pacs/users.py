@@ -310,10 +310,12 @@ class Profile:
         return frozenset(f for f in raw if isinstance(f, str) and f in PHI_FIELDS)
 
     def sees(self, field: str) -> bool:
-        # A field nobody classified is withheld, not shown. This is the only
-        # safe default: the failure mode of guessing wrong is a leak that
-        # nothing reports, and the failure mode of this is a visible *** that
-        # somebody asks about.
+        # FAIL-OPEN by design, and the reader must know it: a field that is not
+        # in PHI_FIELDS (or an alias of one) is SHOWN. Redaction is a key
+        # allow-list of identifiers, so a new payload key that carries an
+        # identifier under an unclassified name leaks until it is added to
+        # PHI_FIELDS / _ALIASES — free text (log messages), paths and file
+        # names are handled at their source, not here.
         if field not in PHI_FIELDS:
             return True          # not an identifier at all — modality, port, counts
         return field in self.phi_visible()
@@ -594,6 +596,11 @@ _ALIASES: dict[str, str] = {
     "AccessionNumber":         "accession",
     "StudyDescription":        "study_desc",
     "ReferringPhysicianName":  "referring",
+    # RIS order numbers: the accession is built from ORC-3/OBR-3 (falling back
+    # to ORC-2/OBR-2), so these two carry the same value under another key.
+    # They only ever appear on orders, which is what makes them safe as aliases.
+    "filler_order_number":     "accession",
+    "placer_order_number":     "accession",
 }
 
 # Every key redact() should treat as an identifier, so a caller can hand the

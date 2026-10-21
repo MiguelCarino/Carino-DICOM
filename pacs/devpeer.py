@@ -80,6 +80,7 @@ PEER_PREFIX = "carino-peer-"
 # peer's OWN config, and the failure would arrive as a validation error during
 # create() rather than as anything an operator could read.
 AE_PREFIX = "CARINOPEER"
+_AET_RE = __import__("re").compile(r"^CARINOPEER[0-9A-F]{4}$")
 VOID_AET = "CARINOVOID"
 # Written inside each peer directory, holding the pid that made it, so the
 # startup sweep can tell a tree left behind by a killed run from one a second
@@ -175,13 +176,64 @@ def remove_peer_dir(path: str, root: Optional[str] = None) -> None:
     shutil.rmtree(real)
 
 
-def _owner_pid(peer_dir: str) -> int:
-    """The pid recorded in *peer_dir*, or 0 when there is nothing readable."""
+def _owner_record(peer_dir: str) -> tuple:
+    """(pid, process start time or None) recorded in *peer_dir*; (0, None)
+    when there is nothing readable. Older folders carry the pid alone."""
     try:
         with open(os.path.join(peer_dir, OWNER_FILE), "r", encoding="utf-8") as fh:
-            return int(fh.read().strip() or 0)
+            parts = fh.read().split()
+        pid = int(parts[0]) if parts else 0
+        start = parts[1] if len(parts) > 1 else None
+        return pid, start
     except (OSError, ValueError):
-        return 0
+        return 0, None
+
+
+def _owner_pid(peer_dir: str) -> int:
+    """The pid recorded in *peer_dir*, or 0 when there is nothing readable."""
+    return _owner_record(peer_dir)[0]
+
+
+def _start_time(pid: int) -> Optional[str]:
+    """A process's start time (Linux /proc/<pid>/stat field 22), or None when
+    the platform does not say. Recorded beside the pid so a REUSED pid — the
+    same number after a container restart — is not taken as the owner."""
+    try:
+        with open(f"/proc/{int(pid)}/stat", "r", encoding="utf-8") as fh:
+            data = fh.read()
+        return data.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _owner_alive(peer_dir: str) -> bool:
+    pid, start = _owner_record(peer_dir)
+    # The sweep runs before this process has created any peer, so a folder
+    # naming OUR pid is always an earlier run's that happened to get the same
+    # number (a container restarting in place gets the same pid every time).
+    if pid == os.getpid():
+        return False
+    if not _pid_alive(pid):
+        return False
+    if start is not None:
+        now = _start_time(pid)
+        if now is not None and now != start:
+            return False        # the pid was reused by an unrelated process
+    return True
+
+
+def _is_our_folder(path: str) -> bool:
+    """Only a folder this account created privately (mkdtemp makes it 0700) is
+    evidence about a peer. Anything a different user — or anybody with write
+    access to the temp folder — could have planted is neither trusted to keep
+    rows alive nor ours to delete."""
+    if os.name != "posix":
+        return True
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return st.st_uid == os.geteuid() and not (st.st_mode & 0o077)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -220,9 +272,12 @@ def _peer_aet(peer_dir: str) -> str:
     try:
         with open(os.path.join(peer_dir, "config.json"), "r", encoding="utf-8") as fh:
             doc = json.load(fh)
-        return str((doc.get("scp") or {}).get("aet", "") or "")
+        aet = str((doc.get("scp") or {}).get("aet", "") or "").strip()
     except (OSError, ValueError, AttributeError):
         return ""
+    # Only a title of the shape _new_aet mints: anything else ('PEER') would
+    # substring-match, and keep, every row on the primary.
+    return aet if _AET_RE.match(aet) else ""
 
 
 def _names_a_live_peer(row: dict, live_aets: set) -> bool:
@@ -236,8 +291,14 @@ def _names_a_live_peer(row: dict, live_aets: set) -> bool:
     wiring deleted underneath it.
     """
     aet = str(row.get("aet", "") or "").strip().upper()
-    name = str(row.get("name", "") or "").upper()
-    return any(live and (aet == live.upper() or live.upper() in name) for live in live_aets)
+    name = str(row.get("name", "") or "").strip().upper()
+    for live in live_aets:
+        lv = str(live or "").strip().upper()
+        if not lv:
+            continue
+        if aet == lv or name in (f"DEV PEER {lv}", f"BLACK HOLE {lv}"):
+            return True
+    return False
 
 
 def sweep_stale(tmp_root: Optional[str] = None, log=None, cfg=None) -> list[str]:
@@ -289,8 +350,13 @@ def sweep_stale(tmp_root: Optional[str] = None, log=None, cfg=None) -> list[str]
         # not a peer: both are left exactly where they are.
         if os.path.islink(path) or not os.path.isdir(path):
             continue
+        if not _is_our_folder(path):
+            if log:
+                log.warn(f"Ignoring {path}: it is not a private folder of this account, so it "
+                         f"is not a dev peer of ours (left alone, and not trusted)", kind="devpeer")
+            continue
         pid = _owner_pid(path)
-        if _pid_alive(pid):
+        if _owner_alive(path):
             aet = _peer_aet(path)
             if aet:
                 live_aets.add(aet)
@@ -458,7 +524,8 @@ class DevPeer:
             peer = None
             try:
                 with open(os.path.join(peer_dir, OWNER_FILE), "w", encoding="utf-8") as fh:
-                    fh.write(str(os.getpid()))
+                    start = _start_time(os.getpid())
+                    fh.write(str(os.getpid()) + (f" {start}" if start else ""))
                 sock_a, scp_port = _reserve_port()
                 sock_b, qr_port = _reserve_port()
                 # The black hole's port is one nothing listens on, and closing

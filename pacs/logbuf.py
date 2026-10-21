@@ -20,6 +20,22 @@ _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DAY_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.log$")
 
 
+def _one_line(value) -> str:
+    """*value* as text with CR, LF and every other C0 control escaped."""
+    out = []
+    for ch in str(value):
+        o = ord(ch)
+        if ch == "\r":
+            out.append("\\r")
+        elif ch == "\n":
+            out.append("\\n")
+        elif o < 32 or o == 127:
+            out.append("\\x%02x" % o)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _as_int(value) -> int:
     try:
         return int(value or 0)
@@ -92,15 +108,25 @@ class LogBuffer:
             try:
                 os.makedirs(self.log_dir, exist_ok=True)
                 day = entry["ts"][:10]  # YYYY-MM-DD (UTC)
-                kind = entry.get("kind", "")
+                kind = _one_line(entry.get("kind", ""))
                 prefix = (kind + " ") if kind else ""
-                line = "%s [%-5s] %s%s\n" % (entry["ts"], entry["level"].upper(), prefix, entry["message"])
+                # CR/LF and other control characters are escaped: a message
+                # carrying remote input (an accession another RIS returned) could
+                # otherwise forge whole lines in the dated file.
+                line = "%s [%-5s] %s%s\n" % (entry["ts"], _one_line(entry["level"]).upper(), prefix,
+                                             _one_line(entry["message"]))
                 # 0640, not the 0644 a plain open() gives: these lines carry
                 # patient names, patient IDs, accession numbers and the AE titles
                 # of every node this box talks to. On a shared machine that is a
                 # patient list any unprivileged account could read.
                 path = os.path.join(self.log_dir, day + ".log")
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
+                             | getattr(os, "O_NOFOLLOW", 0), 0o640)
+                try:
+                    if os.fstat(fd).st_mode & 0o027:
+                        os.fchmod(fd, 0o640)      # an older 0644 file is tightened
+                except (OSError, AttributeError):
+                    pass
                 with os.fdopen(fd, "a", encoding="utf-8") as fh:
                     fh.write(line)
             except OSError:

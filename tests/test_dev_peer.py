@@ -232,7 +232,7 @@ def test_reserved_ports_are_real_free_ports_and_never_the_same():
 
 def test_the_sweep_removes_a_directory_left_by_a_killed_run(tmp_path):
     stale = tmp_path / (devpeer.PEER_PREFIX + "dead")
-    stale.mkdir()
+    stale.mkdir(mode=0o700)         # as tempfile.mkdtemp makes a real one
     (stale / "index.db").write_text("x", encoding="utf-8")
     removed = sweep_stale(tmp_root=str(tmp_path))
     assert removed == [str(stale)]
@@ -253,9 +253,10 @@ def test_the_sweep_leaves_a_directory_whose_owner_is_still_running(tmp_path):
     if os.name != "posix":
         pytest.skip("_pid_alive only asks the question on POSIX")
     live = tmp_path / (devpeer.PEER_PREFIX + "live")
-    live.mkdir()
-    (live / devpeer.OWNER_FILE).write_text(str(os.getpid()), encoding="utf-8")
-    assert sweep_stale(tmp_root=str(tmp_path)) == []
+    live.mkdir(mode=0o700)
+    with _other_live_process() as pid:
+        (live / devpeer.OWNER_FILE).write_text(str(pid), encoding="utf-8")
+        assert sweep_stale(tmp_root=str(tmp_path)) == []
     assert live.is_dir()
 
 
@@ -282,7 +283,7 @@ def test_the_sweep_never_follows_a_symlink_or_removes_a_file(tmp_path):
     link_out = root / (devpeer.PEER_PREFIX + "l")
     os.symlink(str(victim), str(link_out), target_is_directory=True)
     stale = root / (devpeer.PEER_PREFIX + "target")
-    stale.mkdir()
+    stale.mkdir(mode=0o700)
     (stale / "index.db").write_text("x", encoding="utf-8")
     link_in = root / (devpeer.PEER_PREFIX + "m")
     os.symlink(str(stale), str(link_in), target_is_directory=True)
@@ -314,12 +315,29 @@ def test_the_sweep_drops_destination_rows_a_killed_run_left_behind(tmp_path):
     assert [d["name"] for d in reloaded.destinations] == ["Real PACS"]
 
 
-def _live_peer_dir(root, aet):
-    """A peer folder that looks exactly like one this process is using."""
+import contextlib  # noqa: E402
+import subprocess  # noqa: E402
+
+
+@contextlib.contextmanager
+def _other_live_process():
+    """The pid of a running process that is NOT this one: a folder naming this
+    process's own pid is, by construction, an earlier run's litter (the sweep
+    runs before this process creates any peer)."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def _live_peer_dir(root, aet, pid):
+    """A peer folder that looks exactly like one another live dashboard owns."""
     path = os.path.join(str(root), devpeer.PEER_PREFIX + aet.lower())
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(path, mode=0o700, exist_ok=True)
     with open(os.path.join(path, devpeer.OWNER_FILE), "w", encoding="utf-8") as fh:
-        fh.write(str(os.getpid()))
+        fh.write(str(pid))
     with open(os.path.join(path, "config.json"), "w", encoding="utf-8") as fh:
         json.dump({"scp": {"aet": aet, "port": 51000}}, fh)
     return path
@@ -337,22 +355,23 @@ def test_the_sweep_keeps_the_rows_of_a_peer_it_just_decided_is_still_alive(tmp_p
         pytest.skip("_pid_alive only asks the question on POSIX")
     root = tmp_path / "root"
     root.mkdir()
-    live_dir = _live_peer_dir(root, "CARINOPEERLIVE")
     cfg = Config(str(tmp_path / "config.json"))
     cfg.data["destinations"] = [
         {"name": "Real PACS", "host": "10.0.0.9", "port": 104, "aet": "REMOTE", "enabled": True},
-        {"name": "Dev peer CARINOPEERLIVE", "host": "127.0.0.1", "port": 51000,
-         "aet": "CARINOPEERLIVE", "enabled": True, "ephemeral": True},
-        {"name": "Black hole CARINOPEERLIVE", "host": "127.0.0.1", "port": 51001,
+        {"name": "Dev peer CARINOPEER1A2B", "host": "127.0.0.1", "port": 51000,
+         "aet": "CARINOPEER1A2B", "enabled": True, "ephemeral": True},
+        {"name": "Black hole CARINOPEER1A2B", "host": "127.0.0.1", "port": 51001,
          "aet": "CARINOVOID", "enabled": False, "ephemeral": True},
         {"name": "Dev peer CARINOPEERDEAD", "host": "127.0.0.1", "port": 52000,
          "aet": "CARINOPEERDEAD", "enabled": True, "ephemeral": True},
     ]
     cfg.save()
-    assert sweep_stale(tmp_root=str(root), cfg=cfg) == []
+    with _other_live_process() as pid:
+        live_dir = _live_peer_dir(root, "CARINOPEER1A2B", pid)
+        assert sweep_stale(tmp_root=str(root), cfg=cfg) == []
     assert os.path.isdir(live_dir), "the directory half already got this right"
     names = [d["name"] for d in cfg.destinations]
-    assert names == ["Real PACS", "Dev peer CARINOPEERLIVE", "Black hole CARINOPEERLIVE"]
+    assert names == ["Real PACS", "Dev peer CARINOPEER1A2B", "Black hole CARINOPEER1A2B"]
     reloaded = Config(str(tmp_path / "config.json"))
     assert [d["name"] for d in reloaded.destinations] == names
 
@@ -366,15 +385,16 @@ def test_the_sweep_touches_no_rows_at_all_when_a_live_peer_will_not_say_who_it_i
     root = tmp_path / "root"
     root.mkdir()
     mystery = root / (devpeer.PEER_PREFIX + "mystery")
-    mystery.mkdir()
-    (mystery / devpeer.OWNER_FILE).write_text(str(os.getpid()), encoding="utf-8")
+    mystery.mkdir(mode=0o700)
     cfg = Config(str(tmp_path / "config.json"))
     cfg.data["destinations"] = [
         {"name": "Dev peer CARINOPEERAB12", "host": "127.0.0.1", "port": 51000,
          "aet": "CARINOPEERAB12", "enabled": True, "ephemeral": True},
     ]
     cfg.save()
-    assert sweep_stale(tmp_root=str(root), cfg=cfg) == []
+    with _other_live_process() as pid:
+        (mystery / devpeer.OWNER_FILE).write_text(str(pid), encoding="utf-8")
+        assert sweep_stale(tmp_root=str(root), cfg=cfg) == []
     assert [d["name"] for d in cfg.destinations] == ["Dev peer CARINOPEERAB12"]
     assert mystery.is_dir()
 

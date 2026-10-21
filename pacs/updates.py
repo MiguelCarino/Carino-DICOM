@@ -65,13 +65,20 @@ def fetch_latest_tag(current: str) -> Optional[str]:
 
 
 class UpdateCheck:
-    def __init__(self, current: str, fetch=fetch_latest_tag, clock=time.time):
+    def __init__(self, current: str, fetch=fetch_latest_tag, clock=time.time,
+                 monotonic=None):
         self.current = current
         self._fetch = fetch
         self._clock = clock
+        # Whether a check is DUE is measured on a clock that cannot go backwards
+        # (with an injected wall clock, that clock — negative elapsed time is
+        # then treated as due). An RTC corrected backwards by NTP used to stop
+        # checks for as long as the clock had been ahead.
+        self._mono = monotonic or (time.monotonic if clock is time.time else None)
         self._lock = threading.Lock()
         self._latest: Optional[str] = None
         self._checked_at = 0.0
+        self._checked_mono: Optional[float] = None
         self._reachable: Optional[bool] = None
         self._running = False
 
@@ -83,8 +90,13 @@ class UpdateCheck:
         with self._lock:
             if self._running:
                 return
-            if not force and self._checked_at and self._clock() - self._checked_at < INTERVAL_SEC:
-                return
+            if not force and self._checked_at:
+                if self._mono is not None and self._checked_mono is not None:
+                    elapsed = self._mono() - self._checked_mono
+                else:
+                    elapsed = self._clock() - self._checked_at
+                if 0 <= elapsed < INTERVAL_SEC:
+                    return
             self._running = True
         threading.Thread(target=self._run, name="update-check", daemon=True).start()
 
@@ -101,6 +113,7 @@ class UpdateCheck:
                 self._latest = tag
             self._reachable = ok
             self._checked_at = self._clock()
+            self._checked_mono = self._mono() if self._mono is not None else None
             self._running = False
 
     def status(self, enabled: bool) -> dict:

@@ -80,6 +80,8 @@ class EmergencyController:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._wake = threading.Event()
+        # Serialises arm / disarm / restart_monitor (never held by the worker).
+        self._lifecycle = threading.RLock()
         self._health: dict[tuple, _Health] = {}      # _key(dest) -> health
         self.state = OFF
         self.trigger_dest = ""
@@ -154,6 +156,39 @@ class EmergencyController:
         return f"{d.get('host', '')}:{d.get('port', '')}"
 
     # ---- lifecycle ---------------------------------------------------------
+    def restart_monitor(self) -> None:
+        """Restart ONLY the monitor thread — for a config save.
+
+        stop()/start() reset the state machine (OFF, then IDLE), so a save used
+        to end a live emergency or re-trigger it: duplicate notifications, a
+        dismissed prompt reopening, activated_by overwritten, and hold-and-
+        forward off for as long as the old worker took to join. Here the state,
+        the trigger, the acknowledgements and who activated are left exactly as
+        they are; only the worker is replaced, and it is started already
+        knowing them."""
+        with self._lifecycle:
+            old_stop, old_wake, t = self._stop, self._wake, self._thread
+            old_stop.set()
+            old_wake.set()
+            if t and t.is_alive() and t is not threading.current_thread():
+                t.join(timeout=2)
+            self._thread = None
+            if not self.armed:
+                with self._lock:
+                    if self.state not in (ACTIVE, RECOVERING):
+                        self.state = OFF
+                return
+            with self._lock:
+                if self.state == OFF:
+                    self.state = IDLE
+            self._spawn()
+
+    def _spawn(self) -> None:
+        self._stop, self._wake = threading.Event(), threading.Event()
+        self._thread = threading.Thread(target=self._loop, args=(self._stop, self._wake),
+                                        name="pacs-emergency", daemon=True)
+        self._thread.start()
+
     def start(self) -> None:
         """Start the monitor thread if failover is armed (idempotent).
 
@@ -172,11 +207,8 @@ class EmergencyController:
         # C-ECHO can sit on the wire for seconds) therefore keeps the flag it was
         # stopped with and exits on its own — clearing a shared event here would
         # resurrect it alongside its replacement.
-        self._stop, self._wake = threading.Event(), threading.Event()
         self.state = IDLE
-        self._thread = threading.Thread(target=self._loop, args=(self._stop, self._wake),
-                                        name="pacs-emergency", daemon=True)
-        self._thread.start()
+        self._spawn()
         n = len(self._trigger_dests())
         self.log.info(
             f"Emergency failover armed — monitoring {n} destination(s) "
@@ -231,13 +263,18 @@ class EmergencyController:
                 raise
 
     def arm(self, profile=None) -> dict:
-        self._set_armed(True)
-        self.start()
+        # One lifecycle lock across "persist the flag" and "start/stop the
+        # worker": an Arm and a Disarm interleaving used to leave config armed
+        # with no monitor running at all.
+        with self._lifecycle:
+            self._set_armed(True)
+            self.start()
         return self.status(profile)
 
     def disarm(self, profile=None) -> dict:
-        self._set_armed(False)
-        self.stop()
+        with self._lifecycle:
+            self._set_armed(False)
+            self.stop()
         with self._lock:
             self._health.clear()
             self.trigger_dest = ""
@@ -245,7 +282,7 @@ class EmergencyController:
         self.log.info("Emergency failover disarmed", kind="emergency")
         return self.status(profile)
 
-    def _notify(self, event: str, actor=None) -> None:
+    def _notify(self, event: str, actor=None, facts: Optional[dict] = None) -> None:
         """Tell the people the policy names, through whatever channels are on.
 
         Best effort and never in the caller's way: a webhook that times out or
@@ -262,7 +299,10 @@ class EmergencyController:
         if notifier is None:
             return
         try:
-            notifier.emergency(event, self.status(), self.audience(), actor=actor)
+            status = self.status()
+            if facts:
+                status = {**status, **facts}
+            notifier.emergency(event, status, self.audience(), actor=actor)
         except Exception as exc:
             self.log.error(f"Emergency notification failed: {exc}", kind="emergency")
 
@@ -542,7 +582,13 @@ class EmergencyController:
                           kind="emergency")
         self._mwl_ours = False
         self.mwl_error = ""
+        # Captured BEFORE they are cleared: the 'resolved' message has to name
+        # the destination and say truthfully whether it is answering.
         with self._lock:
+            was = self.state
+            facts = {"trigger_dest": self.trigger_dest, "activated_by": self.activated_by,
+                     "was_active": was in (ACTIVE, RECOVERING),
+                     "primary_online": self._primary_online()}
             self.state = IDLE if self.armed else OFF
             self.trigger_dest = ""
             self.acknowledged.clear()
@@ -550,8 +596,20 @@ class EmergencyController:
         self.log.info(
             f"Emergency resolved by {getattr(profile, 'name', '') or 'the operator'} "
             f"— resumed normal operation", kind="emergency")
-        self._notify("resolved", profile)
+        if was in (ACTIVE, RECOVERING, TRIGGERED):
+            # Nothing to tell anyone when there was no outage to resolve.
+            self._notify("resolved", profile, facts=facts)
         return self.status(profile)
+
+    def _primary_online(self):
+        """True/False from the probes of the trigger destination(s), None if
+        none has been probed. Caller holds _lock."""
+        seen = [h for k, h in self._health.items()
+                if not self.trigger_dest or k[0] == self.trigger_dest]
+        seen = [h for h in seen if h.last_probe]
+        if not seen:
+            return None
+        return all(h.online for h in seen)
 
     # ---- monitor loop ------------------------------------------------------
     def _loop(self, stop: threading.Event, wake: threading.Event) -> None:
@@ -585,13 +643,19 @@ class EmergencyController:
             # sender only records a name as sent once every node carrying it
             # accepted — so a name that is stuck marks each of its nodes failing,
             # which is the honest reading: one of them is not taking images.
-            failing = (not ok) or (name in stuck)
+            # The C-ECHO decides. A failed forward to a node that answers its
+            # echo is a refusal of one instance (A7xx/A9xx, a de-id failure),
+            # not an outage: it used to raise a false 'primary unreachable' to
+            # everyone, and to keep a recovered emergency ACTIVE until the held
+            # queue drained on its own. The passive signal is kept only as
+            # context in the error text while the probe is also failing.
+            failing = not ok
             h.last_probe = now
             h.probe_ok = ok
             if failing:
                 h.consecutive_fails += 1
                 h.consecutive_ok = 0
-                h.last_error = msg if not ok else "forward failing"
+                h.last_error = msg + (" (forwards to it are failing too)" if name in stuck else "")
                 if h.offline_since is None:
                     h.offline_since = now
                 if h.online and (now - h.offline_since) >= threshold:
@@ -640,14 +704,26 @@ class EmergencyController:
                         f"awaiting operator decision", kind="emergency")
 
             elif self.state == TRIGGERED and not any_offline:
+                self._unlocked_facts = {"trigger_dest": self.trigger_dest,
+                                        "was_active": False, "primary_online": True}
                 self.state = IDLE
                 self.trigger_dest = ""
                 self.acknowledged.clear()
                 self.log.info("Emergency stand-down — primary recovered before activation",
                               kind="emergency")
+                # The people told it was down are told it is back.
+                self._unlocked_notify = "resolved"
 
             elif self.state == ACTIVE and not any_offline:
                 self.state = RECOVERING
+                self._flush_pending = True
+
+            elif self.state == RECOVERING and any_offline:
+                # Hysteresis both ways: a primary that drops again while held
+                # studies are flushing is an outage again, not "back".
+                self.state = ACTIVE
+                self.log.warn(f"Emergency: '{offline_names[0]}' dropped again during recovery — "
+                              f"back to ACTIVE", kind="emergency")
 
         # auto_activate path (do the socket work outside the lock)
         if getattr(self, "_unlocked_activate", False):
@@ -657,7 +733,9 @@ class EmergencyController:
         pending = getattr(self, "_unlocked_notify", "")
         if pending:
             self._unlocked_notify = ""
-            self._notify(pending)
+            facts = getattr(self, "_unlocked_facts", None)
+            self._unlocked_facts = None
+            self._notify(pending, facts=facts)
 
         # Outside the lock, like everything else that touches the server: the
         # worklist is the emergency's only path to the modalities, so its state
@@ -665,15 +743,29 @@ class EmergencyController:
         if self.state == ACTIVE:
             self._recheck_worklist()
 
-        if self.state == RECOVERING:
+        if self.state == RECOVERING and getattr(self, "_flush_pending", False):
+            self._flush_pending = False
             self._flush_once()
 
     def _flush_once(self) -> None:
-        """Primary is back — clear send backoff so the held studies forward now."""
+        """Primary is back — clear send backoff so the held studies forward now.
+
+        Once, on entering RECOVERING, and only for the trigger destination(s):
+        clearing every node's backoff every tick redialled unrelated dead nodes
+        each probe interval and defeated the backoff cap."""
         try:
             if not self.server.watcher.running:
                 self.server.start_watcher()
-            res = self.server.retry_stuck()
+            names = [d.get("name", "") for d in self._trigger_dests()] or [self.trigger_dest]
+            reset = 0
+            res = {}
+            for n in dict.fromkeys(x for x in names if x):
+                try:
+                    res = self.server.retry_stuck(n) or {}
+                except TypeError:          # a server that cannot scope it
+                    res = self.server.retry_stuck() or {}
+                reset += int(res.get("reset") or 0)
+            res = {"reset": reset}
             if res.get("reset"):
                 self.log.info(f"Emergency recovery — flushing {res['reset']} held instance(s) to primary",
                               kind="emergency")

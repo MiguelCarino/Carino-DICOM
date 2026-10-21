@@ -69,10 +69,9 @@ class HandSends:
         return out
 
     def _save(self) -> None:
-        tmp = self.path + ".tmp"
+        # Crash-safe and private (0600): it names studies and patients' folders.
+        from .atomicio import atomic_write_text
         try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(self._data, fh)
-            os.replace(tmp, self.path)
-        except OSError:
+            atomic_write_text(self.path, json.dumps(self._data), mode=0o600)
+        except (OSError, TypeError, ValueError):
             pass

@@ -40,20 +40,50 @@ META_NAME = "meta.json"
 
 # --------------------------------------------------------------------- detect
 def _classify(head: bytes, filename: str = "") -> str | None:
-    """'pdf' | 'image' | None from magic bytes, falling back to the extension."""
+    """'pdf' | 'image' | None, from the magic bytes ONLY.
+
+    The extension used to be a fallback, so a '.pdf' that was not a PDF (a
+    link to a private key, say) was staged, previewed and wrapped as one. What
+    a file is decides what it is handled as; its name decides nothing."""
     if head[:4] == b"%PDF":
         return "pdf"
     if head[:3] == b"\xff\xd8\xff":                 # JPEG
         return "image"
     if head[:8] == b"\x89PNG\r\n\x1a\n":            # PNG
         return "image"
-    return CONVERTIBLE_EXTS.get(os.path.splitext(filename)[1].lower())
+    return None
+
+
+def media_type(head: bytes) -> str | None:
+    """The served Content-Type for a staged payload, from its magic bytes."""
+    if head[:4] == b"%PDF":
+        return "application/pdf"
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    return None
+
+
+def _regular_file(path: str) -> bool:
+    """A real regular file, never followed through a link."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    import stat as _stat
+    return _stat.S_ISREG(st.st_mode)
 
 
 def detect_kind(path: str) -> str | None:
-    """Classify a file on disk (see _classify). Anything not PDF/JPEG/PNG → None."""
+    """Classify a file on disk (see _classify). Anything not PDF/JPEG/PNG → None.
+    A symlink or any other non-regular file is never classified — and so never
+    staged, previewed or forwarded with its target's contents."""
+    if not _regular_file(path):
+        return None
     try:
-        with open(path, "rb") as fh:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as fh:
             head = fh.read(16)
     except OSError:
         return None
@@ -186,6 +216,8 @@ def build_encapsulated_pdf(pdf_bytes: bytes, meta: dict):
     the document stays selectable/searchable in a viewer)."""
     from pydicom.uid import EncapsulatedPDFStorage
 
+    if not bytes(pdf_bytes[:5]).startswith(b"%PDF"):
+        raise ValueError("not a PDF document (no %PDF header) — refusing to wrap it")
     ds = _base_dataset(EncapsulatedPDFStorage, meta)
     ds.Modality = "DOC"
     ds.ConversionType = "WSD"                        # Workstation
@@ -274,8 +306,14 @@ def _safe_entry_dir(pending_dir: str, pid: str) -> str:
     # that is easy to leave out: an empty id, "." and "anything/.." all resolve
     # to the pending folder, and discard_pending would then hand the entire
     # review queue to shutil.rmtree.
+    if not isinstance(pid, str) or not pid or "\x00" in pid or "/" in pid or "\\" in pid \
+            or pid in (".", ".."):
+        raise ValueError("invalid pending id")
     base = os.path.realpath(pending_dir)
-    entry = os.path.realpath(os.path.join(pending_dir, pid))
+    raw = os.path.join(pending_dir, pid)
+    if os.path.islink(raw):
+        raise ValueError("invalid pending id")
+    entry = os.path.realpath(raw)
     if entry == base or not entry.startswith(base + os.sep):
         raise ValueError("invalid pending id")
     return entry
@@ -283,11 +321,24 @@ def _safe_entry_dir(pending_dir: str, pid: str) -> str:
 
 def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
     """Move *src* into the pending store with an identity sidecar; return its id."""
+    if os.path.islink(src) or not _regular_file(src):
+        raise ValueError(f"{os.path.basename(src)} is not a regular file (links are never staged)")
     pid = uuid.uuid4().hex
     entry = os.path.join(pending_dir, pid)
     os.makedirs(entry, exist_ok=True)
     fname = os.path.basename(src)
-    dst = os.path.join(entry, fname)
+    # Stored under a fixed name of our own, never the original: a file called
+    # meta.json was overwritten by its own sidecar, and 'x.html' was served
+    # back as text/html. The original name stays in the sidecar for display.
+    try:
+        with open(src, "rb") as fh:
+            head = fh.read(16)
+    except OSError:
+        head = b""
+    ext = {"application/pdf": ".pdf", "image/jpeg": ".jpg",
+           "image/png": ".png"}.get(media_type(head) or "", ".bin")
+    payload = "payload" + ext
+    dst = os.path.join(entry, payload)
     # Move first, sidecar second. The move is what takes the file out of the
     # folder it was found in, so the watcher's next poll cannot queue the same
     # report into a second entry. A crash in the gap between the two leaves a
@@ -303,6 +354,7 @@ def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
     meta = {
         "id": pid,
         "filename": fname,
+        "payload": payload,
         "kind": kind,
         "size": size,
         "staged_at": staged_at,
@@ -316,8 +368,9 @@ def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
         "accession": identity.get("accession", ""),
         "source": identity.get("source", ""),
     }
-    with open(os.path.join(entry, META_NAME), "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, indent=2)
+    from .atomicio import atomic_write_text
+    # Whole or not at all: a sidecar caught half-written reads as a broken item.
+    atomic_write_text(os.path.join(entry, META_NAME), json.dumps(meta, indent=2), mode=0o600)
     return pid
 
 
@@ -335,9 +388,20 @@ def _load_entry(entry: str) -> dict | None:
             meta = json.load(fh)
     except (OSError, ValueError):
         return None
-    fname = meta.get("filename") or ""
+    if not isinstance(meta, dict):
+        return None
+    # Entries staged before the canonical payload name carry only 'filename'.
+    fname = meta.get("payload") or meta.get("filename") or ""
+    if not isinstance(fname, str) or not fname or os.path.basename(fname) != fname \
+            or fname == META_NAME:
+        return None
     fpath = os.path.join(entry, fname)
-    if not fname or not os.path.isfile(fpath):
+    # Never a link, and never anything that resolves outside the entry: the
+    # bytes served and forwarded are the bytes that were staged here.
+    if not _regular_file(fpath):
+        return None
+    real_entry = os.path.realpath(entry)
+    if not os.path.realpath(fpath).startswith(real_entry + os.sep):
         return None
     meta["_path"] = fpath
     return meta
@@ -365,12 +429,12 @@ def count_pending(pending_dir: str) -> int:
 
 
 def preview_path(pending_dir: str, pid: str) -> tuple[str, str] | None:
-    """(folder, filename) of a pending item's raw file, for serving a preview."""
+    """(folder, stored filename) of a pending item's raw file, for a preview."""
     entry = _safe_entry_dir(pending_dir, pid)
     meta = _load_entry(entry)
     if not meta:
         return None
-    return entry, meta["filename"]
+    return entry, os.path.basename(meta["_path"])
 
 
 def _same_person_key(name: str) -> str:

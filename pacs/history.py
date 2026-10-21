@@ -94,13 +94,16 @@ def scan(root: str, max_studies: int = 800, skip=(), on_file=None) -> dict:
     """
     if not root or not os.path.isdir(root):
         return {"studies": [], "total": 0, "truncated": False}
-    skip_abs = [os.path.abspath(d) for d in skip if d]
+    # realpath on both sides: two spellings of one folder (the watch folder
+    # reached through a symlink) must still match, or the nested sent archive
+    # is listed — and deleted — as outgoing.
+    skip_abs = [os.path.realpath(d) for d in skip if d]
 
     studies: dict[str, dict] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         if skip_abs:
             dirnames[:] = [d for d in dirnames
-                           if os.path.abspath(os.path.join(dirpath, d)) not in skip_abs]
+                           if os.path.realpath(os.path.join(dirpath, d)) not in skip_abs]
         # One magic-byte test per file. Counting the folder and finding its
         # header were two loops over the same names, and a count cannot stop
         # early, so every file the hunt had already tested was tested again.
@@ -197,11 +200,36 @@ def study_files(root: str, path: str) -> list[str]:
                 if f.startswith("."):
                     continue
                 fp = os.path.join(dp, f)
+                # Every FILE is held to the root too, not only the study path:
+                # a symlink planted in a storage or drop folder would otherwise
+                # be handed out, sent or attached with its target's contents.
+                if not safe_within(root, fp):
+                    continue
                 if is_dicom(fp):
                     files.append(fp)
-    elif os.path.isfile(path) and is_dicom(path):
+    elif os.path.isfile(path) and safe_within(root, path) and is_dicom(path):
         files.append(path)
     return files
+
+
+def _study_uids_under(path: str) -> set:
+    """Every StudyInstanceUID held by the DICOM files under *path*."""
+    from pydicom import dcmread
+    uids: set = set()
+    for dp, _dn, fns in os.walk(path):
+        for f in fns:
+            fp = os.path.join(dp, f)
+            if os.path.islink(fp) or not is_dicom(fp):
+                continue
+            try:
+                ds = dcmread(fp, stop_before_pixels=True, force=True,
+                             specific_tags=["StudyInstanceUID"])
+                uids.add(str(getattr(ds, "StudyInstanceUID", "") or ""))
+            except Exception:
+                uids.add("")
+            if len(uids) > 1:
+                return uids
+    return uids
 
 
 def study_identity(root: str, path: str) -> dict:
@@ -229,13 +257,28 @@ def study_identity(root: str, path: str) -> dict:
     }
 
 
-def delete_study(root: str, path: str) -> None:
-    """Delete one study's folder (or file) and prune the empty parents it leaves."""
+def delete_study(root: str, path: str, protect=()) -> None:
+    """Delete one study's folder (or file) and prune the empty parents it leaves.
+
+    Refused when the folder holds more than one study (a listed path can be the
+    common parent of a study's folders, which also contains other studies), or
+    when it is, or contains, one of the *protect* folders (the sent archive or
+    the pending store nested inside the outgoing folder)."""
     real_root = os.path.realpath(root)
     real_path = os.path.realpath(path)
     if real_path == real_root or not safe_within(root, path):
         raise ValueError("refusing to delete outside the storage folder")
+    for other in protect:
+        if not other:
+            continue
+        ro = os.path.realpath(other)
+        if ro == real_path or ro.startswith(real_path.rstrip(os.sep) + os.sep):
+            raise ValueError("refusing to delete: this folder holds another configured "
+                             "folder (the sent archive or the review queue)")
     if os.path.isdir(real_path):
+        if len(_study_uids_under(real_path)) > 1:
+            raise ValueError("refusing to delete: this folder holds more than one study — "
+                             "delete the studies one at a time")
         shutil.rmtree(real_path)
     elif os.path.isfile(real_path):
         os.remove(real_path)
@@ -253,13 +296,13 @@ def delete_all(root: str, skip=()) -> int:
     than removed, so Delete all wipes exactly what the list showed."""
     if not root or not os.path.isdir(root):
         return 0
-    skip_abs = [os.path.abspath(d) for d in skip if d]
+    skip_abs = [os.path.realpath(d) for d in skip if d]
     removed = 0
     for name in os.listdir(root):
         if name.startswith("."):        # keep .carinopacs_state.json etc.
             continue
         p = os.path.join(root, name)
-        ap = os.path.abspath(p)
+        ap = os.path.realpath(p)
         if ap in skip_abs:
             continue
         if any(d.startswith(ap + os.sep) for d in skip_abs) and os.path.isdir(p):

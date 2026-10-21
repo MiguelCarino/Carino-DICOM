@@ -420,6 +420,15 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 /* Only a question that found orders addressed to THIS station is good news. */
 .caught-a.good { color: var(--ok); }
 .caught-a.bad { color: var(--bad); }
+.asks-sum { font-size: .8rem; color: var(--muted); margin: 2px 0 6px; }
+.asks-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.asks-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 8px 3px 0; }
+.asks-table td { padding: 3px 8px 3px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.asks-table td.mono { font-family: var(--mono); white-space: nowrap; }
+.asks-table tr.stale td { opacity: .55; }
+.asks-table .ask-bad { color: var(--bad); }
+.asks-table .ask-warn { color: var(--warn, var(--accent)); }
+.asks-table .ask-good { color: var(--ok); }
 
 /* Activity → Connections: one row per distinct association outcome, worst finding sets the colour. */
 .conn-row { border: 1px solid var(--border); border-radius: 10px; background: var(--panel);

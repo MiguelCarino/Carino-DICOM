@@ -179,7 +179,9 @@
     "tls_cert": "",
     "tls_key": "",
     "_comment_behind_proxy": "behind_proxy: true only when this engine sits behind the reverse proxy in deploy/ and is bound to 127.0.0.1. It trusts one hop of X-Forwarded-For / -Proto / -Host, so the login rate limit counts real clients, the session cookie is Secure and DICOMweb links say https://. Anything that can reach the port directly could forge those headers.",
-    "behind_proxy": false
+    "behind_proxy": false,
+    "_comment_allowed_hosts": "allowed_hosts: extra Host names the dashboard answers to while it runs without a token on loopback. Requests carrying any other Host (a DNS-rebinding page) are refused with 421. Loopback names (localhost, 127.x, ::1) are always allowed.",
+    "allowed_hosts": []
   },
   "logs_dir": "./logs",
   "setup_completed": ""

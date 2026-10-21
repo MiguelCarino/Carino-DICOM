@@ -44,7 +44,8 @@ from pydicom.datadict import keyword_for_tag, tag_for_keyword
 from pydicom.dataset import Dataset
 
 from .dicomfs import servable as _servable
-from .scp import dest_path
+from .scp import _RESOURCE_ERRNOS, dest_path, valid_uid
+from .dicomfs import save_dicom
 
 URL_PREFIX = "/dicom-web"
 
@@ -250,13 +251,18 @@ def _accepts_json(header: str) -> bool:
     return False
 
 
-def _accepts_dicom_parts(header: str) -> tuple[bool, Optional[str]]:
-    """(acceptable, requested transfer syntax). A specific transfer-syntax that
-    is not the one on disk is a 406: we store what we were given and never
-    transcode, so pretending otherwise would hand back mislabelled pixels."""
+def _accepts_dicom_parts(header: str) -> tuple[bool, Optional[list]]:
+    """(acceptable, transfer syntaxes the client will take).
+
+    The second value is None when any syntax will do, else the list of every
+    syntax named by an acceptable range, in preference order. Every range is
+    considered (RFC 9110 12.5.1): a first range naming a syntax we do not hold
+    no longer hides a later '*' or a '*/*' that would take what is on disk."""
     ranges = _media_ranges(header)
     if not ranges:
         return True, None
+    named: list = []
+    ok = False
     for mime, p, q in ranges:
         if q <= 0:
             continue
@@ -266,18 +272,22 @@ def _accepts_dicom_parts(header: str) -> tuple[bool, Optional[str]]:
             t = (p.get("type") or "").lower()
             if t in ("", "application/dicom"):
                 ts = p.get("transfer-syntax") or None
-                return True, (None if ts == "*" else ts)
-    return False, None
+                if ts is None or ts == "*":
+                    return True, None
+                ok = True
+                named.append(ts)
+    return ok, (named if ok else None)
 
 
-def _accepts_frames(header: str, media: str) -> bool:
+def _accepts_frames(header: str, media: str, ts: str = "") -> bool:
     """Whether the client will take frames as multipart/related of *media*.
 
     *media* is decided by how the instance was stored, never by preference, so
     this only asks whether the client will accept what we hold — a client that
     names a different type gets a 406 instead of frames of one codec wearing
     another's label. A multipart/related range with no type parameter counts as
-    acceptance: it says "multipart", not "not that one"."""
+    acceptance: it says "multipart", not "not that one". A transfer-syntax
+    parameter, when present, has to name the syntax the frames are in."""
     ranges = _media_ranges(header)
     if not ranges:
         return True
@@ -289,7 +299,9 @@ def _accepts_frames(header: str, media: str) -> bool:
         if mime == "multipart/related":
             t = (p.get("type") or "").lower()
             if t in ("", media):
-                return True
+                want = p.get("transfer-syntax") or ""
+                if not want or want == "*" or not ts or want == ts:
+                    return True
     return False
 
 
@@ -528,7 +540,8 @@ def _multipart_response(parts: list[tuple[str, str]], part_type: str, status: in
 
 
 # --------------------------------------------------------------- multipart in
-def _parse_multipart_related(body: bytes, boundary: bytes) -> list[tuple[dict, bytes]]:
+def _parse_multipart_related(body: bytes, boundary: bytes,
+                             complete: Optional[list] = None) -> list[tuple[dict, memoryview]]:
     """Parse a multipart/related body into [(headers, content)].
 
     Werkzeug only parses multipart/form-data, so this is ours. Strictly CRLF, per
@@ -537,38 +550,92 @@ def _parse_multipart_related(body: bytes, boundary: bytes) -> list[tuple[dict, b
 
     A trailing part with no boundary after it is dropped, not returned short —
     a body that was cut off must not parse into a plausible-looking instance.
+    When *complete* is a list, ``complete[0]`` is set to whether the mandatory
+    close-delimiter was seen, so the caller can refuse a truncated body rather
+    than answer 200 for the parts that happened to survive.
     Preamble and epilogue are ignored, as RFC 2046 requires.
+
+    Parts are returned as memoryviews over *body* rather than slices: a slice
+    per part (and the CRLF-prefixed copy of the whole body this used to make)
+    held three or four copies of a 1 GB upload at once.
     """
-    parts: list[tuple[dict, bytes]] = []
+    parts: list[tuple[dict, memoryview]] = []
     sep = b"\r\n--" + boundary
-    data = b"\r\n" + body          # so the opening boundary matches the same shape
-    pos = data.find(sep)
+    view = memoryview(body)
+    closed = False
+    # The opening boundary may sit at offset 0 with no CRLF in front of it.
+    first = b"--" + boundary
+    if body.startswith(first):
+        pos, seplen = 0, len(first)
+    else:
+        pos = body.find(sep)
+        seplen = len(sep)
     while pos != -1:
-        cursor = pos + len(sep)
-        if data[cursor:cursor + 2] == b"--":
+        cursor = pos + seplen
+        if body[cursor:cursor + 2] == b"--":
+            closed = True
             break                  # closing boundary
-        eol = data.find(b"\r\n", cursor)
+        eol = body.find(b"\r\n", cursor)
         if eol == -1:
             break
         cursor = eol + 2
-        if data[cursor:cursor + 2] == b"\r\n":
+        if body[cursor:cursor + 2] == b"\r\n":
             headers, cursor = {}, cursor + 2
         else:
-            end = data.find(b"\r\n\r\n", cursor)
+            end = body.find(b"\r\n\r\n", cursor)
             if end == -1:
                 break
             headers = {}
-            for line in data[cursor:end].split(b"\r\n"):
+            for line in body[cursor:end].split(b"\r\n"):
                 k, _, v = line.partition(b":")
                 if v:
                     headers[k.decode("latin-1").strip().lower()] = v.decode("latin-1").strip()
             cursor = end + 4
-        nxt = data.find(sep, cursor)
+        nxt = body.find(sep, cursor)
         if nxt == -1:
             break
-        parts.append((headers, data[cursor:nxt]))
-        pos = nxt
+        parts.append((headers, view[cursor:nxt]))
+        pos, seplen = nxt, len(sep)
+    if complete is not None:
+        complete[:] = [closed]
     return parts
+
+
+class _ViewReader(io.RawIOBase):
+    """A read-only, seekable file over a memoryview that copies only what is
+    read: each read() returns exactly one new bytes object, which pydicom keeps
+    as the element value, so parsing a part costs the part once rather than
+    twice (io.BytesIO(memoryview) copies the whole part up front)."""
+
+    def __init__(self, view: memoryview):
+        super().__init__()
+        self._v = view
+        self._pos = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def read(self, n: int = -1) -> bytes:
+        end = len(self._v) if n is None or n < 0 else min(len(self._v), self._pos + n)
+        out = self._v[self._pos:end].tobytes()
+        self._pos = end
+        return out
+
+    def readinto(self, b) -> int:
+        data = self.read(len(b))
+        b[:len(data)] = data
+        return len(data)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        base = {0: 0, 1: self._pos, 2: len(self._v)}[whence]
+        self._pos = max(0, base + offset)
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
 
 
 def _boundary_of(content_type: str) -> tuple[Optional[bytes], str]:
@@ -599,7 +666,15 @@ def store_instance(server, ds: Dataset, source: str = "STOW-RS") -> str:
 
     path = dest_path(root, ds, bool(cfg.scp.get("organize", True)))
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    ds.save_as(path, **_SAVE_KW)
+    from .scp import _existing_patient
+    before = _existing_patient(path)
+    if before is not None and before != str(getattr(ds, "PatientID", "") or ""):
+        server.log.warn(f"{source}: {os.path.basename(path)} replaces an instance with a "
+                        f"different PatientID (same SOP Instance UID) — check the sender",
+                        kind="store", path=path)
+    # Through the same crash-safe writer as C-STORE: a failed re-post never
+    # truncates the good copy, and a failed first post leaves nothing behind.
+    save_dicom(ds, path)
 
     # The index is written synchronously here, unlike the C-STORE path's queued
     # write: a STOW client routinely queries for what it just posted, and a
@@ -643,13 +718,22 @@ def _space_ok(storage_dir: str, min_free_mb: int) -> bool:
 
 
 # --------------------------------------------------------------- frames
+_NATIVE_FRAME_TS = "1.2.840.10008.1.2.1"
+_BIG_ENDIAN_TS = "1.2.840.10008.1.2.2"
+# A frame list is a URL, and each entry used to cost a copy of the frame: a
+# few kilobytes of URL could make the server allocate gigabytes.
+_MAX_FRAMES_PER_REQUEST = 4096
+
+
 def _frame_media(ts: str) -> Optional[str]:
+    if ts == _BIG_ENDIAN_TS:
+        return None             # PS3.18 8.7.3.2: Big Endian is not used with web services
     if ts in _UNCOMPRESSED_TS:
         return "application/octet-stream"
     return _TS_MEDIA.get(ts)
 
 
-def _uncompressed_frames(ds: Dataset, wanted: list[int]) -> list[bytes]:
+def _uncompressed_frames(ds: Dataset, wanted: list[int]) -> list:
     """Slice native pixel data into the requested 1-based frames, in that order.
 
     The bytes are handed back as stored: no windowing, no rescale, no
@@ -674,12 +758,16 @@ def _uncompressed_frames(ds: Dataset, wanted: list[int]) -> list[bytes]:
         # image that looks plausible.
         raise ValueError("single-bit pixel data cannot be split into frames")
     size = rows * cols * samples * (bits // 8)
+    if str(getattr(ds, "PhotometricInterpretation", "") or "").strip().upper() == "YBR_FULL_422":
+        # PS3.3 C.7.6.3.1.2: two values per pixel (Y plus a shared CbCr pair).
+        size = rows * cols * 2 * (bits // 8)
+    view = memoryview(pixels)
     out = []
     for n in wanted:
         if n < 1 or n > total:
             raise IndexError(f"frame {n} is out of range (1-{total})")
         start = (n - 1) * size
-        frame = pixels[start:start + size]
+        frame = view[start:start + size]     # a view, not a copy: repeats cost nothing
         if len(frame) != size:
             raise ValueError(f"frame {n} is truncated in the stored file")
         out.append(frame)
@@ -894,19 +982,22 @@ def create_blueprint(server) -> Blueprint:
         extras, _wants_all = _parse_include(request.args, level)
         idx = index()
         try:
+            # One row past the page, so "truncated" is said only when there is
+            # really more — not when the result exactly fills the limit.
             if level == "study":
-                rows = idx.query_studies(filters, limit=limit, offset=offset)
+                rows = idx.query_studies(filters, limit=limit + 1, offset=offset)
             elif level == "series":
-                rows = idx.query_series(study_uid, filters, limit=limit, offset=offset)
+                rows = idx.query_series(study_uid, filters, limit=limit + 1, offset=offset)
             else:
                 rows = idx.query_instances(study_uid, series_uid, filters,
-                                           limit=limit, offset=offset)
+                                           limit=limit + 1, offset=offset)
         except Exception as exc:
             stats.bump("errors")
             server.log.error(f"DICOMweb query failed: {exc}", kind="dicomweb")
             return _error(500, f"query failed: {exc}")
         stats.bump("queries")
-        if len(rows) >= limit:
+        if len(rows) > limit:
+            rows = rows[:limit]
             warns.append(f"result truncated at {limit}; use offset to page")
         # One mutable budget shared by every row rather than one per row:
         # includefield is what turns a query into file opens, and the cost that
@@ -963,9 +1054,28 @@ def create_blueprint(server) -> Blueprint:
         must not happen: a page boundary here would hand a viewer a study short
         by however many instances, with a 200 on it and nothing to notice.
         """
-        rows = index().query_instances(study_uid=study, series_uid=series,
-                                       filters={"SOPInstanceUID": sop} if sop else None,
-                                       limit=0)
+        if sop is not None and (not sop or any(c in sop for c in "*?\\")):
+            # {instance} is one SOP Instance UID (PS3.18 10.4.1), never a
+            # pattern: '*' used to return every instance in the series.
+            return []
+        idx = index()
+        rows = idx.query_instances(study_uid=study, series_uid=series,
+                                   filters={"SOPInstanceUID": sop} if sop else None,
+                                   limit=0)
+        if sop:
+            rows = [r for r in rows if r.get("SOPInstanceUID") == sop]
+        # The index picks the newest copy of each instance; when that file has
+        # gone and an older copy still exists, serve the one that is there.
+        for r in rows:
+            p = r.get("path", "")
+            if p and not os.path.isfile(p):
+                alt = None
+                try:
+                    alt = idx.get_instance_path(r.get("SOPInstanceUID") or "")
+                except Exception:
+                    alt = None
+                if alt:
+                    r["path"] = alt
         # The index orders instances by InstanceNumber alone, which at study level
         # interleaves the series: slice 1 of every series, then slice 2 of every
         # series. Nothing is lost — each part is a complete Part 10 object and a
@@ -1005,7 +1115,7 @@ def create_blueprint(server) -> Blueprint:
         for row in rows:
             path = row.get("path", "")
             ts = row.get("TransferSyntaxUID") or "1.2.840.10008.1.2.1"
-            if wanted_ts and ts != wanted_ts:
+            if wanted_ts is not None and ts not in wanted_ts:
                 return _error(406, f"instances are stored as {ts}; this server does not transcode")
             if not servable(path):
                 missing += 1
@@ -1096,18 +1206,28 @@ def create_blueprint(server) -> Blueprint:
             return _error(400, "frame list must be comma-separated numbers")
         if not wanted:
             return _error(400, "no frames requested")
+        if len(wanted) > _MAX_FRAMES_PER_REQUEST:
+            return _error(400, f"at most {_MAX_FRAMES_PER_REQUEST} frames per request")
         rows = _rows_for(study=study, series=series, sop=sop)
-        if not rows or not servable(rows[0].get("path", "")):
+        if len(rows) != 1 or not servable(rows[0].get("path", "")):
             return _error(404, f"instance {sop} not found")
         row = rows[0]
         ts = row.get("TransferSyntaxUID") or ""
         media = _frame_media(ts)
         if media is None:
             return _error(406, f"frames of {ts} instances are not served (no transcoding)")
-        if not _accepts_frames(request.headers.get("Accept", ""), media):
-            return _error(406, f'only multipart/related; type="{media}" is available for these frames')
+        # Labelled with the syntax the BYTES are in: native pixels are always
+        # handed back little-endian explicit (pydicom has already inflated a
+        # deflated file), which is the one syntax Table 8.7.3-4 allows here.
+        part_ts = _NATIVE_FRAME_TS if ts in _UNCOMPRESSED_TS else ts
+        if not _accepts_frames(request.headers.get("Accept", ""), media, part_ts):
+            return _error(406, f'only multipart/related; type="{media}"; transfer-syntax={part_ts} '
+                               f'is available for these frames')
         try:
             ds = dcmread(row["path"])
+            total = int(getattr(ds, "NumberOfFrames", 1) or 1)
+            if len(wanted) > max(total, 1) * 4:
+                return _error(400, f"{len(wanted)} frames requested from a {total}-frame instance")
             data = (_uncompressed_frames(ds, wanted) if ts in _UNCOMPRESSED_TS
                     else _encapsulated_frames(ds, wanted))
         except IndexError as exc:
@@ -1122,12 +1242,12 @@ def create_blueprint(server) -> Blueprint:
         # what tells the client the byte order and the packing of what it just
         # received. A compressed part needs no such parameter — image/jpeg
         # already says how to decode the bytes.
-        ct = f'{media}; transfer-syntax={ts}' if media == "application/octet-stream" else media
+        ct = f'{media}; transfer-syntax={part_ts}'
 
         def gen():
             for frame in data:
                 yield _multipart_headers(boundary, ct)
-                yield frame
+                yield frame.tobytes() if isinstance(frame, memoryview) else frame
                 yield b"\r\n"
             yield f"--{boundary}--\r\n".encode("ascii")
 
@@ -1171,6 +1291,12 @@ def create_blueprint(server) -> Blueprint:
         else:
             other.append({"00081197": {"vr": "US", "Value": [reason]}})
 
+    try:
+        stow_limit = max(1, int(server.cfg.dicomweb.get("max_concurrent_stow", 2) or 2))
+    except Exception:
+        stow_limit = 2
+    stow_slots = threading.BoundedSemaphore(stow_limit)
+
     @bp.post("/studies", strict_slashes=False)
     @bp.post("/studies/<study>")
     def stow(study: Optional[str] = None):
@@ -1209,6 +1335,21 @@ def create_blueprint(server) -> Blueprint:
         # a length we can test — a truncated multipart would otherwise parse into
         # fewer instances than the client sent and be answered 200.
         request.max_content_length = _STOW_MAX_BYTES + 1
+        # Each STOW holds its body in memory while it is parsed, so the number
+        # in flight at once is bounded: a handful of parallel 1 GB uploads would
+        # otherwise take the whole process — and the receiver with it — down.
+        if not stow_slots.acquire(blocking=False):
+            server.log.warn(f"STOW-RS: refused an upload from {request.remote_addr or '?'} — "
+                            f"{stow_limit} already in progress", kind="dicomweb")
+            resp = _error(503, f"too many concurrent STOW-RS uploads (limit {stow_limit}); retry shortly")
+            resp.headers["Retry-After"] = "5"
+            return resp
+        try:
+            return _stow_body(study, boundary)
+        finally:
+            stow_slots.release()
+
+    def _stow_body(study: Optional[str], boundary: bytes):
         over = False
         try:
             body = request.get_data(cache=False)
@@ -1219,43 +1360,75 @@ def create_blueprint(server) -> Blueprint:
                             f"{_STOW_MAX_BYTES // (1024 * 1024)} MB limit from "
                             f"{request.remote_addr or '?'}", kind="dicomweb")
             return _error(413, f"request larger than the {_STOW_MAX_BYTES // (1024 * 1024)} MB STOW limit")
-        parts = _parse_multipart_related(body, boundary)
+        complete: list = [False]
+        parts = _parse_multipart_related(body, boundary, complete)
         if not parts:
             return _error(400, "no multipart/related parts found (CRLF boundaries are required)")
+        if not complete[0]:
+            # RFC 2046: the close-delimiter is mandatory. A body without one was
+            # cut off in transit, and answering 200 for the parts that survived
+            # would tell the client every instance it sent was stored.
+            server.log.warn(f"STOW-RS: refused a truncated body (no closing boundary) from "
+                            f"{request.remote_addr or '?'}", kind="dicomweb")
+            return _error(400, "multipart/related body has no closing boundary — it was truncated")
 
         stored: list[dict] = []
         failed: list[dict] = []
         other: list[dict] = []
+        # A study in the PATH is an assertion every part must satisfy. Without
+        # one, POST /studies accepts instances of any number of studies.
+        required = study or ""
         target = study or ""
         for headers, content in parts:
             ctype = (headers.get("content-type") or "application/dicom").split(";")[0].strip().lower()
             if ctype != "application/dicom":
+                stats.bump("failed")
                 _fail(failed, other, None, 0x0122)          # SOP Class not supported
                 continue
             try:
-                ds = dcmread(io.BytesIO(content))
+                ds = dcmread(_ViewReader(content))
             except Exception as exc:
                 stats.bump("failed")
                 _fail(failed, other, None, 0xC000)          # cannot understand
                 server.log.warn(f"STOW-RS: rejected an unreadable part: {exc}", kind="dicomweb")
                 continue
+            # Identity before anything is written: an instance with no (or no
+            # valid) SOP Instance / SOP Class / Study / Series UID cannot be
+            # filed under a name of its own, and used to overwrite its siblings
+            # as unknown.dcm while every one was reported stored.
+            bad = [k for k in ("SOPClassUID", "SOPInstanceUID", "StudyInstanceUID",
+                               "SeriesInstanceUID")
+                   if not valid_uid(getattr(ds, k, ""))]
+            meta_sop = str(getattr(getattr(ds, "file_meta", None),
+                                   "MediaStorageSOPInstanceUID", "") or "").strip().rstrip("\x00")
+            if not bad and meta_sop and meta_sop != str(ds.SOPInstanceUID).strip():
+                bad.append("MediaStorageSOPInstanceUID (does not match SOPInstanceUID)")
+            if bad:
+                stats.bump("failed")
+                _fail(failed, other, ds if "SOPInstanceUID" not in bad and "SOPClassUID" not in bad
+                      else None, 0xA900)                    # does not match SOP Class
+                server.log.warn(f"STOW-RS: rejected a part with missing or invalid "
+                                f"{', '.join(bad)}", kind="dicomweb")
+                continue
             uid = str(getattr(ds, "StudyInstanceUID", "") or "")
-            if target and uid != target:
+            if required and uid != required:
                 stats.bump("failed")
                 _fail(failed, other, ds, 0x0110)            # processing failure
                 server.log.warn(f"STOW-RS: instance belongs to study {uid}, "
-                                f"not the requested {target}", kind="dicomweb")
+                                f"not the requested {required}", kind="dicomweb")
                 continue
             try:
                 store_instance(server, ds, source="STOW-RS")
             except Exception as exc:
                 stats.bump("failed")
-                _fail(failed, other, ds, 0xA700 if isinstance(exc, OSError) else 0x0110)
+                resource = isinstance(exc, OSError) and getattr(exc, "errno", None) in _RESOURCE_ERRNOS
+                floor = isinstance(exc, OSError) and "free-space floor" in str(exc)
+                _fail(failed, other, ds, 0xA700 if (resource or floor) else 0x0110)
                 server.log.error(f"STOW-RS: could not store {getattr(ds, 'SOPInstanceUID', '?')}: {exc}",
                                  kind="dicomweb")
                 continue
             stats.bump("stored")
-            stored.append(_sop_ref(ds, uid or target))
+            stored.append(_sop_ref(ds, uid))
             if not target:
                 target = uid
 

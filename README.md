@@ -283,6 +283,8 @@ and AE/host allow-lists.
 
 Plain HTTP on `127.0.0.1` keeps working as before. A dashboard with a token,
 served over plain HTTP on a non-loopback address, logs a warning at every start.
+Without a token, the dashboard answers only to a loopback `Host` (or a name in
+`web.allowed_hosts`), which is what stops a DNS-rebinding web page from driving it.
 
 ## No telemetry
 
@@ -354,6 +356,10 @@ temporary loopback test archive for bench testing.
 - **TLS** uses the same port as plain DICOM. Generate a certificate with
   `openssl req -x509 …` and configure it in the dashboard.
 - **Back up the storage folders.** The index can be rebuilt; the images cannot.
+- **Invalid UIDs are refused.** A C-STORE (or STOW-RS part) whose SOP Instance UID
+  is missing or not a valid UID is refused (`0xC000`) instead of being filed under
+  a shared name. Every instance is written to a temporary name, fsynced and
+  renamed, so a failed re-send never damages the copy already stored.
 
 ## Documentation
 

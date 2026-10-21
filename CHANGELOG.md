@@ -5,6 +5,16 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Added
+- **Activity → Worklist queries.** Every attribute each modality's worklist query asks
+  for, per calling AE title — sequences as paths, filter or fill-in — and how the answer
+  carried it: filled, sent empty, or not sent. Missing attributes are listed first, so a
+  console showing a blank field points at the attribute to add. Only attribute names and
+  counts are kept, never patient values (`pacs/mwlasks.py`, `<ris.store_dir>/mwl_asks.json`,
+  0600, bounded, written at most once a minute unless something visible changed). A
+  failure to record never costs a modality its worklist. `GET /api/worklist/asks`
+  (config.read), `POST /api/worklist/asks/clear` (services.control).
+
 ## [1.3.0] — 2026-10-16
 
 ### Added

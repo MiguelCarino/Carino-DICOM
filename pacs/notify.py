@@ -20,10 +20,9 @@ caught and turned into a counter and a log line.
 **The message respects who is reading it.** Recipients are Profiles, not
 addresses, and the same outage renders differently for each: reception is told
 to start keying orders by hand, a radiologist is told their primary is
-unreachable and which node is still up, IT gets the address and the error. A
-recipient who may not see a destination's host and port is not sent one in an
-e-mail, because an e-mail is the one place an access control cannot be applied
-after the fact.
+unreachable, and a profile holding routing.read additionally gets the state
+and since-when lines. No message carries a host, port or error text: an e-mail
+is the one place an access control cannot be applied after the fact.
 """
 
 from __future__ import annotations
@@ -35,7 +34,9 @@ import queue
 import smtplib
 import threading
 import time
+import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from typing import Any, Optional
@@ -83,6 +84,45 @@ SUBJECTS = {
     "activated": "Carino DICOM: emergency failover ACTIVE ({dest})",
     "resolved":  "Carino DICOM: back to normal ({dest})",
 }
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A webhook is POSTed to the configured URL and nowhere else. urllib's
+    default turns a 3xx into a bodiless GET to wherever Location points (an
+    internal address included) and then reports the alert as delivered."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def redact_url(url: str) -> str:
+    """scheme://host[:port]/… — never the userinfo, path or query, which for
+    Slack/Teams/Discord incoming webhooks IS the credential."""
+    try:
+        parts = urllib.parse.urlsplit(str(url or ""))
+        host = parts.hostname or "?"
+        if ":" in host:
+            host = f"[{host}]"
+        port = f":{parts.port}" if parts.port else ""
+        return f"{parts.scheme}://{host}{port}/…"
+    except ValueError:
+        return "(unparseable URL)"
+
+
+def _smtp_context(sm: dict) -> ssl.SSLContext:
+    """A VERIFYING TLS context for SMTP. smtplib's own default (context=None)
+    accepts any certificate, so a man in the middle got the SMTP password and
+    the alert. smtp.ca_file adds an internal CA; smtp.verify false is the
+    explicit, logged opt-out."""
+    ca = str(sm.get("ca_file", "") or "").strip() or None
+    ctx = ssl.create_default_context(cafile=ca)
+    if sm.get("verify") is False:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 class Notifier:
@@ -194,6 +234,12 @@ class Notifier:
                 "activated_by": status.get("activated_by", ""),
                 "actor": getattr(actor, "name", "") or "",
             }
+            # Facts the 'resolved' wording is built from, when the controller
+            # knows them: whether the primary is actually answering, whether
+            # failover had been activated, how many held instances still wait.
+            for k in ("primary_online", "was_active", "held_remaining"):
+                if k in status:
+                    payload[k] = status[k]
             self._enqueue(("webhook", payload, None))
             for profile in audience or []:
                 if getattr(profile, "email", ""):
@@ -254,6 +300,17 @@ class Notifier:
         url = str(wh.get("url", "") or "").strip()
         if not wh.get("enabled", False) or not url:
             return
+        try:
+            parts = urllib.parse.urlsplit(url)
+            scheme_ok = parts.scheme.lower() in ("http", "https") and bool(parts.hostname)
+        except ValueError:
+            scheme_ok = False
+        if not scheme_ok:
+            # A loaded config is not validated: file:// or ftp:// must never
+            # reach urlopen.
+            self._note_error("webhook URL must be an http:// or https:// URL with a host "
+                             f"({redact_url(url)}) — nothing was sent")
+            return
         body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json",
                    # Receivers allow-list this token, so it keeps the
@@ -280,13 +337,18 @@ class Notifier:
             try:
                 req = urllib.request.Request(url, data=body, headers=headers,
                                              method="POST")
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with _OPENER.open(req, timeout=timeout) as resp:
                     if 200 <= resp.status < 300:
                         self._note_sent(f"webhook {payload.get('event', '')}")
                         return
                     last = f"HTTP {resp.status}"
             except urllib.error.HTTPError as exc:
                 last = f"HTTP {exc.code}"
+                if 300 <= exc.code < 400:
+                    # Not followed (see _NoRedirect): the configured URL is wrong.
+                    loc = redact_url(exc.headers.get("Location", "") if exc.headers else "")
+                    last = f"HTTP {exc.code} redirect to {loc} — update the webhook URL"
+                    break
                 # 4xx is the receiver saying the request itself is wrong. Retrying
                 # an unchanged body against it just makes the same mistake three
                 # times; 408 and 429 are the two that genuinely mean "later".
@@ -299,7 +361,7 @@ class Notifier:
                 # a delivery that finally succeeds four minutes later is not
                 # worth the wait it imposed on everything behind it in the queue.
                 time.sleep(min(5.0, 1.0 + attempt))
-        self._note_error(f"webhook POST to {url} failed ({last})")
+        self._note_error(f"webhook POST to {redact_url(url)} failed ({last})")
 
     # ---- e-mail ----------------------------------------------------------
     def _send_email(self, payload: dict, profile) -> None:
@@ -309,6 +371,11 @@ class Notifier:
             return
         to = getattr(profile, "email", "")
         if not to:
+            return
+        if any(c in str(to) for c in "\r\n\x00") or "," in str(to):
+            # A header-injection attempt (Bcc: smuggled in) or a malformed
+            # address: never handed to the SMTP server.
+            self._note_error("a recipient address contains a line break or a comma — not sent")
             return
         # The fallback sender keeps the pre-rename spelling: a site that has
         # allow-listed this address would silently drop the failover alert —
@@ -325,17 +392,30 @@ class Notifier:
 
         port = int(_positive(sm.get("port"), 587))
         timeout = _positive(sm.get("timeout_sec"), 15.0)
-        mode = str(sm.get("tls", "starttls") or "starttls").lower()
+        mode = str(sm.get("tls", "starttls") or "starttls").strip().lower()
+        if mode not in ("starttls", "ssl", "none"):
+            # A loaded config is not validated, and an unrecognised value used
+            # to mean "no encryption" — with the password sent anyway.
+            self._note_error(f"notify.smtp.tls is {sm.get('tls')!r}, not starttls, ssl or none — "
+                             f"no mail was sent")
+            return
+        user = str(sm.get("username", "") or "")
+        password = str(sm.get("password", "") or "")
+        if mode == "none" and user:
+            from .config import is_loopback_host
+            if not (is_loopback_host(host) or sm.get("allow_plaintext_auth") is True):
+                self._note_error("notify.smtp.tls is 'none' with a username — the password "
+                                 "would cross the network in cleartext; not sent")
+                return
         try:
+            ctx = _smtp_context(sm)
             if mode == "ssl":
-                server = smtplib.SMTP_SSL(host, port, timeout=timeout)
+                server = smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx)
             else:
                 server = smtplib.SMTP(host, port, timeout=timeout)
             with server:
                 if mode == "starttls":
-                    server.starttls()
-                user = str(sm.get("username", "") or "")
-                password = str(sm.get("password", "") or "")
+                    server.starttls(context=ctx)
                 # Authentication is opt-in by the presence of a username,
                 # because the relay this is usually pointed at is the hospital's
                 # own and takes internal mail without credentials. Calling
@@ -355,8 +435,10 @@ class Notifier:
         Two things vary. The GUIDANCE varies by role, because the three people
         being told about one outage have three different jobs to do about it and
         a single generic paragraph helps none of them. The DETAIL varies by
-        capability: the destination's address goes only to somebody who could
-        have read it in the dashboard anyway. An e-mail leaves the appliance and
+        capability: the State / Since lines go only to somebody who could have
+        read them in the dashboard (routing.read). The destination NAME is in
+        every message — subject and headline — because it is what the outage is
+        about; no host, port or error text is ever included. An e-mail leaves the appliance and
         cannot be un-sent, so it is the last place to be generous with
         information the reader is not cleared for.
         """
@@ -366,9 +448,21 @@ class Notifier:
         event = payload.get("event", "")
 
         if event.endswith("resolved"):
-            headline = (f"{dest} is reachable again and Carino DICOM has returned to "
-                        f"normal operation. Studies held during the outage have been "
-                        f"forwarded.")
+            # Worded from what is actually known, never assumed: an operator can
+            # press Resume normal while the primary is still down.
+            online = payload.get("primary_online")
+            if online is False:
+                headline = (f"Emergency mode was ended by an operator, but {dest} is still "
+                            f"NOT answering. Studies are not being delivered to it.")
+            else:
+                headline = (f"{dest} is reachable again and Carino DICOM has returned to "
+                            f"normal operation.")
+                if payload.get("was_active", True):
+                    left = payload.get("held_remaining")
+                    if left:
+                        headline += f" {left} held instance(s) are still being forwarded."
+                    else:
+                        headline += " Studies held during the outage are being forwarded."
         elif event.endswith("activated"):
             by = payload.get("activated_by") or "the system"
             headline = (f"Emergency failover is ACTIVE, activated by {by}. "

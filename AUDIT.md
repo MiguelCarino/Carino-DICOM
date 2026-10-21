@@ -31,3 +31,55 @@ Not listed and not code to study:
 
 | File | Status | By | Date | At commit | Notes |
 |---|---|---|---|---|---|
+| `pacs/atomicio.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: crash-safe temp+fsync+rename writer, per-path write lock. |
+| `pacs/dicomfs.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: save_dicom writes atomically (temp, fsync, rename) under a path lock. |
+| `pacs/scp.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: UID validation (0xC000), reserved-name/truncation fixes, status-code mapping, callback errors logged, association limits. |
+| `pacs/netclaim.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: AF_INET-first resolve, wildcard probe of local addresses, association limits / per-host cap helpers. |
+| `pacs/qr.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: C-FIND cap ends A700, stop status, failed-list via pynetdicom, exact/ambiguous move AE, deid-destination refusal, TLS fail-closed, stop aborts associations, stale-copy fallback. |
+| `pacs/mwl.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Literal-bracket wildcards, stand-in identifiers queryable, legacy DA/time matching, UNASSIGNED station, C000 on store failure, allowed_aets type. |
+| `pacs/print_scp.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Caps on cells/films/image size, vectorised 16-bit decode, hint validation, session statuses, N-DELETE cleanup, per-session identity. |
+| `pacs/server.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Hold-and-forward refresh/journal pins, stuck-panel fixes, manual-send guards, index root rescan, failed restarts, delete protections, probe casing, monitor restart. |
+| `pacs/config.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New validation (AE titles, allow-lists, ports, folders, editor_url, CORS, notify types, numbers), web.allowed_hosts. |
+| `pacs/dicomweb.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: WADO exact SOP, Accept negotiation, frame caps/labels/YBR, truncation warning, STOW identity/atomic/close-delimiter/memory/semaphore. |
+| `pacs/index.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Case-sensitive text keys, PN normalisation, universal '*', non-UTF-8 names, per-row retry, nested-root skip, purge safety. |
+| `pacs/watcher.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Backoff clamp, per-pass circuit breaker, size+mtime stability, symlink/hidden-dir rules, archive-pass safety rewrite. |
+| `pacs/state.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Snapshot-safe save/all_entries/clear_backoff, quarantine of corrupt ledgers, fsync, 0600, pin journal, change-only dirty, tombstones. |
+| `pacs/handsent.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Atomic 0600 save. |
+| `pacs/routing.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Node-level de-identification on every decision, inode/ctime header-cache key, file-meta calling_aet, comma patterns. |
+| `pacs/scu.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: TLS fail-closed, connect timeouts, size-scaled DIMSE timeout, AE-title errors as results, C-ECHO without Verification, probe item cap. |
+| `pacs/caught.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Atomic 0600 save, tolerant load, item counts vs kept. |
+| `pacs/mwlasks.py` | ai | AI | 2026-10-20 | (uncommitted) | New: record of what each modality's worklist queries ask for and how they were answered; names only, never values. Hooked into `MwlSCP._handle_find`, served on Activity → Worklist queries. Tests: `tests/test_mwl_asks.py`, `pacs/web/tests/worklist-asks.e2e.mjs`. |
+| `pacs/ris.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: PID-fallback guards, identity collision guards, corrupt-store quarantine, idempotent close, study_uid kept, MLLP frame/idle/connection caps, ACK delimiters, IPv6 bind, no names in logs. |
+| `pacs/auth.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Thread-safe limiter, block-before-verify, per-account limits, dummy PBKDF2, KDF cap, name login, logout revocation, service actor for token logins. |
+| `pacs/web.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Host allow-list, STOW origin check, capability gates (probe, reveal, preview, log file), path handles, order placeholder guard, config-save gates, security headers, CORS origin, audit of DICOMweb/export, seed/save/password rules. |
+| `pacs/users.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Order-number aliases; corrected sees() comment. |
+| `pacs/ingest.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Magic-only classification, no symlinks, canonical payload names, atomic sidecar, PDF check, safer entry ids. |
+| `pacs/history.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Per-file root containment, multi-study delete refusal, realpath skips. |
+| `pacs/emergency.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: RECOVERING->ACTIVE, C-ECHO-only health, single scoped flush, restart_monitor, lifecycle lock, truthful resolved notifications. |
+| `pacs/notify.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Verified SMTP TLS, tls mode allow-list, no cleartext auth, no redirects, URL redaction, header-injection guard, wording from facts. |
+| `pacs/audit.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Torn-tail repair, seq-named archives, locked file opening, raw unparseable lines, canonical hashing, dir fsync, 0600/0700, rotation problem. |
+| `pacs/deid.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: No-secret claims downgraded, D-action handling (UI/SQ/payload), PN catch-all, overlay group, rebuilt file meta/preamble, standard-root fix, opt-in issuer. |
+| `pacs/devpeer.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Owner/mode checks, pid reuse handling, exact AE matching. |
+| `pacs/updates.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Monotonic due-check. |
+| `pacs/logbuf.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Control characters escaped in files, O_NOFOLLOW, mode tightened. |
+| `pacs/__main__.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Bounded dashboard HTTP handler; deid site key on fresh init. |
+| `docker/entrypoint.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Env checked before scaffold, resumable first boot, Config.save, ConfigError message, token override warning. |
+| `docker/healthcheck.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Probes the configured bind; real token header. |
+| `desktop/main.js` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Config bind preserved, IPv6/trim URLs, unusable URL handled, child-window guards, ~user expansion. |
+| `desktop/hosts.js` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: pure host/URL helpers for the shell. |
+| `desktop/package.json` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Packages hosts.js. |
+| `config.example.json` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: web.allowed_hosts. |
+| `test_print.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Reads the canonical pending payload name. |
+| `tests/test_qr.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: A service stop is C000, not Cancel. |
+| `tests/test_routing.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Fixtures for canonical payload names and real mtimes. |
+| `tests/test_web_auth.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Orphan fixture stamped with the real mtime. |
+| `tests/test_dev_peer.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: Live peers modelled as another process with a 0700 folder. |
+| `tests/test_review_store.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: C-STORE path regression tests. |
+| `tests/test_review_watcher.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: forwarder, archive, ledger, hold-and-forward tests. |
+| `tests/test_review_routing.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: routing and manual-send tests. |
+| `tests/test_review_deid.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: de-identification tests. |
+| `tests/test_review_qr_index.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: index and Q/R tests. |
+| `tests/test_review_dicomweb.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: DICOMweb tests. |
+| `tests/test_review_web.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: dashboard API tests. |
+| `tests/test_review_misc.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: config, RIS, MWL, print, emergency, notify, audit, SCU, stores, container, desktop tests. |
+| `tests/test_review_services.py` | ai | AI | 2026-10-20 | 31ba5b5 (uncommitted) | 2026-10 review fixes: New: pending store, study browser, stuck panel tests. |

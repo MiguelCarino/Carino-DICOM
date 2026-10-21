@@ -24,9 +24,18 @@ SAVE_KWARGS = (
 _HAS_PREAD = hasattr(os, "pread")
 
 
-def save_dicom(ds, path) -> None:
-    """Write *ds* as a complete Part 10 file, whatever pydicom version is installed."""
-    ds.save_as(path, **SAVE_KWARGS)
+def save_dicom(ds, path, fsync: bool = True) -> None:
+    """Write *ds* as a complete Part 10 file, whatever pydicom version is installed.
+
+    Never in place: the bytes go to a dot-prefixed scratch file in the same
+    directory, are fsynced, and are renamed over *path* (see atomicio). A write
+    that fails part-way — an element that cannot be encoded, a full disk, a
+    crash — therefore leaves the previous copy of the instance intact and no
+    truncated .dcm at the final name, and two writers of the same path are
+    serialised so the last complete object wins whole."""
+    from .atomicio import atomic_write, path_lock
+    with path_lock(path):
+        atomic_write(path, lambda fh: ds.save_as(fh, **SAVE_KWARGS), fsync=fsync)
 
 
 def is_dicom(path: str) -> bool:

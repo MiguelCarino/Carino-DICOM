@@ -147,7 +147,9 @@ def test_grayscale_pdf():
         items = _pending(cfg)
         assert len(items) == 1 and items[0]["kind"] == "pdf", "expected one PDF pending item"
         assert SCU_AET in items[0]["source"], "source missing SCU AE"
-        head = open(os.path.join(items[0]["_dir"], items[0]["filename"]), "rb").read(5)
+        # Stored under the canonical payload name; 'filename' is the original.
+        stored = items[0].get("payload") or items[0]["filename"]
+        head = open(os.path.join(items[0]["_dir"], stored), "rb").read(5)
         assert head == b"%PDF-", "not a PDF"
         res = server.approve_pending(items[0]["id"], {"patient": "DOE^JANE", "patient_id": "P1"})
         assert res.get("ok"), res
@@ -186,7 +188,9 @@ def test_color_pdf():
             "server did not hand back colour image box class on the colour meta"
         items = _pending(cfg)
         assert len(items) == 1 and items[0]["kind"] == "pdf", "colour print did not queue a PDF"
-        head = open(os.path.join(items[0]["_dir"], items[0]["filename"]), "rb").read(5)
+        # Stored under the canonical payload name; 'filename' is the original.
+        stored = items[0].get("payload") or items[0]["filename"]
+        head = open(os.path.join(items[0]["_dir"], stored), "rb").read(5)
         assert head == b"%PDF-", "colour render is not a PDF"
         print("  [3] color print: colour meta + colour boxes -> captured PDF OK")
     finally:

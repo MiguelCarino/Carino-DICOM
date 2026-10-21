@@ -32,7 +32,8 @@ import sys
 
 sys.path.insert(0, "/app")
 
-from pacs.config import auth_token_of, is_loopback_host, validate, web_host_of  # noqa: E402
+from pacs.config import (Config, ConfigError, auth_token_of, is_loopback_host,  # noqa: E402
+                         validate, web_host_of)
 from pacs.__main__ import build_parser, main  # noqa: E402
 
 DEFAULT_CONFIG = "/data/config.json"
@@ -228,14 +229,49 @@ def enrol_services(data: dict, spec: str) -> list[str]:
     return enabled
 
 
-def prepare_config(cfg_path: str) -> None:
-    fresh = not os.path.exists(cfg_path)
-    if fresh:
-        first_boot_scaffold(cfg_path)
+def _check_env() -> None:
+    """Refuse a bad environment BEFORE anything is written: a first boot that
+    died after `pacs init` used to leave a config.json behind, and the next
+    boot then treated it as an old install (loopback dashboard, no token, no
+    services) — healthy-looking and unreachable."""
+    env_port = os.environ.get("PACS_WEB_PORT", "").strip()
+    if env_port:
+        try:
+            int(env_port)
+        except ValueError:
+            die([f"PACS_WEB_PORT is not a number: {env_port!r}"])
+    spec = os.environ.get("PACS_SERVICES", "scp")
+    for name in [x.strip().lower() for x in spec.replace(";", ",").split(",") if x.strip()]:
+        if name not in SERVICE_SECTIONS:
+            die([f"PACS_SERVICES contains an unknown service: {name!r}",
+                 "Known values: " + ", ".join(sorted(set(SERVICE_SECTIONS)))])
 
-    with open(cfg_path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
+
+def prepare_config(cfg_path: str) -> None:
+    _check_env()
+    # First boot is "no config yet" OR "a first boot started and did not
+    # finish": the marker is created before `pacs init` and removed only once
+    # the finished config has been written.
+    marker = cfg_path + ".first-boot"
+    fresh = not os.path.exists(cfg_path) or os.path.exists(marker)
+    if fresh:
+        try:
+            with open(marker, "w", encoding="utf-8") as fh:
+                fh.write("first boot in progress\n")
+        except OSError:
+            pass
+        if not os.path.exists(cfg_path):
+            first_boot_scaffold(cfg_path)
+
+    # Loaded through the app's own Config, so an empty or corrupt file gets the
+    # app's operator-facing message instead of a raw JSONDecodeError traceback.
+    try:
+        cfg = Config(cfg_path)
+    except ConfigError as exc:
+        die(["Carino DICOM refused to start — the configuration cannot be read.", "", str(exc)])
+    data = cfg.data
     before = json.dumps(data, sort_keys=True)
+    stored_token = auth_token_of(data.get("web") or {})
     web = data.setdefault("web", {})
 
     # A container binds inside its own network namespace, so leaving the
@@ -291,6 +327,10 @@ def prepare_config(cfg_path: str) -> None:
     env_token = read_token_from_env()
     generated = False
     if env_token:
+        if stored_token and stored_token != env_token and not fresh:
+            print("WARNING: PACS_AUTH_TOKEN(_FILE) replaces the token stored in config.json "
+                  "(for example one rotated from the dashboard). Update the secret, or unset "
+                  "it to keep the stored token.", file=sys.stderr)
         web["auth_token"] = env_token
     elif not auth_token_of(web) and not is_loopback_host(web_host_of(web)):
         web["auth_token"] = secrets.token_urlsafe(32)
@@ -307,23 +347,24 @@ def prepare_config(cfg_path: str) -> None:
              "", str(exc), "", hint])
 
     if json.dumps(data, sort_keys=True) != before:
-        tmp = cfg_path + ".tmp"
         try:
-            # 0600, matching Config.save(): this file carries web.auth_token in
-            # plaintext, and /data is a volume the host can hand to anybody.
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            try:
-                os.fchmod(fd, 0o600)
-            except OSError:
-                pass
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=2)
-            os.replace(tmp, cfg_path)
+            # Through Config.save(): a unique O_EXCL|O_NOFOLLOW temp at 0600,
+            # fsync, rename, directory fsync — never the fixed config.json.tmp a
+            # planted symlink could redirect, and never an empty config.json
+            # after a power cut.
+            cfg.data = data
+            cfg.save()
         except OSError as exc:
             die([f"Could not write {cfg_path}: {exc}",
                  "The directory holding config.json must be writable by this",
                  "container's uid — the app writes config.json and its watcher",
                  "state there. See the uid/gid notes in docker-compose.yml."])
+
+    # The first boot is complete only now that its config is written.
+    try:
+        os.remove(marker)
+    except OSError:
+        pass
 
     if generated:
         banner([

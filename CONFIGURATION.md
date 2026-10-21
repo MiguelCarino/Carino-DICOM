@@ -137,7 +137,8 @@ is reserved whether or not the receiver is enabled**, so enrolling the receiver
 later can never fail to bind against a service the operator already had running.
 `scp.port` itself is range-checked unconditionally for the same reason.
 
-`web.port` takes no part in any of this — see [`web.port`](#webport).
+`web.port` is checked too: range, type (never `true`, which JSON would otherwise
+accept as port 1) and against the DICOM and HL7 listeners.
 
 Validation proves the number is in range and unique *within this config*.
 "Another PACS already owns 11112" is a different question, answered by the setup
@@ -158,10 +159,21 @@ It is a filter, not authentication. DICOM does not authenticate the caller, so a
 AE title is a claim, not a credential; combine it with mutual TLS if you need real
 access control.
 
-**Only `qr.allowed_aets` is type-checked** (`qr.allowed_aets must be a list`). The
-other three are not, and the failure is quiet: a JSON string instead of a list —
-`"allowed_aets": "CT1"` — is accepted, then iterated character by character, so the
-allow-list becomes `C`, `T`, `1` and the real modality is refused.
+All four are validated as a **list of AE titles** — each entry 1–16 printable ASCII
+characters with no backslash (`scp.allowed_aets entry #1 ('A…') is longer than 16
+characters …`). A bare string (`"allowed_aets": "CT1"`) used to be iterated
+character by character; it is now refused on Save, and a listener handed one by a
+hand-edited file refuses to start rather than accept `C`, `T` and `1`.
+
+### Association limits (`max_associations`, `max_per_host`)
+
+`scp`, `print`, `mwl` and `qr` accept two optional integers. `max_associations`
+(default 50) is how many associations the listener holds at once — pynetdicom's own
+default was 10, and eleven idle TCP connections from anywhere filled it and locked
+out even allow-listed modalities. `max_per_host` (default 20, `0` = off) is how many
+of those one IP address may hold: a further connection from that address is closed
+before any DICOM is spoken and logged. A connection that sends no A-ASSOCIATE-RQ is
+dropped after 10 seconds.
 
 ### TLS on the DICOM listeners
 
@@ -244,14 +256,11 @@ The on/off switch; see [above](#enabled-is-the-onoff-switch).
 `string` · default `"CARINODICOM"`
 
 The AE title this receiver answers to — what modalities configure as the called
-AE. Validation refuses it blank (`scp.aet is required`) and refuses anything over
-16 characters (`AE titles must be 16 characters or fewer`), both unconditionally,
-even with the receiver disabled.
-
-Not checked: spaces and backslashes. `modalities[].aet` is refused for those
-because DICOM does not permit them; `scp.aet` is not, so a stray space here is
-saved without complaint and shows up later as associations that fail for no
-visible reason.
+AE. Validation refuses it blank, over 16 characters, non-ASCII, or holding a
+backslash or a control character — every AE title in the config (`scu.aet`,
+`print`/`mwl`/`qr` when enabled, every destination and move destination,
+`worklist_source.aet` when set) is held to the same rule pynetdicom enforces, so a
+Save can no longer store a title the listener then refuses to start with.
 
 ### `scp.bind`
 
@@ -275,8 +284,14 @@ the history browser's "received" group reads it, DICOMweb serves WADO/QIDO out o
 it, STOW-RS writes into it through the same layout function, and the dashboard's
 disk-headroom readout probes its volume. Move it and all of those follow.
 
-Validation refuses a non-string. It does not check that the folder exists or is
-writable; that surfaces as a failed C-STORE.
+Validation refuses a non-string and an empty one, and refuses a `scu.watch_dir` or
+`scu.sent_dir` that is this folder or is nested with it either way (the forwarder
+moves or deletes what it has sent, so it would act on the archive itself). It does
+not check that the folder exists or is writable; that surfaces as a failed C-STORE.
+
+Every instance is written to a hidden scratch file beside its final name, fsynced
+and renamed into place, so a re-send whose write fails (full disk, an element that
+cannot be encoded) leaves the previous copy intact and never a truncated `.dcm`.
 
 ### `scp.organize`
 
@@ -285,9 +300,19 @@ writable; that surfaces as a failed C-STORE.
 The on-disk layout. On, an instance is filed as
 `PatientID/StudyInstanceUID/SeriesInstanceUID/SOPInstanceUID.dcm`, each component
 sanitised to `[A-Za-z0-9._-]` and truncated, with fallbacks (`NOID`, `NOSTUDY`,
-`NOSERIES`) when the tag is absent. Off, everything is written flat as
-`SOPInstanceUID.dcm` in `storage_dir`. The same flag governs STOW-RS uploads, so
-both protocols file identically.
+`NOSERIES`) when the tag is absent; a Windows device name (`CON`, `NUL`, `COM1` …)
+is prefixed with `_`, and an invalid Study or Series UID becomes a hash of the raw
+value rather than a sanitised name another value could share. Off, everything is
+written flat as `SOPInstanceUID.dcm` in `storage_dir`. The same flag governs STOW-RS
+uploads, so both protocols file identically.
+
+The SOP Instance UID has to be a valid UID (digits and dots, at most 64
+characters); the C-STORE request's Affected SOP Instance UID is used when the data
+set carries none. An instance with neither is refused with `0xC000` (STOW-RS: a
+failure item) instead of being filed under a shared fallback name, where it used
+to overwrite every other such instance. Failure statuses: `0xA700` only for a full
+disk or quota, `0xA900` for a SOP class that does not match the negotiated
+context, `0xC210`/`0xC211` for a data set that cannot be decoded or written.
 
 Worth knowing before turning it off: the folder layout puts the PatientID in the
 path. That is what makes a study browsable, and it is also an identifier in a
@@ -307,17 +332,16 @@ dashboard's disk card uses it to decide "low".
 The guard fails **open**: if the free space cannot be read at all, the instance is
 accepted. A probe error is not a reason to reject an image.
 
-Read as `int(float(value or 0) * 1024)`, so fractional gigabytes work and any
-value at or below zero switches the guard off entirely. Validation does not check
-it: `"two"` is saved happily and then raises inside `start_receiver`, which leaves
-the receiver unbound with the error in the log.
+Read as `int(float(value or 0) * 1024)`, so fractional gigabytes work and `0`
+switches the guard off. Validation requires a finite number ≥ 0 (`scp.min_free_gb
+must be a number >= 0`), so a Save can no longer persist `"two"` and take the
+receiver down.
 
 ### `scp.allowed_aets`
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)
 
-Not type-checked. The startup line says which regime is in force: `(accept: any)`
-or the names.
+The startup line says which regime is in force: `(accept: any)` or the names.
 
 ### `scp.tls` / `scp.tls_cert` / `scp.tls_key` / `scp.tls_ca`
 
@@ -401,9 +425,14 @@ failed destination waits `base`, then `2×`, `4×`… capped at 300 seconds, whe
 `base` is this value with a floor of 5 seconds. Setting a long interval therefore
 slows retries as well as detection.
 
-Validated as a number ≥ 1 (`scu.poll_interval must be a number >= 1`). The check
-is `float()`, so the string `"2"` is accepted and works; `"fast"` is refused. The
-loop itself also floors the wait at 1 second.
+Validated as a JSON number ≥ 1 (`scu.poll_interval must be a number >= 1`); a
+quoted `"2"` or `NaN` is refused. The loop itself also floors the wait at 1 second.
+
+A file is forwarded once its size AND its modification time have held still across
+two polls (a preallocated copy keeps its size while it is still being written).
+Symlinks and hidden folders in the outgoing tree are never forwarded or archived.
+When a node fails at the connection level, the rest of that pass skips it instead
+of paying a timeout per file.
 
 ### `scu.on_success`
 
@@ -442,6 +471,19 @@ refuses to act at all if the config changed while the pass was running. A study
 that fails any of these stays in the outgoing folder and says so in the stuck
 panel.
 
+The archive pass also waits until EVERY file in the item — reports, half-copied
+files, anything — has held still since the previous pass, re-checks the item after
+the report siphon, and then moves or deletes exactly the files it judged (never an
+`rmtree`), removing only folders that are left empty. A hidden file holding DICOM
+bytes (a copy tool's in-flight name) is left alone, and an item containing a folder
+symlink is not archived at all.
+
+Changing `on_success` to `move` or `delete`, or changing any folder field
+(`scp.storage_dir`, `scu.watch_dir`, `scu.sent_dir`, `scu.pending_dir`,
+`ris.store_dir`, `index.path`, `audit.dir`, `logs_dir`) from the dashboard needs
+`studies.delete` as well as `config.write`; changing the `audit` section needs
+`auth.manage`.
+
 ### `scu.sent_dir`
 
 `string` (path) · default `"./sent"`
@@ -454,8 +496,9 @@ re-forwarded.
 It is also the history browser's "sent" / "archived" group and one of the roots
 DICOMweb serves from, so studies stay queryable after they are filed.
 
-Validation refuses a non-string and nothing more. Pointing it at a volume with no
-space, or at the same path as `watch_dir`, is not caught here.
+Validation refuses a non-string, an empty value while `on_success` is `move`, a
+`sent_dir` that is `watch_dir` or a folder above it, and one that is or nests with
+`scp.storage_dir`. A subfolder of `watch_dir` is fine.
 
 ### `scu.pending_dir`
 
@@ -472,10 +515,16 @@ converted and dropped into `watch_dir` when somebody approves it.
 Like `sent_dir`, it is excluded from the scan and from the archive pass even when
 nested under `watch_dir`.
 
-Setting it to `""` is accepted by validation and quietly disables the siphon —
-reports beside a study are then archived or deleted with it, never queued. It also
+Setting it to `""` disables the siphon. A study with a report or image beside it is
+then **not** archived or deleted at all (it waits, with a warning), because the
+report could not be queued and would otherwise be destroyed with the study. It also
 breaks print capture, which fails the job with a processing failure and logs
 `Failed to render print job…`, because there is no folder to stage into.
+
+Staged files are kept under a fixed name of their own (`payload.pdf` / `.png` /
+`.jpg`); the original file name is in the item's metadata. Only files whose bytes
+are a PDF, JPEG or PNG are staged — the extension decides nothing — and symlinks
+are never staged.
 
 <a id="scu-tls"></a>
 
@@ -641,7 +690,7 @@ print job matters more than one image per sheet.
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)
 
-Not type-checked. A refused modality is logged as `Print: refused <AE> @ <ip> — its
+A refused modality is logged as `Print: refused <AE> @ <ip> — its
 AE title is not in the allowed list (…)`, counted in Errors and
 shown as the card's *Last problem*.
 
@@ -684,7 +733,8 @@ destination's flag too.
 
 `string` · default `"CARINOMWL"`
 
-Called AE title. Refused above 16 characters. Empty is not refused.
+Called AE title, validated like every AE title (see [`scp.aet`](#scpaet)); blank is
+refused while the service is enabled.
 
 ### `mwl.bind`
 
@@ -698,9 +748,8 @@ Called AE title. Refused above 16 characters. Empty is not refused.
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)
 
-Not type-checked. This is the only access control on the worklist port, and the
-port carries patient names, accession numbers and birth dates in the clear unless
-TLS is on.
+This is the only access control on the worklist port, and the port carries patient
+names, accession numbers and birth dates in the clear unless TLS is on.
 
 ### `mwl.tls` / `mwl.tls_cert` / `mwl.tls_key` / `mwl.tls_ca`
 
@@ -922,7 +971,8 @@ failure appears on the `qr` channel at start.
 
 `string` · default `"CARINOQR"`
 
-Called AE title. Refused above 16 characters. Empty is not refused.
+Called AE title, validated like every AE title (see [`scp.aet`](#scpaet)); blank is
+refused while the service is enabled.
 
 ### `qr.bind`
 
@@ -936,7 +986,8 @@ Called AE title. Refused above 16 characters. Empty is not refused.
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)
 
-The one that **is** type-checked: `qr.allowed_aets must be a list`.
+With it empty (and no mutual TLS) the Q/R listener logs a warning at start: any
+caller can query the archive and C-GET images back over its own association.
 
 ### `qr.move_destinations`
 
@@ -1027,6 +1078,13 @@ Turn it off for a read-only deployment: `POST /dicom-web/studies` then answers
 carry on unaffected. The ceiling on a STOW body is a constant in
 `pacs/dicomweb.py`, not a config key — there is no setting for it.
 
+`dicomweb.max_concurrent_stow` (optional, default 2) is how many STOW bodies may be
+in flight at once; a further one is answered `503` with `Retry-After`, because each
+is held in memory while it is parsed. Every part must carry valid SOP Class, SOP
+Instance, Study and Series UIDs (a missing one is a failure item, never a file), a
+body without its closing boundary is `400`, and one POST to `/studies` may carry
+instances of several studies.
+
 ### `dicomweb.cors_origins`
 
 `list of strings` · default `[]`
@@ -1037,7 +1095,9 @@ trailing slash, no path, no pattern syntax of any kind. Empty means no CORS head
 are emitted at all, which is what a same-origin viewer and every non-browser client
 want. A literal `"*"` in the list is honoured, and only because someone typed it:
 from then on every origin is reflected back and any page the operator has open can
-read the archive off this machine. Name the viewer instead.
+read the archive off this machine. Name the viewer instead. `"*"` is refused while no
+`web.auth_token` is set, and `"null"` (the origin of sandboxed frames and `file://`
+pages) is always refused.
 
 This list carries more weight than a CORS setting usually does, because
 `/dicom-web` is exempt from the `X-Carino` write-header guard that protects the
@@ -1370,9 +1430,19 @@ Deliberately absent from both `config.example.json` and the defaults in
 is not the same statement, so nothing ever writes an empty one.
 
 The key every pseudonym and every date offset is derived from. With no secret the
-mapping is a pure function of the input, which means anyone who can guess a
-`PatientID` can confirm that patient is present in your anonymised set. Set one for
-anything leaving the building.
+mapping is a pure function of the input under a key that is public in the source,
+so it can be **reversed by enumeration**: a six-digit MRN space falls in seconds,
+and the recovered PatientID then rebuilds every true date. Output made without a
+secret is therefore marked `PatientIdentityRemoved=NO`, does not claim the Basic
+Profile (113100), and says `NO SITE KEY: PSEUDONYMS REVERSIBLE` in
+DeidentificationMethod. `pacs init` generates one for a new config; an existing
+config is never given one automatically, because that would re-pseudonymise its
+future exports. Set one for anything leaving the building.
+
+`deid.issuer_in_identity` (optional, default `false`) adds IssuerOfPatientID to the
+pseudonym identity, so two patients with the same MRN from different issuers stop
+being merged. Off by default because turning it on changes the pseudonym of every
+patient that has an issuer.
 
 Changing it re-pseudonymises everything from that moment on, and the studies you
 have already exported stop lining up with the ones that follow. That is why there is
@@ -1703,9 +1773,13 @@ application/json` and `User-Agent: Carino-PACS`.
 
 Validation refuses two things. `enabled: true` with an empty URL: *nothing would be
 sent, and the appliance would report notification as configured.* And any non-empty
-URL that does not start with `http://` or `https://` — checked even while the webhook
-is disabled, so a typo cannot sit in the file waiting for the day somebody switches
-it on.
+URL that is not `http://` or `https://` (any case) with a host — checked even while
+the webhook is disabled, so a typo cannot sit in the file waiting for the day somebody
+switches it on. Redirects are **not** followed: a `3xx` is a failed delivery saying
+which host it pointed at, never a GET to wherever `Location` says. Changing the URL
+needs `destinations.write` as well as `config.write`. In the log and in `last_error`
+the URL appears only as `scheme://host[:port]/…`, because for Slack/Teams/Discord
+hooks the path is the credential.
 
 ### `notify.webhook.secret`
 
@@ -1778,7 +1852,15 @@ in clear — including the login, if a username is set.
 Validation refuses anything else, and the message says why the strictness is there:
 *An unrecognised value used to mean no encryption, which is not a thing to arrive at
 by typo when a password is being sent.* An empty string reaches this check and is
-refused; a non-string is refused one step earlier by the type check.
+refused; a non-string is refused one step earlier by the type check. `none` together
+with a username is refused for any host that is not loopback — the password would
+cross the network in clear — and a hand-edited value the notifier does not recognise
+sends nothing rather than falling back to cleartext.
+
+The server certificate is **verified** for `ssl` and `starttls` (smtplib's default is
+not to). `notify.smtp.ca_file` (optional) adds an internal CA bundle;
+`notify.smtp.verify: false` is the explicit, unsafe opt-out for a relay with a
+certificate nothing can verify.
 
 ### `notify.smtp.username`
 
@@ -2217,14 +2299,11 @@ Type-checked along with `enabled`, `tls`, `no_ris` and `emergency_trigger`. A qu
 `"false"` here reads as TRUE at runtime and would strip a real destination at the next
 discard, so it is refused at save time.
 
-### A gap in destination validation
+### Destination validation
 
-Every entry is assumed to be an object without being checked, unlike
-[`modalities`](#modalities), which checks. A string in the list produces a usable-if-odd
-message (`destination #1 missing 'name'`), but a bare number raises `TypeError: argument
-of type 'int' is not a container or iterable` out of `validate()`. That is not a
-`ValueError`, so it does not travel the path the dashboard's Save and the CLI catch, and
-the operator gets an unhandled error instead of a sentence naming the row.
+Every entry has to be an object (`destination #1 must be an object with name / host /
+port / aet`), with a non-empty string host, a real port (not `true`) and a valid AE
+title.
 
 ---
 
@@ -2351,11 +2430,20 @@ later edit in the dashboard sticks.
 
 The dashboard's TCP port.
 
-**Validation refuses nothing here.** It is not range-checked, and — unlike the DICOM
-listeners and `ris`, which are checked against one another — it is not compared with them,
-so a config in which the dashboard and the receiver claim the same number saves cleanly and
-fails at bind time. `pacs serve` reads it as `int(...)`, so a value `int()` cannot parse
-raises out of the command rather than being reported as a config problem.
+Validated as an integer 1..65535 (never `true`) and checked against the DICOM and HL7
+listener ports, so the dashboard and the receiver can no longer be saved onto one number.
+
+### `web.allowed_hosts`
+
+`list of strings` · default `[]`
+
+While the dashboard runs without a credential (loopback, no token, no profiles), a
+request whose `Host` header is not a loopback name (`localhost`, `127.x`, `::1`), the
+bind address or one of these names is refused with `421`. That is what stops a
+DNS-rebinding web page — which is same-origin to its own name and can set any header —
+from reading the config, rewriting it or shutting the engine down. With a token or
+profiles in force the check stays out of the way: the attacker's origin holds no
+credential.
 
 ### `web.update_check`
 
@@ -2428,9 +2516,13 @@ only read studies while it is deliberately holding the token; and there is no sa
 hand it one, because a deep-link query string is exactly the URL-logging leak the design
 forbids. With a token set, the answer is the bundled `"/editor/"`.
 
-Type only — a non-string is refused, because it is read through `(x or "").strip()` and
-would otherwise raise inside a live request. A URL that does not resolve is not detected
-here; the button simply goes nowhere.
+Validation accepts only `""`, a path on this dashboard starting with `/` (not `//`), or an
+`http(s)://` URL with a host; `javascript:`, `data:` and the rest are refused, because the
+dashboard opens this URL with the operator's session. Changing it to an absolute URL needs
+`destinations.write` as well as `config.write` — the editor is handed whole studies. The
+CORS origin is the browser's serialisation of the URL (lower-case host, default port
+dropped, no userinfo). A URL that does not resolve is not detected here; the button simply
+goes nowhere.
 
 Note that `GET /api/config` does not answer with this section verbatim: `auth_token` is
 removed and replaced by the boolean mirror `auth_token_set`.

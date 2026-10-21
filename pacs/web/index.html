@@ -973,6 +973,7 @@
             <button class="hist-tab" id="tab_connections" data-tab="connections" data-cap="logs.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgConnections"><span data-i18n>Connections</span></button>
             <button class="hist-tab" id="tab_audit" data-tab="audit" data-cap="audit.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgAudit"><span data-i18n>Audit</span></button>
             <button class="hist-tab" id="tab_caught" data-tab="caught" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgCaught"><span data-i18n>Worklist probes</span></button>
+            <button class="hist-tab" id="tab_asks" data-tab="asks" data-cap="config.read" role="tab" aria-selected="false" tabindex="-1" aria-controls="dlgAsks"><span data-i18n>Worklist queries</span></button>
           </div>
         </div>
         <section class="tabpane" id="dlgLogs" role="tabpanel" aria-labelledby="tab_logs">
@@ -1017,6 +1018,19 @@
             </div>
           </div>
           <div class="hist-list" id="caughtList"></div>
+        </section>
+        <!-- Every attribute each modality's worklist query asks for, and how our answer carried it.
+             Tag names and counts only, never values; see pacs/mwlasks.py. -->
+        <section class="tabpane" id="dlgAsks" role="tabpanel" aria-labelledby="tab_asks" hidden>
+          <p class="pane-lede" data-i18n>what each modality asks the worklist for</p>
+          <div class="hist-bar">
+            <p class="hint hint-flush hint-70ch" data-i18n>Each time a modality pulls its worklist, its query lists the attributes it wants: the ones it filled in are filters, the empty ones are what it wants filled. Missing ones are what its screen shows blank. Only attribute names are kept, never patient values.</p>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="asksRefresh" data-i18n>↻ Refresh</button>
+              <button class="btn tiny danger" id="asksClear" data-i18n>🗑 Clear</button>
+            </div>
+          </div>
+          <div class="hist-list" id="asksList"></div>
         </section>
 
         <section class="tabpane" id="dlgAudit" role="tabpanel" aria-labelledby="tab_audit" hidden>

@@ -62,7 +62,7 @@ from pynetdicom.sop_class import (
 
 from .connections import listener_handlers
 from .logbuf import LogBuffer
-from .netclaim import claim
+from .netclaim import cap_per_host, claim, limit_listener
 
 _LOG = logging.getLogger(__name__)
 
@@ -105,6 +105,36 @@ def _peer_addr(event) -> str:
 
 
 # --------------------------------------------------------------------- layout
+# A printer's own limits. ImageDisplayFormat is a request field, and each cell
+# used to mint a UID and a response item: 'STANDARD\\65535,65535' asked for 4e9.
+MAX_CELLS_PER_FILM = 64
+MAX_FILMS_PER_ASSOCIATION = 32
+# Pixels one image box may claim, and how much of that claim the bytes actually
+# sent must cover: Rows/Columns of 65535 with two bytes of PixelData used to be
+# padded out to gigabytes before decoding.
+MAX_IMAGE_PIXELS = 8192 * 8192
+MIN_PIXEL_FILL = 0.5
+# Below this many bytes of claimed geometry, padding is cheap and kept.
+_PAD_FREELY_BYTES = 1024 * 1024
+
+
+def _cell_count(fmt: str) -> int:
+    """How many image boxes *fmt* asks for, computed without building them."""
+    parts = str(fmt or "").upper().split("\\")
+    kind = parts[0].strip() if parts else ""
+    spec = parts[1] if len(parts) > 1 else ""
+    nums = []
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if tok.isdigit() and int(tok) > 0:
+            nums.append(int(tok))
+    if kind == "STANDARD" and "," in spec and len(nums) == 2:
+        return nums[0] * nums[1]
+    if kind in ("ROW", "COL", "COLUMN") and nums:
+        return sum(nums)
+    return 1
+
+
 def _layout_cells(fmt: str) -> list[tuple[float, float, float, float]]:
     """Fractional (x, y, w, h) page rectangles, one per image box, for a DICOM
     Image Display Format.  Position N (1-based) uses cell N-1.  Handles the
@@ -184,6 +214,15 @@ def _image_from_item(item):
         if rows <= 0 or cols <= 0 or not pixel:
             return None
         samples = int(getattr(item, "SamplesPerPixel", 1) or 1)
+        if rows * cols > MAX_IMAGE_PIXELS:
+            return None
+        claimed = rows * cols * (3 if samples >= 3 else 1) * \
+            (2 if int(getattr(item, "BitsAllocated", 8) or 8) > 8 and samples < 3 else 1)
+        if claimed > _PAD_FREELY_BYTES and len(pixel) < claimed * MIN_PIXEL_FILL:
+            # Far shorter than its own (large) geometry: a decompression bomb,
+            # not a truncated image worth padding. Small boxes are still padded,
+            # so a short fragment renders partly blank rather than not at all.
+            return None
         bits = int(getattr(item, "BitsAllocated", 8) or 8)
         stored = int(getattr(item, "BitsStored", bits) or bits)
         photometric = str(getattr(item, "PhotometricInterpretation", "") or "").upper()
@@ -210,17 +249,15 @@ def _image_from_item(item):
         if bits > 8:
             # Scale the *used* range (BitsStored) down to 8 bits — a plain
             # ">>8" would render 10/12-bit film data almost black.
-            import array
-            import sys as _sys
             need = rows * cols * 2
             pixel = (pixel + b"\x00" * need)[:need]
-            a = array.array("H")
-            a.frombytes(pixel)
-            if _sys.byteorder == "big":     # DICOM print is little-endian
-                a.byteswap()
             shift = max(0, stored - 8)
-            out = bytes(min(255, v >> shift) for v in a)
-            im = Image.frombytes("L", (cols, rows), out)
+            # In C, not a Python loop per pixel: "I;16" is little-endian, as
+            # DICOM print is, and converting to L clamps exactly as min(255, v)
+            # did.
+            im16 = Image.frombytes("I;16", (cols, rows), pixel)
+            scale = 1.0 / (1 << shift)
+            im = im16.point(lambda v: v * scale).convert("L")
         else:
             need = rows * cols
             pixel = (pixel + b"\x00" * need)[:need]
@@ -285,11 +322,25 @@ def _scrape_identity(ds, into: dict) -> None:
         return
     for tag, key in _IDENTITY_TAGS.items():
         val = getattr(ds, tag, None)
-        if val:
-            into[key] = str(val)
-            if tag == "PatientName":
-                from .history import _fmt_name
-                into["patient"] = _fmt_name(val)
+        if not val:
+            continue
+        sval = str(val).strip()
+        # Hints from a print request are untrusted: a value that is not valid
+        # for its VR is dropped here, so a fresh one is minted downstream rather
+        # than an invalid Study Instance UID being built into the instance.
+        if tag == "StudyInstanceUID":
+            from .scp import valid_uid
+            if not valid_uid(sval):
+                continue
+        elif tag == "StudyDate":
+            if not (len(sval) == 8 and sval.isdigit()):
+                continue
+        elif len(sval) > 64:
+            continue
+        into[key] = sval
+        if tag == "PatientName":
+            from .history import _fmt_name
+            into["patient"] = _fmt_name(val)
 
 
 class _Job:
@@ -393,10 +444,18 @@ class PrintSCP:
         tls_key: str = "",
         tls_ca: str = "",
         journal=None,
+        max_associations: Optional[int] = None,
+        max_per_host: Optional[int] = None,
     ):
         self.aet = aet
         # connections.ConnectionJournal, or None outside PacsServer.
         self.journal = journal
+        self.max_associations = max_associations
+        self.max_per_host = max_per_host
+        if isinstance(allowed_aets, str):
+            # A bare string used to be iterated character by character, so
+            # "CT1" became an allow-list of 'C', 'T' and '1'.
+            raise ValueError("allowed_aets must be a list of AE titles, not a string")
         self.bind = bind
         self.port = port
         self.log = log
@@ -514,6 +573,9 @@ class PrintSCP:
 
         if sop_class == BasicFilmSession:
             job.session_label = str(getattr(attrs, "FilmSessionLabel", "") or "")
+            # A new session is a new patient as far as anyone knows: the
+            # previous session's hints must not label this one's film.
+            job.identity_hints = {}
             _scrape_identity(attrs, job.identity_hints)
             # The label stays on the job (it titles the pending item) but not in
             # the log: modalities commonly put the patient's name in it, and the
@@ -526,6 +588,16 @@ class PrintSCP:
         if sop_class == BasicFilmBox:
             film_uid = new_uid
             fmt = str(getattr(attrs, "ImageDisplayFormat", "") or "STANDARD\\1,1")
+            cells = _cell_count(fmt)
+            if cells > MAX_CELLS_PER_FILM:
+                self._problem(f"Print from {event.assoc.requestor.ae_title}: film box format "
+                              f"{fmt[:32]} asks for {cells} images (limit {MAX_CELLS_PER_FILM}); refused")
+                return 0x0106, Dataset()   # invalid attribute value
+            if len(job.film_boxes) >= MAX_FILMS_PER_ASSOCIATION:
+                self._problem(f"Print from {event.assoc.requestor.ae_title}: more than "
+                              f"{MAX_FILMS_PER_ASSOCIATION} unprinted film boxes on one "
+                              f"association; refused")
+                return 0xC605, Dataset()   # insufficient memory in printer
             orientation = str(getattr(attrs, "FilmOrientation", "") or "PORTRAIT")
             _scrape_identity(attrs, job.identity_hints)
             # Colour or grayscale is decided by which meta context this arrived
@@ -633,6 +705,15 @@ class PrintSCP:
         seq = getattr(mods, _GRAYSCALE_IMAGE_SEQ, None) or getattr(mods, _COLOR_IMAGE_SEQ, None)
         item = seq[0] if seq else None
         if item is not None:
+            try:
+                too_big = int(getattr(item, "Rows", 0) or 0) * int(getattr(item, "Columns", 0) or 0) \
+                    > MAX_IMAGE_PIXELS
+            except (TypeError, ValueError):
+                too_big = False
+            if too_big:
+                self._problem(f"Print: image {position or '?'} from {event.assoc.requestor.ae_title} "
+                              f"claims {_describe_item(item)} — larger than this printer accepts")
+                return 0xC603, Dataset()   # image size larger than image box size
             img = _image_from_item(item)
             if img is not None:
                 fb.images[box_uid] = (position or (len(fb.images) + 1), img)
@@ -685,7 +766,13 @@ class PrintSCP:
             else:
                 why = f"{asked} film(s) were created but no image was sent into them"
             self._problem(f"Print from {who}: nothing to print — {why}")
-            return 0xB603, Dataset()   # empty page warning (still a success-class status)
+            # The Film Session codes for a Film Session N-ACTION, the Film Box
+            # one for a Film Box (PS3.4 H.4): B602 = film boxes without image
+            # boxes, C600 = no film boxes at all. Still non-fatal for B6xx, so
+            # the SCU can go on and print a real film on this association.
+            if sop_class == BasicFilmBox:
+                return 0xB603, Dataset()
+            return (0xB602 if asked else 0xC600), Dataset()
 
         identity = {
             "source": f"{who} @ {_peer_addr(event)}",
@@ -754,10 +841,20 @@ class PrintSCP:
         req = event.request
         target = str(getattr(req, "RequestedSOPInstanceUID", "") or "")
         job = self._job(event)
+        if target and target not in job.film_boxes and not job.film_boxes.get(target):
+            sop_class = str(getattr(req, "RequestedSOPClassUID", "") or "")
+            if sop_class == BasicFilmSession:
+                job.identity_hints = {}
+                job.session_label = ""
         job.film_boxes.pop(target, None)
         for buid, fuid in list(job.box_to_film.items()):
             if fuid == target:
                 job.box_to_film.pop(buid, None)
+        for auid, fuid in list(job.anno_to_film.items()):
+            if fuid == target:
+                job.anno_to_film.pop(auid, None)
+        if job.last_film == target:
+            job.last_film = ""
         return 0x0000
 
     def _handle_close(self, event) -> None:
@@ -823,6 +920,7 @@ class PrintSCP:
         if self.running:
             return
         ae = AE(ae_title=self.aet)
+        limit_listener(ae, self.max_associations)
         ae.add_supported_context(BasicGrayscalePrintManagementMeta)
         if self.color:
             ae.add_supported_context(BasicColorPrintManagementMeta)
@@ -861,6 +959,7 @@ class PrintSCP:
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )
+        cap_per_host(self._server, self.max_per_host, log=self.log, label="Print")
         self._bridge = _PynetdicomBridge(ae, self)
         logging.getLogger("pynetdicom").addHandler(self._bridge)
         allow = ", ".join(self.allowed_aets) if self.allowed_aets else "any"

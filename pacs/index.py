@@ -107,7 +107,7 @@ _ROW_FIELDS = (
 _FIELDS: dict[str, tuple[str, str, str]] = {
     "StudyInstanceUID":    ("study_uid", "uid", "study"),
     "PatientID":           ("patient_id", "text", "study"),
-    "PatientName":         ("patient_name", "text", "study"),
+    "PatientName":         ("patient_name", "pn", "study"),
     "StudyDate":           ("study_date", "date", "study"),
     "StudyTime":           ("study_time", "time", "study"),
     "AccessionNumber":     ("accession", "text", "study"),
@@ -215,6 +215,24 @@ def _like_pattern(value: str) -> str:
                  .replace("*", "%").replace("?", "_"))
 
 
+def _encodable(path: str) -> bool:
+    """False for a str holding lone surrogates (a non-UTF-8 file name decoded
+    with surrogateescape), which sqlite3 refuses to bind."""
+    try:
+        path.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _pn_norm(value: str) -> str:
+    """A PN value with trailing empty components and groups removed."""
+    groups = [g.rstrip("^") for g in str(value).split("=")]
+    while groups and not groups[-1]:
+        groups.pop()
+    return "=".join(groups).rstrip("^=")
+
+
 def _prefix_term(col: str, prefix: str) -> tuple[str, list]:
     """SQL for "path starts with this directory". Deliberately NOT LIKE: a
     Windows path is full of backslashes, which is LIKE's escape character here,
@@ -314,7 +332,9 @@ def _term(col: str, kind: str, raw: Any) -> Optional[tuple[str, list]]:
         # C-FIND UID lists); splitting here is what makes a list query work.
         values = _s(raw).split("\\")
     values = [v for v in values if v != ""]
-    if not values:
+    if not values or "*" in values:
+        # A lone '*' is universal matching (PS3.4 C.2.2.2.4), the same as an
+        # empty value — including the rows where the attribute is absent.
         return None
 
     frags: list[str] = []
@@ -362,12 +382,32 @@ def _term(col: str, kind: str, raw: Any) -> Optional[tuple[str, list]]:
             else:
                 frags.append(f"{col} = ?")
                 params.append(v)
-        else:  # text / cs
+        elif kind == "pn":
+            # PN is the one VR whose matching may ignore case (C.2.2.2.1), and
+            # trailing empty components are the same name (PS3.5 6.2):
+            # 'DOE^JANE^^^' is 'DOE^JANE'.
+            if "*" in v or "?" in v:
+                frags.append(f"{col} LIKE ? ESCAPE '\\'")
+                params.append(_like_pattern(v))
+            else:
+                frags.append(f"(rtrim({col}, '^=') = ? COLLATE NOCASE)")
+                params.append(_pn_norm(v))
+        elif kind == "cs":
             if "*" in v or "?" in v:
                 frags.append(f"{col} LIKE ? ESCAPE '\\'")
                 params.append(_like_pattern(v))
             else:
                 frags.append(f"{col} = ? COLLATE NOCASE")
+                params.append(v)
+        else:  # text: case-SENSITIVE (PS3.4 C.2.2.2.1 / C.2.2.2.4)
+            # PatientID 'ab123' and 'AB123' are two patients. Matching them
+            # case-insensitively pulled another patient's studies into a C-FIND
+            # and a PATIENT-level C-MOVE.
+            if "*" in v or "?" in v:
+                frags.append(f"{col} GLOB ?")
+                params.append(v.replace("[", "[[]"))
+            else:
+                frags.append(f"{col} = ?")
                 params.append(v)
     if not frags:
         return None
@@ -637,6 +677,8 @@ class InstanceIndex:
         sop = _s(getattr(ds, "SOPInstanceUID", ""))
         if not sop:
             return None                      # DICOMDIR and friends: nothing to index
+        if not _encodable(path):
+            return None                      # sqlite cannot bind a non-UTF-8 name
         meta = getattr(ds, "file_meta", None)
         try:
             st = os.stat(path)
@@ -852,12 +894,27 @@ class InstanceIndex:
             return
         try:
             self._write(work)
-        except sqlite3.Error:
-            pass                              # already counted + logged in _write
+        except Exception:
+            # One bad row must not sink the rest of the batch (up to 500 rows,
+            # including C-STOREs the modality was already told were stored):
+            # retry the rows one at a time and lose only the ones that fail.
+            if len(rows) == 1:
+                return
+            for r in rows:
+                def one(conn, r=r):
+                    if isinstance(r, str):
+                        conn.execute("DELETE FROM instances WHERE path = ?", (r,))
+                    else:
+                        conn.execute(_INSERT, r)
+                try:
+                    self._write(one)
+                except Exception as exc:
+                    self.errors += 1
+                    self.log.warn(f"Index: could not write one row: {exc}", kind="index")
 
     # ------------------------------------------------------------------ rescan
     def rescan(self, roots: dict, purge: bool = True,
-               stop: Optional[threading.Event] = None) -> dict:
+               stop: Optional[threading.Event] = None, skip=None) -> dict:
         """Reconcile the index with what is actually on disk.
 
         *roots* is ``{group: root_path}``. Incremental: a file whose path, size
@@ -916,24 +973,47 @@ class InstanceIndex:
             pending.clear()
             seen.clear()
 
+        # A root nested inside another (the sent archive inside the outgoing
+        # folder) belongs to its own group: walking it again under the outer
+        # group flipped those rows between groups on every rescan. *skip* adds
+        # folders that are in no group at all (the pending tree).
+        claimed = {os.path.realpath(r) for r in groups.values()}
+        for extra in (skip or []):
+            if extra:
+                claimed.add(os.path.realpath(extra))
+        walk_errors: list = []
         for group, root in groups.items():
             known = self._known(group, root)
+            own = os.path.realpath(root)
+            group_files = 0
+            def _onerror(err, _g=group):
+                walk_errors.append((_g, err))
             # Every file is offered to is_dicom, hidden ones included. The walk
             # MUST accept exactly what add_file accepts: anything the walk
             # declines but add_file indexed would be deleted by the purge below
             # while the file is still sitting on disk. Sidecars cost one failed
             # magic-byte read each, which is the cheaper half of that trade.
-            for dirpath, _dirnames, filenames in os.walk(root):
+            for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
                 if stop is not None and stop.is_set():
                     counts["cancelled"] = True
                     break
+                dirnames[:] = [d for d in dirnames
+                               if os.path.realpath(os.path.join(dirpath, d)) == own
+                               or os.path.realpath(os.path.join(dirpath, d)) not in claimed]
                 for name in sorted(filenames):
                     path = self.norm_path(os.path.join(dirpath, name))
+                    if not _encodable(path):
+                        # A name that is not valid UTF-8 (a cp1252 copy from a
+                        # Samba share) cannot be bound by sqlite. It is skipped
+                        # and counted, never allowed to abort the whole walk.
+                        counts["failed"] += 1
+                        continue
                     try:
                         st = os.stat(path)
                     except OSError:
                         continue
                     counts["files"] += 1
+                    group_files += 1
                     seen.append((path,))
                     prev = known.get(path)
                     if prev is not None and prev[0] == int(st.st_size) and \
@@ -952,14 +1032,29 @@ class InstanceIndex:
                         commit()
             if counts["cancelled"]:
                 break
+            if group_files == 0 and known:
+                # A root that exists but holds nothing while the index remembers
+                # files under it is an unmounted share far more often than an
+                # emptied archive. Never purge on that evidence alone.
+                walk_errors.append((group, f"{root} is empty but {len(known)} file(s) are indexed under it"))
         commit()
+        # Only the group whose walk could not be trusted keeps its rows: one
+        # unmounted share must not stop stale rows being purged everywhere else.
+        unsure = {g for g, _err in walk_errors}
+        if walk_errors:
+            counts["walk_errors"] = len(walk_errors)
+            g, err = walk_errors[0]
+            self.log.warn(f"Index rescan: could not read part of the '{g}' tree ({err}); "
+                          f"rows were kept rather than purged", kind="index")
+        purge_groups = [g for g in groups if g not in unsure]
 
         # restarted: the seen set was begun again part-way through, so it holds
         # only what was walked after that point. Purging against it would delete
         # rows for files still sitting on disk — the same reason a lost batch
         # suppresses the purge, reached without any error being raised.
-        if purge and not counts["cancelled"] and not counts["errors"] and not restarted:
-            marks = ",".join("?" for _ in groups)
+        if purge and purge_groups and not counts["cancelled"] and not counts["errors"] \
+                and not restarted:
+            marks = ",".join("?" for _ in purge_groups)
 
             def prune(c):
                 # indexed_at guards the race with a C-STORE that landed mid-walk:
@@ -968,7 +1063,7 @@ class InstanceIndex:
                 return c.execute(
                     f"DELETE FROM instances WHERE grp IN ({marks}) AND indexed_at < ? "
                     "AND path NOT IN (SELECT path FROM scan_seen)",
-                    (*groups.keys(), started),
+                    (*purge_groups, started),
                 )
             try:
                 cur = self._write(prune)

@@ -55,7 +55,7 @@ from .assocwords import caller_of, listener_refusal
 from .connections import listener_handlers
 from .dicomfs import within_roots
 from .logbuf import LogBuffer
-from .netclaim import claim
+from .netclaim import cap_per_host, claim, limit_listener
 
 # A C-FIND that would return more than this is a mistake at the other end (an
 # IMAGE-level query with no study key walks the whole archive).  We answer with
@@ -297,10 +297,22 @@ class QrSCP:
         tls_key: str = "",
         tls_ca: str = "",
         journal=None,
+        max_associations: Optional[int] = None,
+        max_per_host: Optional[int] = None,
+        is_deid_destination: Optional[Callable[[str], bool]] = None,
     ):
         self.aet = aet
         # connections.ConnectionJournal, or None outside PacsServer.
         self.journal = journal
+        self.max_associations = max_associations
+        self.max_per_host = max_per_host
+        # name -> True when routing de-identifies for that destination (see
+        # resolve_move_destination). None outside PacsServer.
+        self.is_deid_destination = is_deid_destination
+        if isinstance(allowed_aets, str):
+            # A bare string used to be iterated character by character, so
+            # "CT1" became an allow-list of 'C', 'T' and '1'.
+            raise ValueError("allowed_aets must be a list of AE titles, not a string")
         self.bind = bind
         self.port = port
         self.log = log
@@ -477,10 +489,17 @@ class QrSCP:
         named: set[str] = set()
         for row in rows:
             if event.is_cancelled or stopping.is_set():
-                self.log.info(f"C-FIND from {who} cancelled after {n} match(es)", kind="qr")
                 with self._lock:
                     self.match_count += n
-                yield 0xFE00, None
+                if event.is_cancelled:
+                    self.log.info(f"C-FIND from {who} cancelled after {n} match(es)", kind="qr")
+                    yield 0xFE00, None
+                else:
+                    # FE00 answers the SCU's own C-CANCEL; a server stopping is
+                    # a failure the SCU did not cause and should retry.
+                    self.log.warn(f"C-FIND from {who} ended by a service stop after "
+                                  f"{n} match(es)", kind="qr")
+                    yield 0xC000, None
                 return
             try:
                 item, unsupported = build_response(level, row, query, self.aet)
@@ -498,6 +517,11 @@ class QrSCP:
             yield (0xFF01 if (ignored or unsupported) else 0xFF00), item
         with self._lock:
             self.match_count += n
+        if truncated:
+            # Success would tell the SCU this is every match. It is not, and an
+            # image-by-image retrieve driven from this list would quietly miss
+            # the rest: end on Refused: Out of Resources instead.
+            yield 0xA700, None
 
     def _handle_move(self, event):
         """Destination first, then the sub-operation count, then one pending
@@ -534,12 +558,26 @@ class QrSCP:
 
         contexts = _retrieve_contexts(rows or [])
         kwargs = {"ae_title": dest.get("aet") or dest_aet}
-        if dest.get("tls") and self.get_tls_context:
-            try:
-                kwargs["tls_args"] = (self.get_tls_context(), dest["host"])
-            except Exception as exc:
-                refuse = f"TLS config error ({exc})"
-                contexts = []
+        if dest.get("tls"):
+            # Fail closed: a TLS destination is never dialled in plaintext. With
+            # no usable client context the move is refused before any
+            # connection is made (0xA801), rather than sending the A-ASSOCIATE
+            # — and then the images — unencrypted.
+            tls_error = ""
+            if not self.get_tls_context:
+                tls_error = "no TLS client configuration is available"
+            else:
+                try:
+                    kwargs["tls_args"] = (self.get_tls_context(), dest["host"])
+                except Exception as exc:
+                    tls_error = f"TLS config error ({exc})"
+            if tls_error:
+                with self._lock:
+                    self.refused_count += 1
+                self.log.error(f"C-MOVE from {who} @ {addr} → {dest_aet} refused: destination "
+                               f"requires TLS but {tls_error}", kind="qr")
+                yield None, None
+                return
         kwargs["contexts"] = contexts or _fallback_contexts()
         yield dest["host"], int(dest["port"]), kwargs
 
@@ -628,16 +666,36 @@ class QrSCP:
                 f"can be read out. Every instance in this request will be refused.",
                 kind="qr")
 
-        broken: list[str] = []
+        broken: list[tuple[str, str]] = []
         sent = 0
         for row in rows:
             if event.is_cancelled or stopping.is_set():
-                self.log.warn(f"{what} cancelled after {sent} instance(s)", kind="qr")
                 with self._lock:
                     self.sent_count += sent
-                yield 0xFE00, _failed_list(broken)
+                    self.failed_count += len(broken)
+                # The unreadable rows go to pynetdicom as failed sub-operations
+                # first, so its Failed SOP Instance UID List carries them next
+                # to the instances the destination itself refused.
+                for uid, cls in broken:
+                    yield 0xFF00, _unsendable(uid, cls)
+                if event.is_cancelled:
+                    self.log.warn(f"{what} cancelled after {sent} instance(s)", kind="qr")
+                    yield 0xFE00, None
+                else:
+                    self.log.warn(f"{what} ended by a service stop after {sent} instance(s)",
+                                  kind="qr")
+                    yield 0xA702, None
                 return
             path = row.get("path") or ""
+            uid = str(row.get("SOPInstanceUID") or "")
+            if path and not os.path.isfile(path) and uid:
+                # The index's newest copy is gone; an older copy may still be there.
+                try:
+                    alt = self.index.get_instance_path(uid)
+                except Exception:
+                    alt = None
+                if alt and within_roots(alt, roots):
+                    path = alt
             if not within_roots(path, roots):
                 # Reported as a failed sub-operation rather than skipped, for
                 # the same reason an unreadable file is: the SCU has to learn
@@ -645,7 +703,7 @@ class QrSCP:
                 # because they are different faults — this one says the index
                 # and the configured folders disagree, and no amount of fixing
                 # permissions will address it.
-                broken.append(str(row.get("SOPInstanceUID") or ""))
+                broken.append((uid, str(row.get("SOPClassUID") or "")))
                 self.log.error(
                     f"{what}: refusing {os.path.basename(path) or '(no path)'} — the index "
                     f"names a file outside every configured storage folder. The index is a "
@@ -655,7 +713,7 @@ class QrSCP:
             try:
                 ds = dcmread(path)
             except Exception as exc:
-                broken.append(str(row.get("SOPInstanceUID") or ""))
+                broken.append((uid, str(row.get("SOPClassUID") or "")))
                 self.log.error(f"{what}: cannot read {os.path.basename(path) or path}: "
                                f"{exc}", kind="qr", path=path)
                 continue
@@ -666,13 +724,18 @@ class QrSCP:
             self.sent_count += sent
             self.failed_count += len(broken)
         if not broken:
-            return                          # pynetdicom sends the final Success
-        # Everything we never yielded is still counted as "remaining", and
-        # pynetdicom rolls remaining into failed on a Failure/Warning status —
-        # which is exactly the accounting we want for unreadable files.
+            return                          # pynetdicom sends the final status
         self.log.error(f"{what}: {len(broken)} of {len(rows)} instance(s) could not be "
                        f"read and were NOT delivered", kind="qr")
-        yield (0xA702 if sent == 0 else 0xB000), _failed_list(broken)
+        # Each unreadable row becomes a sub-operation that fails inside
+        # pynetdicom without anything being sent (the stand-in has no transfer
+        # syntax, so send_c_store refuses it). pynetdicom then composes the
+        # final status and the Failed SOP Instance UID List itself, from BOTH
+        # these and whatever the destination rejected — 0xA702 when nothing at
+        # all was delivered, 0xB000 when some was. Handing it our own list here
+        # used to replace its list and lose the destination's refusals.
+        for uid, cls in broken:
+            yield 0xFF00, _unsendable(uid, cls)
 
     # ---- move destinations -------------------------------------------------
     def resolve_move_destination(self, dest_aet: str) -> Optional[dict]:
@@ -688,10 +751,19 @@ class QrSCP:
         table = self.move_destinations or {}
         entry = table.get(dest_aet)
         if entry is None:
-            for key, val in table.items():
-                if str(key).strip().upper() == dest_aet.upper():
-                    entry = val
-                    break
+            # Case-insensitive only when it is unambiguous: AE titles compare
+            # byte-wise almost everywhere, and 'pacs' and 'PACS' can be two nodes.
+            loose = [val for key, val in table.items()
+                     if str(key).strip().upper() == dest_aet.upper()]
+            stripped = [val for key, val in table.items() if str(key).strip() == dest_aet]
+            if len(stripped) == 1:
+                entry = stripped[0]
+            elif len(loose) == 1:
+                entry = loose[0]
+            elif len(loose) > 1:
+                self.log.error(f"C-MOVE destination '{dest_aet}' matches several "
+                               f"qr.move_destinations entries by case only — refused", kind="qr")
+                return None
         if isinstance(entry, dict) and entry.get("host") and entry.get("port"):
             return {"host": str(entry["host"]), "port": int(entry["port"]),
                     "aet": str(entry.get("aet") or dest_aet), "tls": bool(entry.get("tls"))}
@@ -701,14 +773,35 @@ class QrSCP:
             dests = self.get_destinations() or []
         except Exception:
             return None
-        for d in dests:
-            if str(d.get("aet", "")).strip().upper() != dest_aet.upper():
-                continue
-            if not d.get("host") or not d.get("port"):
-                continue
-            return {"host": str(d["host"]), "port": int(d["port"]),
-                    "aet": str(d.get("aet") or dest_aet), "tls": bool(d.get("tls"))}
-        return None
+        usable = [d for d in dests if d.get("host") and d.get("port")]
+        exact = [d for d in usable if str(d.get("aet", "")).strip() == dest_aet]
+        loose = [d for d in usable if str(d.get("aet", "")).strip().upper() == dest_aet.upper()]
+        if len(exact) == 1:
+            match = exact[0]
+        elif len(exact) > 1 or len(loose) > 1:
+            self.log.error(f"C-MOVE destination '{dest_aet}' matches several destinations "
+                           f"— refused rather than guessing which one", kind="qr")
+            return None
+        elif len(loose) == 1:
+            match = loose[0]
+        else:
+            return None
+        # A destination a routing rule de-identifies for must never receive
+        # identified images, and this path sends the stored file as-is. Such a
+        # node is reachable by C-MOVE only through an explicit
+        # qr.move_destinations entry the operator wrote for it.
+        if self.is_deid_destination is not None:
+            try:
+                scrubbed = bool(self.is_deid_destination(str(match.get("name") or "")))
+            except Exception:
+                scrubbed = True
+            if scrubbed:
+                self.log.error(f"C-MOVE destination '{dest_aet}' is '{match.get('name')}', which "
+                               f"routing de-identifies for; C-MOVE would send identified images, "
+                               f"so it is refused", kind="qr")
+                return None
+        return {"host": str(match["host"]), "port": int(match["port"]),
+                "aet": str(match.get("aet") or dest_aet), "tls": bool(match.get("tls"))}
 
     def _handle_rejected(self, event) -> None:
         """Say why a caller was turned away, which pynetdicom does not."""
@@ -727,6 +820,7 @@ class QrSCP:
         if self.running:
             return
         ae = AE(ae_title=self.aet)
+        limit_listener(ae, self.max_associations)
         for model in _MODELS_FIND + _MODELS_MOVE + _MODELS_GET:
             ae.add_supported_context(model)
         # C-GET returns the instances on the requestor's own association, which
@@ -762,8 +856,14 @@ class QrSCP:
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )
+        cap_per_host(self._server, self.max_per_host, log=self.log, label="Query/Retrieve")
         allow = ", ".join(self.allowed_aets) if self.allowed_aets else "any"
         proto = "DICOM-TLS" + (" (mutual)" if self.tls and self.tls_ca else "") if self.tls else "plain DICOM"
+        if not self.allowed_aets and not (self.tls and self.tls_ca):
+            self.log.warn(
+                "Query/Retrieve accepts ANY calling AE title: anyone who can reach this port can "
+                "query the archive and C-GET images back over their own association. Set "
+                "qr.allowed_aets (or mutual TLS) unless this network is trusted.", kind="qr")
         self.log.info(
             f"Query/Retrieve listening on {self.bind}:{self.port} as {self.aet} "
             f"[{proto}] (accept: {allow})",
@@ -792,6 +892,15 @@ class QrSCP:
         finally:
             self._server = None
         me = threading.current_thread()
+        # shutdown() only closes the listening socket. An idle association would
+        # otherwise stay connected (answering on the old allow-list) and make
+        # each join below wait out its whole timeout.
+        for t in assocs:
+            try:
+                if t.is_alive() and t is not me:
+                    t.abort()
+            except Exception:
+                pass
         for t in assocs:
             try:
                 if t.is_alive() and t is not me:
@@ -799,6 +908,17 @@ class QrSCP:
             except Exception:
                 pass
         self.log.info("Query/Retrieve stopped", kind="qr")
+
+
+def _unsendable(uid: str, sop_class: str = ""):
+    """A stand-in dataset for an instance that could not be read. It carries
+    the instance's identity (so pynetdicom lists it as failed) and no file
+    meta, so pynetdicom's send_c_store raises before a byte is sent."""
+    from pydicom.dataset import Dataset
+    ds = Dataset()
+    ds.SOPClassUID = sop_class or "1.2.840.10008.5.1.4.1.1.7"
+    ds.SOPInstanceUID = uid or "0"
+    return ds
 
 
 def _failed_list(uids: list[str]):

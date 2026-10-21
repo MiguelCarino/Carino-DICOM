@@ -141,6 +141,21 @@ def _service_inputs(data: dict, name: str) -> list:
     return [sect({"printer": "print"}.get(name, name))]
 
 
+def _restamped(entry: dict, st) -> bool:
+    """True when a send-state entry was stamped against OTHER bytes than the
+    file now on disk (a replaced file). An entry with no stamp is not judged."""
+    return (("size" in entry and entry.get("size") != st.st_size)
+            or ("mtime" in entry and entry.get("mtime") != st.st_mtime))
+
+
+def _is_root(root: str, path: str) -> bool:
+    """True when *path* names the storage root itself rather than a study in it."""
+    try:
+        return bool(path) and os.path.realpath(path) == os.path.realpath(root)
+    except (OSError, ValueError):
+        return False
+
+
 def _deid_answers(router, names) -> dict:
     """What de-identification each destination is PROMISED, one string per name.
 
@@ -412,7 +427,7 @@ class PacsServer:
         self.config_problem = ""
         try:
             from .config import validate
-            validate(cfg.data)
+            validate(cfg.data, base_dir=os.path.dirname(cfg.path))
         except ValueError as exc:
             self.config_problem = str(exc)
         except Exception:
@@ -506,6 +521,9 @@ class PacsServer:
         # that one, so a caught item filed there would be handed back out to
         # this department's modalities. See pacs/caught.py.
         self.caught = CaughtStore(store_dir=cfg.resolved("ris", "store_dir"), log=self.log)
+        # What each modality's worklist queries ask for (tag names, never values).
+        from .mwlasks import MwlAskStore
+        self.mwl_asks = MwlAskStore(store_dir=cfg.resolved("ris", "store_dir"), log=self.log)
         self.watcher = FolderWatcher(cfg, self.log, index=self.index)
         # What the Send button delivered: Auto-send's record only covers the
         # outgoing folder, and a study sent by hand from Received is not in it.
@@ -523,7 +541,7 @@ class PacsServer:
         self.emergency = EmergencyController(self, self.log)
         # Said once per process: hold-and-forward with nothing flagged as the
         # primary has no delivery it can promise (see _queue_for_forward).
-        self._warned_no_primary = False
+        self._warned_no_primary = None
         # Manual sends whose de-identification promise was replaced while they
         # were in flight (see send_study). Its own lock: a send thread must not
         # queue behind a service start/stop to record a note, and status() must
@@ -550,6 +568,7 @@ class PacsServer:
             return
         path = self.cfg.resolved("index", "path") or ":memory:"
         self.index = InstanceIndex(path, log=self.log)
+        self._indexed_roots = self._index_roots()
 
     def start_index(self) -> None:
         """Bring the index up: background writer on so the C-STORE path hands
@@ -589,7 +608,8 @@ class PacsServer:
 
     def _rescan_run(self, idx: InstanceIndex, stop: threading.Event) -> None:
         try:
-            c = idx.rescan(self._index_roots(), purge=True, stop=stop)
+            c = idx.rescan(self._index_roots(), purge=True, stop=stop,
+                           skip=[self.cfg.resolved("scu", "pending_dir")])
         except Exception as exc:
             self.log.error(f"Index rescan failed: {exc}", kind="index")
         else:
@@ -628,7 +648,15 @@ class PacsServer:
         old = self.index
         enabled = bool(self.cfg.index.get("enabled", True))
         path = self.cfg.resolved("index", "path") or ":memory:"
+        roots = self._index_roots()
+        prev_roots = getattr(self, "_indexed_roots", None)
+        self._indexed_roots = roots
         if bool(old) == enabled and (old is None or old.path == path):
+            # Same database, but a storage / outgoing / sent folder that moved
+            # holds an archive the index has never seen: rescan, and the purge
+            # drops the rows of the folder that is no longer configured.
+            if old is not None and prev_roots is not None and prev_roots != roots:
+                self.rescan_index()
             return
         self.stop_index()
         self._build_index()
@@ -663,6 +691,8 @@ class PacsServer:
                 tls_ca=self.cfg.resolve_path(s.get("tls_ca", "")),
                 min_free_mb=int(float(s.get("min_free_gb", 2) or 0) * 1024),
                 journal=self.journal,
+                max_associations=s.get("max_associations"),
+                max_per_host=s.get("max_per_host"),
             )
             self.scp.start()
 
@@ -681,6 +711,14 @@ class PacsServer:
         with self._lock:
             if self.scp:
                 self.scp.stop()
+
+    def _is_deid_destination(self, name: str) -> bool:
+        """True when any enabled de-identification rule names *name* — such a
+        node must never be handed an identified copy by a path that bypasses
+        routing (C-MOVE through the destinations fallback)."""
+        from . import routing
+        summary = routing.Router.from_config(self.cfg, None).deid_summary()
+        return name in set(summary.get("destinations", [])) | set(summary.get("held", []))
 
     def _probe(self, dest: dict):
         """Quiet C-ECHO to a destination for the emergency health monitor —
@@ -734,6 +772,8 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(p.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(p.get("tls_ca", "")),
                 journal=self.journal,
+                max_associations=p.get("max_associations"),
+                max_per_host=p.get("max_per_host"),
             )
             # The card's evidence — how many films, the last one, the last
             # problem — is what an operator checks after a modality reports a
@@ -791,6 +831,9 @@ class PacsServer:
                 tls_key=self.cfg.resolve_path(m.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(m.get("tls_ca", "")),
                 journal=self.journal,
+                max_associations=m.get("max_associations"),
+                max_per_host=m.get("max_per_host"),
+                asks=self.mwl_asks,
             )
             self._counter_since["mwl"] = time.time()
             self.mwl_scp.start()
@@ -845,12 +888,15 @@ class PacsServer:
                 # a C-MOVE and a WADO retrieve of one instance can never reach
                 # different verdicts about whether it may be read.
                 get_storage_roots=self.cfg.storage_roots,
+                is_deid_destination=self._is_deid_destination,
                 allowed_aets=q.get("allowed_aets", []),
                 tls=bool(q.get("tls", False)),
                 tls_cert=self.cfg.resolve_path(q.get("tls_cert", "")),
                 tls_key=self.cfg.resolve_path(q.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(q.get("tls_ca", "")),
                 journal=self.journal,
+                max_associations=q.get("max_associations"),
+                max_per_host=q.get("max_per_host"),
             )
             self.qr_scp.start()
 
@@ -1004,7 +1050,12 @@ class PacsServer:
         # to the primary (retrying/holding until it's back). Independent of
         # whether the study matches an order.
         if self.emergency.active and self.cfg.emergency.get("hold_and_forward", True):
-            self._queue_for_forward(path)
+            try:
+                self._queue_for_forward(path)
+            except Exception as exc:
+                # Never at the cost of order matching below.
+                self.log.error(f"Emergency hold-and-forward failed for "
+                               f"{os.path.basename(path)}: {exc}", kind="emergency")
         if not accession and not patient_id and not study_uid:
             return
         # Study Instance UID is the strongest key (exact when the exam was made
@@ -1015,7 +1066,7 @@ class PacsServer:
         if self.cfg.ris.get("auto_close", True):
             self.orders.close(order["id"], reason=ris.CLOSE_MATCHED, matched_study=study_uid)
             self.log.info(
-                f"RIS order matched + closed: {order.get('patient') or '?'} "
+                f"RIS order matched + closed: {order.get('id') or '?'} "
                 f"[acc {order.get('accession') or '—'}] ← study {os.path.basename(path)}",
                 kind="ris",
             )
@@ -1026,7 +1077,7 @@ class PacsServer:
         else:
             self.log.info(
                 f"RIS order matched (left open — auto-close off): "
-                f"{order.get('patient') or '?'} [acc {order.get('accession') or '—'}]",
+                f"{order.get('id') or '?'} [acc {order.get('accession') or '—'}]",
                 kind="ris",
             )
 
@@ -1054,15 +1105,27 @@ class PacsServer:
         sent and let it be archived — or deleted — having never reached the
         primary, which is the entire reason hold-and-forward exists. A pin only
         widens the route; the rules still add whatever else they want."""
-        import shutil as _sh
+        from .atomicio import atomic_copy
         try:
             watch = self.cfg.resolved("scu", "watch_dir")
             os.makedirs(watch, exist_ok=True)
             dst = os.path.join(watch, os.path.basename(path))
             if os.path.abspath(dst) == os.path.abspath(path):
                 return
-            if not os.path.exists(dst):
-                _sh.copy2(path, dst)
+            src = os.stat(path)
+            try:
+                have = os.stat(dst)
+                same = (have.st_size, have.st_mtime_ns) == (src.st_size, src.st_mtime_ns)
+            except FileNotFoundError:
+                same = False
+            if not same:
+                # Missing, a leftover partial copy, or a held copy of an older
+                # version of this instance (a corrected re-send): (re)write it
+                # through a hidden scratch name + rename, so the watcher never
+                # sees a half-copied file and the primary gets the bytes that
+                # are in storage now. The copy keeps the source's mtime, so the
+                # send state reads changed bytes as a new promise.
+                atomic_copy(path, dst)
         except OSError as exc:
             self.log.warn(f"Emergency hold-and-forward: could not queue {os.path.basename(path)}: {exc}",
                           kind="emergency")
@@ -1070,20 +1133,23 @@ class PacsServer:
         primaries = self._holdforward_primaries()
         if primaries:
             # Pinned every time, not just on the copy: an earlier queue attempt
-            # may have landed the file before the primary was known. Flushed
-            # immediately — the watcher only persists at the end of a pass, and a
-            # crash in between would leave the held copy on disk with the promise
-            # gone, which is the failover guarantee quietly evaporating.
-            self.watcher.state.pin(dst, primaries)
-            self.watcher.state.save()
-        elif not self._warned_no_primary:
-            self._warned_no_primary = True
-            self.log.warn(
-                "Emergency hold-and-forward has no primary to hold FOR — no enabled "
-                "destination is flagged emergency_trigger, so held studies go wherever "
-                "the routing rules send them and nothing guarantees a back-fill",
-                kind="emergency",
-            )
+            # may have landed the file before the primary was known. Journalled
+            # durably (one fsynced line) rather than by rewriting the whole send
+            # ledger on this C-STORE thread for every instance.
+            self.watcher.state.pin(dst, primaries, durable=True)
+        else:
+            marker = (getattr(self.emergency, "since", None),
+                      getattr(self.emergency, "trigger_dest", ""))
+            if self._warned_no_primary != marker:
+                # Once per activation, not once per process: an outage after the
+                # primary flag was later removed must be warned about again.
+                self._warned_no_primary = marker
+                self.log.warn(
+                    "Emergency hold-and-forward has no primary to hold FOR — no enabled "
+                    "destination is flagged emergency_trigger, so held studies go wherever "
+                    "the routing rules send them and nothing guarantees a back-fill",
+                    kind="emergency",
+                )
 
     # ---- emergency failover (health monitor + state machine) --------------
     def emergency_action(self, action: str, profile=None) -> dict:
@@ -1425,7 +1491,10 @@ class PacsServer:
         if refused:
             return {"ok": False, "code": refused,
                     "message": self.ORDER_REFUSED_MESSAGES[refused]}
-        o = self.orders.update(oid, fields)
+        try:
+            o = self.orders.update(oid, fields)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
         if not o:
             return {"ok": False, "message": "order not found"}
         self.log.info(f"RIS order edited [acc {o.get('accession') or '—'}]", kind="ris")
@@ -1883,6 +1952,9 @@ class PacsServer:
             return {"ok": False, "message": f"'{station}' is not a registered modality. Add it "
                                             f"under Configuration → Modalities first, so the "
                                             f"AE title being borrowed is one somebody chose."}
+        # Ask as the REGISTERED spelling: C-FIND matching on the station key is
+        # case-sensitive, and a RIS checking the calling AE sees exactly this.
+        station = str(known[0].get("aet", "") or "").strip() or station
         modality = str(known[0].get("modality", "") or "")
 
         d = Destination(name="worklist source", host=host, port=int(src.get("port", 105) or 105),
@@ -2064,8 +2136,11 @@ class PacsServer:
         root = self._group_root(group)
         if root is None:
             return {"ok": False, "message": "group must be received|outgoing|sent"}
+        protect = [self.cfg.resolved("scu", "sent_dir"), self.cfg.resolved("scu", "pending_dir"),
+                   self.cfg.resolved("scp", "storage_dir"), self.cfg.resolved("scu", "watch_dir")]
+        protect = [p for p in protect if p and os.path.realpath(p) != os.path.realpath(root)]
         try:
-            history.delete_study(root, path)
+            history.delete_study(root, path, protect=protect)
         except (ValueError, OSError) as exc:
             return {"ok": False, "message": str(exc)}
         if self.index is not None:
@@ -2123,12 +2198,23 @@ class PacsServer:
         root = self._group_root(group)
         if root is None:
             return {"ok": False, "message": "group must be received|outgoing|sent"}
+        if _is_root(root, path):
+            return {"ok": False, "field": "path",
+                    "message": "pick a study, not the whole storage folder"}
         try:
             files = history.study_files(root, path)
         except (ValueError, OSError) as exc:
             return {"ok": False, "message": str(exc)}
         if not files:
             return {"ok": False, "message": "no DICOM files found for this study"}
+        inflight_key = os.path.realpath(path)
+        with self._lock:
+            sending = getattr(self, "_sends_in_flight", None)
+            if sending is None:
+                sending = self._sends_in_flight = set()
+            if inflight_key in sending:
+                return {"ok": False, "message": "this study is already being sent — wait for "
+                                                "that send to finish"}
         dests = [Destination.from_dict(d) for d in self.cfg.enabled_destinations()]
         if not dests:
             return {"ok": False, "message": "no enabled destinations — add one in Destinations first"}
@@ -2267,10 +2353,25 @@ class PacsServer:
                 has already taken is idempotent by SOP Instance UID."""
                 if _config_signature(self.cfg) == frozen.signature:
                     return
-                live = _deid_answers(
-                    routing.Router(self.cfg.routing, dest_names, cfg=self.cfg), dest_names)
+                live_router = routing.Router(self.cfg.routing, dest_names, cfg=self.cfg)
+                live = _deid_answers(live_router, dest_names)
                 moved = {n for n in dest_names
                          if live.get(n) != promised.get(n)} - superseded
+                # Conservative on top of the per-name answers: when the routing
+                # rules or the de-identification settings themselves changed,
+                # every node a deidentify rule names in EITHER version stops
+                # receiving from this send. A rule whose conditions moved can
+                # change what one file owes without moving the config-level
+                # answer for its name.
+                try:
+                    import json as _json
+                    rules_moved = (_json.dumps([frozen.routing, frozen.deid], sort_keys=True, default=str)
+                                   != _json.dumps([self.cfg.routing, self.cfg.deid], sort_keys=True,
+                                                  default=str))
+                except Exception:
+                    rules_moved = True
+                if rules_moved:
+                    moved |= (set(router.deid_nodes) | set(live_router.deid_nodes)) - superseded
                 if not moved:
                     return
                 superseded.update(moved)
@@ -2355,10 +2456,12 @@ class PacsServer:
                             else:
                                 fail += 1
                 except Exception as exc:
-                    fail += len([x for x in todo if x.name in scrub])
-                    for n in scrub:
-                        _tally(n)["fail"] += 1
-                        _tally(n)["last_error"] = f"de-identification failed ({exc})"
+                    # Once per NODE in both counters, as the success path
+                    # records: the summary and the hand-send record must agree.
+                    for x in [x for x in todo if x.name in scrub]:
+                        fail += 1
+                        _tally(x.name)["fail"] += 1
+                        _tally(x.name)["last_error"] = f"de-identification failed ({exc})"
                     self.log.error(
                         f"Send {os.path.basename(fp)}: de-identification failed ({exc}) — "
                         f"not forwarded to {', '.join(sorted(scrub))}",
@@ -2393,7 +2496,28 @@ class PacsServer:
             for dname, t in tally.items():
                 self.handsent.record(key, dname, **t)
 
-        threading.Thread(target=_run, name="pacs-send", daemon=True).start()
+        def _run_guarded():
+            try:
+                _run()
+            except Exception as exc:        # noqa: BLE001 - never die silently
+                self.log.error(f"Manual send of {label} stopped: {exc}", kind="send")
+            finally:
+                with self._lock:
+                    self._sends_in_flight.discard(inflight_key)
+
+        with self._lock:
+            # Re-checked as it is claimed: two clicks can both pass the early
+            # check above before either thread is registered.
+            if inflight_key in self._sends_in_flight:
+                return {"ok": False, "message": "this study is already being sent — wait for "
+                                                "that send to finish"}
+            self._sends_in_flight.add(inflight_key)
+        try:
+            threading.Thread(target=_run_guarded, name="pacs-send", daemon=True).start()
+        except Exception:
+            with self._lock:
+                self._sends_in_flight.discard(inflight_key)
+            raise
         return {"ok": True, "message": f"Sending {len(files)} instance(s) to their routed destination(s)…"}
 
     # How many mid-send changes /api/status carries. One row per study, newest
@@ -2424,6 +2548,9 @@ class PacsServer:
         root = self._group_root(group)
         if root is None:
             return {"ok": False, "message": "group must be received|outgoing|sent"}
+        if _is_root(root, path):
+            return {"ok": False, "field": "path",
+                    "message": "pick a study, not the whole storage folder"}
         try:
             files = history.study_files(root, path)
         except (ValueError, OSError) as exc:
@@ -2464,6 +2591,9 @@ class PacsServer:
         # Land it in its own subfolder so it reads as a separate DOC/OT series
         # (the browser groups a study one modality per folder).
         dest_dir = os.path.join(study_dir, "attachments")
+        if os.path.islink(dest_dir) or (os.path.exists(dest_dir) and not safe_within(root, dest_dir)):
+            return {"ok": False, "message": "the study's attachments folder is a link outside "
+                                            "the storage folder — refused"}
         try:
             ds = ingest.build_from_bytes(data, kind, identity)
             out = ingest.save_instance(ds, dest_dir)
@@ -2511,9 +2641,12 @@ class PacsServer:
         except (ValueError, OSError):
             return None
         base = path if os.path.isdir(path) else os.path.dirname(path)
+        from .dicomfs import safe_within
         for fp in files:
             if os.path.relpath(fp, base) == name:
-                return fp
+                # Asked again at hand-out: the file must still resolve inside
+                # the storage root (a link swapped in since the listing).
+                return fp if safe_within(root, fp) else None
         return None
 
     # ---- pending imports (non-DICOM awaiting review) ----------------------
@@ -2637,6 +2770,8 @@ class PacsServer:
         # store_dir / match_on may have changed — repoint the live order store.
         self.orders.store_dir = self.cfg.resolved("ris", "store_dir")
         self.orders.match_on = self.cfg.ris.get("match_on", "accession")
+        self.mwl_asks.flush()
+        self.mwl_asks.store_dir = self.cfg.resolved("ris", "store_dir")
         self._sync_index()
 
     def apply_config(self, new_data: Optional[dict] = None, enforce: bool = False,
@@ -2739,6 +2874,10 @@ class PacsServer:
         else:
             bounce = [n for n in listeners if running[n] and n in moved and n not in turned_off]
         restarted, started, stopped = [], [], []
+        # Listeners that this save stopped (or meant to start) and that did not
+        # come back: returned so the caller can say "saved, but the receiver is
+        # now DOWN" instead of a bare ok.
+        start_failures: list = []
         # ---- the bounce: past this line only exit (b) is left ---------------
         for n in [n for n in listeners if n in bounce or n in turned_off]:
             _sec, _start, stop, label, kind = listeners[n]
@@ -2760,6 +2899,7 @@ class PacsServer:
                 start()
             except Exception as exc:
                 self.log.error(f"Could not start {label}: {exc}", kind=kind)
+                start_failures.append({"service": label, "error": str(exc)})
                 # Enabled but not bound is a state the dashboard shows (and the
                 # log explains), not a reason to abort a save that is already
                 # persisted. A run-now service that is NOT enrolled draws nothing
@@ -2794,6 +2934,7 @@ class PacsServer:
                     started.append(label)
                 except Exception as exc:
                     self.log.error(f"Could not start {label}: {exc}", kind=kind)
+                    start_failures.append({"service": label, "error": str(exc)})
         had_mwl = self._is_running("mwl")
         self.sync_worklist()   # a no_ris destination may now want a permanent worklist
         if not had_mwl and self._is_running("mwl"):
@@ -2830,8 +2971,15 @@ class PacsServer:
         # was on the air before the bounce is on the air after it, and the
         # monitor re-evaluates it on its next tick like any other.
         was_emergency = getattr(self.emergency, "state", "")
-        self._apply_step(self.emergency.stop, "pause the health monitor", "emergency")
-        self._apply_step(self.emergency.start, "resume the health monitor", "emergency")
+        restart = getattr(self.emergency, "restart_monitor", None)
+        if restart is not None:
+            # Replaces the worker without touching the state machine: no OFF/IDLE
+            # window (hold-and-forward stays on), no re-trigger, no duplicate
+            # notification, no dismissed prompt reopening.
+            self._apply_step(restart, "restart the health monitor", "emergency")
+        else:
+            self._apply_step(self.emergency.stop, "pause the health monitor", "emergency")
+            self._apply_step(self.emergency.start, "resume the health monitor", "emergency")
         if was_emergency in (EMG_ACTIVE, EMG_RECOVERING) and self.emergency.state != was_emergency:
             self.emergency.state = was_emergency
         self.log.info("Configuration updated — " + (
@@ -2839,7 +2987,8 @@ class PacsServer:
             kind="config")
         if first_exc is not None:
             raise first_exc
-        return {"restarted": restarted, "started": started, "stopped": stopped}
+        return {"restarted": restarted, "started": started, "stopped": stopped,
+                "failed": start_failures}
 
     # ---- one service on or off (a card's Start / Stop) --------------------
     def _listener_table(self) -> dict:
@@ -3360,7 +3509,14 @@ class PacsServer:
         attention = 0
         now = time.time()
         for path, e in self.watcher.state.all_entries().items():
-            if not os.path.exists(path):
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            if _restamped(e, st):
+                # The bytes on disk are not the bytes this entry describes (a
+                # corrected re-send under the same name): it is a new file that
+                # owes a fresh routing pass, never something to discard.
                 continue
             sent = set(e.get("sent", []))
             fails = e.get("fail", {}) or {}
@@ -3550,8 +3706,12 @@ class PacsServer:
     def retry_stuck(self, dest: Optional[str] = None) -> dict:
         """Clear the retry backoff so the next watcher pass attempts immediately
         (all stuck destinations, or just `dest`)."""
+        if dest is not None and not isinstance(dest, str):
+            return {"ok": False, "message": "dest must be a destination name", "field": "dest"}
+        dest = (dest or "").strip()
         names = {dest} if dest else None
-        n = self.watcher.state.clear_backoff(names)
+        n = self.watcher.state.clear_backoff(names, enabled=set(self._enabled_dest_names()),
+                                             existing_only=True)
         self.watcher.state.save()
         if not self.watcher.running:
             return {"ok": True, "reset": n,
@@ -3617,11 +3777,30 @@ class PacsServer:
                     "owing": sorted(owing)}
         watch = self.cfg.resolved("scu", "watch_dir")
         removed = 0
+        gone = 0
+        changed = []
         for fp in paths:
+            # Re-checked at the last moment: a corrected re-send may have
+            # replaced the file since the listing, and its new bytes have not
+            # been routed by anything yet.
+            e = self.watcher.state.peek(fp) or {}
+            try:
+                st = os.stat(fp)
+                if e and _restamped(e, st):
+                    changed.append(os.path.basename(fp))
+                    continue
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
             try:
                 os.remove(fp)
             except FileNotFoundError:
-                pass
+                # Somebody else (the watcher archiving it) got there first: not
+                # ours to count as removed, but its record is dead either way.
+                gone += 1
+                self.watcher.state.drop(fp)
+                continue
             except OSError as exc:
                 self.log.warn(f"Could not remove stuck file {os.path.basename(fp)}: {exc}",
                               kind="send")
@@ -3632,8 +3811,18 @@ class PacsServer:
                 self.index.remove_file(fp)
             prune_empty_dirs(os.path.dirname(fp), watch)
         self.watcher.state.save()
+        if changed and not removed:
+            why = (f"{', '.join(changed)} changed on disk since it was listed — it is a new copy "
+                   f"that has not been routed yet; nothing was removed")
+            return {"ok": False, "removed": 0, "message": why, "error": why, "field": "files"}
         self.log.warn(f"Discarded {removed} stuck file(s) from the outgoing folder", kind="send")
-        return {"ok": True, "removed": removed, "message": f"Removed {removed} file(s)"}
+        msg = f"Removed {removed} file(s)"
+        if gone:
+            msg += f"; {gone} had already left the outgoing folder"
+        if changed:
+            msg += f"; {len(changed)} changed since listed and were kept"
+        return {"ok": True, "removed": removed, "already_gone": gone, "kept_changed": len(changed),
+                "message": msg}
 
     def send_stuck(self, files, destination: str) -> dict:
         """One-off forward of orphaned/held files to a destination the operator
@@ -3680,10 +3869,19 @@ class PacsServer:
             except Exception as exc:
                 return {"ok": False, "message": f"TLS config error: {exc}"}
         aet = self.cfg.scu.get("aet", "CARINOSCU")
+        generation = _config_signature(self.cfg)
 
         def _run():
             ok = fail = 0
-            for fp in paths:
+            for i, fp in enumerate(paths):
+                # The scrub decision above was made under the config as it stood;
+                # a save since then (a rule that now de-identifies for this node)
+                # must not let the rest go out under the old answer.
+                if _config_signature(self.cfg) != generation:
+                    self.log.warn(f"Stuck send to {name}: the configuration changed while it was "
+                                  f"running — {len(paths) - i} file(s) not sent; send them again "
+                                  f"under the current settings", kind="send")
+                    break
                 try:
                     with deidentified_tempfile(fp, deider if scrub else None) as payload:
                         for d in nodes:

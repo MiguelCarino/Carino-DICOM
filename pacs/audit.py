@@ -61,6 +61,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -68,6 +69,23 @@ from typing import Any, Iterator, Optional
 
 CURRENT = "audit.jsonl"
 ARCHIVE_GLOB = "audit-*.jsonl"
+# Only names this module writes count as archives: a stray audit-backup.jsonl
+# an operator copied into the folder used to be walked as part of the chain.
+_ARCHIVE_RE = re.compile(r"^audit-(\d{8}T\d{6}Z-\d{3}|\d{12})\.jsonl$")
+_SEQ_NAME = re.compile(r"^audit-(\d{12})\.jsonl$")
+
+
+def _archive_key(path: str) -> tuple:
+    """Archives written since the 2026-10 review are named by the first seq
+    they hold, so their order comes from the chain itself and not from a wall
+    clock that can step backwards. Older timestamp-named archives predate all
+    of them and keep their (chronological) name order."""
+    name = os.path.basename(path)
+    m = _SEQ_NAME.match(name)
+    return (1, int(m.group(1)), name) if m else (0, 0, name)
+RECOVERED = "audit.recovered"
+EXPORTED = "audit.exported"
+STUDY_STORED = "study.stored"
 GENESIS = "0" * 64            # the previous digest of the very first record
 
 # Rotation is by size, not by day. A dated file sounds tidier until an appliance
@@ -170,6 +188,30 @@ def config_changes(stored: dict, incoming: dict) -> dict:
     return out
 
 
+def _first_seq(path: str) -> int:
+    """The seq of the first record in *path*, or a large number if unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    return int(json.loads(line).get("seq") or 0)
+                except (ValueError, AttributeError, TypeError):
+                    return 1 << 62
+    except (OSError, UnicodeDecodeError):
+        pass
+    return 1 << 62
+
+
+def _canonical(record: dict) -> dict:
+    """The record exactly as it will read back from disk. Hashing the in-memory
+    dict made a record with int dict keys (or anything default=str renders)
+    verify as altered forever."""
+    return json.loads(json.dumps(record, sort_keys=True, separators=(",", ":"), default=str))
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -212,6 +254,7 @@ class AuditLog:
         self._head = GENESIS
         self._seq = 0
         self._broken = ""       # set when we could not write; surfaces in status()
+        self._rotation_problem = ""
         self._opened = False
 
     # ---- paths -----------------------------------------------------------
@@ -226,7 +269,13 @@ class AuditLog:
         lexical order is the chronological one. That is the whole reason the
         rotation name is built the way it is.
         """
-        archives = sorted(glob.glob(os.path.join(self.dir, ARCHIVE_GLOB)))
+        archives = [p for p in glob.glob(os.path.join(self.dir, ARCHIVE_GLOB))
+                    if _ARCHIVE_RE.match(os.path.basename(p))]
+        # Ordered by the first sequence number each archive holds (its name),
+        # not by a wall-clock stamp: a clock that steps backwards (an appliance
+        # with no RTC before NTP syncs) sorted a newer archive before an older
+        # one and made verify() report tampering. See _archive_key.
+        archives.sort(key=_archive_key)
         live = self.path
         return archives + ([live] if os.path.exists(live) else [])
 
@@ -243,10 +292,17 @@ class AuditLog:
             return self
         with self._lock:
             try:
-                os.makedirs(self.dir, exist_ok=True)
+                fresh_dir = not os.path.isdir(self.dir)
+                os.makedirs(self.dir, mode=0o700, exist_ok=True)
+                if fresh_dir:
+                    try:
+                        os.chmod(self.dir, 0o700)
+                    except OSError:
+                        pass
             except OSError as exc:
                 self._fail(f"audit directory {self.dir} cannot be created: {exc}")
                 return self
+            torn = self._repair_torn_tail()
             try:
                 last = self._last_record()
             except (OSError, UnicodeDecodeError) as exc:
@@ -265,7 +321,43 @@ class AuditLog:
                 except (TypeError, ValueError):
                     self._seq = 0
             self._opened = True
+        if torn:
+            # The fragment is evidence of a crash, not of tampering: kept beside
+            # the trail, and said in the trail itself.
+            self.record(RECOVERED, detail={"torn_bytes": torn[0], "kept_as": torn[1]})
         return self
+
+    def _repair_torn_tail(self):
+        """A live file whose last byte is not a newline ends in a record torn by
+        a crash mid-append. Appending after it glued the next record onto the
+        fragment (that record was lost and verify() failed forever). The
+        fragment is cut off into a .torn sidecar instead. Returns (bytes,
+        sidecar name) when something was cut, else None."""
+        try:
+            with open(self.path, "rb+") as fh:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                if size == 0:
+                    return None
+                fh.seek(size - 1)
+                if fh.read(1) == b"\n":
+                    return None
+                fh.seek(0)
+                data = fh.read()
+                cut = data.rfind(b"\n") + 1
+                fragment = data[cut:]
+                side = f"{CURRENT}.torn-{int(time.time())}"
+                with open(os.path.join(self.dir, side), "ab") as out:
+                    out.write(fragment + b"\n")
+                fh.truncate(cut)
+                fh.flush()
+                os.fsync(fh.fileno())
+                return (len(fragment), side)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            self._fail(f"audit trail ends in a torn record that could not be repaired: {exc}")
+            return None
 
     def _last_record(self) -> Optional[dict]:
         """The newest record that still carries a digest, or None on a fresh trail.
@@ -360,12 +452,19 @@ class AuditLog:
                     # Extra fields fill gaps and never overwrite. A caller that
                     # passes seq= or prev= as a keyword — by accident or not —
                     # must not be able to write its own place in the chain.
+                    # An underscore prefix is reserved for read-side markers
+                    # (verify() strips them), so such a key is renamed.
+                    key = str(key).lstrip("_") or "field"
                     if key not in record:
                         record[key] = value
+                record = _canonical(record)
                 record["hash"] = digest(self._head, record)
                 line = json.dumps(record, sort_keys=True, separators=(",", ":"),
                                   default=str)
-                with open(self.path, "a", encoding="utf-8") as fh:
+                created = not os.path.exists(self.path)
+                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
+                             | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
                     if self.fsync:
                         # An audit record that is still in the page cache when
@@ -374,6 +473,10 @@ class AuditLog:
                         # on deliberate actions, not per received instance.
                         fh.flush()
                         os.fsync(fh.fileno())
+                if created and self.fsync:
+                    # The directory entry too, or a power cut can take the new
+                    # file (and the records fsynced into it) away whole.
+                    _fsync_dir(self.dir)
                 self._head = record["hash"]
                 self._broken = ""
                 return record
@@ -401,6 +504,20 @@ class AuditLog:
             return
         if size < self.max_bytes:
             return
+        first = _first_seq(self.path)
+        if first < (1 << 62):
+            target = os.path.join(self.dir, f"audit-{first:012d}.jsonl")
+            if not os.path.exists(target):
+                try:
+                    os.replace(self.path, target)
+                    self._rotation_problem = ""
+                    if self.fsync:
+                        _fsync_dir(self.dir)
+                except OSError as exc:
+                    self._rotation_problem = (f"audit rotation failed ({exc}) — still "
+                                              f"recording to {self.path}")
+                    self._fail(self._rotation_problem)
+                return
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         # The sequence suffix is ALWAYS present and always three digits, which
         # is not decoration. files() orders archives lexically and verify()
@@ -419,9 +536,15 @@ class AuditLog:
             n += 1
         try:
             os.replace(self.path, target)
+            self._rotation_problem = ""
+            if self.fsync:
+                _fsync_dir(self.dir)
         except OSError as exc:
-            # Keep writing to the oversized file rather than stop recording.
-            self._fail(f"audit rotation failed ({exc}) — still recording to {self.path}")
+            # Keep writing to the oversized file rather than stop recording,
+            # and keep SAYING so: a successful append afterwards clears
+            # `broken`, so the rotation failure is remembered on its own.
+            self._rotation_problem = f"audit rotation failed ({exc}) — still recording to {self.path}"
+            self._fail(self._rotation_problem)
 
     # ---- reading ---------------------------------------------------------
     def read_all(self) -> Iterator[dict]:
@@ -439,9 +562,24 @@ class AuditLog:
         of them plainly — ``file`` — would add it to the hashed body and fail
         every record in the trail.
         """
-        for path in self.files():
+        # Every file is OPENED under the writer's lock, then read outside it: a
+        # rotation between listing and opening used to report the live file as
+        # unreadable (verify false, export 503) on an intact trail. An open
+        # handle follows the file through the rename.
+        handles: list = []
+        with self._lock:
+            for path in self.files():
+                try:
+                    handles.append((path, open(path, "r", encoding="utf-8"), None))
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    handles.append((path, None, exc))
+        for path, fh0, err in handles:
             try:
-                with open(path, "r", encoding="utf-8") as fh:
+                if err is not None:
+                    raise err
+                with fh0 as fh:
                     for line in fh:
                         line = line.strip()
                         if not line:
@@ -449,7 +587,8 @@ class AuditLog:
                         try:
                             rec = json.loads(line)
                         except ValueError:
-                            yield {"_unparseable": line[:200], "_file": os.path.basename(path)}
+                            yield {"_unparseable": line[:200], "_raw": line,
+                                   "_file": os.path.basename(path)}
                             continue
                         if isinstance(rec, dict):
                             rec["_file"] = os.path.basename(path)
@@ -573,7 +712,21 @@ class AuditLog:
             # is the difference between an operator learning their trail stopped
             # and finding out at an inspection.
             "broken": self.broken,
+            "rotation_problem": self._rotation_problem,
         }
+
+
+def _fsync_dir(directory: str) -> None:
+    try:
+        fd = os.open(directory, getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _actor_of(actor: Any) -> dict:

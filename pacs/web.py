@@ -78,10 +78,63 @@ MANUAL_DIR = next(
 )
 
 
+def _host_name(host_header: str) -> str:
+    """The host part of a Host header, lower-cased, without port or brackets."""
+    h = str(host_header or "").strip().lower()
+    if not h:
+        return ""
+    if h.startswith("["):
+        end = h.find("]")
+        return h[1:end] if end != -1 else ""
+    if h.count(":") == 1:
+        h = h.split(":", 1)[0]
+    return h.rstrip(".") if h.endswith(".") and h != "." else h
+
+
 def create_app(server: PacsServer) -> Flask:
     from . import dicomweb          # pulls pydicom in; keep it off the CLI's import path
 
     app = Flask(__name__, static_folder=None)
+
+    # ---- Host allow-list (DNS rebinding) ----------------------------------
+    # Registered FIRST, before authentication. While the dashboard runs
+    # unauthenticated on loopback, "only a process on this machine can reach
+    # it" is false for any BROWSER on this machine: a page whose DNS name
+    # rebinds to 127.0.0.1 is same-origin to its own name, can set X-Carino,
+    # and could read the config, rewrite it and shut the engine down. Such a
+    # request carries the attacker's Host, so anything that is not a loopback
+    # name, the bind address or an operator-listed web.allowed_hosts entry is
+    # refused (421) whenever no credential is required. With a token or
+    # profiles in force the attacker's origin holds no credential, so the
+    # check stays out of the way of LAN and proxy names.
+    @app.before_request
+    def _require_known_host():
+        try:
+            required = guard.required
+        except NameError:
+            required = False
+        if required:
+            return None
+        if _host_allowed(request.host):
+            return None
+        return jsonify(ok=False, error="unexpected Host header — this dashboard answers only "
+                                       "to its own address (add the name to web.allowed_hosts "
+                                       "if it is legitimate)"), 421
+
+    def _host_allowed(host_header: str) -> bool:
+        name = _host_name(host_header)
+        if not name:
+            return False
+        if name in ("localhost", "::1") or name.startswith("127."):
+            return True
+        web = server.cfg.web if isinstance(server.cfg.web, dict) else {}
+        bind = str(web.get("host", "") or "").strip().lower().strip("[]")
+        if bind and bind not in ("0.0.0.0", "::") and name == bind:
+            return True
+        extra = web.get("allowed_hosts") or []
+        if isinstance(extra, list):
+            return name in {str(h).strip().lower().strip("[]") for h in extra if str(h).strip()}
+        return False
 
     # ---- authentication ---------------------------------------------------
     # No-op while web.auth_token is empty — which config validation only permits
@@ -119,6 +172,16 @@ def create_app(server: PacsServer) -> Flask:
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
         if request.path == "/dicom-web" or request.path.startswith("/dicom-web/"):
+            # No custom header can be demanded of a DICOMweb client, but a
+            # BROWSER write always says where it came from: a present Origin
+            # that is neither this server nor a configured viewer is refused.
+            origin = request.headers.get("Origin")
+            if origin:
+                allowed = server.cfg.dicomweb.get("cors_origins") or []
+                same = _host_name(urlsplit(origin).netloc) == _host_name(request.host) \
+                    and urlsplit(origin).port == urlsplit("//" + request.host).port
+                if not same and origin not in allowed and "*" not in allowed:
+                    return jsonify(ok=False, error="cross-origin write refused"), 403
             return None
         if request.headers.get("X-Carino") != "1":
             return jsonify(ok=False, message="missing X-Carino header"), 403
@@ -451,8 +514,45 @@ def create_app(server: PacsServer) -> Flask:
             return resp
         if body is None:
             return resp
-        resp.set_data(json.dumps(users.redact(body, who)))
+        body = users.redact(body, who)
+        if not who.sees("patient_id") and request.path in _PATH_BEARING:
+            # The storage layout puts the PatientID in every path. A profile
+            # that may not see it gets an opaque handle instead, which the
+            # study and stuck actions resolve back on the server.
+            body = _handles_for_paths(body, _PATH_BEARING[request.path])
+        resp.set_data(json.dumps(body))
         return resp
+
+    # path-valued keys to swap for handles, per endpoint
+    _PATH_BEARING = {"/api/studies": ("path",), "/api/log": ("path",),
+                     "/api/stuck": ("rel", "path")}
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import secrets as _secrets
+    _handle_key = _secrets.token_bytes(32)
+    _handles: dict = {}
+
+    def _handle_for(value: str) -> str:
+        h = "h:" + _hmac.new(_handle_key, value.encode("utf-8", "surrogateescape"),
+                             _hashlib.sha256).hexdigest()[:24]
+        if len(_handles) > 50000:
+            _handles.clear()
+        _handles[h] = value
+        return h
+
+    def _resolve_handle(value):
+        """A handle back to the path it stands for; anything else unchanged."""
+        if isinstance(value, str) and value.startswith("h:"):
+            return _handles.get(value)
+        return value
+
+    def _handles_for_paths(node, keys):
+        if isinstance(node, dict):
+            return {k: (_handle_for(v) if k in keys and isinstance(v, str) and v
+                        else _handles_for_paths(v, keys)) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_handles_for_paths(v, keys) for v in node]
+        return node
 
     def _redacted(data: dict) -> dict:
         out = copy.deepcopy(data)
@@ -513,6 +613,11 @@ def create_app(server: PacsServer) -> Flask:
         there is nothing to prove — that is how the first one gets set.
         """
         if not guard.required:
+            return True
+        if not guard.token:
+            # Profiles in force, but no token configured: there is no token to
+            # prove possession of, and the caller already passed the
+            # capability check (auth.manage) as a signed-in profile.
             return True
         presented = auth.token_from_headers(request.headers)
         return bool(presented) and guard.verify_token(presented)
@@ -846,6 +951,52 @@ def create_app(server: PacsServer) -> Flask:
                            + " and ".join(c.split(".")[0] for c in lacking)
                            + ", which needs " + " and ".join(lacking)
                            + " — this profile does not hold it."))
+            # Fields OUTSIDE those two sections that reach the same places:
+            # where PHI leaves the box, what the forwarder may delete, and
+            # whether anything is recorded at all. config.write implies none.
+            from .config import _PATH_FIELDS, _deep_merge as _dm
+            new_doc = _dm(DEFAULTS, data)
+            old_doc = _dm(DEFAULTS, stored)
+
+            def _get(doc, sec, key):
+                b = doc.get(sec)
+                return b.get(key) if isinstance(b, dict) else None
+
+            def _absolute(url) -> bool:
+                u = str(url or "").strip()
+                return bool(u) and not (u.startswith("/") and not u.startswith("//"))
+            gates = []
+            if _get(new_doc, "qr", "move_destinations") != _get(old_doc, "qr", "move_destinations"):
+                gates.append(("destinations.write", "qr.move_destinations"))
+            new_eu, old_eu = _get(new_doc, "web", "editor_url"), _get(old_doc, "web", "editor_url")
+            if new_eu != old_eu and _absolute(new_eu):
+                gates.append(("destinations.write", "web.editor_url"))
+            if _get(new_doc, "dicomweb", "cors_origins") != _get(old_doc, "dicomweb", "cors_origins"):
+                gates.append(("destinations.write", "dicomweb.cors_origins"))
+            if _get(new_doc.get("notify") or {}, "webhook", "url") != \
+                    _get(old_doc.get("notify") or {}, "webhook", "url"):
+                gates.append(("destinations.write", "notify.webhook.url"))
+            if (_get(new_doc, "scu", "on_success") != _get(old_doc, "scu", "on_success")
+                    and _get(new_doc, "scu", "on_success") in ("move", "delete")):
+                gates.append(("studies.delete", "scu.on_success"))
+            for sec, key in _PATH_FIELDS:
+                if _get(new_doc, sec, key) != _get(old_doc, sec, key):
+                    gates.append(("studies.delete", f"{sec}.{key}"))
+            if new_doc.get("logs_dir") != old_doc.get("logs_dir"):
+                gates.append(("studies.delete", "logs_dir"))
+            if new_doc.get("audit") != old_doc.get("audit"):
+                gates.append(("auth.manage", "audit"))
+            missing_caps = [(cap, field) for cap, field in gates if not who.can(cap)]
+            if missing_caps:
+                caps = sorted({c for c, _f in missing_caps})
+                raise _Refused(403, dict(
+                    ok=False, error="not permitted",
+                    forbidden={"capability": missing_caps[0][0], "capabilities": caps,
+                               "fields": [f for _c, f in missing_caps]},
+                    detail="this Save changes " + ", ".join(f for _c, f in missing_caps)
+                           + ", which needs " + " and ".join(caps)
+                           + " — config.write alone does not reach where studies are sent, "
+                             "what the forwarder deletes, or the audit trail."))
             return data
 
         with _save_lock:
@@ -864,10 +1015,14 @@ def create_app(server: PacsServer) -> Flask:
             # sent one can keep saving without a re-GET between every Save.
             # `restarted` says which listeners the Save bounced (only those whose
             # own settings changed); `started`/`stopped` the ones a flag moved.
+            # `failed` lists listeners this Save stopped (or tried to start)
+            # that did not come back: the config is saved, but the receiver
+            # that was working may now be down, and a bare ok:true hid that.
             return _tagged(jsonify(ok=True, config=_redacted(server.cfg.data),
                                    restarted=applied.get("restarted", []),
                                    started=applied.get("started", []),
-                                   stopped=applied.get("stopped", [])))
+                                   stopped=applied.get("stopped", []),
+                                   failed=applied.get("failed", [])))
 
     @app.post("/api/auth/token")
     def api_auth_token():
@@ -1070,6 +1225,11 @@ def create_app(server: PacsServer) -> Flask:
         action = str(d.get("action") or "").strip().lower()
         if action == "set":
             value = d.get("value")
+            if isinstance(value, str) and field == "webhook":
+                # Read stripped by everything that reports it; a key of spaces
+                # (or with spaces round it) would sign with one value while the
+                # dashboard reported another. Passwords keep their spaces.
+                value = value.strip()
             if not isinstance(value, str) or not value:
                 return jsonify(ok=False, error=f"'value' must be a non-empty string"), 400
         elif action == "clear":
@@ -1078,7 +1238,12 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(ok=False, error="action must be set|clear"), 400
 
         with server.cfg.mutate():
-            block = server.cfg.data.setdefault("notify", {}).setdefault(field, {})
+            notify = server.cfg.data.get("notify")
+            if not isinstance(notify, dict):
+                notify = server.cfg.data["notify"] = {}
+            block = notify.get(field)
+            if not isinstance(block, dict):
+                block = notify[field] = {}
             previous = block.get(key, "")
             block[key] = value
             try:
@@ -1271,7 +1436,25 @@ def create_app(server: PacsServer) -> Flask:
         if denied:
             return denied
         status = request.args.get("status") or None
-        return jsonify(server.list_orders(status))
+        body = server.list_orders(status)
+        if guard.profiles_enabled:
+            who = guard.current()
+            for o in body.get("orders") or []:
+                # Which fields this profile gets as the placeholder, so the edit
+                # form can lock them instead of posting "***" back.
+                o["redacted"] = users.withheld(list(o), who)
+        return jsonify(body)
+
+    def _without_withheld(d: dict) -> dict:
+        """Drop every value this profile was shown as the placeholder (and any
+        literal placeholder): a withheld field keeps its stored value, as
+        pending approve does. Otherwise a round-trip writes '***' into the
+        order — and onto the worklist."""
+        who = guard.current()
+        hidden = set(users.withheld(list(d), who)) if guard.profiles_enabled else set()
+        return {k: v for k, v in d.items()
+                if k not in hidden and not (isinstance(v, str) and v.strip() == users.REDACTED)
+                and k != "redacted"}
 
     @app.get("/api/ris/orders/stations")
     def api_ris_order_stations():
@@ -1298,7 +1481,8 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("orders.write")
         if denied:
             return denied
-        d = request.get_json(silent=True) or {}
+        d = request.get_json(silent=True)
+        d = _without_withheld(d if isinstance(d, dict) else {})
         res = server.add_order(d)
         return jsonify(res), (200 if res.get("ok") else 400)
 
@@ -1307,11 +1491,12 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("orders.write")
         if denied:
             return denied
-        d = request.get_json(silent=True) or {}
+        d = request.get_json(silent=True)
+        d = d if isinstance(d, dict) else {}
         oid = d.get("id")
         if not oid:
             return jsonify(ok=False, message="missing 'id'"), 400
-        res = server.update_order(oid, d)
+        res = server.update_order(oid, _without_withheld(d))
         return jsonify(res), (200 if res.get("ok") else 400)
 
     @app.post("/api/ris/orders/cancel")
@@ -1402,15 +1587,37 @@ def create_app(server: PacsServer) -> Flask:
     def api_watcher():
         return _service_switch("watcher", "watcher")
 
+    def _probe_target_refused(dest) -> str:
+        """Why a free-form test target is refused, or "". The Test buttons take
+        the row being edited (not only saved destinations, so an unsaved edit
+        can be tried), which makes them a TCP probe from this appliance: link-
+        local and cloud-metadata addresses are never a DICOM node."""
+        import ipaddress
+        host = str(dest.get("host", "") or "").strip().strip("[]")
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return ""
+        if ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+            return f"{host} is a link-local, multicast or unspecified address, not a DICOM node"
+        return ""
+
     @app.post("/api/echo")
     def api_echo():
+        """C-ECHO a node. Takes a destination ROW — saved or still being edited
+        in the form — so it is not limited to configured destinations; the
+        services.control gate (a write capability) is what limits who may."""
         denied = guard.deny("services.control")
         if denied:
             return denied
-        dest = request.get_json(silent=True) or {}
+        dest = request.get_json(silent=True)
+        dest = dest if isinstance(dest, dict) else {}
         for k in ("host", "port", "aet"):
             if k not in dest:
                 return jsonify(error=f"destination missing '{k}'"), 400
+        why = _probe_target_refused(dest)
+        if why:
+            return jsonify(ok=False, error=why, field="host"), 400
         res = server.echo(dest)
         return jsonify(ok=res.ok, message=res.message)
 
@@ -1432,14 +1639,18 @@ def create_app(server: PacsServer) -> Flask:
     def api_connections_check():
         """The destination row's "What it accepts": the same gate as its Test
         (POST /api/echo), because it is the same act — association negotiation
-        with a node already in the configuration, sending nothing."""
+        with the node in the row (saved or being edited), sending nothing."""
         denied = guard.deny("services.control")
         if denied:
             return denied
-        dest = request.get_json(silent=True) or {}
+        dest = request.get_json(silent=True)
+        dest = dest if isinstance(dest, dict) else {}
         for k in ("host", "port", "aet"):
             if k not in dest:
                 return jsonify(error=f"destination missing '{k}'"), 400
+        why = _probe_target_refused(dest)
+        if why:
+            return jsonify(ok=False, error=why, field="host"), 400
         try:
             return jsonify(server.check_destination(dest))
         except (TypeError, ValueError) as exc:
@@ -1464,8 +1675,13 @@ def create_app(server: PacsServer) -> Flask:
         Gated on config.read rather than orders.read on purpose: this is
         infrastructure diagnosis, and the items that come back are another
         system's patients. The people who run this — IT and administrators —
-        are not the people who key orders in."""
-        denied = guard.deny("config.read")
+        are not the people who key orders in.
+
+        It needs services.control, not config.read: it reaches OFF the box,
+        borrows a live modality's AE title towards another RIS and files that
+        system's patients to disk — none of which is a read. config.read is
+        held by password-less profiles on a network bind."""
+        denied = guard.deny("services.control")
         if denied:
             return denied
         body = request.get_json(silent=True) or {}
@@ -1489,11 +1705,30 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/worklist/caught/clear")
     def api_worklist_caught_clear():
-        denied = guard.deny("config.read")
+        denied = guard.deny("services.control")
         if denied:
             return denied
         n = server.caught.clear()
         return jsonify(ok=True, message=f"Cleared {n} probe round(s)")
+
+    # What each modality's worklist queries ask for, and how we answered — tag
+    # names and counts only (pacs/mwlasks.py), so config.read is enough.
+    @app.get("/api/worklist/asks")
+    def api_worklist_asks():
+        denied = guard.deny("config.read")
+        if denied:
+            return denied
+        asks = getattr(server, "mwl_asks", None)
+        return jsonify(stations=asks.stations() if asks is not None else [])
+
+    @app.post("/api/worklist/asks/clear")
+    def api_worklist_asks_clear():
+        denied = guard.deny("services.control")
+        if denied:
+            return denied
+        asks = getattr(server, "mwl_asks", None)
+        n = asks.clear() if asks is not None else 0
+        return jsonify(ok=True, message=f"Cleared the queries of {n} modality(ies)")
 
     @app.get("/api/log")
     def api_log():
@@ -1529,6 +1764,11 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("logs.read")
         if denied:
             return denied
+        # A plain-text file goes out as written: nothing on the way can redact
+        # it, so it needs every identifier field, like a DICOM file.
+        refused = _deny_unredactable()
+        if refused:
+            return refused
         day = str(request.args.get("day", ""))
         path = server.log.day_file(day)
         if path is None:
@@ -1580,9 +1820,10 @@ def create_app(server: PacsServer) -> Flask:
             st[key] = [m]
 
     def _study_action(fn):
-        d = request.get_json(silent=True) or {}
-        path = d.get("path")
-        if not path:
+        d = request.get_json(silent=True)
+        d = d if isinstance(d, dict) else {}
+        path = _resolve_handle(d.get("path"))
+        if not path or not isinstance(path, str):
             return jsonify(ok=False, message="missing 'path'"), 400
         res = fn(d.get("group", "received"), path)
         return jsonify(res), (200 if res.get("ok") else 400)
@@ -1596,7 +1837,9 @@ def create_app(server: PacsServer) -> Flask:
 
     @app.post("/api/studies/reveal")
     def api_studies_reveal():
-        denied = guard.deny("studies.read")
+        # Opens a window on the console of the machine running the engine — an
+        # action, not a read, and only meaningful to someone sitting at it.
+        denied = guard.deny("services.control")
         if denied:
             return denied
         return _study_action(server.reveal_study)
@@ -1617,6 +1860,8 @@ def create_app(server: PacsServer) -> Flask:
         res = server.delete_all_studies(group)
         return jsonify(res), (200 if res.get("ok") else 400)
 
+    _ATTACH_MAX_BYTES = 100 * 1024 * 1024
+
     @app.post("/api/studies/attach")
     def api_studies_attach():
         """Multipart: 'group', 'path', and a 'file' (PDF/JPEG/PNG) to wrap as a
@@ -1624,9 +1869,17 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.send")
         if denied:
             return denied
-        group = request.form.get("group", "received")
-        path = request.form.get("path")
-        up = request.files.get("file")
+        # Bounded before the form is parsed (werkzeug enforces it while
+        # reading), like the eye-photo and STOW routes: up.read() holds the
+        # whole upload in memory.
+        request.max_content_length = _ATTACH_MAX_BYTES
+        try:
+            group = request.form.get("group", "received")
+            path = _resolve_handle(request.form.get("path"))
+            up = request.files.get("file")
+        except RequestEntityTooLarge:
+            return jsonify(ok=False, message=f"the attachment is larger than "
+                           f"{_ATTACH_MAX_BYTES // (1024 * 1024)} MB"), 413
         if not path or up is None or not up.filename:
             return jsonify(ok=False, message="need a study 'path' and a 'file'"), 400
         res = server.attach_to_study(group, path, up.filename, up.read())
@@ -1655,10 +1908,9 @@ def create_app(server: PacsServer) -> Flask:
     #     editor origin — including one that has been XSS'd — reads the whole
     #     archive on the operator's ambient session. Requiring an explicit
     #     Authorization header is the weaker capability, so it is the right one.
-    # This is also why Allow-Headers may stay "*": the wildcard is honoured for
-    # non-credentialed requests only. Adding Allow-Credentials later would
-    # silently stop Authorization from being allowed and break the editor in a
-    # way that looks like a network fault. Note that ACAO is an exact origin and
+    # Allow-Headers names Authorization and X-Carino-Token explicitly: under
+    # the Fetch standard a "*" there never covers Authorization, so a preflight
+    # for a token-holding editor would have been refused. Note that ACAO is an exact origin and
     # never "*" — a wildcard would let any page the operator visits enumerate
     # and download their archive off localhost, token or no token, because a
     # bearer header is not a credential the browser withholds.
@@ -1669,11 +1921,24 @@ def create_app(server: PacsServer) -> Flask:
     # answer is web.editor_url = "/editor/" — the bundled same-origin copy,
     # where _editor_origin() returns None and no CORS is emitted at all.
     def _editor_origin():
+        """The editor's ORIGIN as a browser serialises it (RFC 6454 6.2): scheme
+        and host lower-cased, the default port dropped, no userinfo. The raw
+        netloc ('https://Editor.Example:443') never matched what the browser
+        sends, so the cross-origin editor failed with an opaque error."""
         url = (server.cfg.web.get("editor_url") or "").strip()
-        p = urlsplit(url)
-        if p.scheme in ("http", "https") and p.netloc:
-            return f"{p.scheme}://{p.netloc}"
-        return None
+        try:
+            p = urlsplit(url)
+            port = p.port
+        except ValueError:
+            return None
+        scheme = (p.scheme or "").lower()
+        if scheme not in ("http", "https") or not p.hostname:
+            return None
+        host = p.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        default = 443 if scheme == "https" else 80
+        return f"{scheme}://{host}" + (f":{port}" if port and port != default else "")
 
     def _cors(resp):
         origin = _editor_origin()
@@ -1689,7 +1954,10 @@ def create_app(server: PacsServer) -> Flask:
         if origin:
             resp.headers["Access-Control-Allow-Origin"] = origin
             resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-            resp.headers["Access-Control-Allow-Headers"] = "*"
+            # Listed, not "*": the Fetch standard never lets the wildcard
+            # cover Authorization, so a token-holding editor's preflight would
+            # be refused.
+            resp.headers["Access-Control-Allow-Headers"] = "Authorization, X-Carino-Token"
             resp.headers["Access-Control-Allow-Private-Network"] = "true"
             resp.headers["Access-Control-Max-Age"] = "600"
             resp.headers["Vary"] = "Origin"
@@ -1859,7 +2127,7 @@ def create_app(server: PacsServer) -> Flask:
                 r.update(draft, r.enabled)
             described = {str(k): str(v if v is not None else "") for k, v in attrs.items()}
             return jsonify(ok=True, **r.explain(attrs=described))
-        path = d.get("path")
+        path = _resolve_handle(d.get("path"))
         if not path:
             return jsonify(ok=False, message="need 'attributes' or a study 'path'"), 400
         if draft is not None:
@@ -1900,6 +2168,14 @@ def create_app(server: PacsServer) -> Flask:
             return denied
         return jsonify(server.stuck_sends(detail=True))
 
+    def _stuck_body():
+        """The JSON object a Stuck action posts, or None for anything else (a
+        list, a string): refused with 400 rather than reaching the server."""
+        d = request.get_json(silent=True)
+        if d is None:
+            return {}
+        return d if isinstance(d, dict) else None
+
     @app.post("/api/stuck/discard")
     def api_stuck_discard():
         """Delete orphaned/held files the stuck listing reports — accepting the
@@ -1907,7 +2183,12 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.delete")
         if denied:
             return denied
-        files = (request.get_json(silent=True) or {}).get("files")
+        d = _stuck_body()
+        if d is None:
+            return jsonify(ok=False, error="expected a JSON object"), 400
+        files = d.get("files")
+        if isinstance(files, list):
+            files = [_resolve_handle(f) for f in files]
         res = server.discard_stuck(files)
         # A count, not the handles: those are storage paths, and the storage
         # layout puts the PatientID in them.
@@ -1921,8 +2202,15 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.send")
         if denied:
             return denied
-        d = request.get_json(silent=True) or {}
+        d = _stuck_body()
+        if d is None:
+            return jsonify(ok=False, error="expected a JSON object"), 400
         files = d.get("files")
+        if isinstance(files, list):
+            files = [_resolve_handle(f) for f in files]
+        if d.get("destination") is not None and not isinstance(d.get("destination"), str):
+            return jsonify(ok=False, error="'destination' must be a name",
+                           field="destination"), 400
         res = server.send_stuck(files, d.get("destination"))
         request.environ["carino.audit_detail"] = {
             "files": len(files) if isinstance(files, list) else 0,
@@ -1934,8 +2222,13 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.send")
         if denied:
             return denied
-        dest = (request.get_json(silent=True) or {}).get("dest") or None
-        res = server.retry_stuck(dest)
+        d = _stuck_body()
+        if d is None:
+            return jsonify(ok=False, error="expected a JSON object"), 400
+        dest = d.get("dest")
+        if dest is not None and not isinstance(dest, str):
+            return jsonify(ok=False, error="'dest' must be a destination name", field="dest"), 400
+        res = server.retry_stuck((dest or "").strip() or None)
         return jsonify(res), (200 if res.get("ok") else 400)
 
     # ---- pending imports (non-DICOM awaiting review) ----------------------
@@ -1953,6 +2246,11 @@ def create_app(server: PacsServer) -> Flask:
         for item in body.get("items") or []:
             item["redacted"] = (users.withheld(list(item), who)
                                 if guard.profiles_enabled else [])
+            if guard.profiles_enabled and not who.sees("patient_name"):
+                # Original file names are routinely the patient's name
+                # ('Doe_Jane_report.pdf'): replaced by a neutral handle.
+                ext = os.path.splitext(str(item.get("filename") or ""))[1][:8]
+                item["filename"] = f"{str(item.get('id') or 'item')[:12]}{ext}"
         return jsonify(body)
 
     @app.post("/api/pending/approve")
@@ -2006,12 +2304,33 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("studies.read")
         if denied:
             return denied
+        # The bytes are a report or a print film whose content carries the
+        # patient's name; they cannot be redacted, so the same whole-PHI rule
+        # as the raw DICOM hand-out applies.
+        refused = _deny_unredactable()
+        if refused:
+            return refused
         pid = request.args.get("id", "")
         loc = server.pending_preview(pid)
         if not loc:
             return jsonify(error="not found"), 404
         folder, filename = loc
-        return send_from_directory(folder, filename)
+        from . import ingest
+        try:
+            with open(os.path.join(folder, filename), "rb") as fh:
+                head = fh.read(16)
+        except OSError:
+            return jsonify(error="not found"), 404
+        # The type comes from what the bytes ARE, never from the name the file
+        # arrived with: 'x.html' starting with %PDF used to be served as
+        # text/html on this origin and run as the operator.
+        mime = ingest.media_type(head)
+        if not mime:
+            return jsonify(error="not a previewable file"), 415
+        resp = send_from_directory(folder, filename, mimetype=mime, max_age=0)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self'; object-src 'self'"
+        return resp
 
     @app.post("/api/shutdown")
     def api_shutdown():
@@ -2060,6 +2379,9 @@ def create_app(server: PacsServer) -> Flask:
                        list_profiles=guard.lists_profiles(),
                        **_capabilities_catalogue())
 
+    # OWASP ASVS 5.0 V6.2.1 / NIST SP 800-63B: at least 8.
+    _MIN_PASSWORD = 8
+
     @app.post("/api/profiles/seed")
     def api_profiles_seed():
         """Turn profiles on, with the four presets.
@@ -2073,11 +2395,38 @@ def create_app(server: PacsServer) -> Flask:
         denied = guard.deny("auth.manage")
         if denied:
             return denied
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}
+        admin_pw = body.get("admin_password")
+        if admin_pw is not None and (not isinstance(admin_pw, str) or len(admin_pw) < _MIN_PASSWORD):
+            return jsonify(ok=False, field="admin_password",
+                           error=f"the administrator password must be at least "
+                                 f"{_MIN_PASSWORD} characters"), 400
+        reachable = not is_loopback_host(web_host_of(server.cfg.web))
         with server.cfg.mutate():
             if users.profiles_of(server.cfg.users):
                 return jsonify(ok=False,
                                error="profiles already exist on this appliance"), 400
-            resp = _write_profiles(users.preset_profiles(), audit.PROFILE_CREATED,
+            presets = users.preset_profiles()
+            if admin_pw:
+                # Off-box there is no first-run nag to set the first password
+                # in, and an open Administrator is refused outright: the seed
+                # takes the password, and every other preset that could change
+                # something is created DISABLED until it gets one.
+                for row in presets:
+                    if row.get("admin"):
+                        row["password"] = users.hash_password(admin_pw)
+                    elif reachable and row.get("password") is None and any(
+                            users._is_write(c) for c in (row.get("capabilities") or [])):
+                        row["enabled"] = False
+            elif reachable:
+                return jsonify(ok=False, field="admin_password",
+                               error="this dashboard is reachable from the network, so the "
+                                     "presets cannot be created open — send "
+                                     "{\"admin_password\": \"...\"} to seed with a locked "
+                                     "Administrator (the other write-capable presets start "
+                                     "disabled until they are given passwords)"), 400
+            resp = _write_profiles(presets, audit.PROFILE_CREATED,
                                    "seeded the four preset profiles")
         # Seeding is the moment guard.required flips on, so the request that
         # did it is the last one this caller can make without a session — the
@@ -2116,6 +2465,12 @@ def create_app(server: PacsServer) -> Flask:
             pid = str(body.get("id") or "")
             existing = next((r for r in rows if r.get("id") == pid), None)
             creating = existing is None
+            if creating and pid:
+                # An id that names no profile is a stale editor row for one that
+                # was deleted — never a request to create it again (password-less,
+                # capabilities and all). Creation is an absent or empty id.
+                return jsonify(ok=False, error="no such profile — it may have been deleted; "
+                                               "reload the profile list"), 404
             if creating:
                 row = {"id": users.new_id(), "password": None}
                 rows.append(row)
@@ -2142,9 +2497,9 @@ def create_app(server: PacsServer) -> Flask:
                 action = str(pw.get("action") or "").lower()
                 if action == "set":
                     value = pw.get("value")
-                    if not isinstance(value, str) or len(value) < 4:
+                    if not isinstance(value, str) or len(value) < _MIN_PASSWORD or len(value) > 1024:
                         return jsonify(ok=False,
-                                       error="a password must be at least 4 characters. "
+                                       error=f"a password must be at least {_MIN_PASSWORD} characters. "
                                              "Leave it unset for an open profile instead — "
                                              "a short password is not a weaker lock, it is "
                                              "the same open door with a step in front of it."), 400
@@ -2300,11 +2655,21 @@ def create_app(server: PacsServer) -> Flask:
                               f"would be missing records without saying so: "
                               f"{record['_unreadable']}",
                 }), 503
+            if "_unparseable" in record:
+                # The corrupt line IS the evidence: exported exactly as it sits
+                # in the file, never as an empty object.
+                lines.append(str(record.get("_raw") or record.get("_unparseable") or ""))
+                continue
             lines.append(json.dumps({k: v for k, v in record.items()
                                      if not k.startswith("_")},
                                     sort_keys=True, separators=(",", ":"),
                                     default=str))
         body = "\n".join(lines) + ("\n" if lines else "")
+        # A bulk disclosure of the unredacted trail is itself recorded, with
+        # the head it ended at — which also anchors this copy inside the trail.
+        server.audit.record(audit.EXPORTED, actor=who, target="audit trail",
+                            source=request.remote_addr or "",
+                            detail={"records": len(lines), "head": server.audit.head()})
         resp = app.response_class(body, mimetype="application/x-ndjson")
         resp.headers["Content-Disposition"] = 'attachment; filename="carino-dicom-audit.jsonl"'
         return resp
@@ -2406,6 +2771,43 @@ def create_app(server: PacsServer) -> Flask:
                 parts.append(f"{field}={value}")
         return " ".join(parts)[:300]
 
+    def _record_dicomweb(path: str, resp) -> None:
+        """DICOMweb is audited like the API: a refusal is recorded, a STOW that
+        stored instances is a write by a named caller, and a read is recorded
+        when audit.log_reads asks for it (PS3.15 A.5: instances accessed)."""
+        method = request.method.upper()
+        if method == "OPTIONS":
+            return
+        actor = guard.current()
+        if resp.status_code in (401, 403):
+            server.audit.record(audit.DENIED, actor=actor, target=path, outcome="denied",
+                                source=request.remote_addr or "", method=method,
+                                endpoint=path)
+            return
+        if method == "POST":
+            server.audit.record(audit.STUDY_STORED, actor=actor, target=path,
+                                outcome="ok" if resp.status_code in (200, 202) else "failed",
+                                source=request.remote_addr or "", status=resp.status_code,
+                                endpoint=path)
+        elif method in ("GET", "HEAD") and 200 <= resp.status_code < 300:
+            parts = path.split("/")
+            target = parts[3] if len(parts) > 3 and parts[2] == "studies" else path
+            server.audit.record(audit.STUDY_READ, actor=actor, target=target,
+                                source=request.remote_addr or "", endpoint=path)
+
+    @app.after_request
+    def _security_headers(resp):
+        """nosniff and frame protection on everything; never cache an API answer
+        (they carry PHI, and the token endpoint hands out a secret)."""
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if request.path.startswith("/api/"):
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    # GET endpoints that hand out instance bytes (see _record_to_audit).
+    _AUDIT_READS = frozenset({"/api/studies/file", "/api/pending/preview"})
+
     @app.after_request
     def _record_to_audit(resp):
         """Record every mutating API call, with its outcome.
@@ -2421,9 +2823,23 @@ def create_app(server: PacsServer) -> Flask:
         """
         try:
             path = request.path
+            if path == "/dicom-web" or path.startswith("/dicom-web/"):
+                _record_dicomweb(path, resp)
+                return resp
             if not path.startswith("/api/"):
                 return resp
             method = request.method.upper()
+            if method in ("GET", "HEAD") and path in _AUDIT_READS \
+                    and 200 <= resp.status_code < 300:
+                # The raw hand-outs (DICOM bytes, a pending report): recorded as
+                # instance access when audit.log_reads is on (record() drops it
+                # otherwise), the dashboard's half of what DICOMweb records.
+                server.audit.record(
+                    audit.STUDY_READ, actor=guard.current(),
+                    target=str(request.args.get("id") or "") if path == "/api/pending/preview"
+                    else (str(request.args.get("name") or "") or "study file"),
+                    source=request.remote_addr or "", endpoint=path)
+                return resp
             if path in _AUDIT_SKIP or method in ("GET", "HEAD", "OPTIONS"):
                 # A 403 on a read is still worth a record — it is the only
                 # trace that somebody went looking.

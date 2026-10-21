@@ -22,7 +22,7 @@ import re
 import secrets
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 # Imported as a module, not as names: users.py holds the profile rules and this
 # file holds the document they live in, and the arrow only ever points this way.
@@ -262,6 +262,10 @@ DEFAULTS: dict[str, Any] = {
         "tls_cert": "",         # server certificate chain (PEM); relative paths resolve against this file's folder
         "tls_key": "",          # its private key (PEM, unencrypted — the service starts unattended)
         "behind_proxy": False,  # true ONLY behind the reverse proxy in deploy/: trust its X-Forwarded-For/-Proto/-Host
+        # Extra Host names the dashboard answers to while no credential is
+        # required (loopback, no token): anything that is not a loopback name or
+        # one of these is refused, which is what stops a DNS-rebinding page.
+        "allowed_hosts": [],
     },
     "logs_dir": "./logs",       # dated log files (one per day) live here
     "setup_completed": "",      # UTC stamp of the run that finished the service chooser; "" = never, so the chooser is offered
@@ -846,14 +850,14 @@ class Config:
         # existed in memory.
         with self.mutate():
             merged = _deep_merge(DEFAULTS, new_data)
-            validate(merged)
+            validate(merged, base_dir=os.path.dirname(self.path))
             self.data = merged
             self.save()
         return self
 
     def would_accept(self, new_data: dict) -> None:
         """Validate a candidate config without applying it (raises ValueError)."""
-        validate(_deep_merge(DEFAULTS, new_data))
+        validate(_deep_merge(DEFAULTS, new_data), base_dir=os.path.dirname(self.path))
 
     # ---- convenient views --------------------------------------------------
     @property
@@ -1061,13 +1065,283 @@ def _dest_label(d: dict) -> str:
     return f"'{d.get('name')}' at {d.get('host')}:{d.get('port')} AE {d.get('aet')}"
 
 
-def validate(data: dict) -> None:
-    """Raise ValueError on anything that would make the app misbehave."""
+def _is_port(v) -> bool:
+    """A TCP port: an int (never a bool — True would be accepted as port 1)."""
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 65535
+
+
+def _aet_problem(value) -> str:
+    """Why *value* is not an AE title pynetdicom will accept, or ''.
+
+    PS3.5 6.2 (VR AE): at most 16 characters of the default repertoire, no
+    backslash, no control characters, not all spaces. These used to be only
+    length-checked, so '' or 'A\\B' saved fine and then stopped the listener
+    (or failed every forward) inside pynetdicom."""
+    if not isinstance(value, str):
+        return f"must be a string, not {type(value).__name__}"
+    v = value.strip()
+    if not v:
+        return "is empty"
+    if len(v) > 16:
+        return "is longer than 16 characters"
+    if not v.isascii():
+        return "contains non-ASCII characters"
+    if "\\" in v or any(ord(c) < 32 or ord(c) == 127 for c in v):
+        return "contains a backslash or a control character"
+    return ""
+
+
+def _check_aet(name: str, value, required: bool = True) -> None:
+    if not required and (value is None or (isinstance(value, str) and not value.strip())):
+        return
+    why = _aet_problem(value)
+    if why:
+        raise ValueError(f"{name} {why} — a DICOM AE title is 1-16 printable ASCII "
+                         f"characters with no backslash ({value!r})")
+
+
+def _check_aet_list(name: str, value) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be a list of AE titles, e.g. [\"CT1\"]. A bare string "
+                         f"would be read one character at a time ({value!r}).")
+    for i, a in enumerate(value):
+        why = _aet_problem(a)
+        if why:
+            raise ValueError(f"{name} entry #{i + 1} ({a!r}) {why} — the listener would refuse "
+                             f"to start with it")
+
+
+def _norm_dir(value: str, base_dir: str) -> str:
+    v = os.path.expanduser(str(value or ""))
+    if not os.path.isabs(v):
+        v = os.path.join(base_dir, v)
+    return os.path.realpath(v)
+
+
+def _nested(a: str, b: str) -> bool:
+    """True when a and b are the same directory or one contains the other."""
+    return a == b or a.startswith(b.rstrip(os.sep) + os.sep) or b.startswith(a.rstrip(os.sep) + os.sep)
+
+
+def _ancestor_or_same(outer: str, inner: str) -> bool:
+    return outer == inner or inner.startswith(outer.rstrip(os.sep) + os.sep)
+
+
+def _check_review_rules(data: dict, base_dir: str) -> None:
+    """Field checks added after the 2026-10 review: types and ranges that used
+    to be accepted and then failed inside the service that read them."""
+    import math
+    from urllib.parse import urlsplit
+
+    # ---- AE titles --------------------------------------------------------
+    _check_aet("scp.aet", data["scp"].get("aet"))
+    _check_aet("scu.aet", data["scu"].get("aet"))
+    for sec in ("print", "mwl", "qr"):
+        b = data.get(sec)
+        if isinstance(b, dict) and "aet" in b:
+            _check_aet(f"{sec}.aet", b.get("aet"), required=bool(b.get("enabled")))
+    for sec in ("scp", "print", "mwl", "qr"):
+        b = data.get(sec)
+        if isinstance(b, dict):
+            _check_aet_list(f"{sec}.allowed_aets", b.get("allowed_aets", []))
+            for k in ("max_associations", "max_per_host"):
+                if k in b and b[k] is not None and not (
+                        isinstance(b[k], int) and not isinstance(b[k], bool) and b[k] >= 0):
+                    raise ValueError(f"{sec}.{k} must be a whole number >= 0")
+    ris = data.get("ris")
+    if isinstance(ris, dict):
+        for i, h in enumerate(ris.get("allowed_hosts", []) or []):
+            try:
+                if not isinstance(h, str):
+                    raise ValueError(h)
+                ipaddress.ip_address(h.strip())
+            except ValueError:
+                raise ValueError(f"ris.allowed_hosts entry #{i + 1} ({h!r}) must be an IP address "
+                                 f"string — the listener compares it with the peer's address")
+    qr = data.get("qr")
+    if isinstance(qr, dict) and isinstance(qr.get("move_destinations"), dict):
+        for ae, dest in qr["move_destinations"].items():
+            if isinstance(dest, dict):
+                # "" is allowed (resolve_move_destination dials the key itself).
+                _check_aet(f"qr.move_destinations['{ae}'].aet", dest.get("aet"), required=False)
+                if "port" in dest and not _is_port(dest["port"]):
+                    raise ValueError(f"qr.move_destinations['{ae}'] has an invalid port")
+    ws = data.get("worklist_source")
+    if isinstance(ws, dict):
+        _check_aet("worklist_source.aet", ws.get("aet", ""), required=False)
+        if "port" in ws and not _is_port(ws["port"]):
+            raise ValueError("worklist_source.port must be 1..65535")
+
+    # ---- ports ------------------------------------------------------------
+    for sec in ("scp", "print", "mwl", "qr", "ris"):
+        b = data.get(sec)
+        if isinstance(b, dict) and "port" in b and isinstance(b["port"], bool):
+            raise ValueError(f"{sec}.port must be a port number, not true/false")
+    wp = data["web"].get("port", 8042)
+    if not _is_port(wp):
+        raise ValueError(f"web.port must be a whole number 1..65535 ({wp!r})")
+    taken: dict[int, str] = {}
+    for name, section, default, always in (("web", data["web"], 8042, True),
+                                           ("scp", data["scp"], 11112, True),
+                                           ("print", data.get("print"), 11113, False),
+                                           ("mwl", data.get("mwl"), 11114, False),
+                                           ("qr", data.get("qr"), 11115, False),
+                                           ("ris", data.get("ris"), 2575, False)):
+        if not isinstance(section, dict) or not (always or section.get("enabled")):
+            continue
+        port = section.get("port", default)
+        if not _is_port(port):
+            continue
+        if port in taken:
+            raise ValueError(f"{taken[port]}.port and {name}.port are both {port} — "
+                             "every enabled listener needs its own port")
+        taken[port] = name
+
+    # ---- numbers ----------------------------------------------------------
+    def _num(name, v, minimum, required=False):
+        if v is None and not required:
+            return
+        if (not isinstance(v, (int, float)) or isinstance(v, bool)
+                or not math.isfinite(float(v)) or v < minimum):
+            raise ValueError(f"{name} must be a number >= {minimum} ({v!r})")
+    _num("scp.min_free_gb", data["scp"].get("min_free_gb"), 0)
+    _num("scu.poll_interval", data["scu"].get("poll_interval"), 1, required=True)
+    em = data.get("emergency")
+    if isinstance(em, dict):
+        for k in ("probe_interval_sec", "recovery_successes", "offline_threshold_sec"):
+            if isinstance(em.get(k), bool):
+                raise ValueError(f"emergency.{k} must be a number, not true/false")
+
+    # ---- destinations -----------------------------------------------------
+    dests = data.get("destinations", [])
+    if isinstance(dests, list):
+        for i, d in enumerate(dests):
+            if not isinstance(d, dict):
+                raise ValueError(f"destination #{i + 1} must be an object with name / host / port / aet")
+            if "host" in d and not (isinstance(d["host"], str) and d["host"].strip()):
+                raise ValueError(f"destination #{i + 1} needs a host name or address (a string)")
+            if "port" in d and isinstance(d["port"], bool):
+                raise ValueError(f"destination #{i + 1} has an invalid port")
+            if "aet" in d:
+                _check_aet(f"destination #{i + 1} ({d.get('name')!r}) aet", d.get("aet"))
+
+    ah = data["web"].get("allowed_hosts", [])
+    if not isinstance(ah, list) or not all(isinstance(h, str) for h in ah):
+        raise ValueError("web.allowed_hosts must be a list of host names, e.g. [\"pacs.example\"]")
+
+    # ---- web.editor_url ---------------------------------------------------
+    eu = data["web"].get("editor_url", "")
+    if isinstance(eu, str) and eu.strip():
+        e = eu.strip()
+        ok = False
+        if e.startswith("/") and not e.startswith("//") and "\\" not in e:
+            ok = True
+        else:
+            try:
+                parts = urlsplit(e)
+                ok = parts.scheme.lower() in ("http", "https") and bool(parts.hostname)
+            except ValueError:
+                ok = False
+        if not ok:
+            raise ValueError(f"web.editor_url is {e!r} — it must be empty, a path on this "
+                             f"dashboard starting with '/', or an http(s):// URL with a host. "
+                             f"Any other scheme (javascript:, data:) would run in the dashboard.")
+
+    # ---- dicomweb CORS ----------------------------------------------------
+    dw = data.get("dicomweb")
+    if isinstance(dw, dict) and isinstance(dw.get("cors_origins"), list):
+        for o in dw["cors_origins"]:
+            if isinstance(o, str) and o.strip().lower() == "null":
+                raise ValueError("dicomweb.cors_origins may not contain 'null' — sandboxed "
+                                 "iframes and file:// pages all send that origin")
+            if isinstance(o, str) and o.strip() == "*" and not auth_token_of(data["web"]):
+                raise ValueError("dicomweb.cors_origins '*' with no web.auth_token lets any web "
+                                 "page read this archive — set a token or list the viewer origins")
+
+    # ---- notify -----------------------------------------------------------
+    nt = data.get("notify")
+    if isinstance(nt, dict):
+        for block_name in ("webhook", "smtp"):
+            block = nt.get(block_name)
+            defaults = DEFAULTS["notify"][block_name]
+            if not isinstance(block, dict):
+                continue
+            for k, dv in defaults.items():
+                if k not in block:
+                    continue
+                if isinstance(dv, bool) and not isinstance(block[k], bool):
+                    raise ValueError(f"notify.{block_name}.{k} must be true or false, not "
+                                     f"{type(block[k]).__name__} ({block[k]!r}) — a quoted "
+                                     f"\"false\" reads as TRUE")
+                if isinstance(dv, str) and not isinstance(block[k], str):
+                    raise ValueError(f"notify.{block_name}.{k} must be a string, not "
+                                     f"{type(block[k]).__name__}")
+        wh = nt.get("webhook")
+        if isinstance(wh, dict):
+            url = str(wh.get("url", "") or "").strip()
+            if url:
+                try:
+                    parts = urlsplit(url)
+                    good = parts.scheme.lower() in ("http", "https") and bool(parts.hostname)
+                except ValueError:
+                    good = False
+                if not good:
+                    raise ValueError(f"notify.webhook.url is '{url}' — it must be an http:// or "
+                                     f"https:// URL with a host")
+            _num("notify.webhook.timeout_sec", wh.get("timeout_sec"), 1)
+        sm = nt.get("smtp")
+        if isinstance(sm, dict) and sm.get("enabled"):
+            mode = str(sm.get("tls", "starttls") or "").strip().lower()
+            if mode == "none" and str(sm.get("username", "") or "").strip() \
+                    and not is_loopback_host(str(sm.get("host", "") or "").strip()):
+                raise ValueError("notify.smtp.tls is 'none' with a username set — the SMTP password "
+                                 "would cross the network in cleartext. Use starttls or ssl.")
+
+    # ---- folders ----------------------------------------------------------
+    scu = data["scu"]
+    storage = data["scp"].get("storage_dir")
+    if isinstance(storage, str) and not storage.strip():
+        raise ValueError("scp.storage_dir is empty — received images need a folder")
+    watch = scu.get("watch_dir")
+    if isinstance(watch, str) and not watch.strip():
+        raise ValueError("scu.watch_dir is empty — the forwarder needs an outgoing folder")
+    if scu.get("on_success") == "move" and isinstance(scu.get("sent_dir"), str) \
+            and not scu["sent_dir"].strip():
+        raise ValueError("scu.on_success is 'move' but scu.sent_dir is empty")
+    if isinstance(storage, str) and isinstance(watch, str):
+        st, wa = _norm_dir(storage, base_dir), _norm_dir(watch, base_dir)
+        if _nested(st, wa):
+            raise ValueError(
+                "scu.watch_dir and scp.storage_dir are the same folder or one is inside the "
+                "other. The forwarder archives or deletes what it has sent, so it would act on "
+                "the receive archive itself. Give the outgoing folder its own place.")
+        for key in ("sent_dir", "pending_dir"):
+            v = scu.get(key)
+            if not isinstance(v, str) or not v.strip():
+                continue
+            other = _norm_dir(v, base_dir)
+            if _ancestor_or_same(other, wa):
+                raise ValueError(
+                    f"scu.{key} is scu.watch_dir or a folder above it — the forwarder skips "
+                    f"{key}, so it would never see anything to send. A subfolder of the "
+                    f"outgoing folder, or a separate folder, works.")
+            if key == "sent_dir" and _nested(other, st):
+                raise ValueError("scu.sent_dir and scp.storage_dir are the same folder or nested")
+
+
+def validate(data: dict, base_dir: Optional[str] = None) -> None:
+    """Raise ValueError on anything that would make the app misbehave.
+
+    *base_dir* is the config file's folder, against which relative paths are
+    resolved for the folder cross-checks (defaults to the working directory)."""
     for section in ("scp", "scu", "web"):
         if not isinstance(data.get(section), dict):
             raise ValueError(f"'{section}' must be an object")
     _check_bools(data)
     _check_strings(data)
+    _check_review_rules(data, base_dir or os.getcwd())
 
     # The scp checks below are deliberately unconditional — they do NOT look at
     # scp.enabled. A config that only validates while the receiver is off would
@@ -1318,7 +1592,7 @@ def validate(data: dict) -> None:
                     "notify.webhook.enabled is true but notify.webhook.url is empty — "
                     "nothing would be sent, and the appliance would report notification "
                     "as configured.")
-            if url and not (url.startswith("http://") or url.startswith("https://")):
+            if url and not (url.lower().startswith("http://") or url.lower().startswith("https://")):
                 raise ValueError(
                     f"notify.webhook.url is '{url}' — it must start with http:// or https://.")
             r = wh.get("retries")

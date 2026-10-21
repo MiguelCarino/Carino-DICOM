@@ -91,20 +91,34 @@ class CaughtStore:
         try:
             with open(self._path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            rounds = data.get("rounds", [])
-            if isinstance(rounds, list):
-                self._rounds = [r for r in rounds if isinstance(r, dict) and r.get("id")]
-                for rnd in self._rounds:
-                    _resplit(rnd)
-        except (OSError, ValueError):
-            pass
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            if self.log is not None:
+                try:
+                    self.log.warn(f"Worklist probe history {self._path} could not be read "
+                                  f"({exc}) — starting empty", kind="mwl")
+                except Exception:
+                    pass
+            return
+        rounds = data.get("rounds", []) if isinstance(data, dict) else []
+        if isinstance(rounds, list):
+            good = []
+            for r in rounds:
+                if not (isinstance(r, dict) and r.get("id")):
+                    continue
+                try:
+                    _resplit(r)
+                except Exception:
+                    continue        # a malformed round is dropped, not fatal
+                good.append(r)
+            self._rounds = good[:MAX_ROUNDS]
 
     def _save_locked(self) -> None:
         os.makedirs(self.store_dir, exist_ok=True)
-        tmp = self._path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"rounds": self._rounds}, fh, indent=2)
-        os.replace(tmp, self._path)
+        from .atomicio import atomic_write_text
+        # fsync + rename + directory fsync, 0600: it holds another site's patients.
+        atomic_write_text(self._path, json.dumps({"rounds": self._rounds}, indent=2), mode=0o600)
 
     def add_round(self, station_aet: str, source: dict, probes: list) -> dict:
         """File one probe round — several questions asked of one provider as one
@@ -129,7 +143,10 @@ class CaughtStore:
                 "date_key": getattr(pr, "date_key", ""),
                 "calling_key": getattr(pr, "calling_key", ""),
                 "modality_key": getattr(pr, "modality_key", ""),
-                "count": len(items),
+                # The true number the provider returned; items is capped
+                # (scu.MAX_PROBE_ITEMS), so 'kept' says how many are filed.
+                "count": max(len(items), int(getattr(pr, "total", 0) or 0)),
+                "kept": len(items),
                 # Split by who each item is actually addressed to. This is the
                 # line that turns "3 came back" into an answer: an item with no
                 # ScheduledStationAETitle reaches EVERY modality, so a station

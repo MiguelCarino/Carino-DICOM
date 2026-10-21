@@ -349,6 +349,7 @@ const AUDIT_ACTIONS = {
   "api.ris.orders.capture": "Captured a study for an order", "api.selftest": "Ran a service test",
   "api.studies.attach": "Attached a file to a study", "api.studies.reveal": "Opened a study's folder",
   "api.worklist.caught.clear": "Cleared the worklist probes",
+  "api.worklist.asks.clear": "Cleared the worklist query record",
 };
 const AUDIT_OUTCOMES = { ok: "Done", failed: "Failed", denied: "Refused" };
 let auditRows = [];

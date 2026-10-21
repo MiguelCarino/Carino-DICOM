@@ -241,6 +241,13 @@ document.addEventListener("DOMContentLoaded", () => {
     flashNote(r.message || "", r.ok !== false);
     loadCaught();
   });
+  $("asksRefresh").addEventListener("click", loadAsks);
+  $("asksClear").addEventListener("click", async () => {
+    if (!confirm(T("Clear the record of what each modality asks for? It fills again with their next queries."))) return;
+    const r = await post("/api/worklist/asks/clear", {});
+    flashNote(r.message || "", r.ok !== false);
+    loadAsks();
+  });
   $("addMod").addEventListener("click", () => { addModRow({}); const e = $("modEmpty"); if (e) e.hidden = true; });
   // Saves the whole config, so the server's validator judges the registry.
   $("saveMods").addEventListener("click", async () => {

@@ -44,6 +44,7 @@ import json
 import os
 import socket
 import threading
+import time
 import uuid
 from typing import Callable, Optional
 
@@ -289,17 +290,60 @@ def build_ack(msg: HL7Message, code: str = "AA", text: str = "") -> str:
     AA = Application Accept.  Echoes MSH-10 as the MSA control id.  Sender/
     receiver app+facility are swapped so the ACK routes back sensibly.
     """
+    # Built with the SENDER's own separators, so every echoed value stays one
+    # field (MSA-2 must equal the original MSH-10, HL7 v2 ch.2), and with the
+    # sender's processing ID and version echoed back.
+    fs = msg.field_sep or "|"
+    enc = msg.field("MSH", 2) or "^~\\&"
     sending_app = msg.field("MSH", 3)
     sending_fac = msg.field("MSH", 4)
     recv_app = msg.field("MSH", 5) or "CARINORIS"
     recv_fac = msg.field("MSH", 6)
     ctrl = msg.control_id or uuid.uuid4().hex[:12]
-    fs = "|"
+    proc = msg.field("MSH", 11) or "P"
+    version = msg.field("MSH", 12) or "2.3"
+    trigger = ""
+    parts = (msg.field("MSH", 9) or "").split(msg.comp_sep or "^")
+    if len(parts) > 1:
+        trigger = parts[1]
+    cs = msg.comp_sep or "^"
+    mtype = f"ACK{cs}{trigger}{cs}ACK" if trigger else "ACK"
     # Swap sender/receiver: our app answers back to their app.
-    msh = fs.join(["MSH", "^~\\&", recv_app, recv_fac, sending_app, sending_fac,
-                   "", "", "ACK", ctrl, "P", "2.3"])
-    msa = fs.join(["MSA", code, ctrl] + ([text] if text else []))
+    msh = fs.join(["MSH", enc, recv_app, recv_fac, sending_app, sending_fac,
+                   "", "", mtype, ctrl, proc, version])
+    msa = fs.join(["MSA", code, ctrl] + ([_hl7_escape(text, fs, enc)] if text else []))
     return msh + "\r" + msa + "\r"
+
+
+def _hl7_escape(value: str, fs: str = "|", enc: str = "^~\\&") -> str:
+    """HL7 v2 escaping of the delimiter characters in free text."""
+    esc = enc[2] if len(enc) > 2 else "\\"
+    out = str(value).replace(esc, f"{esc}E{esc}").replace(fs, f"{esc}F{esc}")
+    if enc:
+        out = out.replace(enc[0], f"{esc}S{esc}")
+    if len(enc) > 1:
+        out = out.replace(enc[1], f"{esc}R{esc}")
+    if len(enc) > 3:
+        out = out.replace(enc[3], f"{esc}T{esc}")
+    return out
+
+
+def _parse_error_ack(payload: bytes, text: str) -> str:
+    """AR for a message that would not parse, still echoing its MSH-10 when it
+    can be extracted, so the sender can correlate the reject."""
+    ctrl = ""
+    try:
+        raw = payload.decode("utf-8", errors="replace")
+        first = raw.replace("\n", "\r").split("\r", 1)[0]
+        if first.startswith("MSH") and len(first) > 3:
+            fs = first[3]
+            fields = first.split(fs)
+            ctrl = fields[9] if len(fields) > 9 else ""
+            if any(c in ctrl for c in "|^~\\&"):
+                ctrl = ""
+    except Exception:
+        ctrl = ""
+    return f"MSH|^~\\&|CARINORIS|||||ACK|{ctrl}|P|2.3\rMSA|AR|{ctrl}|{text}\r"
 
 
 # --------------------------------------------------------------- order store
@@ -352,6 +396,7 @@ class OrderStore:
         # moves the tick by nothing and therefore still announces nothing, which
         # is the property the old design was actually protecting.
         self._created_seq = 0
+        self.load_problem = ""
         self._load()
 
     # ---- persistence -------------------------------------------------------
@@ -363,7 +408,18 @@ class OrderStore:
         try:
             with open(self._path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            for o in data.get("orders", []):
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            self._quarantine(f"not readable as JSON: {exc}")
+            return
+        if not isinstance(data, dict):
+            self._quarantine(f"a JSON {type(data).__name__}, not an object")
+            return
+        try:
+            for o in data.get("orders", []) or []:
+                if not isinstance(o, dict):
+                    continue
                 if o.get("id"):
                     # Orders written before `origin` existed carry their
                     # provenance only in the `source` display string. Stamp it
@@ -385,19 +441,35 @@ class OrderStore:
                 self._created_seq = max(0, int(data.get("created_seq") or 0))
             except (TypeError, ValueError):
                 self._created_seq = 0
-        except (OSError, ValueError):
-            pass
+        except (TypeError, AttributeError, ValueError) as exc:
+            self._quarantine(f"malformed contents: {exc}")
+            self._orders.clear()
+
+    def _quarantine(self, why: str) -> None:
+        """Set an unusable orders.json aside instead of overwriting it with the
+        next save, and say so: it may hold the only copy of open emergency
+        orders and the closed-order audit trail."""
+        import time as _t
+        aside = f"{self._path}.corrupt-{_t.strftime('%Y%m%dT%H%M%S')}"
+        try:
+            os.replace(self._path, aside)
+        except OSError:
+            aside = "(could not be moved aside)"
+        self.load_problem = (f"{self._path} could not be loaded ({why}); it was set aside as "
+                             f"{aside} and the order list starts empty — restore it from there.")
+        if self.log:
+            self.log.error(self.load_problem, kind="ris")
 
     def _save_locked(self) -> None:
         os.makedirs(self.store_dir, exist_ok=True)
-        tmp = self._path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            # The tick rides along with the orders because this rewrites the
-            # whole file on every change anyway, so keeping it monotonic across
-            # a restart costs one integer and no extra write.
-            json.dump({"orders": list(self._orders.values()),
-                       "created_seq": self._created_seq}, fh, indent=2)
-        os.replace(tmp, self._path)
+        from .atomicio import atomic_write_text
+        # The tick rides along with the orders because this rewrites the whole
+        # file on every change anyway, so keeping it monotonic across a restart
+        # costs one integer and no extra write. Crash-safe (fsync + rename +
+        # directory fsync) and 0600: it is a list of patients.
+        atomic_write_text(self._path, json.dumps({"orders": list(self._orders.values()),
+                                                  "created_seq": self._created_seq}, indent=2),
+                          mode=0o600)
 
     # ---- CRUD --------------------------------------------------------------
     def add(self, fields: dict, source: str = "manual",
@@ -445,11 +517,13 @@ class OrderStore:
     def _log_created(self, order: dict, source: str) -> None:
         if not self.log:
             return
+        # Order id + accession only: the activity log is readable by profiles
+        # that may not see patient names or study descriptions, and a free-text
+        # message is out of the key-based redactor's reach.
         self.log.info(
-            f"RIS order queued: {order.get('patient') or '?'} "
-            f"[acc {order.get('accession') or '—'}] {order.get('study_desc') or ''} "
-            f"(via {source})",
-            kind="ris",
+            f"RIS order queued: {order.get('id') or '?'} "
+            f"[acc {order.get('accession') or '—'}] (via {source})",
+            kind="ris", accession=order.get("accession") or "",
         )
         mod = str(order.get("modality") or "").strip().upper()
         allowed = [str(m).upper() for m in (self._site_modalities() or [])]
@@ -464,20 +538,34 @@ class OrderStore:
             )
 
     # ---- identity ----------------------------------------------------------
-    def _find_identity_locked(self, fields: dict) -> Optional[dict]:
+    def _find_identity_locked(self, fields: dict, origin: str = "") -> Optional[dict]:
         """The stored order these fields are about, or None.
 
         Tries each identifier in turn rather than building one composite key:
         the filler order number is routinely absent from the first message and
         present in the second, so a composite would make the same order look
-        like two."""
+        like two.
+
+        Two guards keep an identifier collision from merging two patients: an
+        order whose Patient ID differs (both non-empty) is never the same
+        order, and an HL7 message is never matched to a manual or test order
+        by accession alone — the RIS's placer number and a hand-typed accession
+        live in different namespaces."""
+        pid = _norm(fields.get("patient_id"))
         for key in IDENTITY_FIELDS:
             want = _norm(fields.get(key))
             if not want:
                 continue
             for o in self._orders.values():
-                if _norm(o.get(key)) == want:
-                    return o
+                if _norm(o.get(key)) != want:
+                    continue
+                other = _norm(o.get("patient_id"))
+                if pid and other and pid != other:
+                    continue
+                if (origin and key == "accession" and origin_of(o) != origin
+                        and ORIGIN_RIS in (origin, origin_of(o))):
+                    continue
+                return o
         return None
 
     def find_identity(self, fields: dict) -> Optional[dict]:
@@ -508,7 +596,7 @@ class OrderStore:
         """
         cancelling = (control or "").strip().upper() in CANCEL_CONTROLS
         with self._lock:
-            existing = self._find_identity_locked(fields)
+            existing = self._find_identity_locked(fields, origin=origin)
 
             if existing is None:
                 if cancelling:
@@ -556,8 +644,8 @@ class OrderStore:
         elif action == "updated":
             self.log.info(
                 f"RIS order amended (rev {order.get('revision')}): "
-                f"{order.get('patient') or '?'} [acc {acc}]",
-                kind="ris",
+                f"{order.get('id') or '?'} [acc {acc}]",
+                kind="ris", accession=order.get("accession") or "",
             )
         elif action == "cancelled":
             # Warn-level lines also become the RIS card's "last problem" in
@@ -616,6 +704,10 @@ class OrderStore:
             o = self._orders.get(oid)
             if not o:
                 return None
+            if o.get("status") == "closed":
+                # A closed order is the audit record of what was done; an edit
+                # would rewrite history. Reopening is a new order.
+                raise ValueError("order is closed — it can no longer be edited")
             self._update_locked(o, fields)
             self._save_locked()
             return dict(o)
@@ -627,6 +719,8 @@ class OrderStore:
             v = str(fields.get(k, "") or "").strip()
             if only_nonempty and not v:
                 continue
+            if k == "study_uid" and o.get("study_uid"):
+                continue        # never rewritten once minted (see below)
             o[k] = v
         # study_uid is never rewritten here — it is not in the HL7 field set and
         # an operator edit that cleared it would strand the exam the modality
@@ -643,6 +737,10 @@ class OrderStore:
             o = self._orders.get(oid)
             if not o:
                 return None
+            if o.get("status") == "closed":
+                # Already closed: the first close reason (matched, cancelled by
+                # the RIS) is the record, and a second close must not rewrite it.
+                return dict(o)
             self._close_locked(o, reason, matched_study)
             self._save_locked()
             return dict(o)
@@ -685,7 +783,8 @@ class OrderStore:
         acc = _norm(accession)
         pid = _norm(patient_id)
         with self._lock:
-            opens = [o for o in self._orders.values() if o.get("status") == "open"]
+            everything = list(self._orders.values())
+        opens = [o for o in everything if o.get("status") == "open"]
         if su:
             for o in opens:
                 if _norm(o.get("study_uid")) == su:
@@ -694,10 +793,19 @@ class OrderStore:
             for o in opens:
                 if _norm(o.get("accession")) == acc:
                     return dict(o)
-        if pid and self.match_on == "accession_or_patient":
-            for o in opens:
-                if _norm(o.get("patient_id")) == pid:
-                    return dict(o)
+        # The Patient-ID fallback is for a study that carries NO accession and
+        # no Study UID any order knows. A study with an accession that matches
+        # nothing is a different exam, and later instances of a study whose
+        # order already matched (and closed) must not close the patient's NEXT
+        # order. With more than one open order for the patient the pick would
+        # be arbitrary, so nothing is auto-matched.
+        if pid and self.match_on == "accession_or_patient" and not acc:
+            if su and any(_norm(o.get("study_uid")) == su or _norm(o.get("matched_study")) == su
+                          for o in everything):
+                return None
+            cands = [o for o in opens if _norm(o.get("patient_id")) == pid]
+            if len(cands) == 1:
+                return dict(cands[0])
         return None
 
     def counts(self) -> dict:
@@ -755,6 +863,11 @@ class RisListener:
     connection (MLLP is request/response over a persistent stream).
     """
 
+    # One MLLP frame may not grow past this, and a connection that completes
+    # no message for this long is closed (see _handle_conn).
+    MAX_FRAME_BYTES = 4 * 1024 * 1024
+    IDLE_LIMIT_SEC = 120.0
+
     def __init__(
         self,
         bind: str,
@@ -763,6 +876,7 @@ class RisListener:
         log: LogBuffer,
         allowed_hosts: Optional[list[str]] = None,
         accept_types: Optional[list[str]] = None,
+        max_connections: int = 32,
     ):
         self.bind = bind
         self.port = port
@@ -775,6 +889,8 @@ class RisListener:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self.max_connections = max(1, int(max_connections or 32))
+        self._slots = threading.BoundedSemaphore(self.max_connections)
         self.received_count = 0
         self.order_count = 0        # orders CREATED — a live feed also amends and cancels
         self.updated_count = 0
@@ -800,9 +916,19 @@ class RisListener:
         # means "sharing permitted" and would let this listener come up beside
         # another one. netclaim explains why that costs images.
         claim(self.bind, self.port)
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Resolved, not assumed IPv4: an IPv6 bind ('::1', '::') used to crash
+        # start() with "Address family for hostname not supported".
+        infos = socket.getaddrinfo(self.bind or None, self.port, type=socket.SOCK_STREAM,
+                                   flags=socket.AI_PASSIVE)
+        info = next((i for i in infos if i[0] == socket.AF_INET), infos[0])
+        srv = socket.socket(info[0], socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((self.bind, self.port))
+        if info[0] == socket.AF_INET6 and (self.bind or "") in ("", "::"):
+            try:
+                srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            except (OSError, AttributeError):
+                pass
+        srv.bind(info[4])
         srv.listen(8)
         srv.settimeout(0.5)
         # Each run owns its stop event and its socket, so a straggler accept loop
@@ -841,7 +967,15 @@ class RisListener:
                     except OSError:
                         pass
                     continue
-                threading.Thread(target=self._handle_conn, args=(conn, peer, stop),
+                if not self._slots.acquire(blocking=False):
+                    self.log.warn(f"RIS: refused a connection from {peer} — "
+                                  f"{self.max_connections} already open", kind="ris")
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+                    continue
+                threading.Thread(target=self._handle_conn_slot, args=(conn, peer, stop),
                                  name="pacs-ris-conn", daemon=True).start()
         finally:
             # Drop the last reference to the listening fd here — whoever joins us
@@ -851,13 +985,27 @@ class RisListener:
             except OSError:
                 pass
 
+    def _handle_conn_slot(self, conn, peer, stop) -> None:
+        try:
+            self._handle_conn(conn, peer, stop)
+        finally:
+            self._slots.release()
+
     def _handle_conn(self, conn: socket.socket, peer: str, stop: threading.Event) -> None:
         """Read MLLP-framed messages off one connection, ACK each. A sender may
-        pipeline several messages on the same stream, so we loop until close."""
+        pipeline several messages on the same stream, so we loop until close.
+
+        Bounded: one frame may not grow past MAX_FRAME_BYTES (an endless frame
+        with no FS/CR used to buffer until memory ran out), and a connection
+        that delivers no complete message for IDLE_LIMIT_SEC is closed even if
+        it trickles a byte at a time."""
         conn.settimeout(30)
         buf = bytearray()
+        last_msg = time.monotonic()
         try:
             while not stop.is_set():
+                if time.monotonic() - last_msg > self.IDLE_LIMIT_SEC:
+                    break
                 try:
                     chunk = conn.recv(65536)
                 except socket.timeout:
@@ -865,6 +1013,18 @@ class RisListener:
                 if not chunk:
                     break
                 buf.extend(chunk)
+                start0 = buf.find(VT)
+                if start0 != -1 and len(buf) - start0 > self.MAX_FRAME_BYTES \
+                        and buf.find(bytes([FS, CR]), start0 + 1) == -1:
+                    with self._lock:
+                        self.error_count += 1
+                    self.log.warn(f"RIS: {peer} sent a message over the "
+                                  f"{self.MAX_FRAME_BYTES // (1024 * 1024)} MB limit — "
+                                  f"connection closed", kind="ris")
+                    conn.sendall(bytes([VT]) + _parse_error_ack(bytes(buf[start0 + 1:start0 + 4096]),
+                                                                "message too large").encode("utf-8")
+                                 + bytes([FS, CR]))
+                    break
                 # Drain every complete <VT>…<FS><CR> frame currently in buffer.
                 while True:
                     start = buf.find(VT)
@@ -879,6 +1039,7 @@ class RisListener:
                         break
                     payload = bytes(buf[start + 1:end])
                     del buf[:end + 2]
+                    last_msg = time.monotonic()
                     ack = self._process(payload, peer)
                     conn.sendall(bytes([VT]) + ack.encode("utf-8") + bytes([FS, CR]))
         except OSError as exc:
@@ -900,8 +1061,8 @@ class RisListener:
             with self._lock:
                 self.error_count += 1
             self.log.error(f"RIS: could not parse HL7 from {peer}: {exc}", kind="ris")
-            # Best-effort AR (Application Reject) with an empty control id.
-            return "MSH|^~\\&|CARINORIS|||||ACK|1|P|2.3\rMSA|AR|1|parse error\r"
+            # Best-effort AR (Application Reject), echoing MSH-10 when it can.
+            return _parse_error_ack(payload, "parse error")
 
         mtype = (msg.message_type.split("^")[0] or "").upper()
         if mtype in self.accept_types:

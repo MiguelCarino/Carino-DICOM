@@ -47,15 +47,17 @@ def check_dashboard(web: dict) -> None:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-    req = urllib.request.Request(f"{scheme}://127.0.0.1:{port}/api/status")
+    host = _probe_host(web.get("host", ""))
+    req = urllib.request.Request(f"{scheme}://{host}:{port}/api/status",
+                                 headers={"Host": f"127.0.0.1:{port}"})
     if token:
-        # Sent both ways on purpose — the API's header name is settling, and a
-        # healthcheck that fails on a rename would take the container down.
+        # The two headers pacs/auth.py accepts (Authorization: Bearer and
+        # X-Carino-Token) — nothing else is read by the server.
         req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("X-Auth-Token", token)
+        req.add_header("X-Carino-Token", token)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
-            body = resp.read(65536)
+            body = resp.read(4 * 1024 * 1024)
             code = resp.status
     except urllib.error.HTTPError as exc:
         # 401/403 means Flask is up and answering, which is what health asks.
@@ -64,7 +66,7 @@ def check_dashboard(web: dict) -> None:
             return
         raise SystemExit(f"unhealthy: dashboard returned HTTP {exc.code}")
     except Exception as exc:
-        raise SystemExit(f"unhealthy: dashboard not answering on 127.0.0.1:{port} ({exc})")
+        raise SystemExit(f"unhealthy: dashboard not answering on {host}:{port} ({exc})")
     if code != 200:
         raise SystemExit(f"unhealthy: dashboard returned HTTP {code}")
     try:
@@ -73,14 +75,27 @@ def check_dashboard(web: dict) -> None:
         raise SystemExit("unhealthy: /api/status did not return JSON")
 
 
+def _probe_host(bind) -> str:
+    """Where to knock: the configured address when it is a specific one (a
+    listener bound to the container's own interface does not answer on
+    127.0.0.1), the loopback for a wildcard or an empty bind."""
+    b = str(bind or "").strip()
+    if b in ("", "0.0.0.0", "::", "[::]"):
+        return "127.0.0.1"
+    if ":" in b and not b.startswith("["):
+        return f"[{b}]"
+    return b
+
+
 def check_listener(section: dict, label: str) -> None:
     if not section.get("enabled"):
         return
     port = int(section.get("port", 0))
     if not port:
         return
+    host = _probe_host(section.get("bind", "")).strip("[]")
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT):
+        with socket.create_connection((host, port), timeout=TIMEOUT):
             pass
     except OSError as exc:
         raise SystemExit(f"unhealthy: {label} is enabled but nothing is listening on {port} ({exc})")

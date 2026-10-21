@@ -992,7 +992,14 @@ def test_e2e_a_report_beside_a_study_is_siphoned_to_the_review_queue():
             fh.write(b"%PDF-1.4\n" + b"0" * 64)
         run_watcher(cfg)
         pending = cfg.resolved("scu", "pending_dir")
-        staged = [f for _r, _d, fs in os.walk(pending) for f in fs if f == "report.pdf"]
+        # Staged under a canonical payload name; the original name is kept in
+        # the sidecar for display.
+        import json as _json
+        staged = []
+        for r, _d, fs in os.walk(pending):
+            if "meta.json" in fs:
+                with open(os.path.join(r, "meta.json"), encoding="utf-8") as fh:
+                    staged.append(_json.load(fh).get("filename"))
         assert staged == ["report.pdf"], os.listdir(pending)
         assert os.path.isfile(os.path.join(cfg.resolved("scu", "sent_dir"), "study1", "a.dcm"))
 
@@ -1801,7 +1808,7 @@ def test_a_held_row_prescribes_the_remedy_for_the_cause_it_was_STAMPED_with():
             """One held row, over entries stamped with *stamps* (one per file)."""
             for p, cause in zip(paths, stamps):
                 e = {"sent": [], "route": [], "held": ["Research"],
-                     "size": os.path.getsize(p), "mtime": int(os.path.getmtime(p))}
+                     "size": os.path.getsize(p), "mtime": os.path.getmtime(p)}
                 if cause is not None:
                     e["hold_cause"] = cause
                 srv.watcher.state.put(p, e)

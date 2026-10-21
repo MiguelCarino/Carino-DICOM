@@ -1561,7 +1561,9 @@ def _orphan(srv, name: str, pins: int, loose: int) -> dict:
         p = os.path.join(out, f"f{i}.dcm")
         with open(p, "wb") as fh:
             fh.write(b"x")
-        entry = {"sent": [], "size": 1, "mtime": 0.0, "route": [name]}
+        # Stamped against the real file: the stuck panel ignores an entry whose
+        # size/mtime no longer describe the bytes on disk (a replaced file).
+        entry = {"sent": [], "size": 1, "mtime": os.path.getmtime(p), "route": [name]}
         if i < pins:
             entry["pin"] = [name]
         srv.watcher.state.put(p, entry)

@@ -95,7 +95,8 @@ def cmd_init(args) -> int:
     """
     cfg_path = os.path.abspath(os.path.expanduser(args.config))
     os.makedirs(os.path.dirname(cfg_path) or ".", exist_ok=True)
-    if os.path.exists(cfg_path):
+    fresh = not os.path.exists(cfg_path)
+    if not fresh:
         print(f"{cfg_path} already exists — leaving it untouched.")
     else:
         example = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.example.json")
@@ -113,6 +114,15 @@ def cmd_init(args) -> int:
             Config(cfg_path).save()
         print(f"Wrote {cfg_path}")
     cfg = Config(cfg_path)
+    if fresh and not str((cfg.deid or {}).get("secret", "") or "").strip():
+        # A NEW config gets its own de-identification site key: with none, every
+        # pseudonym and date shift can be reversed by enumeration. Existing
+        # configs are never given one here — that would re-pseudonymise every
+        # future export of an install that already has exports out there.
+        import secrets as _secrets
+        cfg.deid["secret"] = _secrets.token_urlsafe(32)
+        cfg.save()
+        print("  generated a de-identification site key (deid.secret)")
     for section, field in (("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir")):
         d = cfg.resolved(section, field)
         os.makedirs(d, exist_ok=True)
@@ -308,10 +318,44 @@ def cmd_serve(args) -> int:
     if args.dev_peer:
         print("Dev peer enabled — the dashboard may create a second, disposable archive.")
     try:
-        app.run(host=host, port=port, threaded=True, use_reloader=False, ssl_context=ssl_ctx)
+        app.run(host=host, port=port, threaded=True, use_reloader=False, ssl_context=ssl_ctx,
+                request_handler=_bounded_handler())
     finally:
         server.shutdown()
     return 0
+
+
+# The dev server starts one thread per connection with no read timeout, so 300
+# sockets that never finish their headers held 300 threads forever — in the
+# process that also runs the receiver. Each connection now times out after
+# _HTTP_IDLE_SEC without data, and at most _HTTP_MAX_CONNECTIONS are served at
+# once (a browser uses about six); the rest are closed straight away.
+_HTTP_IDLE_SEC = 30
+_HTTP_MAX_CONNECTIONS = 64
+
+
+def _bounded_handler():
+    import threading
+    from werkzeug.serving import WSGIRequestHandler
+
+    slots = threading.BoundedSemaphore(_HTTP_MAX_CONNECTIONS)
+
+    class BoundedHandler(WSGIRequestHandler):
+        timeout = _HTTP_IDLE_SEC
+
+        def handle(self):
+            if not slots.acquire(blocking=False):
+                try:
+                    self.connection.close()
+                except OSError:
+                    pass
+                return
+            try:
+                super().handle()
+            finally:
+                slots.release()
+
+    return BoundedHandler
 
 
 def cmd_receive(args) -> int:

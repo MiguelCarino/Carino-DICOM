@@ -39,9 +39,31 @@ def _resolve(bind: str, port: int):
     config and defaults to 0.0.0.0, so this must accept "", a dotted quad, a
     hostname and an IPv6 literal alike — refusing a spelling that works would
     stop a service that had been starting fine."""
-    family, socktype, proto, _canon, addr = socket.getaddrinfo(
-        bind or "0.0.0.0", int(port), type=socket.SOCK_STREAM)[0]
+    infos = socket.getaddrinfo(bind or "0.0.0.0", int(port), type=socket.SOCK_STREAM)
+    # Resolve the way pynetdicom's AddressInformation does when it binds: the
+    # first IPv4 answer, else the first IPv6 one. getaddrinfo('localhost') lists
+    # ::1 first on most hosts, and probing [::1] while the real bind lands on
+    # 127.0.0.1 let the guard pass a port another engine already held there.
+    for info in infos:
+        if info[0] == socket.AF_INET:
+            family, socktype, proto, _canon, addr = info
+            return family, socktype, proto, addr
+    family, socktype, proto, _canon, addr = infos[0]
     return family, socktype, proto, addr
+
+
+def _local_addresses() -> list[str]:
+    """This machine's own IPv4 addresses, best effort, for probing a wildcard
+    bind: a listener on one specific interface is not answering on 127.0.0.1,
+    and Winsock lets a wildcard bind share its port."""
+    out: list[str] = []
+    try:
+        for a in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if a not in out and not a.startswith("127."):
+                out.append(a)
+    except OSError:
+        pass
+    return out
 
 
 def _accepting(bind: str, port: int) -> bool:
@@ -103,3 +125,64 @@ def claim(bind: str, port: int) -> None:
             raise
     finally:
         probe.close()
+    if (bind or "0.0.0.0") in ("0.0.0.0", "::"):
+        # A wildcard bind succeeds beside a listener on one specific address,
+        # so ask each of this machine's own addresses whether one answers.
+        for a in _local_addresses():
+            if _accepting(a, port):
+                raise OSError(f"port {port} is already in use on {a}")
+
+
+# ---- association limits for the DIMSE listeners -----------------------------
+DEFAULT_MAX_ASSOCIATIONS = 50
+DEFAULT_MAX_PER_HOST = 20
+DEFAULT_ACSE_TIMEOUT = 10.0
+
+
+def limit_listener(ae, max_associations=None, acse_timeout=None) -> None:
+    """Raise pynetdicom's association ceiling (default 10, which eleven silent
+    TCP connections from anywhere used to fill, locking out even allow-listed
+    modalities) and shorten the wait for an A-ASSOCIATE-RQ, so a socket that
+    never speaks is dropped in seconds rather than holding a slot for 30."""
+    try:
+        n = int(max_associations or DEFAULT_MAX_ASSOCIATIONS)
+    except (TypeError, ValueError):
+        n = DEFAULT_MAX_ASSOCIATIONS
+    ae.maximum_associations = max(1, n)
+    ae.acse_timeout = float(acse_timeout or DEFAULT_ACSE_TIMEOUT)
+
+
+def cap_per_host(server, max_per_host=None, log=None, label: str = "listener") -> None:
+    """Refuse a new TCP connection from a host that already holds
+    *max_per_host* associations on *server*, before any DICOM is spoken, so a
+    single machine cannot occupy every slot the listener has. 0 disables."""
+    try:
+        cap = int(DEFAULT_MAX_PER_HOST if max_per_host is None else max_per_host)
+    except (TypeError, ValueError):
+        cap = DEFAULT_MAX_PER_HOST
+    if cap <= 0 or server is None:
+        return
+
+    def verify_request(request, client_address) -> bool:
+        host = client_address[0] if isinstance(client_address, tuple) else str(client_address)
+        held = 0
+        try:
+            for a in list(server.active_associations):
+                try:
+                    if a.is_acceptor and str(a.requestor.address) == host:
+                        held += 1
+                except Exception:
+                    continue
+        except Exception:
+            return True
+        if held >= cap:
+            if log is not None:
+                try:
+                    log.warn(f"{label}: refused a connection from {host} — it already "
+                             f"holds {held} associations (limit {cap})", kind="scp")
+                except Exception:
+                    pass
+            return False
+        return True
+
+    server.verify_request = verify_request

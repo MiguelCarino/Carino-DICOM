@@ -54,10 +54,14 @@ patient is Mrs X from ward 4" is a perfectly ordinary thing to find in a
 ProtocolName. That costs the recipient some usability and it is the right
 trade.
 
-Structured Reports are a third gap: SR content is walked and profiled like any
-other sequence, but narrative text inside a report is not read for identifiers.
-Do not forward SR objects to an untrusted recipient on the strength of this
-module alone.
+Structured Reports are a third gap. A sequence whose action is D (ContentSequence,
+for one) keeps its items and every item is profiled like any other dataset — so
+attributes the table names are cleaned inside it — and the free-text values in
+those items (TextValue) are replaced outright, because narrative text in a
+report is not read for identifiers. Coded and numeric content survives. Do not forward SR objects to an untrusted
+recipient on the strength of this module alone. An object whose Type 1 payload
+the table says to replace and that cannot be cleaned (EncapsulatedDocument) is
+refused with DeidError rather than forwarded empty.
 
 Determinism
 -----------
@@ -68,11 +72,15 @@ StudyInstanceUID still maps to the same remapped UID. Re-sending a study is
 therefore idempotent — the recipient overwrites the instance it already has
 instead of growing a duplicate study.
 
-The site key comes from the optional ``deid.secret`` config value. With no
-secret the mapping is a pure function of the input, which means anyone who can
-guess a PatientID can confirm it is present in your anonymised set. Set a
-secret for anything leaving the building. Changing it later re-pseudonymises
-everything, so previously exported studies will no longer line up.
+The site key comes from the optional ``deid.secret`` config value (``pacs init``
+generates one for a new config). With no secret the mapping is a pure function
+of the input and the key is public in this source, so the mapping can be fully
+REVERSED by enumeration: a six-digit MRN space falls in seconds, and with the
+real PatientID recovered, date_offset() rebuilds every true date. Output made
+without a secret is therefore marked PatientIdentityRemoved=NO and does not
+claim the Basic Profile (113100). Set a secret for anything leaving the
+building. Changing it later re-pseudonymises everything, so previously exported
+studies will no longer line up.
 
 Consistency with the bundled editor
 -----------------------------------
@@ -353,6 +361,9 @@ _TEMPORAL_EXCLUDE = frozenset({
 _PATIENT_ID = 0x00100020
 _PATIENT_NAME = 0x00100010
 _SOURCE_AE = 0x00020016  # SourceApplicationEntityTitle, in file meta
+# Carino's own implementation class UID for de-identified output (2.25 branch,
+# fixed so every scrubbed object names the same implementation).
+_IMPLEMENTATION_CLASS_UID = "2.25.157460416232938452512331768434935862873"
 # Group 2 is not covered by Table E.1-1 and is not reached by the recursive
 # passes (file meta is a separate dataset), so these two are handled by hand.
 # Private Information is an opaque vendor blob living in the Part-10 header —
@@ -459,6 +470,10 @@ _PIXEL_RISK_SOP_PREFIXES = (
 )
 
 _WARN_CAP = 1024  # bounded dedupe set; the log ring only holds 500 entries
+
+# Type 1 payloads a D action cannot satisfy with a dummy: emptying them makes a
+# non-conformant, contentless object, so the instance is refused instead.
+_TYPE1_PAYLOAD = frozenset({0x00420011})      # EncapsulatedDocument
 
 
 class DeidError(Exception):
@@ -583,6 +598,8 @@ def load_profile_table(path: str = PROFILE_JS) -> dict:
 
 def write_dataset(ds: Dataset, path: str) -> None:
     """Write a full Part-10 file (preamble + meta), across pydicom 2 and 3."""
+    if getattr(ds, "preamble", None) is not None and ds.get("PatientIdentityRemoved", "") != "":
+        ds.preamble = b"\x00" * 128
     try:
         ds.save_as(path, enforce_file_format=True)   # pydicom >= 3
     except TypeError:
@@ -598,7 +615,7 @@ class Deidentifier:
 
     def __init__(self, profile: str = "basic", keep_private: bool = False,
                  keep_dates: bool = False, prefix: str = "ANON",
-                 secret: str = "", log=None):
+                 secret: str = "", log=None, issuer_in_identity: bool = False):
         if profile not in PROFILES:
             raise ValueError("deid profile must be one of %s" % (PROFILES,))
         self.profile = profile
@@ -616,8 +633,18 @@ class Deidentifier:
         # every pseudonym, so changing it hands the same patient a second
         # identity and severs the longitudinal linkage the profile exists for.
         self._key = hashlib.sha256(b"carino-pacs/deid/v1\x00" + secret.encode("utf-8")).digest()
+        # No site key = the public key above = a mapping anyone can reverse.
+        self.has_secret = bool(str(secret or "").strip())
+        # Opt-in so existing pseudonyms keep lining up: with it, two patients
+        # sharing an MRN under different issuers stop being merged into one.
+        self.issuer_in_identity = bool(issuer_in_identity)
         self._lock = threading.Lock()
         self._warned: set = set()
+        if self.enabled and not self.has_secret:
+            self._say("warn", "De-identification: no deid.secret is set, so pseudonyms and date "
+                              "shifts can be reversed by anyone who enumerates PatientIDs. Output "
+                              "is marked PatientIdentityRemoved=NO. Set a site key "
+                              "(Settings → De-identification).")
 
         if self.enabled and self.keep_private:
             self._say("warn", "De-identification: keep_private is on — private attributes are "
@@ -641,7 +668,8 @@ class Deidentifier:
             return None
         return cls(profile=profile, keep_private=d.get("keep_private", False),
                    keep_dates=d.get("keep_dates", False), prefix=d.get("prefix", "ANON"),
-                   secret=d.get("secret", ""), log=log)
+                   secret=d.get("secret", ""), log=log,
+                   issuer_in_identity=d.get("issuer_in_identity", False) is True)
 
     @property
     def enabled(self) -> bool:
@@ -660,7 +688,9 @@ class Deidentifier:
     def map_uid(self, uid: str) -> str:
         """Stable remap of one instance UID, or the UID itself if it is standard."""
         s = str(uid or "").strip()
-        if not s or s.startswith(_STANDARD_ROOT):
+        # The root itself or a UID UNDER it — not any UID whose digits merely
+        # begin the same way (1.2.840.100081... is someone else's tree).
+        if not s or s == _STANDARD_ROOT or s.startswith(_STANDARD_ROOT + "."):
             return s
         h = bytearray(self._digest("uid", s)[:16])
         # Shape the digest into a well-formed RFC 4122 v4 UUID before encoding
@@ -689,6 +719,15 @@ class Deidentifier:
         """
         pid = str(ds.get("PatientID", "") or "").strip()
         if pid:
+            if self.issuer_in_identity:
+                issuer = str(ds.get("IssuerOfPatientID", "") or "").strip()
+                q = ds.get("IssuerOfPatientIDQualifiersSequence", None)
+                try:
+                    uni = str(q[0].get("UniversalEntityID", "") or "").strip() if q else ""
+                except (IndexError, TypeError, AttributeError):
+                    uni = ""
+                if issuer or uni:
+                    return "pid:" + issuer + "\x00" + uni + "\x00" + pid
             return "pid:" + pid
         study = str(ds.get("StudyInstanceUID", "") or "").strip()
         if study:
@@ -747,18 +786,45 @@ class Deidentifier:
             if 0x5000 <= group <= 0x50FF:
                 del ds[elem.tag]
                 continue
-            if 0x6000 <= group <= 0x60FF and elem.tag.element in (0x3000, 0x4000):
+            if 0x6000 <= group <= 0x60FF:
+                # The whole overlay group: its data, and its Description and
+                # Label, which carry free text ('Jane Doe') as readily as the
+                # bitmap carries burned-in pixels.
                 del ds[elem.tag]
                 continue
 
             vr = _vr(elem)
             action = None if self._retained(tag, vr) else _ACTIONS.get(tag)
+            if action is None and vr == "PN" and not self._retained(tag, vr) \
+                    and not elem.tag.is_private:
+                # A person name the table does not list (an evaluator, an
+                # operator in a newer module) is still a person's name.
+                action = "Z"
             removed = False
             if action == "X":
                 del ds[elem.tag]
                 removed = True
             elif action in ("D", "X/D"):
-                elem.value = self._dummy_for(vr)
+                if vr == "SQ":
+                    pass                    # items kept; profiled by the recursion below
+                elif vr == "UI":
+                    v = elem.value
+                    if v in (None, ""):
+                        elem.value = None
+                    elif isinstance(v, (list, tuple)) or getattr(v, "VM", 1) > 1 \
+                            or type(v).__name__ == "MultiValue":
+                        elem.value = [self.map_uid(u) for u in v]
+                    else:
+                        elem.value = self.map_uid(v)
+                elif tag in _TYPE1_PAYLOAD:
+                    raise DeidError(
+                        "this object's %s must be replaced and cannot be cleaned (a "
+                        "document payload) — refused rather than forwarded empty"
+                        % (elem.keyword or hex(tag)))
+                elif vr == "AS":
+                    elem.value = "000Y"
+                else:
+                    elem.value = self._dummy_for(vr)
             elif action in ("Z", "Z/D", "X/Z", "X/Z/D"):
                 # Always the empty option, never the remove option: several of
                 # these are Type 2, and dropping a Type 2 attribute produces an
@@ -770,6 +836,12 @@ class Deidentifier:
             if not removed and _vr(elem) == "SQ" and elem.value is not None:
                 for item in elem.value:
                     self._apply_profile(item)
+                    if action in ("D", "X/D"):
+                        # A kept D sequence (ContentSequence, ...) still cannot
+                        # carry narrative: its free-text values are replaced.
+                        for tkw in ("TextValue", "UnformattedTextValue"):
+                            if tkw in item and item.get(tkw):
+                                item[tkw].value = "ANONYMIZED"
 
     def _remap_uids(self, ds: Dataset) -> None:
         for elem in ds:
@@ -842,7 +914,9 @@ class Deidentifier:
         # safe, and these were not vetted at all. What is left is a list of
         # retain options with no base profile under them, which is exactly the
         # truth — every code in the sequence still names something we did.
-        codes = [] if self.keep_private else [_CODE_BASIC]
+        # No site key: the mapping is reversible, so the Basic Profile — whose
+        # point is that identity cannot be recovered — is not claimed either.
+        codes = [] if (self.keep_private or not self.has_secret) else [_CODE_BASIC]
         codes += [_CODE_FULL_DATES if self.keep_dates else _CODE_MOD_DATES,
                   _CODE_PATIENT_CHARS]
         if self.profile == "basic":
@@ -862,6 +936,8 @@ class Deidentifier:
         method = ["Carino DICOM %s profile" % self.profile] + [m for _, m in codes]
         if self.keep_private:
             method.append("PRIVATE ATTRIBUTES RETAINED UNVETTED")
+        if not self.has_secret:
+            method.append("NO SITE KEY: PSEUDONYMS REVERSIBLE")
         if not self.keep_dates:
             # E.3.6 requires the manner of the date modification to be stated,
             # and this is the only place a receiving system will ever read it —
@@ -878,7 +954,7 @@ class Deidentifier:
         # Asserting YES while forwarding unvetted private attributes would be a
         # false claim on the one attribute a recipient is entitled to trust, so
         # keep_private downgrades it. The method text says why.
-        ds.PatientIdentityRemoved = "NO" if self.keep_private else "YES"
+        ds.PatientIdentityRemoved = "NO" if (self.keep_private or not self.has_secret) else "YES"
         ds.DeidentificationMethod = method
         ds.DeidentificationMethodCodeSequence = seq
         ds.LongitudinalTemporalInformationModified = "UNMODIFIED" if self.keep_dates else "MODIFIED"
@@ -892,17 +968,27 @@ class Deidentifier:
         # instance; some archives index the header and lose the file.
         sop_class = ds.get("SOPClassUID", None)
         sop_inst = ds.get("SOPInstanceUID", None)
-        if sop_class:
-            fm.MediaStorageSOPClassUID = sop_class
-        if sop_inst:
-            fm.MediaStorageSOPInstanceUID = sop_inst
-        fm.ImplementationVersionName = "CARINO-DICOM"
-        if self.profile == "strict" and _SOURCE_AE in fm:
-            del fm[_SOURCE_AE]  # the sending AE title names the originating site
-        if not self.keep_private:
-            for tag in _META_PRIVATE:
-                if tag in fm:
-                    del fm[tag]
+        # PS3.15 E.1.1 item 7: the File Meta Information is REPLACED with a
+        # description of the de-identifying application. Rebuilt from scratch:
+        # only the version and the three identity/syntax elements survive, so
+        # the sending/receiving AE titles, presentation addresses, the original
+        # implementation and any private blob are all gone (in every profile).
+        from pydicom.dataset import FileMetaDataset
+        new = FileMetaDataset()
+        if "FileMetaInformationVersion" in fm:
+            new.FileMetaInformationVersion = fm.FileMetaInformationVersion
+        new.MediaStorageSOPClassUID = sop_class or fm.get("MediaStorageSOPClassUID", "")
+        new.MediaStorageSOPInstanceUID = sop_inst or fm.get("MediaStorageSOPInstanceUID", "")
+        if "TransferSyntaxUID" in fm:
+            new.TransferSyntaxUID = fm.TransferSyntaxUID
+        new.ImplementationClassUID = _IMPLEMENTATION_CLASS_UID
+        new.ImplementationVersionName = "CARINO-DICOM"
+        ds.file_meta = new
+        # The 128-byte preamble is free-form and has carried names before.
+        try:
+            ds.preamble = b"\x00" * 128
+        except AttributeError:
+            pass
 
     # -- entry point ---------------------------------------------------------
 

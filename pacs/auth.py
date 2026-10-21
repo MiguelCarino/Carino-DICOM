@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+import threading
 import time
 from collections import deque
 from hashlib import sha256
@@ -132,6 +133,19 @@ def path_is_protected(path: str, extra_prefixes: tuple[str, ...] = ()) -> bool:
     return False
 
 
+# Concurrent password-hash verifications allowed at once (see login_profile).
+KDF_CONCURRENCY = 4
+
+_DUMMY: dict = {}
+
+
+def _dummy_record() -> dict:
+    """A real PBKDF2 record nobody knows the password of, for timing parity."""
+    if not _DUMMY:
+        _DUMMY.update(_users.hash_password(secrets.token_urlsafe(16)))
+    return _DUMMY
+
+
 class RateLimiter:
     """Sliding window of failed attempts per client, with a fixed short block.
 
@@ -152,6 +166,10 @@ class RateLimiter:
         self._fails: dict[str, deque[float]] = {}
         self._blocked: dict[str, float] = {}   # key -> epoch when the block lifts
         self._noted: dict[str, float] = {}     # key -> epoch we last logged, for log throttling
+        # Werkzeug serves each request on its own thread: every method below
+        # holds this, or concurrent failures raise "dictionary changed size
+        # during iteration" out of a check() documented as never raising.
+        self._lock = threading.RLock()
 
     def _prune(self, now: float) -> None:
         # An attacker spraying from a botnet must not be able to grow this dict
@@ -159,21 +177,23 @@ class RateLimiter:
         # expired keys first; if that is not enough, drop the least recently
         # active. Losing a key only forgives past failures, it never grants
         # access.
-        for key in [k for k, until in self._blocked.items() if until <= now]:
-            self._blocked.pop(key, None)
-        for key in [k for k, hits in self._fails.items()
-                    if not hits or hits[-1] <= now - self.window]:
-            self._fails.pop(key, None)
-            self._noted.pop(key, None)
-        while len(self._fails) > self.max_clients:
-            oldest = min(self._fails, key=lambda k: self._fails[k][-1])
-            self._fails.pop(oldest, None)
-            self._noted.pop(oldest, None)
+        with self._lock:
+            for key in [k for k, until in self._blocked.items() if until <= now]:
+                self._blocked.pop(key, None)
+            for key in [k for k, hits in self._fails.items()
+                        if not hits or hits[-1] <= now - self.window]:
+                self._fails.pop(key, None)
+                self._noted.pop(key, None)
+            while len(self._fails) > self.max_clients:
+                oldest = min(self._fails, key=lambda k: (self._fails.get(k) or [0.0])[-1])
+                self._fails.pop(oldest, None)
+                self._noted.pop(oldest, None)
 
     def retry_after(self, key: str, now: Optional[float] = None) -> int:
         """Seconds this client must wait, 0 when it may attempt now."""
         now = time.time() if now is None else now
-        until = self._blocked.get(key, 0.0)
+        with self._lock:
+            until = self._blocked.get(key, 0.0)
         if until <= now:
             return 0
         return max(1, int(round(until - now)))
@@ -181,22 +201,24 @@ class RateLimiter:
     def record_failure(self, key: str, now: Optional[float] = None) -> int:
         """Count one evaluated failure; returns the new retry_after."""
         now = time.time() if now is None else now
-        hits = self._fails.setdefault(key, deque())
-        cutoff = now - self.window
-        while hits and hits[0] <= cutoff:
-            hits.popleft()
-        hits.append(now)
-        if len(hits) >= self.limit:
-            self._blocked[key] = now + self.block
-            hits.clear()
-        self._prune(now)
-        return self.retry_after(key, now)
+        with self._lock:
+            hits = self._fails.setdefault(key, deque())
+            cutoff = now - self.window
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            hits.append(now)
+            if len(hits) >= self.limit:
+                self._blocked[key] = now + self.block
+                hits.clear()
+            self._prune(now)
+            return self.retry_after(key, now)
 
     def clear(self, key: str) -> None:
         """A correct credential forgives the client's history."""
-        self._fails.pop(key, None)
-        self._blocked.pop(key, None)
-        self._noted.pop(key, None)
+        with self._lock:
+            self._fails.pop(key, None)
+            self._blocked.pop(key, None)
+            self._noted.pop(key, None)
 
     def should_log(self, key: str, now: Optional[float] = None) -> bool:
         """One log line per client per window.
@@ -205,10 +227,11 @@ class RateLimiter:
         of the log buffer just by making noise.
         """
         now = time.time() if now is None else now
-        if now - self._noted.get(key, 0.0) < self.window:
-            return False
-        self._noted[key] = now
-        return True
+        with self._lock:
+            if now - self._noted.get(key, 0.0) < self.window:
+                return False
+            self._noted[key] = now
+            return True
 
 
 class SessionSigner:
@@ -223,6 +246,30 @@ class SessionSigner:
     def __init__(self, ttl: int = SESSION_TTL):
         self._secret = secrets.token_bytes(32)
         self.ttl = int(ttl)
+        # nonce -> exp of sessions ended by logout. Bounded by the TTL (entries
+        # expire with the session they name) and lost on restart, which ends
+        # every session anyway — a logged-out cookie no longer works anywhere.
+        self._revoked: dict[str, int] = {}
+        self._rlock = threading.Lock()
+
+    def revoke(self, value: str) -> None:
+        parts = str(value or "").split(".")
+        if len(parts) not in (4, 5):
+            return
+        try:
+            exp = int(parts[1])
+        except ValueError:
+            return
+        now = time.time()
+        with self._rlock:
+            for n, e in [(n, e) for n, e in self._revoked.items() if e <= now]:
+                self._revoked.pop(n, None)
+            if len(self._revoked) < 100000:
+                self._revoked[parts[2]] = exp
+
+    def _is_revoked(self, nonce: str) -> bool:
+        with self._rlock:
+            return nonce in self._revoked
 
     def _sign(self, payload: str) -> str:
         return hmac.new(self._secret, payload.encode("utf-8"), sha256).hexdigest()
@@ -264,6 +311,8 @@ class SessionSigner:
             return "invalid"
         if exp <= now:
             return "expired"
+        if self._is_revoked(nonce):
+            return "invalid"
         return ""
 
     # ---- profile sessions (format 2) ------------------------------------
@@ -319,6 +368,8 @@ class SessionSigner:
             return "invalid"
         if exp <= now:
             return "expired"
+        if self._is_revoked(nonce):
+            return "invalid"
         return ""
 
 
@@ -366,6 +417,14 @@ class AuthGuard:
         self.log = log
         self.sessions = SessionSigner(ttl=ttl)
         self.limiter = RateLimiter()
+        # Profile logins are limited per (client, account) so a NAT neighbour
+        # hammering one account cannot lock out everyone else, and per client
+        # at a looser ceiling so spraying many accounts is slowed too.
+        self.account_limiter = RateLimiter()
+        self.spray_limiter = RateLimiter(limit=FAIL_LIMIT * 4)
+        # PBKDF2 costs tens of milliseconds of a core; unauthenticated callers
+        # may not run an unbounded number of them at once.
+        self._kdf_slots = threading.BoundedSemaphore(KDF_CONCURRENCY)
         self.extra_prefixes = tuple(extra_prefixes)
 
     @property
@@ -569,23 +628,53 @@ class AuthGuard:
         deliberate POST rather than something the page assumes, so the audit
         trail has a login to record and the operator has a session to end.
         """
-        profile = _users.by_id(self.cfg.users, str(profile_id or ""))
+        wanted = str(profile_id or "").strip()
+        profile = _users.by_id(self.cfg.users, wanted)
+        if profile is None and wanted and not _users.is_valid_id(wanted):
+            # "Type your name" mode (users.list_profiles false): the browser has
+            # no list to turn the name into an id, so it sends the name.
+            low = wanted.casefold()
+            named = [p for p in _users.enabled_profiles(self.cfg.users)
+                     if p.name.strip().casefold() == low]
+            profile = named[0] if len(named) == 1 else None
+        account = f"{client_ip}|{(profile.id if profile is not None else wanted.casefold())[:64]}"
+        # The block is checked BEFORE anything is verified. "A correct
+        # credential beats the block" is right for a 256-bit token and wrong
+        # for a human password: it turned 429-versus-200 into an oracle that
+        # said exactly which guess was right, at the cost of one PBKDF2 each.
+        wait = max(self.account_limiter.retry_after(account, now),
+                   self.spray_limiter.retry_after(client_ip, now))
+        if wait:
+            return Verdict(False, 429, "rate_limited", retry_after=wait), _users.ANONYMOUS
+
+        def fail():
+            if self.log is not None and self.limiter.should_log(client_ip, now):
+                self.log.warn(f"Rejected a profile login from {client_ip}", kind="auth")
+            w = max(self.account_limiter.record_failure(account, now),
+                    self.spray_limiter.record_failure(client_ip, now))
+            if w:
+                return Verdict(False, 429, "rate_limited", retry_after=w), _users.ANONYMOUS
+            return Verdict(False, 401, "invalid"), _users.ANONYMOUS
+
         if profile is None or not profile.enabled:
             # A wrong id and a wrong password answer identically, and both are
-            # counted. The picker already publishes which profiles exist when
-            # the operator wants it to; where they have turned that off, this
-            # must not put it back by being more specific about failures.
-            return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
+            # counted — and both cost one PBKDF2, so the response time does not
+            # say which ids exist either.
+            with self._kdf_slots:
+                _users.verify_password(_dummy_record(), str(password or "") or "x")
+            return fail()
         if profile.locked:
-            if not profile.check_password(str(password or "")):
-                return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
+            with self._kdf_slots:
+                good = profile.check_password(str(password or ""))
+            if not good:
+                return fail()
         elif password:
             # They typed a password at a profile that has none. Refusing is the
             # honest answer: silently accepting it teaches somebody that their
             # password "works" and leaves them believing the account is
             # protected when anyone can click straight in.
-            return self._fail(client_ip, "invalid", now), _users.ANONYMOUS
-        self.limiter.clear(client_ip)
+            return fail()
+        self.account_limiter.clear(account)
         if self.log is not None:
             self.log.info(f"{profile.name} signed in from {client_ip}", kind="auth")
         return Verdict(True, refresh=True), profile
@@ -854,10 +943,10 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
                 profile.id, profile.credential_fingerprint()))
         verdict = guard.login(str(body.get("token") or ""), _client_ip())
         if not verdict.ok:
-            _audit("login.failed", target="api token", outcome="denied",
-                   reason=verdict.reason)
+            _audit("login.failed", actor=_users.SERVICE_PROFILE, target="api token",
+                   outcome="denied", reason=verdict.reason)
             return _reject(verdict)
-        _audit("login", target="api token")
+        _audit("login", actor=_users.SERVICE_PROFILE, target="api token")
         resp = jsonify(ok=True, auth=guard.status())
         return _set_cookie(resp) if verdict.refresh else resp
 
@@ -867,6 +956,9 @@ def install(app, cfg, log=None, ttl: int = SESSION_TTL,
         # to say whose it was.
         _audit("logout", actor=guard.identify(headers=request.headers,
                                               cookies=request.cookies))
+        # Ended on the server too, not only in this browser: a copied cookie
+        # stops working the moment its owner logs out.
+        guard.sessions.revoke(guard._cookie(request.cookies))
         resp = jsonify(ok=True)
         resp.delete_cookie(SESSION_COOKIE, path="/", samesite="Strict")
         return resp

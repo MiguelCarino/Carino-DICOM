@@ -1037,7 +1037,11 @@ def test_find_cancel_and_stop():
         gen2 = scp._handle_find(ev2)
         assert next(gen2)[0] == 0xFF00
         scp._stopping.set()
-        assert next(gen2)[0] == 0xFE00, "in-flight query ignored the stop flag"
+        # A server stop is not the SCU's own C-CANCEL: FE00 would tell it it
+        # cancelled. It is a failure the SCU should retry (PS3.4 Table C.4-1).
+        st = next(gen2)[0]
+        assert st != 0xFF00, "in-flight query ignored the stop flag"
+        assert st == 0xC000, f"a service stop must not be reported as Cancel, got {st:#06x}"
         print(" [18] C-FIND honours C-CANCEL and the stop flag mid-query OK")
     finally:
         scp._stopping.clear()

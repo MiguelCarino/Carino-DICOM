@@ -67,7 +67,6 @@ the order exactly (see ``OrderStore.match`` / ``_reconcile_study``).
 from __future__ import annotations
 
 import datetime
-import fnmatch
 import threading
 from typing import Callable, Optional
 
@@ -80,7 +79,7 @@ from pynetdicom.sop_class import (
 from .assocwords import caller_of, listener_refusal
 from .connections import listener_handlers
 from .logbuf import LogBuffer
-from .netclaim import claim
+from .netclaim import cap_per_host, claim, limit_listener
 
 
 def _peer_addr(event) -> str:
@@ -648,12 +647,24 @@ def _query_values(query_value) -> list[str]:
     return [q] if q else []
 
 
+def _wildcard_re(q: str):
+    """A DICOM wildcard (PS3.4 C.2.2.2.4) as a regex: '*' and '?' are the only
+    wildcards; every other character — '[' included — is literal. fnmatch read
+    '[!Z]*' as a character class (widening a query to other patients) and, on
+    Windows, normcased the value."""
+    import re as _re
+    out = []
+    for ch in q:
+        out.append(".*" if ch == "*" else "." if ch == "?" else _re.escape(ch))
+    return _re.compile("".join(out), _re.DOTALL)
+
+
 def _match_one_text(q: str, o: str) -> bool:
     """One query VALUE against one order value: wildcard, else case-insensitive
     equality. Split out of :func:`_match_text` so that honouring every value of a
     multi-valued key is a loop over the existing rule rather than a second rule."""
     if any(c in q for c in "*?"):
-        return fnmatch.fnmatch(o.upper(), q.upper())
+        return _wildcard_re(q.upper()).fullmatch(o.upper()) is not None
     return o.upper() == q.upper()
 
 
@@ -686,6 +697,20 @@ def _match_one_date(q: str, order_date: str) -> bool:
     return order_date == q
 
 
+def _norm_query_date(q: str) -> Optional[str]:
+    """A DA query value (single or range) in YYYYMMDD form, or None when it is
+    not a date at all. The legacy 'yyyy.mm.dd' form (PS3.5 6.2, kept for
+    backward compatibility) is accepted by dropping the dots."""
+    q = q.replace(".", "").strip()
+    if "-" in q:
+        lo, _, hi = q.partition("-")
+        lo, hi = lo.strip(), hi.strip()
+        if (lo and not _is_da(lo)) or (hi and not _is_da(hi)) or (not lo and not hi):
+            return None
+        return f"{lo}-{hi}"
+    return q if _is_da(q) else None
+
+
 def _match_date(query_value, order_date: str) -> bool:
     """DICOM date matching (exact or ``a-b`` / ``a-`` / ``-b`` range), satisfied by
     ANY of the key's values — a worklist SCU legitimately asks for two days at
@@ -693,12 +718,45 @@ def _match_date(query_value, order_date: str) -> bool:
     Empty query matches all. An order with NO scheduled date matches any query
     (lenient — a hand-keyed emergency order must not be hidden by a date
     filter)."""
-    queries = _query_values(query_value)
-    if not queries:
+    raw = _query_values(query_value)
+    if not raw:
         return True
     if not order_date:
         return True                     # dateless order: never hide it
+    queries = [n for n in (_norm_query_date(q) for q in raw) if n]
+    if not queries:
+        # Nothing in the key is a date or a date range ('2026-10-20' is not DA):
+        # treated as universal rather than compared as text, which hid every
+        # dated order — the opposite of this module's "never hide an order".
+        return True
     return any(_match_one_date(q, order_date) for q in queries)
+
+
+def _match_time(query_value, order_time: str) -> bool:
+    """SPS Start Time (a required matching key, PS3.4 Table K.6-1): exact or a
+    'a-b' / 'a-' / '-b' range, matched independently of the date (the default
+    reading of C.2.2.2.5). An order with no time matches any time."""
+    raw = _query_values(query_value)
+    if not raw or not order_time:
+        return True
+    t = order_time[:6].ljust(6, "0")
+
+    def norm(v: str) -> str:
+        v = "".join(c for c in v.split(".")[0] if c.isdigit())
+        return v.ljust(6, "0")[:6] if v else ""
+    for q in raw:
+        if "-" in q:
+            lo, _, hi = q.partition("-")
+            lo, hi = norm(lo), norm(hi)
+            if not lo and not hi:
+                return True
+            if (not lo or t >= lo) and (not hi or t <= (hi if hi != "000000" else "235959")):
+                return True
+        else:
+            n = norm(q)
+            if not n or n == t:
+                return True
+    return False
 
 
 def _query_sps_item(ds):
@@ -717,23 +775,52 @@ def _query_sps_item(ds):
 
 
 def order_matches_query(order: dict, ds) -> bool:
-    """True if *order* satisfies every match key present in the C-FIND query *ds*."""
-    if not _match_text(getattr(ds, "PatientID", ""), order.get("patient_id")):
+    """True if *order* satisfies every match key present in the C-FIND query *ds*.
+
+    A key whose value this SCP sends as a stand-in (the TMP- Patient ID, the
+    UNKNOWN^ name, a derived Study UID) also matches that stand-in: a tech who
+    re-queries by what the console just showed must find the same order."""
+    emitted: list = []
+
+    def item():
+        if not emitted:
+            try:
+                emitted.append(build_worklist_item(order))
+            except Exception:
+                emitted.append(None)
+        return emitted[0]
+
+    def key(query_value, stored, attr) -> bool:
+        if _match_text(query_value, stored):
+            return True
+        if not _query_values(query_value):
+            return True
+        it = item()
+        sent = str(getattr(it, attr, "") or "") if it is not None else ""
+        return bool(sent) and sent != str(stored or "") and _match_text(query_value, sent)
+
+    if not key(getattr(ds, "PatientID", ""), order.get("patient_id"), "PatientID"):
         return False
-    if not _match_text(getattr(ds, "PatientName", ""), order.get("patient_name") or order.get("patient")):
+    if not key(getattr(ds, "PatientName", ""), order.get("patient_name") or order.get("patient"),
+               "PatientName"):
         return False
     if not _match_text(getattr(ds, "AccessionNumber", ""), order.get("accession")):
         return False
-    if not _match_text(getattr(ds, "StudyInstanceUID", ""), order.get("study_uid")):
+    if not key(getattr(ds, "StudyInstanceUID", ""), order.get("study_uid"), "StudyInstanceUID"):
         return False
     q = _query_sps_item(ds)
     if q is not None:
         # Modality / station may be blank on the order → lenient (show everywhere).
         if not _match_text(getattr(q, "Modality", ""), order.get("modality"), lenient_blank_order=True):
             return False
-        if not _match_text(getattr(q, "ScheduledStationAETitle", ""), order.get("station_aet"), lenient_blank_order=True):
+        station = str(order.get("station_aet") or "").strip()
+        if station.upper() == UNASSIGNED_STATION_AET:
+            station = ""                # the wire spelling of "addressed to nobody"
+        if not _match_text(getattr(q, "ScheduledStationAETitle", ""), station, lenient_blank_order=True):
             return False
         if not _match_date(getattr(q, "ScheduledProcedureStepStartDate", ""), _order_date(order)):
+            return False
+        if not _match_time(getattr(q, "ScheduledProcedureStepStartTime", ""), _order_time(order)):
             return False
     return True
 
@@ -1161,10 +1248,22 @@ class MwlSCP:
         tls_key: str = "",
         tls_ca: str = "",
         journal=None,
+        max_associations: Optional[int] = None,
+        max_per_host: Optional[int] = None,
+        asks=None,
     ):
         self.aet = aet
+        # mwlasks.MwlAskStore, or None: what each caller's queries ask for.
+        self.asks = asks
+        self._template = None
         # connections.ConnectionJournal, or None outside PacsServer.
         self.journal = journal
+        self.max_associations = max_associations
+        self.max_per_host = max_per_host
+        if isinstance(allowed_aets, str):
+            # A bare string used to be iterated character by character, so
+            # "CT1" became an allow-list of 'C', 'T' and '1'.
+            raise ValueError("allowed_aets must be a list of AE titles, not a string")
         self.bind = bind
         self.port = port
         self.log = log
@@ -1241,15 +1340,23 @@ class MwlSCP:
             # item is this module's decision, so a caller that hands over its
             # whole store cannot put a closed one back on a modality's screen.
             orders = [o for o in (self.get_orders() or []) if o.get("status") == "open"]
-        except Exception:
-            orders = []
+        except Exception as exc:
+            # Not "no orders": an empty Success would tell the modality its
+            # worklist is empty when the SCP simply could not read it.
+            with self._lock:
+                self.error_count += 1
+            self.log.error(f"MWL: could not read the open orders for {who}: {exc}", kind="mwl")
+            yield 0xC000, None           # Unable to process
+            return
         matches = [o for o in orders if order_matches_query(o, query)]
         self.log.info(
             f"MWL query from {who} @ {_peer_addr(event)} → {len(matches)} "
             f"of {len(orders)} open order(s)", kind="mwl")
         n = 0
+        sent = []
         for order in matches:
             if event.is_cancelled:
+                self._record_asks(who, event, query, sent)
                 yield 0xFE00, None       # Cancel
                 return
             try:
@@ -1268,10 +1375,26 @@ class MwlSCP:
                                f"{order.get('id') or '?'}: {exc}", kind="mwl")
                 continue
             n += 1
+            sent.append(item)
             yield 0xFF00, item           # Pending — one match
         with self._lock:
             self.match_count += n
+        self._record_asks(who, event, query, sent)
         # Generator return → pynetdicom sends 0x0000 Success.
+
+    def _record_asks(self, who: str, event, query, sent: list) -> None:
+        """File which attributes this query asked for and how the items sent
+        carried them (mwlasks.py). Never allowed to cost the modality its
+        worklist: a failure here is logged and the C-FIND carries on."""
+        if self.asks is None:
+            return
+        try:
+            if self._template is None:
+                # A blank order's item: what every answer carries at the least.
+                self._template = build_worklist_item({"id": "000000000000"})
+            self.asks.record(who, _peer_addr(event), query, sent, template=self._template)
+        except Exception as exc:
+            self.log.warn(f"MWL: could not record what {who} asked for: {exc}", kind="mwl")
 
     def _handle_rejected(self, event) -> None:
         """Say why a modality was turned away, which pynetdicom does not."""
@@ -1290,6 +1413,7 @@ class MwlSCP:
         if self.running:
             return
         ae = AE(ae_title=self.aet)
+        limit_listener(ae, self.max_associations)
         ae.add_supported_context(ModalityWorklistInformationFind)
         ae.add_supported_context(Verification)
         if self.allowed_aets:
@@ -1311,6 +1435,7 @@ class MwlSCP:
         self._server = ae.start_server(
             (self.bind, self.port), block=False, evt_handlers=handlers, ssl_context=ssl_context
         )
+        cap_per_host(self._server, self.max_per_host, log=self.log, label="Worklist")
         allow = ", ".join(self.allowed_aets) if self.allowed_aets else "any"
         proto = "DICOM-TLS" + (" (mutual)" if self.tls and self.tls_ca else "") if self.tls else "plain DICOM"
         self.log.info(
@@ -1326,4 +1451,6 @@ class MwlSCP:
             self._server.shutdown()
         finally:
             self._server = None
+            if self.asks is not None:
+                self.asks.flush()
             self.log.info("Worklist (MWL) stopped", kind="mwl")

@@ -79,7 +79,11 @@ def _backoff(attempts: int, base: float) -> float:
     Keeps a permanently-down node from being hammered every poll while still
     retrying often enough that a brief outage recovers quickly."""
     base = max(5.0, float(base or 5.0))
-    return min(_BACKOFF_CAP, base * (2 ** max(0, attempts - 1)))
+    # Clamp the exponent BEFORE multiplying: 2**1024 cannot be turned into a
+    # float, and the OverflowError used to escape every pass from attempt 1025
+    # on (about 85 h of a node being down), stopping all forwarding behind it.
+    exp = min(max(0, int(attempts or 0) - 1), 16)
+    return min(_BACKOFF_CAP, base * (2.0 ** exp))
 
 
 def _dedupe(target: str) -> str:
@@ -93,6 +97,25 @@ def _dedupe(target: str) -> str:
     return f"{base}_{i}{ext}"
 
 
+def _move_file(src: str, target: str) -> str:
+    """shutil.move one file to a de-duplicated *target*; returns where it
+    landed. A cross-device move that fails part-way (shutil copies, then
+    unlinks) leaves a partial copy at the target: it is removed again while the
+    source still exists, so a retry does not file a truncated twin."""
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+    target = _dedupe(target)
+    try:
+        shutil.move(src, target)
+    except OSError:
+        if os.path.lexists(src) and os.path.lexists(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        raise
+    return target
+
+
 def _merge_move(src: str, dst: str) -> None:
     """Recursively move EVERYTHING from *src* into *dst* (files, subfolders,
     non-DICOM and all), then remove the now-empty source tree."""
@@ -100,7 +123,7 @@ def _merge_move(src: str, dst: str) -> None:
     for name in os.listdir(src):
         s = os.path.join(src, name)
         d = os.path.join(dst, name)
-        if os.path.isdir(s):
+        if os.path.isdir(s) and not os.path.islink(s):
             _merge_move(s, d)
         else:
             os.makedirs(os.path.dirname(d) or ".", exist_ok=True)
@@ -115,11 +138,25 @@ class FolderWatcher:
         self.index = index
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
-        self._sizes: dict[str, int] = {}          # path -> last-seen size (stability check)
+        # path -> last-seen (size, mtime_ns): the stability check. Both have to
+        # hold still across two polls — a preallocated copy keeps its size while
+        # the bytes behind it are still being written.
+        self._sizes: dict[str, tuple] = {}
+        # Every regular file under each outgoing item -> (size, mtime_ns) as of
+        # the previous archive pass. An item is only moved or deleted once ALL
+        # of its files (non-DICOM and half-written ones included) held still.
+        self._item_seen: dict[str, tuple] = {}
+        self._warned_links: set[str] = set()
+        self._warned_unqueued: set[str] = set()
+        # Destination names that failed at the LINK level during this pass:
+        # every other file owed to them waits for the next pass instead of
+        # paying its own connect/ACSE timeout (and holding up healthy nodes).
+        self._pass_dead: set[str] = set()
         # The ledger filename keeps the pre-rename spelling: it is the record of
         # what has already gone out, and a rename would read as an empty ledger
         # and re-send the whole outgoing tree to every destination.
-        self.state = SendState(os.path.join(os.path.dirname(cfg.path), ".carinopacs_state.json"))
+        self.state = SendState(os.path.join(os.path.dirname(cfg.path), ".carinopacs_state.json"),
+                               log=log)
         # One long-lived router: it owns the parsed-header cache and the
         # warn-once memo, both of which a per-pass instance would throw away —
         # re-reading every header and re-logging every misconfiguration every
@@ -181,18 +218,38 @@ class FolderWatcher:
             self._stop.wait(max(1.0, interval))
         self.log.info("Watcher stopped", kind="watch")
 
+    def _skip_link(self, p: str) -> bool:
+        """True (and warned once) for a symlink in the outgoing tree. Links are
+        never followed: anyone who can write the drop folder could otherwise
+        forward any DICOM file this account can read — other patients' studies
+        in the archive included — to every configured node."""
+        if not os.path.islink(p):
+            return False
+        if p not in self._warned_links:
+            if len(self._warned_links) > 4096:
+                self._warned_links.clear()
+            self._warned_links.add(p)
+            self.log.warn(f"Ignoring symlink {p} in the outgoing folder — links are never "
+                          f"followed or forwarded; copy the file in instead", kind="watch")
+        return True
+
     def _candidates(self, watch: str, skip_dirs: list[str]) -> list[str]:
         skips = [os.path.abspath(d) for d in skip_dirs if d]
         found = []
-        for root, _dirs, files in os.walk(watch):
+        for root, dirs, files in os.walk(watch):
             # never rescan the archive or the pending-review store
             aroot = os.path.abspath(root)
             if any(aroot == s or aroot.startswith(s + os.sep) for s in skips):
                 continue
+            # Hidden folders are staging areas, invisible to the archive pass
+            # too: the two passes must agree on what is live work.
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for name in files:
                 if name.startswith("."):
                     continue
                 p = os.path.join(root, name)
+                if self._skip_link(p):
+                    continue
                 if is_dicom(p):
                     found.append(p)
         return found
@@ -279,6 +336,7 @@ class FolderWatcher:
         received. *path* is what the operator sees in the log — with a scrubbed
         copy in flight it is not the file on the wire."""
         errors = []
+        link_down = False
         for dest in nodes:
             if self._stop.is_set():
                 return
@@ -292,8 +350,11 @@ class FolderWatcher:
                 # stops being dialled — a silent halt rather than one bad file.
                 res = SendResult(False, f"send raised ({exc})")
             if not res.ok:
+                link_down = link_down or bool(getattr(res, "link", False))
                 errors.append(f"{dest.host}:{dest.port} {res.message}"
                               if len(nodes) > 1 else res.message)
+        if link_down:
+            self._pass_dead.add(dest_name)
         if errors:
             self._note_failure(path, fails, dest_name, "; ".join(errors), interval)
         else:
@@ -530,6 +591,7 @@ class FolderWatcher:
         # list is evidence about yesterday's config, and archiving on it is how
         # a study reaches nobody and is deleted for it.
         evaluated: set[str] = set()
+        self._pass_dead = set()
 
         for path in self._candidates(watch, [sent_dir, pending_dir]):
             if self._stop.is_set():
@@ -542,15 +604,18 @@ class FolderWatcher:
                 self.state.save()
                 return
             try:
-                size = os.path.getsize(path)
-                mtime = os.path.getmtime(path)
+                st = os.stat(path)
+                size = st.st_size
+                mtime = st.st_mtime
             except OSError:
                 continue
 
-            # stability gate: only proceed when size is non-zero and steady
+            # stability gate: only proceed when the file is non-empty and both
+            # its size AND its mtime held still across two polls.
             prev = self._sizes.get(path)
-            self._sizes[path] = size
-            if size == 0 or prev != size:
+            now_sig = (size, st.st_mtime_ns)
+            self._sizes[path] = now_sig
+            if size == 0 or prev != now_sig:
                 continue
             # Past the gate: the bytes are settled and everything below re-routes
             # this file against the live config, so its entry is about to become
@@ -585,6 +650,7 @@ class FolderWatcher:
             # delivery is due like any other.
             todo = [n for n in entry["route"]
                     if n in want and n not in entry["sent"]
+                    and n not in self._pass_dead
                     and now >= fails.get(n, {}).get("next_try", 0)]
             if not todo:
                 continue
@@ -651,14 +717,54 @@ class FolderWatcher:
         if os.path.isfile(entrypath):
             return [entrypath] if is_dicom(entrypath) else []
         out = []
-        for root, _dirs, files in os.walk(entrypath):
+        for root, dirs, files in os.walk(entrypath):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for f in files:
                 if f.startswith("."):
                     continue
                 p = os.path.join(root, f)
+                if os.path.islink(p):
+                    continue
                 if is_dicom(p):
                     out.append(p)
         return out
+
+    def _snapshot(self, entrypath: str) -> tuple[dict, bool]:
+        """({path: (size, mtime_ns)}, has_dir_link) for one outgoing item.
+
+        Every regular file and file link the archive pass would act on. Left
+        out, and so never moved or deleted: hidden folders (staging areas the
+        send pass ignores too) and hidden files carrying DICOM bytes (a copy
+        tool's in-flight temp name). Directory links are reported rather than
+        walked — an item holding one is not archived at all."""
+        out: dict = {}
+        has_link = False
+        try:
+            if os.path.islink(entrypath) or not os.path.isdir(entrypath):
+                st = os.lstat(entrypath)
+                return {entrypath: (st.st_size, st.st_mtime_ns)}, False
+        except OSError:
+            return {}, False
+        for root, dirs, files in os.walk(entrypath):
+            keep = []
+            for d in dirs:
+                if d.startswith("."):
+                    continue
+                if os.path.islink(os.path.join(root, d)):
+                    has_link = True
+                    continue
+                keep.append(d)
+            dirs[:] = keep
+            for f in files:
+                p = os.path.join(root, f)
+                try:
+                    st = os.lstat(p)
+                except OSError:
+                    continue
+                if f.startswith(".") and not os.path.islink(p) and is_dicom(p):
+                    continue
+                out[p] = (st.st_size, st.st_mtime_ns)
+        return out, has_link
 
     _STALE_REWARN = 900.0                   # re-announce a held study every 15 min
 
@@ -730,15 +836,18 @@ class FolderWatcher:
         """(path, kind) for every non-DICOM PDF/image under *entrypath*."""
         from . import ingest
         if os.path.isfile(entrypath):
+            if os.path.islink(entrypath):
+                return []
             k = None if is_dicom(entrypath) else ingest.detect_kind(entrypath)
             return [(entrypath, k)] if k else []
         out = []
-        for root, _dirs, files in os.walk(entrypath):
+        for root, dirs, files in os.walk(entrypath):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for f in files:
                 if f.startswith("."):
                     continue
                 p = os.path.join(root, f)
-                if is_dicom(p):
+                if os.path.islink(p) or is_dicom(p):
                     continue
                 k = ingest.detect_kind(p)
                 if k:
@@ -766,23 +875,32 @@ class FolderWatcher:
             "accession": str(getattr(hdr, "AccessionNumber", "") or ""),
         }
 
-    def _siphon_pending(self, entrypath, pending_dir, dicoms, name) -> int:
+    def _siphon_pending(self, entrypath, pending_dir, dicoms, name) -> tuple[int, int, set]:
         """Move any PDF/image beside a study into the pending-review store,
-        pre-filling its identity from the study. Returns how many were queued."""
+        pre-filling its identity from the study.
+
+        Returns (queued, not_queued, staged_paths). A convertible that could
+        not be queued — staging failed, or there is no pending_dir at all — is
+        counted in not_queued, and the caller must then NOT delete or move the
+        item: the report would otherwise be destroyed with it."""
         conv = self._convertibles_under(entrypath)
-        if not conv or not pending_dir:
-            return 0
+        if not conv:
+            return 0, 0, set()
+        if not pending_dir:
+            return 0, len(conv), set()
         from . import ingest
         identity = self._study_identity(dicoms)
         identity["source"] = name
         queued = 0
+        staged: set = set()
         for path, kind in conv:
             try:
                 ingest.stage_pending(pending_dir, path, identity, kind)
                 queued += 1
-            except OSError as exc:
+                staged.add(path)
+            except Exception as exc:
                 self.log.warn(f"Could not queue {os.path.basename(path)} for review: {exc}", kind="send")
-        return queued
+        return queued, len(conv) - queued, staged
 
     def _archive_pass(self, watch, sent_dir, pending_dir, on_success, want,
                       evaluated, generation) -> None:
@@ -809,83 +927,123 @@ class FolderWatcher:
             return
         sent_abs = os.path.abspath(sent_dir)
         pending_abs = os.path.abspath(pending_dir) if pending_dir else None
-        for name in names:
-            if name.startswith("."):
-                continue
-            entrypath = os.path.join(watch, name)
-            ap = os.path.abspath(entrypath)
-            if ap == sent_abs or ap.startswith(sent_abs + os.sep):
-                continue  # never touch the archive itself (if nested under watch)
-            if pending_abs and (ap == pending_abs or ap.startswith(pending_abs + os.sep)):
-                continue  # never touch the pending store (if nested under watch)
-            dicoms = self._dicoms_under(entrypath)
-            if not dicoms:
-                continue  # not a study (contains no DICOM) — leave it untouched
-            if not all(self._fully_sent(f, want, evaluated) for f in dicoms):
-                continue  # some instance still pending/failed — retry next pass
-            # Judged — now, before anything is moved or destroyed, check that the
-            # config the judgement was made under is still the config in force.
-            # A C-STORE association can hold a pass open for minutes, which is
-            # ample time for a Save to land: the operator adds "Teaching" (or
-            # renames a node, or swaps one out) while this study is on the wire,
-            # and everything above — `want`, `nodes`, `on_success`, and the
-            # routes recorded this pass — is about the destination list they
-            # just replaced. Re-reading the LIVE list here would not rescue it:
-            # a file routed to "Archive" alone still reads as complete beside a
-            # brand-new "Teaching" it was never routed to, because the record is
-            # what is stale, not the comparison. So the pass declines outright.
-            # Simpler to reason about (one rule: a pass may only act on the
-            # config it began under) and it is the only reading that cannot
-            # delete a study the operator has just given a new destination.
-            # Cost: archiving waits one poll interval, once, per save.
-            if self._config_generation() != generation:
-                self.log.info(
-                    "Config changed while this pass was running — archiving deferred "
-                    "to the next pass, which will re-route against the new settings",
-                    kind="watch")
-                return
-            # Route any PDF/image beside the study to the review queue first, so
-            # the archive/delete below only handles DICOM + inert files.
-            queued = self._siphon_pending(entrypath, pending_dir, dicoms, name)
-            if queued:
-                self.log.info(f"Queued {queued} non-DICOM file(s) from {name} for review", kind="send")
-            try:
+        prev_seen = self._item_seen
+        seen_now: dict = {}
+        try:
+            for name in names:
+                if name.startswith("."):
+                    continue
+                entrypath = os.path.join(watch, name)
+                ap = os.path.abspath(entrypath)
+                if ap == sent_abs or ap.startswith(sent_abs + os.sep):
+                    continue  # never touch the archive itself (if nested under watch)
+                if pending_abs and (ap == pending_abs or ap.startswith(pending_abs + os.sep)):
+                    continue  # never touch the pending store (if nested under watch)
+                if os.path.islink(entrypath):
+                    continue  # a linked item is never sent, so never archived either
+                snap, dir_link = self._snapshot(entrypath)
+                seen_now.update(snap)
+                dicoms = self._dicoms_under(entrypath)
+                if not dicoms:
+                    continue  # not a study (contains no DICOM) — leave it untouched
+                if not all(self._fully_sent(f, want, evaluated) for f in dicoms):
+                    continue  # some instance still pending/failed — retry next pass
+                if dir_link:
+                    if entrypath not in self._warned_links:
+                        self._warned_links.add(entrypath)
+                        self.log.warn(f"Not archiving {name}: it contains a folder symlink, "
+                                      f"which is never followed — remove the link", kind="send")
+                    continue
+                # Every file in the item, not only the DICOM ones, has to have
+                # held still since the previous pass. A file still being copied
+                # in (under 132 bytes it is not even recognisable as DICOM)
+                # used to be swept away with the rest of the folder.
+                if any(prev_seen.get(p) != sig for p, sig in snap.items()):
+                    continue
+                # Judged — now, before anything is moved or destroyed, check that the
+                # config the judgement was made under is still the config in force.
+                # A C-STORE association can hold a pass open for minutes, which is
+                # ample time for a Save to land: the operator adds "Teaching" (or
+                # renames a node, or swaps one out) while this study is on the wire,
+                # and everything above — `want`, `nodes`, `on_success`, and the
+                # routes recorded this pass — is about the destination list they
+                # just replaced. So the pass declines outright. Cost: archiving
+                # waits one poll interval, once, per save.
+                if self._config_generation() != generation:
+                    self.log.info(
+                        "Config changed while this pass was running — archiving deferred "
+                        "to the next pass, which will re-route against the new settings",
+                        kind="watch")
+                    return
+                # Route any PDF/image beside the study to the review queue first, so
+                # the archive/delete below only handles DICOM + inert files.
+                queued, unqueued, staged = self._siphon_pending(entrypath, pending_dir, dicoms, name)
+                if queued:
+                    self.log.info(f"Queued {queued} non-DICOM file(s) from {name} for review", kind="send")
+                if unqueued:
+                    if entrypath not in self._warned_unqueued:
+                        if len(self._warned_unqueued) > 4096:
+                            self._warned_unqueued.clear()
+                        self._warned_unqueued.add(entrypath)
+                        why = ("no pending-review folder is configured (scu.pending_dir)"
+                               if not pending_dir else "it could not be queued for review")
+                        self.log.warn(f"Not {'deleting' if on_success == 'delete' else 'archiving'} "
+                                      f"{name}: {unqueued} report/image file(s) in it were not "
+                                      f"queued — {why}", kind="send")
+                    continue
+                # The siphon can take a while: re-check the config and the item.
+                if self._config_generation() != generation:
+                    self.log.info("Config changed while archiving — deferred to the next pass",
+                                  kind="watch")
+                    return
+                expected = {p: sig for p, sig in snap.items() if p not in staged}
+                again, again_link = self._snapshot(entrypath)
+                if again != expected or again_link:
+                    self.log.info(f"{name} changed while it was being archived — left for "
+                                  f"the next pass", kind="send")
+                    continue
+                self._archive_item(entrypath, name, watch, sent_dir, on_success,
+                                   expected, set(dicoms))
+        finally:
+            self._item_seen = seen_now
+
+    def _forget_sent(self, f: str, target: Optional[str]) -> None:
+        """Per-file bookkeeping, done as each file lands so a move that fails
+        part-way leaves no state entry or index row for a file already gone."""
+        self.state.drop(f)
+        self._sizes.pop(f, None)
+        self.router.cache.forget(f)
+        if self.index is not None:
+            self.index.enqueue_remove(f)
+            if target is not None:
+                self.index.enqueue_file(target, "sent")
+
+    def _archive_item(self, entrypath, name, watch, sent_dir, on_success,
+                      files: dict, dicoms: set) -> None:
+        """Delete or move exactly the files that were judged — nothing that
+        appeared since, nothing hidden that was left out of the snapshot — and
+        then remove the folders that are empty, bottom-up. Never an rmtree."""
+        verb = "Deleted" if on_success == "delete" else "Archived"
+        try:
+            for p in sorted(files):
                 if on_success == "delete":
-                    if os.path.isdir(entrypath):
-                        shutil.rmtree(entrypath)
-                    else:
-                        os.remove(entrypath)
-                    verb = "Deleted"
+                    os.remove(p)
+                    if p in dicoms:
+                        self._forget_sent(p, None)
                 else:
-                    rel = os.path.relpath(entrypath, watch)
-                    target = os.path.join(sent_dir, rel)
-                    if os.path.isfile(entrypath):
-                        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
-                        # Keep the name it actually landed under: _dedupe may
-                        # have renamed it, and the index is told where the file
-                        # IS, not where we asked for it to go.
-                        target = _dedupe(target)
-                        shutil.move(entrypath, target)
-                    else:
-                        _merge_move(entrypath, target)
-                    verb = "Archived"
-            except OSError as exc:
-                self.log.warn(f"Could not {on_success} {name}: {exc}", kind="send")
-                continue
-            for f in dicoms:
-                self.state.drop(f)
-                self._sizes.pop(f, None)
-                self.router.cache.forget(f)
-                if self.index is not None:
-                    self.index.enqueue_remove(f)
-            if self.index is not None and on_success == "move":
-                # Re-file the archived copies under their new paths. Removals
-                # and adds share one queue, so the add can never overtake the
-                # remove it replaces, and the paths are read back off disk
-                # because _merge_move may have de-duplicated a name.
-                for f in self._dicoms_under(target):
-                    self.index.enqueue_file(f, "sent")
-            self.log.info(f"{verb} after send: {name}", kind="send")
+                    target = _move_file(p, os.path.join(sent_dir, os.path.relpath(p, watch)))
+                    if p in dicoms:
+                        self._forget_sent(p, target)
+        except OSError as exc:
+            self.log.warn(f"Could not {on_success} {name}: {exc}", kind="send")
+            return
+        if os.path.isdir(entrypath) and not os.path.islink(entrypath):
+            for root, _dirs, _files in os.walk(entrypath, topdown=False):
+                try:
+                    os.rmdir(root)
+                except OSError:
+                    pass        # not empty: something we did not judge is still in it
+        self.log.info(f"{verb} after send: {name}", kind="send")
 
     def stats(self) -> dict:
         with self._lock:
