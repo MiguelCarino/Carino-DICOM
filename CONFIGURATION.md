@@ -1769,7 +1769,7 @@ With this off (or `url` empty) the webhook send is a no-op — no error, no coun
 
 Where the JSON event is POSTed. The body is a compact object — `event`, `at`,
 `state`, `destination`, `since`, `activated_by`, `actor` — sent with `Content-Type:
-application/json` and `User-Agent: Carino-PACS`.
+application/json` and `User-Agent: Carino-DICOM`.
 
 Validation refuses two things. `enabled: true` with an empty URL: *nothing would be
 sent, and the appliance would report notification as configured.* And any non-empty

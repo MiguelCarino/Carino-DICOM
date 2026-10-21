@@ -315,7 +315,7 @@ class Notifier:
         headers = {"Content-Type": "application/json",
                    # Receivers allow-list this token, so it keeps the
                    # pre-rename spelling until they have been told otherwise.
-                   "User-Agent": "Carino-PACS"}
+                   "User-Agent": "Carino-DICOM"}
         secret = str(wh.get("secret", "") or "")
         if secret:
             # The receiver has no other way to know this POST came from the
