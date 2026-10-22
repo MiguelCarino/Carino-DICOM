@@ -41,7 +41,7 @@ clearExtractorBtn.addEventListener('click', () => {
   extractorLogCard.style.display = 'none';
   extractorLogArea.textContent = '';
   renderExtractorGrid();
-  toast?.('Cleared the added files');
+  toast?.(T('Cleared the added files'));
 });
 
 // Sidebar drop zone

@@ -161,13 +161,88 @@ function renderCompareUI() {
     const badge = $(id);
     if (badge) badge.textContent = badge.title = on ? files[i]?.name || '' : '';
   });
-  if (on) drawCompareThumb();
+  if (on) { drawCompareThumb(); renderComparePixels(); }
+}
+
+// Decoding is the slow part, so verdicts are cached per pair of Pixel Data elements: an edit that
+// replaces either one (redaction, rotate, decompress) gets a fresh comparison. `done` holds the
+// settled result, so the (synchronous) report can include it.
+const _cmpPxCache = new WeakMap();
+function pixelCompareJob(a, b) {
+  const pa = lookupTag(a.dict, '7fe00010'), pb = lookupTag(b.dict, '7fe00010');
+  if (!pa || !pb) return null;
+  let inner = _cmpPxCache.get(pa);
+  if (!inner) _cmpPxCache.set(pa, inner = new WeakMap());
+  let job = inner.get(pb);
+  if (!job) {
+    job = { done: null };
+    job.promise = comparePixels(a, b).catch(e => ({ error: e.message })).then(r => (job.done = r));
+    inner.set(pb, job);
+  }
+  return job;
+}
+
+// One sentence for a settled pixel verdict; `cls` is same / diff / '' for colouring.
+function pixelVerdictText(r) {
+  if (!r) return { text: T('Comparing decoded pixels…'), cls: '' };
+  if (r.error) return { text: `${T('Pixels could not be compared:')} ${r.error}`, cls: '' };
+  if (r.shape) return { text: T('Pixels: different size or frame count.'), cls: 'diff' };
+  if (r.same) return { text: T('Pixels: identical after decoding.'), cls: 'same' };
+  return { text: T('Pixels: {n} of {total} samples differ (largest difference {max}).')
+    .replace('{n}', r.diff).replace('{total}', r.samples).replace('{max}', r.max), cls: 'diff' };
+}
+
+// Pixel verdict, then only the compression facts that differ (or one line saying they agree).
+async function renderComparePixels() {
+  const out = $('cmpPixels'), comp = $('cmpComp'), a = files[currentFileIdx], b = compareEntry();
+  if (!out || !a || !b) return;
+  const rows = compressionCompareRows(a, b).filter(r => r[3]);
+  if (comp) {
+    // Warnings are whole sentences: the bar shows a marker and keeps the text as a tooltip (the report prints it).
+    const nWarn = [compressionInfo(a).warnings.length, compressionInfo(b).warnings.length];
+    comp.replaceChildren(...rows.map(([l, x, y]) => {
+      const tr = document.createElement('tr');
+      [l, x, y].forEach((v, i) => {
+        const td = document.createElement('td');
+        if (l === 'Viewer warnings' && i && v !== '—') {
+          td.textContent = `⚠ ${T('{n} warning(s)').replace('{n}', nWarn[i - 1])}`;
+          td.title = v;
+        } else td.textContent = v;
+        tr.appendChild(td);
+      });
+      return tr;
+    }));
+    comp.classList.toggle('hidden', !rows.length);
+  }
+  const same = rows.length ? '' : ` ${T('Same encoding:')} ${compressionLabel(compressionInfo(a))}.`;
+  const job = pixelCompareJob(a, b);
+  if (!job) { out.textContent = same.trim(); out.className = 'cmp-px'; return; }
+  const show = r => { const v = pixelVerdictText(r); out.textContent = v.text + same; out.className = 'cmp-px ' + v.cls; };
+  show(job.done);
+  if (job.done) return;
+  const r = await job.promise;
+  if (files[currentFileIdx] !== a || compareEntry() !== b) return;   // the pair changed meanwhile
+  show(r);
+}
+
+// Values that name THIS file (its UIDs: SOP Instance, Study, Series, SOP Class) or describe ITS
+// pixels (the Image Pixel Module, which is never copied with the values): copying them across
+// makes two files share an identity, or a header that no longer matches its Pixel Data.
+const COPY_LOCKED_TAGS = new Set(['00280002', '00280004', '00280006', '00280008', '00280009',
+  '00280010', '00280011', '00280100', '00280101', '00280102', '00280103', '00281101',
+  '00281102', '00281103', '00281201', '00281202', '00281203', '00281204', '00287FE0']);
+function isCopyLocked(tag, vr) {
+  return vr === 'UI' || COPY_LOCKED_TAGS.has(canonTag(leafTag(tag)));
 }
 
 // Copy every differing top-level value one way; tags missing on the receiving side are created.
+// Never the copy-locked tags, nor private attributes (a private block means something only under
+// its own creator).
 function cmpApplyAll(toOther) {
   const other = compareEntry();
   if (!other) return;
+  // Snapshot before the copy, so Undo restores the values from before it.
+  if (!toOther) trackEditStart?.();
   const src = toOther ? { tags: tagsOf(files[currentFileIdx]), pend: pendingEdits }
                       : { tags: tagsOf(other), pend: pendingOf(other) };
   const dst = toOther ? { tags: tagsOf(other), pend: pendingOf(other) }
@@ -175,12 +250,18 @@ function cmpApplyAll(toOther) {
   let n = 0;
   for (const [tag, el] of src.tags) {
     const vr = el.vr || '';
-    if (isReadOnly(tag, vr)) continue;
+    const dEl = dst.tags.get(tag);
+    const vrD = dEl?.vr || vr;          // the receiving element keeps its own VR
+    if (isReadOnly(tag, vr) || isReadOnly(tag, vrD) || isCopyLocked(tag, vr)) continue;
+    if (parseInt(canonTag(tag).slice(0, 4), 16) % 2 === 1) continue;
     const from = shownValue(tag, el, src.pend);
-    const to   = shownValue(tag, dst.tags.get(tag), dst.pend);
-    if (from !== null && from !== to) { dst.pend.set(tag, { vr, valueString: from }); n++; }
+    const to   = shownValue(tag, dEl, dst.pend);
+    if (from !== null && from !== to) { dst.pend.set(tag, { vr: vrD, valueString: from }); n++; }
   }
-  if (!toOther) trackEditStart?.();
+  if (!toOther) {
+    syncWindowFromEdit(editKey('00281050'), pendingEdits.get(editKey('00281050'))?.valueString);
+    syncWindowFromEdit(editKey('00281051'), pendingEdits.get(editKey('00281051'))?.valueString);
+  }
   renderTable();
   showDownload();
   toast?.(`${T('Copied')} ${n}`);
@@ -222,6 +303,18 @@ function printCompareReport() {
   const pics = shots.some(Boolean) ? `<div class="cmp-shots"><figure>${shots[0]}<figcaption>A — ${_pesc(a.name)}</figcaption></figure>` +
     `<figure>${shots[1]}<figcaption>B — ${_pesc(b.name)}</figcaption></figure></div>` : '';
 
+  // Pixel data & compression: what each side is encoded with, and whether the decoded pixels agree.
+  // The verdict is the one Compare already computed; if it is still running, the report says so.
+  const job = pixelCompareJob(a, b);
+  const pv = job ? pixelVerdictText(job.done) : null;
+  const compRows = compressionCompareRows(a, b).map(([l, x, y, d]) =>
+    `<tr${d ? ' class="c-diff"' : ''}><th>${_pesc(l)}</th><td>${_pesc(x)}</td><td>${_pesc(y)}</td></tr>`).join('');
+  const compSection = `<section><h2>Pixel data &amp; compression</h2>
+      ${pv ? `<p class="pxv ${pv.cls}">${_pesc(pv.text)}</p>` : ''}
+      <table class="kv ident"><thead><tr><th></th><th>A</th><th>B</th></tr></thead><tbody>${compRows}</tbody></table>
+      <p class="valcounts">Rows that differ are marked. Pixels are compared after decoding, so two files can match here while their Pixel Data bytes differ.</p>
+    </section>`;
+
   const n = { diff: groups.diff.length, onlyA: groups.onlyA.length, onlyB: groups.onlyB.length, match: groups.match.length };
   const body = `<style>
       .cmp-shots{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}
@@ -231,6 +324,8 @@ function printCompareReport() {
       .t-diff{color:#b45309;} .t-match{color:#127a2f;} .t-only{color:var(--muted);}
       table.ident th{width:26%;} table.ident thead th{color:var(--muted);font-size:10px;text-transform:uppercase;}
       table.tags.cmp .c-desc{width:24%;}
+      tr.c-diff th, tr.c-diff td{color:#b45309;} .pxv{font:600 12px ui-monospace,Menlo,Consolas,monospace;margin:0 0 6px;}
+      .pxv.same{color:#127a2f;} .pxv.diff{color:#b45309;}
     </style>
     ${pics}
     <section><h2>Summary</h2>
@@ -238,6 +333,7 @@ function printCompareReport() {
         <span class="t-only">${n.onlyB} only in B</span><span class="t-match">${n.match} match</span></p>
       <p class="valcounts">Every tag of both files, sequences included, with this session's unsaved edits applied. Sequences compare by item count.</p>
     </section>
+    ${compSection}
     <section><h2>Files</h2><table class="kv ident"><thead><tr><th></th><th>A</th><th>B</th></tr></thead>
       <tbody><tr><th>File</th><td>${_pesc(a.name)}</td><td>${_pesc(b.name)}</td></tr>${ident}</tbody></table></section>
     ${section('Differences', groups.diff)}
@@ -260,7 +356,34 @@ function tagsOf(entry) {
   if (!entry) return m;
   for (const [t, el] of Object.entries(entry.meta || {})) if (isHex(t)) m.set(t, el);
   for (const [t, el] of Object.entries(entry.dict || {})) if (isHex(t)) m.set(t, el);
+  // A tag added with Add Tag lives only in the working copy until export (so Undo removes it);
+  // show it as a row too.
+  if (entry.pending) for (const [t, p] of entry.pending) {
+    if (t.includes('/') || !isHex(t) || m.has(t) || findTagKey(entry.dict || {}, t)) continue;
+    m.set(t, { vr: p.vr, Value: parseByVR(p.vr, p.valueString) || [] });
+  }
   return m;
+}
+
+// Binary values print by size and a content hash, so two different blobs never read as equal
+// (and never as the empty value '').
+const _binHash = new WeakMap();
+function binaryDigest(el) {
+  const bufs = (Array.isArray(el?.Value) ? el.Value : []).filter(v => v instanceof ArrayBuffer || ArrayBuffer.isView(v));
+  let n = 0, h = 0x811c9dc5;
+  for (const v of bufs) {
+    const key = v instanceof ArrayBuffer ? v : v.buffer;
+    let part = _binHash.get(key);
+    const u8 = v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+    if (!part || part.len !== u8.length) {
+      let x = 0x811c9dc5;
+      for (let i = 0; i < u8.length; i++) { x ^= u8[i]; x = Math.imul(x, 0x01000193) >>> 0; }
+      part = { len: u8.length, h: x };
+      if (v instanceof ArrayBuffer) _binHash.set(key, part);
+    }
+    n += part.len; h = Math.imul(h ^ part.h, 0x01000193) >>> 0;
+  }
+  return bufs.length ? `<binary ${n} bytes #${h.toString(16).padStart(8, '0')}>` : '';
 }
 
 // The value a side shows: its edit, else the loaded value. null = tag absent (distinct from '').
@@ -269,6 +392,7 @@ function shownValue(tag, el, pend) {
   if (!el) return null;
   // Compare sequences by item count; stringifying one yields only backslashes.
   if (el.vr === 'SQ') return String(seqItems(el).length);
+  if (isBinaryVR(el.vr) || /^x?7fe00010$/i.test(leafTag(tag))) return binaryDigest(el) || elToString(el);
   return elToString(el);
 }
 
@@ -393,9 +517,16 @@ function buildSeqRowCells(tr, node, ctx) {
 
 // Mirror a window centre/width edit into the viewer controls.
 function syncWindowFromEdit(path, value) {
-  // Match the full path: a nested (0028,1050) is not the displayed window level.
-  if (editKey('00281050') === path) { const v = parseFloat(value); if (!isNaN(v) && wcSlider) { wcSlider.value = v; if (wcNum) wcNum.value = Math.round(v); if (wcDisplay) wcDisplay.textContent = Math.round(v); } }
-  if (editKey('00281051') === path) { const v = parseFloat(value); if (!isNaN(v) && wwSlider) { wwSlider.value = Math.max(1,v); if (wwNum) wwNum.value = Math.round(Math.max(1,v)); if (wwDisplay) wwDisplay.textContent = Math.round(Math.max(1,v)); } }
+  // Match the full path: a nested (0028,1050) is not the displayed window level. The number box
+  // keeps the exact value (the width/centre handlers read it), and the slider's range grows to
+  // fit, so a later slider move does not clamp or round it.
+  const fit = (slider, v) => {
+    if (v < parseFloat(slider.min)) slider.min = Math.floor(v);
+    if (v > parseFloat(slider.max)) slider.max = Math.ceil(v);
+    slider.value = v;
+  };
+  if (editKey('00281050') === path) { const v = parseFloat(value); if (Number.isFinite(v) && wcSlider) { fit(wcSlider, v); if (wcNum) wcNum.value = v; if (wcDisplay) wcDisplay.textContent = Math.round(v); } }
+  if (editKey('00281051') === path) { const v = Math.max(1, parseFloat(value)); if (Number.isFinite(v) && wwSlider) { fit(wwSlider, v); if (wwNum) wwNum.value = v; if (wwDisplay) wwDisplay.textContent = Math.round(v); } }
 }
 
 // This file's value input
@@ -411,6 +542,8 @@ function buildValueInputA(node, frozen, binary) {
     inp.addEventListener('input', () => {
       trackEditStart?.();
       pendingEdits.set(path, { vr, valueString: inp.value });
+      // A value the VR cannot hold is not written (the element keeps its value); say so here.
+      inp.classList.toggle('invalid', parseByVR(vr, inp.value) === null);
       syncWindowFromEdit(path, inp.value);
       showDownload();
       if (files.length === 1 && dict) drawPreview(dict, currentFrame);
@@ -435,7 +568,10 @@ function appendCompareCells(tr, node, ctx, frozen, binary) {
   inpB.className = 'val-input' + (binary ? ' binary' : '');
   inpB.value = valB ?? '';
   if (valB === null) inpB.placeholder = '— not present —';
-  inpB.disabled = frozen || !node.elB;
+  // The other side is judged by its own element: a binary/UN value there is not text.
+  const frozenB = frozen || isReadOnly(path, node.elB?.vr) || (node.elB && isCopyLocked(path, node.elB.vr));
+  const frozenA = frozen || (node.elA && isReadOnly(path, node.elA.vr)) || isCopyLocked(path, vr);
+  inpB.disabled = frozen || !node.elB || isReadOnly(path, node.elB?.vr);
   if (!inpB.disabled) {
     inpB.addEventListener('input', () => { oPend.set(path, { vr, valueString: inpB.value }); showDownload(); });
   }
@@ -443,16 +579,17 @@ function appendCompareCells(tr, node, ctx, frozen, binary) {
 
   const acts = document.createElement('div');
   acts.className = 'cmp-actions-cell';
-  if (!frozen && valA !== null) {
+  if (!frozenB && !frozenA && valA !== null) {
     acts.appendChild(cmpCopyBtn('→', 'Copy this value to the other file', () => {
-      oPend.set(path, { vr, valueString: valA });
+      oPend.set(path, { vr: node.elB?.vr || vr, valueString: valA });
       renderTable(); showDownload();
     }));
   }
-  if (!frozen && valB !== null) {
+  if (!frozenA && !frozenB && valB !== null) {
     acts.appendChild(cmpCopyBtn('←', 'Copy the other file\'s value to this one', () => {
       trackEditStart?.();
-      pendingEdits.set(path, { vr, valueString: valB });
+      pendingEdits.set(path, { vr: node.elA?.vr || vr, valueString: valB });
+      syncWindowFromEdit(path, valB);
       renderTable(); showDownload();
       if (files.length === 1 && dict) drawPreview(dict, currentFrame);
     }));
@@ -475,8 +612,9 @@ function buildTagRow(node, ctx) {
   tr.innerHTML = `
       <td><div class="tag-cell"><span class="tag-cat" data-cat="${cat}"></span><span class="tag-code">${fmtTag(tag)}</span></div></td>
       <td><span class="${desc ? 'desc-cell' : 'desc-cell desc-unknown'}">${desc || 'Unknown tag'}</span></td>
-      <td><span class="vr-badge">${vr}</span></td>
+      <td><span class="vr-badge"></span></td>
       <td></td>${other ? '<td></td><td></td>' : ''}`;
+  tr.querySelector('.vr-badge').textContent = vr;      // from the file: text, never markup
   tr.querySelector('.tag-cell').style.paddingLeft = Math.min(node.depth, 4) * 14 + 'px';
 
   if (vr === 'SQ') { buildSeqRowCells(tr, node, ctx); return tr; }
@@ -609,6 +747,8 @@ function normBin(node) {
   });
 }
 
+const EDITOR_IMPL_UID = '1.2.826.0.1.3680043.10.743';
+const EDITOR_IMPL_VERSION = 'CARINO_DCM_EDIT';     // SH, at most 16 characters
 function ensureMeta(denat, fm) {
   const m = fm && typeof fm === 'object' ? {...fm} : {};
 
@@ -617,8 +757,12 @@ function ensureMeta(denat, fm) {
   const sopI = (denat['00080018'] ?? denat['x00080018'])?.Value?.[0];
 
   // DicomDict.write() reads meta by plain hex key only; camelCase keys are silently ignored.
-  if (!(m['00020001'] ?? m.FileMetaInformationVersion))
+  // Type 1, two bytes 00 01 (PS3.10 Table 7.1-1): check the value, not just the key.
+  const fmv = (m['00020001'] ?? m.FileMetaInformationVersion)?.Value?.[0];
+  if (!(fmv && (fmv.byteLength ?? fmv.length) === 2)) {
+    delete m.FileMetaInformationVersion;
     m['00020001'] = { vr:'OB', Value:[new Uint8Array([0,1]).buffer] };
+  }
   if (sopC) m['00020002'] = { vr:'UI', Value:[sopC] };
   if (sopI) m['00020003'] = { vr:'UI', Value:[sopI] };
 
@@ -634,8 +778,14 @@ function ensureMeta(denat, fm) {
   }
   if (!m['00020010'] && !m.TransferSyntaxUID)
     m['00020010'] = { vr:'UI', Value:['1.2.840.10008.1.2.1'] };
-  if (!m['00020012'] && !m.ImplementationClassUID)
-    m['00020012'] = { vr:'UI', Value:['1.2.826.0.1.3680043.10.743'] };
+  // This editor re-encodes every byte it writes, so the File Meta names it as the writer
+  // (PS3.10 Table 7.1-1: the implementation that last wrote the file). The source's own
+  // Implementation Version Name, Source AE Title (often a hospital station) and opaque Private
+  // Information blob do not travel with the file.
+  delete m.ImplementationClassUID; delete m.ImplementationVersionName;
+  m['00020012'] = { vr:'UI', Value:[EDITOR_IMPL_UID] };
+  m['00020013'] = { vr:'SH', Value:[EDITOR_IMPL_VERSION] };
+  for (const t of ['00020016', '00020017', '00020018', '00020100', '00020102']) delete m[t];
 
   return m;
 }

@@ -5,13 +5,15 @@
 
 // Must match tests/suites (a browser cannot glob it); tests/suites/selftest.js checks this.
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
-const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'render', 'phone',
-                         'sequences', 'series', 'edits', 'imgedit', 'compare', 'deid', 'swap',
+const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'presentation', 'render', 'phone',
+                         'sequences', 'series', 'edits', 'imgedit', 'compression', 'compare', 'deid', 'swap',
                          'redact', 'samples', 'eyephoto', 'zip'];
 // Suites the visitor's self-test leaves out, and why; tests/suites/selftest.js counts these as
 // listed. ocr: it would fetch the ~8 MB OCR engine and model, which the page promises to load
 // only when someone asks to find text, to report nothing about decoding in this browser.
-const SELFTEST_SKIPPED = { ocr: 'downloads the OCR engine; run by tests/run.sh only' };
+// review: re-dispatches the page's load event and stubs fetch to drive the #load= deep link.
+const SELFTEST_SKIPPED = { ocr: 'downloads the OCR engine; run by tests/run.sh only',
+                           review: 're-dispatches the page load event and stubs fetch; run by tests/run.sh only' };
 
 // PS3.6 Annex A names, kept in English so bug reports stay searchable.
 const TS_NAMES = {
@@ -296,8 +298,13 @@ function runSelfTest(names) {
   const result = $('stResult');
   box.classList.remove('hidden');
   // Exit by reload: the suites have loaded files, switched tabs and stubbed globals.
-  $('stBack').onclick =
-    () => location.replace(location.pathname + location.search);
+  // The trigger may be in the query string too (?selftest); strip it, or Back would loop.
+  $('stBack').onclick = () => {
+    const u = new URL(location.href);
+    u.hash = '';
+    u.searchParams.delete('selftest');
+    location.replace(u.pathname + u.search);
+  };
 
   const step = (msg, frac) => { status.textContent = msg; fill.style.width = Math.round(frac * 100) + '%'; };
   // Yield between suites so the progress line repaints.

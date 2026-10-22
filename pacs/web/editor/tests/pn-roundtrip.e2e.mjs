@@ -172,10 +172,17 @@ const pageScript = (b64, scenario) => `(async () => {
   if (!blob) throw new Error('the page never produced a download');
   const buf = await blob.arrayBuffer();
   const got = new Uint8Array(buf);
-  out.identical = got.byteLength === bytes.byteLength && got.every((v, i) => v === bytes[i]);
+  // The File Meta is not compared: the editor writes its own Implementation Class UID and
+  // Version Name there on every save (PS3.10 Table 7.1-1, the implementation that last wrote
+  // the file), so it differs by design. The dataset after it must not. (0002,0000) is UL at
+  // offset 132, its value at 140; the dataset starts right after the group it measures.
+  const dataset = (u8) => u8.subarray(144 + new DataView(u8.buffer, u8.byteOffset).getUint32(140, true));
+  const a = dataset(bytes), b = dataset(got);
+  out.identical = a.byteLength === b.byteLength && b.every((v, i) => v === a[i]);
 
   // Re-parse the bytes that actually left the page, not the in-memory dict.
   const msg = dcmjs.data.DicomMessage.readFile(buf);
+  out.impl = [msg.meta['00020012']?.Value?.[0], msg.meta['00020013']?.Value?.[0]];
   out.tags = {};
   for (const t of ['00100010','00080090','00081050','00081070','00081060','00081030','00100020']) {
     const el = msg.dict[t];
@@ -249,8 +256,10 @@ try {
   else ok(`pendingEdits seeded with the whole dataset (${r.seeded} tags)`);
   noObjectObject('no PN tag was stringified', r.tags);
   for (const [t, want] of Object.entries(PN)) eq(`${t} survived`, r.tags[t]?.Value, want);
-  r.identical ? ok('the saved bytes are identical to the loaded bytes')
-              : fail('an untouched save changed the bytes');
+  r.identical ? ok('the saved dataset is byte-identical to the loaded one')
+              : fail('an untouched save changed the dataset bytes');
+  eq('the File Meta names the editor as the writer', r.impl,
+     ['1.2.826.0.1.3680043.10.743', 'CARINO_DCM_EDIT']);
 
   // ── 2. Edit something that is not a name. ──────────────────────────────────
   console.log('edit one non-PN tag and save');

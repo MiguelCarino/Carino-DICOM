@@ -44,7 +44,9 @@
     const r = lookupTag(dict,'00280010')?.Value?.[0], c = lookupTag(dict,'00280011')?.Value?.[0];
     set('diagDims', r && c ? `${c}×${r}` : '—');
     set('diagFrames', lookupTag(dict,'00280008')?.Value?.[0] || '1');
-    set('diagTs', metaTxt('00020010') || '—');
+    const ts = metaTxt('00020010');
+    set('diagTs', ts ? (TS_COMPRESSION[ts]?.[0] || ts) : '—');
+    const tsEl = $('diagTs'); if (tsEl) tsEl.title = ts;
   };
 
   // ---- Key/value rows ----
@@ -55,7 +57,10 @@
 
   // Patient-name visibility persists across reloads.
   const PN_KEY = 'dicom-ov-show-patient';
-  const patientShown = () => localStorage.getItem(PN_KEY) === '1';
+  // Storage can throw (blocked site data, sandboxed frame); fall back to a session flag so the
+  // Overview still renders, masked by default.
+  let pnSession = false;
+  const patientShown = () => { try { return localStorage.getItem(PN_KEY) === '1'; } catch (_) { return pnSession; } };
 
   function renderCore() {
     const core = $('ovCore'); if (!core) return;
@@ -78,7 +83,12 @@
       kvRow(T('Series Description'), txt('0008103E')) +
       kvRow(T('Body Part'), txt('00180015'));
     const tgl = $('ovPnToggle');
-    if (tgl) tgl.addEventListener('click', () => { localStorage.setItem(PN_KEY, patientShown() ? '0' : '1'); renderCore(); });
+    if (tgl) tgl.addEventListener('click', () => {
+      const next = !patientShown();
+      pnSession = next;
+      try { localStorage.setItem(PN_KEY, next ? '1' : '0'); } catch (_) {}
+      renderCore();
+    });
   }
 
   // SHA-256 of the file as loaded, not the edited dataset.
@@ -87,20 +97,31 @@
     const entry = files[currentFileIdx];
     let cell;
     if (!entry || entry.shaState === 'unavailable' || (!entry.file && !entry.sha)) {
-      cell = `<span class="ov-kv-v empty">unavailable</span>`;
+      cell = `<span class="ov-kv-v empty">${esc(T('unavailable'))}</span>`;
     } else if (entry.shaState === 'computing') {
-      cell = `<span class="ov-kv-v">computing…</span>`;
+      cell = `<span class="ov-kv-v">${esc(T('computing…'))}</span>`;
     } else if (entry.shaState === 'deferred') {
       const mb = (entry.size / 1048576).toFixed(1);
-      cell = `<span class="ov-kv-v"><button class="ov-reveal" onclick="window.__computeSha()">Compute — ${mb} MB</button></span>`;
+      // No inline handler (the page's Content-Security-Policy forbids them); bound in renderTech.
+      cell = `<span class="ov-kv-v"><button class="ov-reveal" data-compute-sha>${esc(T('Compute — {n} MB').replace('{n}', mb))}</button></span>`;
     } else if (entry.sha) {
       const note = (typeof datasetDirty !== 'undefined' && datasetDirty)
-        ? ` <span class="ov-sha-stale" title="You have edited the working copy this session. This hash is still the ORIGINAL file's — an exported/edited file will hash differently.">working copy edited</span>` : '';
+        ? ` <span class="ov-sha-stale" title="${esc(T("You have edited the working copy this session. This hash is still the ORIGINAL file's — an exported/edited file will hash differently."))}">${esc(T('working copy edited'))}</span>` : '';
       cell = `<span class="ov-kv-v ov-sha">${esc(entry.sha)}${note}</span>`;
     } else {
       cell = `<span class="ov-kv-v empty">—</span>`;
     }
-    return `<div class="ov-kv-row"><span class="ov-kv-k">SHA-256 <span class="ov-kv-sub">file as loaded</span></span>${cell}</div>`;
+    return `<div class="ov-kv-row"><span class="ov-kv-k">SHA-256 <span class="ov-kv-sub">${esc(T('file as loaded'))}</span></span>${cell}</div>`;
+  }
+
+  // Compression verdict, plus the viewer warnings (signed compressed pixels, no window) that
+  // explain "the same file looks worse in another viewer".
+  function compressionRows() {
+    const entry = files[currentFileIdx];
+    if (!entry || !lookupTag(dict, '7fe00010')) return '';
+    const ci = compressionInfo(entry);
+    return kvRow(T('Compression'), compressionLabel(ci)) +
+      ci.warnings.map(w => `<div class="ov-kv-warn">⚠ ${esc(w)}</div>`).join('');
   }
 
   function renderTech() {
@@ -109,6 +130,7 @@
     tech.innerHTML =
       kvRow('SOP Instance UID', txt('00080018')) +
       kvRow('Transfer Syntax UID', metaTxt('00020010')) +
+      compressionRows() +
       kvRow('Photometric Interpretation', txt('00280004')) +
       kvRow('Image Position (Patient)', txt('00200032')) +
       kvRow('Pixel Spacing', txt('00280030')) +
@@ -117,12 +139,12 @@
       kvRow('Specific Character Set', txt('00080005')) +
       kvRow('Rows × Columns', r && c ? `${r} × ${c}` : '') +
       shaRowHtml();
+    tech.querySelector('[data-compute-sha]')?.addEventListener('click', () => window.__computeSha());
   }
   // Lets files.js refresh just this card when a hash resolves.
   window.__ovRenderTech = function () { if (dict) renderTech(); };
 
   // ---- Equipment / manufacturer ----
-  const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="#060606"/><g fill="none" stroke="#333" stroke-width="3"><rect x="22" y="30" width="76" height="50" rx="4"/><circle cx="60" cy="55" r="14"/><rect x="40" y="86" width="40" height="6" rx="3"/></g><text x="60" y="108" fill="#555" font-family="monospace" font-size="9" text-anchor="middle">no image</text></svg>');
 
@@ -130,13 +152,9 @@
     const brand = txt('00080070'), model = txt('00081090'), img = $('ovMfrImg');
     $('ovMfrBrand').textContent = brand || T('Unknown manufacturer');
     $('ovMfrModel').textContent = model || '';
-    if (img) {
-      if (brand || model) {
-        const s = slug(`${brand}-${model}`) || slug(brand) || slug(model);
-        img.onerror = () => { img.onerror = null; img.src = PLACEHOLDER; };
-        img.src = `models/${s}.png`;
-      } else { img.onerror = null; img.src = PLACEHOLDER; }
-    }
+    // No per-model picture ships, and a URL built from the file's Manufacturer / Model would put
+    // the equipment of every study viewed into the host's access log. Always the placeholder.
+    if (img) { img.onerror = null; img.src = PLACEHOLDER; }
     $('ovMfrExtra').innerHTML =
       kvRow(T('Station Name'), txt('00081010')) +
       kvRow(T('Institution'), txt('00080080')) +
@@ -181,7 +199,14 @@
     if (!dict) { summary.style.display = 'none'; summary.innerHTML = ''; list.innerHTML = ''; return; }
 
     let issues = [];
-    try { issues = validateDicom(dict, meta) || []; } catch (_) { issues = []; }
+    // A validator that threw has checked nothing: never show the green badge for it.
+    try { issues = validateDicom(dict, meta, studyEntries()) || []; }
+    catch (_) {
+      summary.style.display = '';
+      summary.innerHTML = `<div class="val-badge warning">${esc(T('Validation unavailable'))}</div>`;
+      list.innerHTML = '';
+      return;
+    }
 
     const cnt = sev => issues.filter(i => i.sev === sev).length;
     const errors = cnt('error'), warnings = cnt('warning'), phi = cnt('phi'), info = cnt('info');
@@ -195,20 +220,20 @@
 
     summary.style.display = '';
     summary.innerHTML =
-      `<div class="val-badge error">● ${errors} Error${errors!==1?'s':''}</div>` +
-      `<div class="val-badge warning">● ${warnings} Warning${warnings!==1?'s':''}</div>` +
-      `<div class="val-badge phi">● ${phi} PHI Flag${phi!==1?'s':''}</div>` +
-      `<div class="val-badge info">● ${info} Info</div>`;
+      `<div class="val-badge error">● ${esc(T('Errors: {n}').replace('{n}', errors))}</div>` +
+      `<div class="val-badge warning">● ${esc(T('Warnings: {n}').replace('{n}', warnings))}</div>` +
+      `<div class="val-badge phi">● ${esc(T('PHI flags: {n}').replace('{n}', phi))}</div>` +
+      `<div class="val-badge info">● ${esc(T('Info: {n}').replace('{n}', info))}</div>`;
 
     const CAP = 60;
     const shown = issues.slice(0, CAP);
     const rows = shown.map(iss => `<div class="val-issue"><div class="val-dot ${iss.sev}"></div>
         <div class="val-issue-body">
           <div class="val-issue-tag">${fmtTag('x'+iss.tag.toLowerCase())} ${esc(iss.desc)}</div>
-          ${iss.sev !== 'phi' ? `<div class="val-issue-msg">${esc(iss.msg)}</div>` : ''}
-          ${iss.val ? `<div class="val-issue-val">${iss.sev==='phi'?'':'Current: '}${esc(iss.val.slice(0,120))}${iss.val.length>120?'…':''}</div>` : ''}
+          ${iss.sev !== 'phi' ? `<div class="val-issue-msg">${esc(validatorMsg(iss))}</div>` : ''}
+          ${iss.val ? `<div class="val-issue-val">${iss.sev==='phi'?'':esc(T('Current:')) + ' '}${esc(iss.val.slice(0,120))}${iss.val.length>120?'…':''}</div>` : ''}
         </div></div>`).join('');
-    const more = issues.length > CAP ? `<div class="val-issue-msg" style="padding:6px 4px;opacity:.7">+${issues.length - CAP} more issue${issues.length - CAP !== 1 ? 's' : ''}…</div>` : '';
+    const more = issues.length > CAP ? `<div class="val-issue-msg" style="padding:6px 4px;opacity:.7">${esc(T('More issues not shown: {n}').replace('{n}', issues.length - CAP))}</div>` : '';
     list.innerHTML = `<div class="val-issues">${rows}${more}</div>`;
   }
 
@@ -220,6 +245,59 @@
   let loadSeq = 0;
   const view = { wc: null, ww: null, invert: false, cmap: 'gray', rotate: 0, flipH: false, flipV: false, zoom: 1, panX: 0, panY: 0, frame: 0 };
   const cine = { playing: false, timer: null, fps: 15, loop: true };
+  // Presentation states that refer to this image. sel = the chosen PR's file index (-1 = the image
+  // as stored); autoWL = take each frame's window from the PR until the user moves a slider.
+  const pres = { list: [], sel: -1, autoWL: true };
+
+  // The study as the validator and the PR lookup see it: the working copy for the open file.
+  function studyEntries() {
+    return files.map((f, i) => ({ dict: i === currentFileIdx ? dict : f.dict, meta: f.meta, name: f.name }));
+  }
+
+  // keep: hold the chosen PR if it still refers to this image (wheel paging within a series).
+  function refreshPresentations(keep) {
+    const sel = $('ovPres');
+    pres.list = presentationStatesFor(studyEntries(), txt('00080018'));
+    if (!keep || !pres.list.some(p => p.index === pres.sel && p.supported)) pres.sel = -1;
+    if (!sel) return;
+    sel.innerHTML = '';
+    const add = (value, label, disabled) => {
+      const o = document.createElement('option');
+      o.value = value; o.textContent = label; o.disabled = !!disabled;
+      sel.appendChild(o);
+    };
+    add('-1', T('Image as stored'));
+    for (const p of pres.list)
+      add(String(p.index), `${p.label} (${T(p.kind)}${p.supported ? '' : ', ' + T('not supported')})`, !p.supported);
+    sel.value = String(pres.sel);
+    sel.classList.toggle('hidden', !pres.list.length);
+    $('ovPresBurn')?.classList.toggle('hidden', pres.sel < 0);
+  }
+
+  // The chosen PR burned in as a new colour series, saved as one archive (or one file).
+  let burning = false;
+  async function burnChosenPresentation() {
+    if (burning || pres.sel < 0) return;
+    burning = true;
+    showLoading?.(true, T('Building the colour series…'), 0);
+    try {
+      const r = await burnPresentationSeries(studyEntries(), pres.sel,
+        (n, of) => showLoading?.(true, T('Building the colour series…'), n / of, `${n} / ${of}`));
+      if (r.error) { toast?.(r.error, 7000); log(`✗ ${r.error}`); return; }
+      if (r.files.length === 1) saveBlob(new Blob([r.files[0].bytes], { type: 'application/dicom' }), r.files[0].name.replace('/', '-'));
+      else saveArchives(r.files, `series-${r.series.number}-color`, 'application/dicom', log);
+      log(`⬇ ${r.files.length} image(s) → series ${r.series.number} "${r.series.description}"`);
+      toast?.(T('Colour series saved: {n} image(s), series {s}. Send it to the PACS beside the original.')
+        .replace('{n}', r.files.length).replace('{s}', r.series.number), 7000);
+    } catch (e) {
+      toast?.(`${T('Could not build the colour series:')} ${e.message || e}`, 7000);
+      log(`✗ ${e.message || e}`);
+    } finally {
+      showLoading?.(false);
+      burning = false;
+    }
+  }
+  window.burnChosenPresentation = burnChosenPresentation;
 
   const LUT = (function () {
     const clamp = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
@@ -246,8 +324,9 @@
     const { rows, cols } = ovRaw, n = rows * cols;
     canvas.width = cols; canvas.height = rows;
     const out = new Uint8ClampedArray(n * 4), lut = LUT[view.cmap] || LUT.gray;
-    if (ovRaw.rgb) {
-      const src = ovRaw.rgb;
+    if (ovRaw.rgb || ovRaw.pres) {
+      const src = ovRaw.rgb ||
+        applyPresentationToFloats(ovRaw.pres.floats, n, view.wc, view.ww, ovRaw.pres.mn, ovRaw.pres.mx, ovRaw.pres);
       for (let i = 0; i < n; i++) { const p = i*4; let r = src[p], g = src[p+1], b = src[p+2]; if (view.invert) { r = 255-r; g = 255-g; b = 255-b; } out[p] = r; out[p+1] = g; out[p+2] = b; out[p+3] = 255; }
     } else {
       // ovRaw.invert = MONOCHROME1, view.invert = toolbar button; they compose.
@@ -355,6 +434,21 @@
   // Only handle on cine state from outside this IIFE (used by tests).
   window.ovCine = { state: cine, start: startCine, stop: stopCine, rate: tagFrameRate };
 
+  // The chosen PR's pipeline for the decoded frame, its floats in the PR's units; null when none
+  // is chosen or it does not cover this frame (then the image draws as stored).
+  function presentationForFrame(res) {
+    const pr = pres.list.find(p => p.index === pres.sel);
+    if (!pr) return null;
+    const prMeta = files[pr.index]?.meta;
+    const p = presentationFor(pr, txt('00080018'), view.frame + 1, readRescale(dict),
+                              previewTransferSyntax(prMeta).isBigEndian);
+    if (!p) return null;
+    p.floats = prRescaleFloats(res.rawFloats, p);
+    if (p.floats === res.rawFloats) { p.mn = res.mn; p.mx = res.mx; }
+    else { p.mn = Infinity; p.mx = -Infinity; for (const v of p.floats) { if (v < p.mn) p.mn = v; if (v > p.mx) p.mx = v; } }
+    return p;
+  }
+
   async function loadImage() {
     if (!canvas) return;
     const noimg = $('ovNoImg'), tools = $('ovTools');
@@ -365,7 +459,7 @@
     if (my !== loadSeq) return;
     if (!res || res.error) {
       ovRaw = null; canvas.style.display = 'none'; noimg.classList.remove('hidden');
-      noimg.textContent = res && res.error ? res.error : 'No renderable pixel data in this file.';
+      noimg.textContent = res && res.error ? res.error : T('No renderable pixel data in this file.');
       $('ovWL').classList.add('hidden'); $('ovFrameNav').classList.add('hidden'); stopCine(); if (tools) tools.style.display = 'none';
       return;
     }
@@ -373,14 +467,18 @@
     if (res.rawFloats) {
       // rawFloats already has Rescale Slope/Intercept applied (in decodeDicomPixels).
       ovRaw = { rawFloats: res.rawFloats, rows: res.rows, cols: res.cols, mn: res.mn, mx: res.mx,
-                wcTag: res.wcTag, wwTag: res.wwTag, invert: res.invert };
+                wcTag: res.wcTag, wwTag: res.wwTag, invert: res.invert, pres: presentationForFrame(res) };
+      if (ovRaw.pres?.window && pres.autoWL) { view.wc = ovRaw.pres.window.wc; view.ww = ovRaw.pres.window.ww; }
       if (view.wc == null) view.wc = res.wcTag ?? Math.round((res.mn + res.mx) / 2);
       if (view.ww == null) view.ww = res.wwTag ?? Math.max(1, res.mx - res.mn);
-      setupWL(); $('ovWL').classList.remove('hidden'); $('ovColormap').disabled = false;
+      setupWL(); $('ovWL').classList.remove('hidden'); $('ovColormap').disabled = !!ovRaw.pres;
     } else {
       ovRaw = { rgb: res.pixels, rows: res.rows, cols: res.cols };
       $('ovWL').classList.add('hidden'); $('ovColormap').disabled = true;
     }
+    // A presentation state's grayscale pipeline does not apply to colour pixels.
+    $('ovPres')?.classList.toggle('hidden', !pres.list.length || !res.rawFloats);
+    $('ovPresBurn')?.classList.toggle('hidden', pres.sel < 0 || !res.rawFloats);
     ovFrames = res.numFrames || 1;
     const fn = $('ovFrameNav');
     if (ovFrames > 1) { fn.classList.remove('hidden'); $('ovFrame').max = ovFrames - 1; syncFrameUI(); }
@@ -396,9 +494,17 @@
     $('ovFlipH').addEventListener('click', () => { view.flipH = !view.flipH; $('ovFlipH').classList.toggle('active', view.flipH); applyTransform(); });
     $('ovFlipV').addEventListener('click', () => { view.flipV = !view.flipV; $('ovFlipV').classList.toggle('active', view.flipV); applyTransform(); });
     $('ovResetView').addEventListener('click', () => { view.zoom = 1; view.panX = 0; view.panY = 0; view.rotate = 0; view.flipH = false; view.flipV = false; $('ovFlipH').classList.remove('active'); $('ovFlipV').classList.remove('active'); applyTransform(); });
-    $('ovWC').addEventListener('input', e => { view.wc = +e.target.value; $('ovWCval').textContent = view.wc; paint(); });
-    $('ovWW').addEventListener('input', e => { view.ww = Math.max(1, +e.target.value); $('ovWWval').textContent = view.ww; paint(); });
-    $('ovPreset').addEventListener('change', e => { if (!e.target.value) return; const [c, w] = e.target.value.split(',').map(Number); view.wc = c; view.ww = w; setupWL(); paint(); });
+    $('ovWC').addEventListener('input', e => { pres.autoWL = false; view.wc = +e.target.value; $('ovWCval').textContent = view.wc; paint(); });
+    $('ovWW').addEventListener('input', e => { pres.autoWL = false; view.ww = Math.max(1, +e.target.value); $('ovWWval').textContent = view.ww; paint(); });
+    $('ovPreset').addEventListener('change', e => { if (!e.target.value) return; pres.autoWL = false; const [c, w] = e.target.value.split(',').map(Number); view.wc = c; view.ww = w; setupWL(); paint(); });
+    $('ovPresBurn')?.addEventListener('click', burnChosenPresentation);
+    // Choosing a PR (or the image as stored) starts again from that one's window.
+    $('ovPres')?.addEventListener('change', e => {
+      pres.sel = parseInt(e.target.value, 10);
+      pres.autoWL = true;
+      view.wc = null; view.ww = null;
+      loadImage();
+    });
     // Using the frame slider stops cine.
     $('ovFrame').addEventListener('input', e => { stopCine(); view.frame = +e.target.value; $('ovFrameLabel').textContent = `${view.frame + 1}/${ovFrames}`; loadImage(); });
     $('ovCinePlay').addEventListener('click', () => { cine.playing ? stopCine() : startCine(); });
@@ -573,7 +679,7 @@
 
     let valHtml = '';
     try {
-      const issues = validateDicom(dict, meta) || [];
+      const issues = validateDicom(dict, meta, studyEntries()) || [];
       if (!issues.length) {
         valHtml = `<section><h2>Validation</h2><p class="ok">✓ No conformance issues found</p></section>`;
       } else {
@@ -638,12 +744,28 @@
       view.rotate = 0; view.flipH = false; view.flipV = false; view.zoom = 1; view.panX = 0; view.panY = 0;
       $('ovInvert')?.classList.remove('active'); $('ovFlipH')?.classList.remove('active'); $('ovFlipV')?.classList.remove('active');
       const cm = $('ovColormap'); if (cm) cm.value = 'gray';
+      pres.autoWL = true;
     }
+    refreshPresentations(!hardReset);
     // Seed cine rate from the new file's tags; a user-typed rate lasts until the next file change.
     cine.fps = tagFrameRate();
     const fpsBox = $('ovCineFps'); if (fpsBox) fpsBox.value = cine.fps;
     renderedIdx = currentFileIdx;
     loadImage();
+  };
+
+  // Text only, after a language switch: the cards, the position label, the presentation menu and
+  // the cine button. The view (frame, W/L, zoom, chosen PR) is left as it is.
+  window.ovRetranslate = function () {
+    if (!dict) return;
+    renderCore(); renderTech(); renderRis(); renderMfr(); renderOvValidation();
+    if (files.length > 1) $('ovStudyIdx').textContent = studyIdxLabel();
+    refreshPresentations(true);
+    if (ovRaw) {
+      $('ovPres')?.classList.toggle('hidden', !pres.list.length || !ovRaw.rawFloats);
+      $('ovPresBurn')?.classList.toggle('hidden', pres.sel < 0 || !ovRaw.rawFloats);
+    }
+    syncCineBtn();
   };
 
   // Called by switchTab: render if the current file hasn't been drawn here yet.

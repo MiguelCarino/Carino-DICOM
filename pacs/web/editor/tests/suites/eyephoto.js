@@ -421,10 +421,8 @@
       reset();
       const frame = document.createElement('iframe');
       frame.style.display = 'none';
-      frame.srcdoc = '<script>window.got = []; window.answer = { ok: true };' +
-        'addEventListener("message", (e) => { const d = e.data; if (!d || d.carinoCreate !== "files") return;' +
-        ' got.push({ origin: e.origin, d }); setTimeout(() => parent.postMessage({ carinoCreate: "stored",' +
-        ' reply: d.reply, ok: answer.ok, message: answer.message }, "*"), 20); });<\/script>';
+      // The page's CSP (inherited by srcdoc) forbids inline script, so the worklist is a file.
+      frame.srcdoc = '<script src="' + new URL('tests/fixtures/worklist-frame.js', location.href).href + '"><\/script>';
       document.body.appendChild(frame);
       await new Promise(r => { frame.onload = r; });
       const worklist = frame.contentWindow;

@@ -14,6 +14,34 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   0600, bounded, written at most once a minute unless something visible changed). A
   failure to record never costs a modality its worklist. `GET /api/worklist/asks`
   (config.read), `POST /api/worklist/asks/clear` (services.control).
+- **Presentation states, compression and study checks in the bundled editor** (re-synced
+  to upstream `a70720b`). The Overview viewer can show an image through a loaded grayscale
+  or pseudo-colour presentation state (its per-frame window, rescale, `INVERSE` or palette),
+  and **Save as colour series** writes what the PR draws as a new RGB Secondary Capture
+  series of the same study, for viewers that ignore presentation states. Every transfer
+  syntax is named and marked lossless or lossy, with warnings where viewers may show the
+  same pixels differently, and a file or a whole study can be decompressed to Explicit VR
+  Little Endian under the same SOP Instance UID (undoable). Compare gives a decoded-pixel
+  verdict. The Conformance card flags a Series Number shared by two series, converted
+  copies and their sources, palettes on grayscale images and PRs whose images are missing,
+  and shows every finding in the reader's language; switching language redraws what was
+  drawn at render time. The Edit toolbar's occasional tools move under one **Tools** menu.
+  The editor page now carries its own Content-Security-Policy: no off-origin script,
+  style, font or worker source, and no off-origin connection but upstream's release check
+  (which never runs outside dcm.carino.systems) and a localhost PACS; `vendor/README.md`
+  spells out what it does allow. `tests/fixtures/worklist-frame.js` is copied for the
+  self-test's send-back case. No new third-party files. Upstream commits `4b09cfb`
+  (compression, decompress, Compare verdict, Tools menu, CSP), `b284616` and `a70720b`;
+  the upstream CHANGELOG covers only the last two.
+
+### Changed
+- **De-identification removes (3004,007F) Dose Calculation Model Name**, the PS3.15 2026d
+  row the editor's table gained. `pacs/deid.py`'s embedded table is regenerated from it
+  and still 656 rows: the hand-added (0002,0013) Implementation Version Name row is gone
+  from both, as it never acted on the dataset (the PACS already rewrites the file meta with
+  its own identity). The editor now writes its own Implementation Class UID and Version
+  Name into the file meta of every file it saves, so `tests/pn-roundtrip.e2e.mjs` compares
+  an untouched save's dataset rather than the whole file, and checks that identity.
 
 ## [1.3.0] — 2026-10-16
 

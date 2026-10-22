@@ -132,6 +132,10 @@ function retagGeometry(node, opKey, ctx) {
     swapPairTag(node, '00181164');    // Imager Pixel Spacing
     swapPairTag(node, '00182010');    // Nominal Scanned Pixel Spacing
     swapPairTag(node, '00280034');    // Pixel Aspect Ratio
+    // In-plane Phase Encoding Direction is relative to the image axes (PS3.3 C.8.3.1).
+    const pe = getTag(node, '00181312');
+    const pev = String(pe?.Value?.[0] ?? '').trim().toUpperCase();
+    if (pev === 'ROW' || pev === 'COL') setTag(node, '00181312', 'CS', pev === 'ROW' ? 'COL' : 'ROW');
   }
 
   const iop = numsOf(getTag(node, '00200037'));
@@ -158,7 +162,9 @@ function retagGeometry(node, opKey, ctx) {
   }
 
   const po = getTag(node, '00200020');
-  if (po && Array.isArray(po.Value) && po.Value.length >= 2) {
+  const poBlank = po && Array.isArray(po.Value) && po.Value.every(v => !String(v ?? '').trim());
+  if (po && Array.isArray(po.Value) && po.Value.length === 1 && !poBlank) here.report?.push('(0020,0020) Patient Orientation');
+  if (po && Array.isArray(po.Value) && po.Value.length >= 2 && !poBlank) {
     const rowDir = String(po.Value[0]), colDir = String(po.Value[1]);
     const flip = { rot90:  [opposeOrientation(colDir), rowDir],
                    rot270: [colDir, opposeOrientation(rowDir)],
@@ -176,7 +182,8 @@ function retagGeometry(node, opKey, ctx) {
 // knows it will no longer line up.
 function unmovedByTransform(d) {
   const out = [];
-  const overlays = Object.keys(d).some(t => /^(60[0-9A-F]{2})(3000|0010|0011|0050)$/i.test(canonTag(t)));
+  // Overlay planes are the even groups 6000-601E (PS3.3 C.9.2); odd 60xx groups are private.
+  const overlays = Object.keys(d).some(t => /^60[0-9A-F][02468ACE](3000|0010|0011|0050)$/i.test(canonTag(t)));
   if (overlays) out.push('Overlay planes (60xx,3000)');
   if (getTag(d, '00186011')) out.push('Sequence of Ultrasound Regions (0018,6011)');
   if (getTag(d, '00700001')) out.push('Graphic Annotation Sequence (0070,0001)');
@@ -186,7 +193,7 @@ function unmovedByTransform(d) {
 // Tags a transform replaces (for session undo): the redaction set plus geometry.
 const PIXEL_EDIT_RESTORE_TAGS = REDACT_RESTORE_TAGS.concat(
   ['00280010', '00280011', '00280030', '00181164', '00182010', '00280034',
-   '00200037', '00200032', '00200020']);
+   '00200037', '00200032', '00200020', '00181312']);
 const PIXEL_EDIT_RESTORE_SEQS = ['52009229', '52009230'];
 
 // Eager on click (like applyRedaction): decoding may be async, but buildEditedFile must
@@ -200,6 +207,8 @@ async function applyPixelTransform(entry, opKey) {
   const src = await decodeStoredFrames(d, meta);
   if (src.error) return { error: src.error };
 
+  const sizeBad = frameSizeProblem(src.frames, src.rows * src.cols * src.spp * Math.ceil(src.ba / 8));
+  if (sizeBad) return { error: sizeBad };
   const moved = transformStoredFrames(src, opKey);
 
   const bytesPerSample = Math.ceil(src.ba / 8);
@@ -210,6 +219,7 @@ async function applyPixelTransform(entry, opKey) {
   moved.frames.forEach((fr, i) =>
     o8.set(new Uint8Array(fr.buffer, fr.byteOffset, fr.byteLength), i * frameBytes));
 
+  markSeed(entry);
   entry.pixelBackup = {
     op: opKey,
     px: getTag(d, '7FE00010'),
@@ -225,6 +235,9 @@ async function applyPixelTransform(entry, opKey) {
   // Privacy: undoing a transform must never restore pre-redaction pixels.
   entry.redactBackup = null;
 
+  if (src.swapped) entry.pixelBackup.whole = convertBigEndianDict(d);
+  // The thumbnail is not turned with the image; drop it rather than leave it misoriented.
+  entry.pixelBackup.icons = stripIcons(d);
   setTag(d, '7FE00010', src.ba <= 8 ? 'OB' : 'OW', outBuf);
   setTag(d, '00280010', 'US', moved.rows);
   setTag(d, '00280011', 'US', moved.cols);
@@ -252,12 +265,12 @@ async function applyPixelTransform(entry, opKey) {
 
   retagDerived(d, `${PIXEL_OPS[opKey].label} — Carino DICOM Editor`);
 
-  entry.pending = seedPending(entry.dict);
-  if (files[currentFileIdx] === entry) usePendingOf(entry);
+  reseedKeepingEdits(entry);
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
   datasetDirty = true;
 
   return { op: opKey, frames: moved.frames.length, rows: moved.rows, cols: moved.cols,
-           converts: !src.raw, depthLoss: !!src.depthLoss, unmoved: report };
+           converts: !src.raw, depthLoss: !!src.depthLoss, unmoved: [...new Set(report)] };
 }
 
 // No (0008,0005) Specific Character Set is written, so per PS3.5 6.1.2.3 text must be in
@@ -284,6 +297,15 @@ function retagDerived(d, what) {
   const next = prev ? `${prev}; ${what}` : what;
   setTag(d, '00082111', 'ST', next.length <= 1024 ? next : prev || what.slice(0, 1024));
 
+  // Enhanced multi-frame: Frame Type value 1 must agree with Image Type when every frame changed
+  // (PS3.3 C.8.16.1), and every frame was rewritten.
+  for (const fg of ['52009229', '52009230']) {
+    for (const item of seqItems(getTag(d, fg))) walkEls(item, (t, el, parent) => {
+      if (canonTag(t) !== '00089007' || !Array.isArray(el.Value) || !el.Value.length) return;
+      if (String(el.Value[0]).trim() !== 'DERIVED') parent[t] = { ...el, Value: ['DERIVED', ...el.Value.slice(1)] };
+    });
+  }
+
   setTag(d, '00080018', 'UI', newUID());
 }
 
@@ -292,16 +314,19 @@ function undoPixelTransform(entry) {
   const b = entry?.pixelBackup;
   if (!b) return false;
   const d = entry.dict;
+  markSeed(entry);
+  if (b.whole) { for (const k of Object.keys(d)) delete d[k]; Object.assign(d, b.whole); }
   delTag(d, '7FE00010');
   if (b.px) d['7FE00010'] = b.px;
   for (const [t, el] of Object.entries(b.tags)) { delTag(d, t); if (el) d[canonTag(t)] = el; }
   for (const [t, el] of Object.entries(b.seqs)) { delTag(d, t); if (el) d[canonTag(t)] = el; }
+  for (const [parent, t, el] of b.icons || []) parent[t] = el;
   if (b.retagged) {
     if (b.tsEl) entry.meta['00020010'] = b.tsEl; else delete entry.meta['00020010'];
   }
   entry.pixelBackup = null;
-  entry.pending = seedPending(d);
-  if (files[currentFileIdx] === entry) usePendingOf(entry);
+  reseedKeepingEdits(entry);
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
   return true;
 }
 
@@ -313,55 +338,93 @@ function invertPhotometric(entry) {
   const pi = String(lookupTag(d, '00280004')?.Value?.[0] || '').trim().toUpperCase();
   const next = pi === 'MONOCHROME1' ? 'MONOCHROME2' : pi === 'MONOCHROME2' ? 'MONOCHROME1' : null;
   if (!next) return { error: T('Only MONOCHROME1 and MONOCHROME2 images can be inverted this way.') };
+  markSeed(entry);
   setTag(d, '00280004', 'CS', next);
-  entry.pending = seedPending(d);
-  if (files[currentFileIdx] === entry) usePendingOf(entry);
+  // It displays as a different image, so it is a new instance with a derivation record.
+  retagDerived(d, `Photometric Interpretation ${pi} -> ${next} - Carino DICOM Editor`);
+  // A later Undo of a rotate/flip must not silently revert this invert.
+  // It keeps this new instance's UID too: the un-rotated but inverted image is not the original.
+  if (entry.pixelBackup) for (const t of ['00280004', '00080018']) entry.pixelBackup.tags[t] = getTag(d, t);
+  reseedKeepingEdits(entry);
+  // As for rotate/flip: an older tag snapshot would put the pre-invert Photometric
+  // Interpretation and SOP Instance UID back over the new instance.
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
   datasetDirty = true;
   return { pi: next };
 }
 
 // ---- Anonymize / randomize / UID remap ----
+// The PS3.15 Basic Profile as the table says, nothing kept or invented on top: Patient's Sex is
+// Z and Patient's Age is X unless Retain Patient Characteristics (113108) is ticked, so a file
+// claiming 113100 alone carries neither. The only addition is the readable ANONYMOUS name, which
+// Z permits (a dummy value instead of zero length). Returns notes for the caller's log.
 function anonymize(d) {
-  // Read before the profile pass zeroes it. Not the PS3.15 Retain Patient Characteristics
-  // option (rtnPatCharsOpt): a deliberate usability default that keeps original sex and
-  // writes a dummy age, neither of which identifies anyone.
-  const sex = String(getTag(d, '00100040')?.Value?.[0] || '').toUpperCase();
-  const keepChars = deidOptions.has('rtnPatCharsOpt');
-
-  remPrivate(d);       // remove all private (odd-group) attributes, recursively
-  applyProfile(d);     // full PS3.15 Basic Profile, recursively (UIDs remapped by remapUIDs())
-
-  // Usability layer, applied on top of the compliant pass:
+  if (!window.DEID_PROFILE) throw new Error(DEID_MISSING);
+  remPrivate(d);                // remove all private (odd-group) attributes, recursively
+  const notes = applyProfile(d);   // full PS3.15 Basic Profile, recursively (UIDs: remapUIDs())
   setTag(d, '00100010', 'PN', ANON_NAME);
-  // With rtnPatCharsOpt on, the real sex/age were kept (K); don't overwrite them.
-  if (!keepChars) {
-    setTag(d, '00100040', 'CS', sex || 'O');
-    setTag(d, '00101010', 'AS', '000Y');
-  }
-
   addDeidMeta(d);
+  return notes;
 }
 
-function randomize(d) {
-  const sex = randFrom(['M', 'F', 'O']);
-  setTag(d, 'x00100010', 'PN', randName(sex));
-  setTag(d, 'x00100020', 'LO', randDigits(8));
-  setTag(d, 'x00100030', 'DA', `${1950 + Math.floor(Math.random() * 60)}${String(1 + Math.floor(Math.random() * 12)).padStart(2,'0')}${String(1 + Math.floor(Math.random() * 28)).padStart(2,'0')}`);
-  setTag(d, 'x00100040', 'CS', sex);
-  setTag(d, 'x00101010', 'AS', `${String(Math.floor(Math.random() * 90) + 1).padStart(3,'0')}Y`);
-  for (const t of DATES) setTag(d, t, 'DA', nowDA());
-  for (const t of TIMES) setTag(d, t, 'TM', nowTM());
-  setTag(d, 'x00200010', 'SH', randDigits(6));
-  setTag(d, 'x00080050', 'SH', randDigits(9));
+// Age in whole years between two DA values, as AS ('nnnY'), or '' when either is unusable.
+function ageAt(dob, at) {
+  const m1 = /^(\d{4})(\d{2})(\d{2})/.exec(String(dob || '')), m2 = /^(\d{4})(\d{2})(\d{2})/.exec(String(at || ''));
+  if (!m1 || !m2) return '';
+  let y = +m2[1] - +m1[1];
+  if (+m2[2] < +m1[2] || (+m2[2] === +m1[2] && +m2[3] < +m1[3])) y--;
+  return y >= 0 && y < 1000 ? String(y).padStart(3, '0') + 'Y' : '';
 }
+
+function randDOB() {
+  return `${1950 + Math.floor(Math.random() * 60)}${String(1 + Math.floor(Math.random() * 12)).padStart(2,'0')}${String(1 + Math.floor(Math.random() * 28)).padStart(2,'0')}`;
+}
+
+// One made-up identity per original patient and one Study ID / Accession per original study, so
+// the slices of one study stay one patient and one study (PS3.3 C.7.1.1 / C.7.2.1: patient- and
+// study-level attributes are identical in every instance). The clock is read once per run.
+function randomizeAll(list) {
+  const NOW_DA = nowDA(), NOW_TM = nowTM();
+  const patients = new Map(), studies = new Map();
+  const keyOf = (d, tag) => String(getTag(d, tag)?.Value?.[0] ?? '').trim();
+  for (const f of list) {
+    const d = f.dict;
+    const pk = keyOf(d, '00100020') || elToString(getTag(d, '00100010')).trim() || f;
+    if (!patients.has(pk)) {
+      const sex = randFrom(['M', 'F', 'O']);
+      patients.set(pk, { sex, name: randName(sex), id: randDigits(8), dob: randDOB() });
+    }
+    const sk = keyOf(d, '0020000D') || f;
+    if (!studies.has(sk)) studies.set(sk, { studyId: randDigits(6), accession: randDigits(9) });
+    const p = patients.get(pk), st = studies.get(sk);
+    setTag(d, '00100010', 'PN', p.name);
+    setTag(d, '00100020', 'LO', p.id);
+    setTag(d, '00100030', 'DA', p.dob);
+    setTag(d, '00100040', 'CS', p.sex);
+    // Patient's Age is the age at the study (PS3.3 C.7.2.2), so it follows from the two dates.
+    setTag(d, '00101010', 'AS', ageAt(p.dob, NOW_DA) || '000Y');
+    // Only dates the file already has are restamped: a missing Acquisition Date stays missing.
+    for (const t of DATES) if (getTag(d, t) || t === 'x00080020') setTag(d, t, 'DA', NOW_DA);
+    for (const t of TIMES) if (getTag(d, t) || t === 'x00080030') setTag(d, t, 'TM', NOW_TM);
+    if (getTag(d, '0008002A')) setTag(d, '0008002A', 'DT', NOW_DA + NOW_TM);
+    setTag(d, '00200010', 'SH', st.studyId);
+    setTag(d, '00080050', 'SH', st.accession);
+  }
+}
+// Kept for callers that randomize one dataset on its own (each call is its own patient).
+function randomize(d) { randomizeAll([{ dict: d }]); }
 
 // ---- Swap patients ----
 // The Patient Module (group 0010) belongs to the person; study, series, equipment and pixels
 // belong to the acquisition, so a swap trades group 0010 between two studies and nothing else.
+// Anatomical Orientation Type (0010,2210) is the exception: it is a General Series attribute
+// (PS3.3 C.7.3.1) that describes the acquisition, so it stays with its images.
 // Accession Number is opt-in: it names the order, and sometimes the order is what was mixed up.
 const SWAP_ACCESSION = ['00080050', '00080051'];
+const SWAP_STAYS = ['00102210'];
 function isSwappedTag(hex, withAccession) {
-  return (hex.startsWith('0010') && hex.slice(4) !== '0000') || (withAccession && SWAP_ACCESSION.includes(hex));
+  return (hex.startsWith('0010') && hex.slice(4) !== '0000' && !SWAP_STAYS.includes(hex)) ||
+         (withAccession && SWAP_ACCESSION.includes(hex));
 }
 function swappedTagsOf(d, withAccession) {
   const out = {};
@@ -370,37 +433,84 @@ function swappedTagsOf(d, withAccession) {
 }
 function writeSwappedTags(d, tags, withAccession) {
   // Delete first so a tag only the old patient had (e.g. Patient Comments) does not stay behind.
-  for (const k of Object.keys(d)) if (canonTag(k).startsWith('0010') || isSwappedTag(canonTag(k), withAccession)) delete d[k];
+  const oldAcc = String(getTag(d, '00080050')?.Value?.[0] ?? '').trim();
+  for (const k of Object.keys(d)) if (isSwappedTag(canonTag(k), withAccession)) delete d[k];
   for (const [hex, el] of Object.entries(tags)) d[hex] = structuredClone(el);
+  if (withAccession && oldAcc) {
+    // The order is named again inside Request Attributes Sequence items (PS3.3 Table 10-9):
+    // move nested copies of the old Accession Number (and its issuer) with the top-level one.
+    const acc = tags['00080050'], issuer = tags['00080051'];
+    walkEls(d, (t, el, parent) => {
+      if (parent === d || canonTag(t) !== '00080050') return;
+      if (String(el?.Value?.[0] ?? '').trim() !== oldAcc) return;
+      if (acc) parent[t] = structuredClone(acc); else delete parent[t];
+      delTag(parent, '00080051');
+      if (issuer) parent['00080051'] = structuredClone(issuer);
+    });
+  }
 }
 // ia, ib: the file indices of each study (groupStudies()). The first file of a study speaks for
 // it, and both blocks are read before either is written.
 function swapPatients(ia, ib, withAccession) {
   const a = swappedTagsOf(files[ia[0]].dict, withAccession);
   const b = swappedTagsOf(files[ib[0]].dict, withAccession);
-  ia.forEach(i => writeSwappedTags(files[i].dict, b, withAccession));
-  ib.forEach(i => writeSwappedTags(files[i].dict, a, withAccession));
+  const writeAll = (idx, tags) => idx.forEach(i => {
+    const d = files[i].dict;
+    writeSwappedTags(d, tags, withAccession);
+    // Patient's Age is the age at THIS study's date, so recompute it rather than move it.
+    const age = ageAt(getTag(d, '00100030')?.Value?.[0], getTag(d, '00080020')?.Value?.[0]);
+    if (age) setTag(d, '00101010', 'AS', age);
+  });
+  writeAll(ia, b);
+  writeAll(ib, a);
 }
 
-function remapUIDs() {
+// UI attributes that name WHAT the data is (a SOP class, transfer syntax, coding scheme or context
+// group), not which instance: Table E.1-1 lists none of them, and rewriting one corrupts the file
+// (an unknown SOP Class, a code whose scheme no longer resolves).
+const NON_INSTANCE_UID_TAGS = new Set([
+  '00020002', '00020010', '00020012',             // file meta: SOP Class, Transfer Syntax, Implementation
+  '00080016', '0008001A', '0008001B', '00081150', // SOP Class, Related/Original Specialized, Referenced SOP Class
+  '0008010C', '0008010D', '00080117', '00080118', // Coding Scheme, Context Group Extension Creator, Context, Mapping Resource
+  '00080062', '0008115A',                         // SOP Classes in Study, SOP Classes Supported
+  '00041510', '00041512', '0004151A',             // DICOMDIR referenced class / transfer syntax
+  '04000010', '04000510',                         // MAC Calculation / Encrypted Content Transfer Syntax
+]);
+// Standard root, on a component boundary: 1.2.840.100089 is someone else's root.
+const isStandardRoot = s => /^1\.2\.840\.10008(\.|$)/.test(s);
+
+// opts.honourOptions (default true): an explicit K in a ticked de-identification option keeps the
+// UID. Randomize and Swap are not de-identification and pass false.
+function remapUIDs(opts = {}) {
+  const honour = opts.honourOptions !== false;
   const map = new Map();
+  const remap = (v) => {
+    const s = String(v || '').trim();
+    if (!s || isStandardRoot(s)) return s;
+    if (!map.has(s)) map.set(s, newUID());
+    return map.get(s);
+  };
   for (const f of files) {
     walkEls(f.dict, (t, el) => {
       if (el.vr !== 'UI' || !el.Value) return;
+      const tag = canonTag(t);
+      if (NON_INSTANCE_UID_TAGS.has(tag)) return;
       // Honour an option's explicit K (e.g. Retain Device Identity keeps (0018,1002) and
       // (0018,100B)). Not resolveAction: it returns null for unlisted tags, and private or
       // vendor UIDs must still be remapped.
-      if (optionRetains(canonTag(t))) return;
-      el.Value = el.Value.map(v => {
-        const s = String(v || '').trim();
-        if (!s) return s;
-        // Standard UIDs (root 1.2.840.10008: SOP Class, Transfer Syntax) are not patient
-        // data; remapping them corrupts the file. Only instance UIDs are remapped.
-        if (s.startsWith('1.2.840.10008')) return s;
-        if (!map.has(s)) map.set(s, newUID());
-        return map.get(s);
-      });
+      if (honour && optionRetains(tag)) return;
+      el.Value = el.Value.map(remap);
     });
+  }
+  // File Meta (0002,0003) is U too: keep the shown copy in step, and give a file whose dataset
+  // has no (or an empty) SOP Instance UID (a DICOMDIR) a fresh one rather than the original.
+  for (const f of files) {
+    const mi = f.meta?.['00020003'];
+    if (!mi?.Value) continue;
+    const sop = String(getTag(f.dict, '00080018')?.Value?.[0] ?? '').trim();
+    mi.Value = mi.Value.map(v => sop || remap(v));
+    // An empty (0008,0018) takes the same new UID, so meta and dataset agree (PS3.10 7.1).
+    if (!sop && getTag(f.dict, '00080018') && mi.Value[0]) setTag(f.dict, '00080018', 'UI', mi.Value[0]);
   }
 }
 

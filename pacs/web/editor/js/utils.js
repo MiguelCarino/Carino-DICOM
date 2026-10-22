@@ -78,19 +78,49 @@ function usePendingOf(entry) {
 }
 // dcmjs keys a dataset "00281050" or "x00281050" depending on version. Resolve the form this
 // file uses; writing the other one would add a bogus second entry instead of editing the tag.
+// dcmjs keys a dataset "00281050" (8 UPPERCASE hex, no 'x'). Resolve the key this file and its
+// working copy already use; otherwise the canonical form, never a lowercase one (that would add a
+// second element with the same tag instead of editing it).
 function editKey(tag8) {
-  const lo = String(tag8).toLowerCase();
-  if (pendingEdits.has(lo)) return lo;
-  if (pendingEdits.has('x' + lo)) return 'x' + lo;
-  if (dict && dict['x' + lo] && !dict[lo]) return 'x' + lo;
-  return lo;
+  const up = String(tag8).replace(/^x/i, '').toUpperCase();
+  for (const k of [up, up.toLowerCase(), 'x' + up.toLowerCase(), 'x' + up])
+    if (pendingEdits.has(k) || (dict && k in dict)) return k;
+  return up;
 }
 // After anonymize/randomize/UID remap rewrite every dataset in place, all working copies are stale.
 // Dropping nested edits too is intended: they could re-apply a value the anonymiser just removed.
+// Privacy: a batch rewrite also ends the session undo of redaction / rotate, whose backups hold
+// pre-rewrite pixels, UIDs and private tags that would otherwise come back under (0012,0062) YES.
 function reseedAllPending() {
-  for (const f of files) f.pending = seedPending(f.dict);
+  for (const f of files) { f.pending = seedPending(f.dict); f.redactBackup = null; f.pixelBackup = null; }
   usePendingOf(files[currentFileIdx]);
+  try { syncImgEditCard?.(); } catch (_) {}
 }
+// Re-seed one file's working copy from its dataset after an operation (redaction, rotate,
+// invert) rewrote it, keeping every value the user typed but has not exported yet. A typed value
+// survives unless the operation itself changed that tag (then the operation's value wins: a
+// stale Burned In Annotation = YES must not be written back over redacted pixels).
+function reseedKeepingEdits(entry) {
+  const old = entry.pending;
+  const before = entry._seedBefore;
+  const fresh = seedPending(entry.dict);
+  if (old && before) {
+    old.forEach((v, k) => {
+      const seeded = before.get(k);
+      const isEdit = !seeded || seeded.valueString !== v.valueString || seeded.vr !== v.vr;
+      if (!isEdit) return;
+      if (k.includes('/')) { fresh.set(k, v); return; }
+      const now = fresh.get(k);
+      const untouched = seeded ? (now && now.valueString === seeded.valueString && now.vr === seeded.vr) : !now;
+      if (untouched) fresh.set(k, v);
+    });
+  }
+  delete entry._seedBefore;
+  entry.pending = fresh;
+  if (files[currentFileIdx] === entry) usePendingOf(entry);
+}
+// Call before an operation that will reseedKeepingEdits(), so edits can be told from seeds.
+function markSeed(entry) { entry._seedBefore = seedPending(entry.dict); }
 
 // ---- Utilities ----
 function isBinaryVR(vr) { return ['OB','OW','OF','UN','OD','OL'].includes(vr); }
@@ -134,11 +164,14 @@ function flattenTags(map, prefix = '', depth = 0, out = []) {
   }
   return out;
 }
+// AT values are tags (PS3.5 Table 6.2-1), read by dcmjs as one packed number: show (gggg,eeee).
+const fmtAT = n => { const h = (Number(n) >>> 0).toString(16).toUpperCase().padStart(8, '0'); return `(${h.slice(0, 4)},${h.slice(4)})`; };
 function elToString(el) {
   if (!el) return '';
   if (el.InlineBinary) return '<binary>';
   const v = el.Value;
   if (v == null) return '';
+  if (el.vr === 'AT' && Array.isArray(v)) return v.map(x => typeof x === 'number' ? fmtAT(x) : String(x ?? '')).join('\\');
   if (Array.isArray(v)) return v.map(x => {
     if (x == null) return '';
     if (typeof x === 'object' && x !== null) {
@@ -153,12 +186,37 @@ function elToString(el) {
 // `sample` is the element's current value. PN must keep its existing shape: the vendored dcmjs
 // reads PN as a string and stringifies what it writes, so an {Alphabetic} object would be
 // saved as "[object Object]". Default to a string.
+// Returns null for a value the VR cannot hold (out of range, not a number, not a tag): callers
+// keep the element as it was rather than write a silently wrapped or zeroed number.
+const INT_RANGE = { US: [0, 0xFFFF], SS: [-0x8000, 0x7FFF], UL: [0, 0xFFFFFFFF], SL: [-0x80000000, 0x7FFFFFFF] };
 function parseByVR(vr, str, sample) {
   if (str == null) return [];
+  // LT / ST / UT are single-valued and their leading spaces are significant (PS3.5 6.2).
+  if (vr === 'LT' || vr === 'ST' || vr === 'UT') return [String(str)];
   const parts = String(str).split('\\').map(s => s.trim());
+  // A cleared numeric field is a zero-length element, not a 0.
+  if (/^(US|UL|SS|SL|FL|FD|AT)$/.test(vr) && !String(str).trim()) return [];
   switch (vr) {
-    case 'US': case 'UL': case 'SS': case 'SL': case 'FL': case 'FD':
-      return parts.map(x => { const n = Number(x); return Number.isFinite(n) ? n : 0; });
+    case 'US': case 'UL': case 'SS': case 'SL': {
+      const [lo, hi] = INT_RANGE[vr];
+      const out = parts.map(x => /^[+-]?\d+$/.test(x) ? Number(x) : NaN);
+      return out.every(n => Number.isInteger(n) && n >= lo && n <= hi) ? out : null;
+    }
+    case 'FL': case 'FD': {
+      const out = parts.map(x => /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(x) ? Number(x) : NaN);
+      return out.every(Number.isFinite) ? out : null;
+    }
+    case 'AT': {
+      const out = parts.map(x => {
+        const m = /^\(?\s*([0-9a-f]{4})\s*,?\s*([0-9a-f]{4})\s*\)?$/i.exec(x) || /^0x([0-9a-f]{4})([0-9a-f]{4})$/i.exec(x);
+        return m ? parseInt(m[1] + m[2], 16) : NaN;
+      });
+      return out.every(Number.isFinite) ? out : null;
+    }
+    case 'DS':
+      // dcmjs only shortens a DS that is a number; an over-long string (some vendors write 17+
+      // characters) would make the writer throw, so hand those over as numbers.
+      return parts.map(x => x.length > 16 && x !== '' && Number.isFinite(Number(x)) ? Number(x) : x);
     case 'PN':
       if (!sample || typeof sample !== 'object') return parts;
       return parts.map(s => {
@@ -232,20 +290,32 @@ function log(msg, type = 'info') {
 }
 
 // ---- UID prefix detection ----
-// SOP Class, Transfer Syntax and coding-scheme UIDs name what the data is, so a new root must never touch them.
-const isStandardUID = s => s.startsWith('1.2.840.10008.');
+// SOP Class, Transfer Syntax and coding-scheme UIDs name what the data is, so a new root must never
+// touch them: by root (the standard's 1.2.840.10008) and by tag (a vendor's private SOP Class sits
+// under the same root as its instance UIDs). NON_INSTANCE_UID_TAGS lives in image-edits.js.
+const isStandardUID = s => /^1\.2\.840\.10008(\.|$)/.test(String(s));
+const isInstanceUIDTag = t => !NON_INSTANCE_UID_TAGS.has(canonTag(t));
+
+// The panel is opened from Tools ▸ UID root…; detection only says whether a shared root exists.
+let uidPatternOpen = false;
+function showUIDPattern(found) {
+  uidPattern.style.display = found && uidPatternOpen ? 'flex' : 'none';
+  const btn = $('uidPatternBtn');
+  if (btn) btn.disabled = !found;
+}
 
 function detectUIDPattern() {
   const uids = [];
   for (const f of files) {
     walkEls(f.dict, (t, el) => {
-      if (el.vr === 'UI' && el.Value) {
-        el.Value.forEach(v => { if (v && !isStandardUID(String(v))) uids.push(String(v)); });
+      if (el.vr === 'UI' && el.Value && isInstanceUIDTag(t)) {
+        el.Value.forEach(v => { v = String(v || '').trim(); if (v && !isStandardUID(v)) uids.push(v); });
       }
     });
   }
   if (!uids.length) {
-    uidPattern.style.display = 'none';
+    sharedUIDPrefix = '';
+    showUIDPattern(false);
     return;
   }
   
@@ -259,6 +329,8 @@ function detectUIDPattern() {
   }
   const k = p.lastIndexOf('.');
   sharedUIDPrefix = k > 0 ? p.slice(0, k) : '';   // no full component in common: no shared root
+  // A lone first arc ('1' or '2') is shared by nearly every UID; it says nothing about origin.
+  if (!sharedUIDPrefix.includes('.')) sharedUIDPrefix = '';
   
   if (sharedUIDPrefix && uids.length > 0) {
     const suffixes = uids.map(u => u.slice(sharedUIDPrefix.length)).filter(s => s);
@@ -266,32 +338,37 @@ function detectUIDPattern() {
     detectedPattern = `${sharedUIDPrefix}.*`;
     uidPatternDisplay.textContent = detectedPattern;
     uidPrefixInput.value = sharedUIDPrefix;
-    uidPattern.style.display = 'flex';
+    showUIDPattern(true);
   } else {
-    uidPattern.style.display = 'none';
+    showUIDPattern(false);
   }
 }
 
 function applyPrefixToAll(newP) {
-  if (!/^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*$/.test(newP) || isStandardUID(newP + '.')) {
+  // ISO/IEC 8824 (PS3.5 9): first arc 0, 1 or 2; under 0 and 1 the second arc is 0-39.
+  const arcs = newP.split('.').map(Number);
+  if (!/^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))+$/.test(newP) || isStandardUID(newP) ||
+      arcs[0] > 2 || (arcs[0] < 2 && arcs[1] > 39)) {
     alert(T('Invalid UID prefix')); return;
   }
   const oldP = sharedUIDPrefix;
   // Only UIDs under the detected root move; anything else keeps its value, so two UIDs never merge.
   const rewrite = v => {
-    const s = String(v || '');
+    const s = String(v || '').replace(/[\0 ]+$/, '');
     return oldP && !isStandardUID(s) && s.startsWith(oldP + '.') ? newP + s.slice(oldP.length) : s;
   };
+  // Read through each file's unexported edits, which are folded in before the rewrite.
+  const views = files.map(f => withPendingEdits(f));
   const moved = new Set();
   let m = 0;
-  for (const f of files) {
+  views.forEach(d => {
     let hit = false;
-    walkEls(f.dict, (t, el) => {
-      if (el.vr !== 'UI' || !el.Value) return;
-      el.Value.forEach(v => { if (rewrite(v) !== String(v || '')) { moved.add(String(v)); hit = true; } });
+    walkEls(d, (t, el) => {
+      if (el.vr !== 'UI' || !el.Value || !isInstanceUIDTag(t)) return;
+      el.Value.forEach(v => { const s = String(v || '').replace(/[\0 ]+$/, ''); if (rewrite(s) !== s) { moved.add(s); hit = true; } });
     });
     if (hit) m++;
-  }
+  });
   const n = moved.size;
   if (!n) return;
   const tooLong = [...moved].filter(v => rewrite(v).length > 64).length;
@@ -303,8 +380,10 @@ function applyPrefixToAll(newP) {
     clearTimeout(editDebounceTimer); preEditSnapshot = null;
     updateHistoryBtns();
     try { renderTechRow(); } catch (_) {}
+    // Typed-but-unexported edits first: reseedAllPending would otherwise drop them.
+    for (const f of files) Object.assign(f.dict, withPendingEdits(f));
     for (const f of files) {
-      walkEls(f.dict, (t, el) => { if (el.vr === 'UI' && el.Value) el.Value = el.Value.map(rewrite); });
+      walkEls(f.dict, (t, el) => { if (el.vr === 'UI' && el.Value && isInstanceUIDTag(t)) el.Value = el.Value.map(rewrite); });
       // Keep the shown File Meta copy of the SOP Instance UID in step; export rebuilds it anyway.
       const mi = f.meta?.['00020003'];
       if (mi?.Value) mi.Value = mi.Value.map(rewrite);

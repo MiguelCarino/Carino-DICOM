@@ -90,20 +90,24 @@
       for (const n of names) for (const t of Object.keys(O[n])) if (O[n][t] !== 'K' && O[n][t] !== 'C') bad.push(`${n}/${t}=${O[n][t]}`);
       ok('every option value is one of the standard\'s K or C', bad.length === 0, bad.slice(0, 5).join(','));
       const count = (n, v) => Object.values(O[n] || {}).filter(x => x === v).length;
-      ok('rtnUIDsOpt is 59 attributes, all keep',
-         count('rtnUIDsOpt', 'K') === 59 && count('rtnUIDsOpt', 'C') === 0,
+      // The option columns are floors too (merge-never-lose, plus the 2026d cells the
+      // Innolitics extract lacks).
+      ok('rtnUIDsOpt is 60 attributes, all keep (incl. (300A,0054))',
+         count('rtnUIDsOpt', 'K') === 60 && O.rtnUIDsOpt['300A0054'] === 'K' && count('rtnUIDsOpt', 'C') === 0,
          `${count('rtnUIDsOpt', 'K')}K/${count('rtnUIDsOpt', 'C')}C`);
       ok('rtnInstIdOpt is 10 attributes, all keep',
          count('rtnInstIdOpt', 'K') === 10 && count('rtnInstIdOpt', 'C') === 0,
          `${count('rtnInstIdOpt', 'K')}K/${count('rtnInstIdOpt', 'C')}C`);
-      ok('rtnLongFullDatesOpt is 165 attributes, all keep',
-         count('rtnLongFullDatesOpt', 'K') === 165 && count('rtnLongFullDatesOpt', 'C') === 0,
+      ok('rtnLongFullDatesOpt is 169 attributes, all keep',
+         count('rtnLongFullDatesOpt', 'K') === 169 &&
+         ['0040A034', '0040A035', '0040B034', '0040B036'].every(t => O.rtnLongFullDatesOpt[t] === 'K') && count('rtnLongFullDatesOpt', 'C') === 0,
          `${count('rtnLongFullDatesOpt', 'K')}K/${count('rtnLongFullDatesOpt', 'C')}C`);
-      ok('rtnDevIdOpt is 46 keep and 11 clean',
-         count('rtnDevIdOpt', 'K') === 46 && count('rtnDevIdOpt', 'C') === 11,
+      ok('rtnDevIdOpt is 48 keep and 11 clean',
+         count('rtnDevIdOpt', 'K') === 48 && O.rtnDevIdOpt['00181010'] === 'K' && O.rtnDevIdOpt['00181011'] === 'K' && count('rtnDevIdOpt', 'C') === 11,
          `${count('rtnDevIdOpt', 'K')}K/${count('rtnDevIdOpt', 'C')}C`);
-      ok('rtnPatCharsOpt is 9 keep and 4 clean',
-         count('rtnPatCharsOpt', 'K') === 9 && count('rtnPatCharsOpt', 'C') === 4,
+      ok('rtnPatCharsOpt is 14 keep and 4 clean',
+         count('rtnPatCharsOpt', 'K') === 14 &&
+         ['00100043', '00100046', '00100047', '00102161', '00102162'].every(t => O.rtnPatCharsOpt[t] === 'K') && count('rtnPatCharsOpt', 'C') === 4,
          `${count('rtnPatCharsOpt', 'K')}K/${count('rtnPatCharsOpt', 'C')}C`);
       // The four wholly-C options are the ones deliberately NOT offered.
       const pureC = ['cleanDescOpt', 'cleanStructContOpt', 'cleanGraphOpt', 'rtnLongModifDatesOpt']
@@ -150,8 +154,12 @@
          Object.keys(window.DEID_PROFILE).length >= 656 &&
          window.DEID_PROFILE_META?.attributes === Object.keys(window.DEID_PROFILE).length,
          `${Object.keys(window.DEID_PROFILE || {}).length} attributes, meta says ${window.DEID_PROFILE_META?.attributes}`);
-      ok('and it still carries the hand-added (0002,0013)',
-         window.DEID_PROFILE['00020013'] === 'D', String(window.DEID_PROFILE['00020013']));
+      // (0002,0013) was a dead hand-added row (the profile only sees the dataset); export now
+      // writes this tool's own Implementation Version Name instead.
+      ok('the dead (0002,0013) row is gone, so the count describes what runs',
+         !('00020013' in window.DEID_PROFILE), String(window.DEID_PROFILE['00020013']));
+      ok('and the 2026d row (3004,007F) Dose Calculation Model Name is removed (X)',
+         window.DEID_PROFILE['3004007F'] === 'X' && window.DEID_OPTIONS.cleanDescOpt['3004007F'] === 'C');
       // Verified against PS3.16 CID 7050 (UID 1.2.840.10008.6.1.925).
       const CID7050 = {
         rtnUIDsOpt: '113110', rtnDevIdOpt: '113109', rtnInstIdOpt: '113112',
@@ -194,6 +202,7 @@
       const RAND_TITLE = 'Give every loaded file a made-up patient, for test data. This is not de-identification.';
       const ANON_REMAP = 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers and remaps UIDs.';
       const ANON_KEEP = 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers. UIDs are kept (Retain UIDs).';
+      const NO_UNDO = 'Undo cannot reverse this.';
       const RAND_MSG = 'Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.';
       ok('Anonymize names the standard it applies', says(anon, 'Anonymize (PS3.15)'), anon.textContent);
       ok('Randomize is labelled as test data', says(rand, 'Fake patient (test data)'), rand.textContent);
@@ -221,17 +230,17 @@
         const msgKeep = $('confirmMsg').textContent;
         $('confirmCancel').click();
         ok('with Retain UIDs ticked the Anonymize confirm says UIDs are kept, with the count filled in',
-           files.length === 1 && msgKeep === filled(ANON_KEEP), msgKeep);
+           files.length === 1 && msgKeep === filled(ANON_KEEP) + ' ' + T(NO_UNDO), msgKeep);
         byOpt('rtnUIDsOpt').click(); byOpt('rtnDevIdOpt').click();
         ok('unticking clears the count', count() === '', JSON.stringify(count()));
         anon.click();
         const msgRemap = $('confirmMsg').textContent;
         $('confirmCancel').click();
-        ok('without it the confirm says UIDs are remapped', msgRemap === filled(ANON_REMAP), msgRemap);
+        ok('without it the confirm says UIDs are remapped, and that Undo cannot reverse it', msgRemap === filled(ANON_REMAP) + ' ' + T(NO_UNDO), msgRemap);
 
         rand.click();
         const msgRand = $('confirmMsg').textContent;
-        ok('the Randomize confirm is the one that says it is NOT de-identification', msgRand === filled(RAND_MSG), msgRand);
+        ok('the Randomize confirm is the one that says it is NOT de-identification', msgRand === filled(RAND_MSG) + ' ' + T(NO_UNDO), msgRand);
         ok('and names what it keeps', /NOT de-identification/.test(RAND_MSG) &&
            ['institution', 'device', 'physician', 'private tags', 'burned-in text'].every(w => RAND_MSG.includes(w)));
         ok('its OK button no longer says Randomize', $('confirmOk').textContent === T('Make fake patient'), $('confirmOk').textContent);
@@ -249,7 +258,9 @@
       const NEW_STRINGS = [
         'Anonymize (PS3.15)', 'Fake patient (test data)', 'Options', 'All files anonymized',
         ANON_TITLE, RAND_TITLE, ANON_REMAP, ANON_KEEP, RAND_MSG,
-        'Make fake patient', 'All files given a fake patient',
+        'Make fake patient', 'All files given a fake patient', NO_UNDO,
+        'Burned In Annotation = YES in {b} of {n} file(s): redact those first, because Find burned-in text stops working once the tags are anonymized.',
+        'The de-identification table (deid-profile.js) did not load, so nothing was anonymized. Reload the page.',
       ];
       for (const loc of ['es', 'pt-BR', 'ja', 'ru']) {
         const missing = NEW_STRINGS.filter(s => !I18N[loc] || !I18N[loc][s] || (s.includes('{n}') && !I18N[loc][s].includes('{n}')));
@@ -274,8 +285,8 @@
          String(seq[0]?.['00080102']?.Value?.[0]) === 'DCM' &&
          String(seq[0]?.['00080104']?.Value?.[0]) === 'Basic Application Confidentiality Profile',
          JSON.stringify(seq[0] || null).slice(0, 120));
-      ok('(0012,0063) carries the single method value it always did',
-         vals(d, '00120063').length === 1 && vals(d, '00120063')[0] === 'Carino DICOM Editor — DICOM PS3.15 Basic Profile',
+      ok('(0012,0063) carries a single, ASCII-only method value',
+         vals(d, '00120063').length === 1 && vals(d, '00120063')[0] === 'Carino DICOM Editor - DICOM PS3.15 Basic Profile',
          vals(d, '00120063').join(' | '));
       ok('UIDs are remapped by default', raw(d, '0020000D') !== STUDY && raw(d, '0020000E') !== SERIES &&
          raw(d, '00080018') !== SOP && raw(d, '00200052') !== FOR,
@@ -294,13 +305,12 @@
       ok('dates are zeroed by default', str(d, '00080020') === '' && str(d, '00080030') === '' &&
          str(d, '00080021') === '' && str(d, '00080022') === '' && str(d, '00080023') === '',
          `${str(d, '00080020')}|${str(d, '00080021')}|${str(d, '00080023')}`);
-      // The usability layer, which is NOT the Retain Patient Characteristics
-      // option and is documented as staying on: readable dummy name, original
-      // sex, dummy age.
+      // Table E.1-1 as written: a file claiming 113100 alone carries neither the
+      // sex (Z) nor the age (X); only Retain Patient Characteristics keeps them.
       ok('the name is replaced with the ANONYMOUS placeholder',
          String(raw(d, '00100010')) === 'ANONYMOUS', String(raw(d, '00100010')));
-      ok('the original sex is still kept for usability', str(d, '00100040') === 'F', str(d, '00100040'));
-      ok('and the age is the 000Y dummy', str(d, '00101010') === '000Y', str(d, '00101010'));
+      ok('Patient\'s Sex is zero-length (Z), not kept and not invented', has(d, '00100040') && str(d, '00100040') === '', str(d, '00100040'));
+      ok('and Patient\'s Age is removed (X), no 000Y fabricated', !has(d, '00101010'), str(d, '00101010'));
       ok('the birth date is still zeroed', str(d, '00100030') === '', str(d, '00100030'));
     }
 

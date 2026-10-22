@@ -84,9 +84,10 @@ function rleToRaw(buf, framePixels, spp, bytesPerSample) {
 // photometric inversion (PS3.3 C.7.6.3.1.2), not the viewer's Invert button, which composes on top.
 function applyWindowToFloats(raw, framePixels, wcVal, wwVal, mn, mx, invert = false) {
   let lo, hi;
-  if (wwVal != null && wcVal != null) {
-    lo = wcVal - 0.5 - (wwVal - 1) / 2;
-    hi = wcVal - 0.5 + (wwVal - 1) / 2;
+  const wcN = parseFloat(wcVal), wwN = parseFloat(wwVal);
+  if (Number.isFinite(wcN) && Number.isFinite(wwN)) {
+    lo = wcN - 0.5 - (wwN - 1) / 2;
+    hi = wcN - 0.5 + (wwN - 1) / 2;
   } else { lo = mn; hi = mx; }
   const range = (hi - lo) || 1;
   const out = new Uint8ClampedArray(framePixels * 4);
@@ -116,13 +117,23 @@ function readPaletteLut(d, descTag, dataTag, bigEndian) {
   const first = desc[1] | 0;
   const lut = new Uint8Array(count);
 
-  if ((desc[2] | 0) === 16 && buf.byteLength >= count * 2) {
+  const u8 = new Uint8Array(buf);
+  if ((desc[2] | 0) === 16) {
+    // A 16-bit table too short for its descriptor is unreadable, not an 8-bit one.
+    if (buf.byteLength < count * 2) return null;
     const dv = new DataView(buf);
     for (let i = 0; i < count; i++) lut[i] = dv.getUint16(i * 2, !bigEndian) >> 8;
+  } else if (buf.byteLength >= count * 2 && count > 1) {
+    // PS3.3 C.7.6.3.1.5 note: 8-bit entries padded to 16 bits are detected by the data being
+    // twice the descriptor's entry count; each word's low byte is the entry.
+    const dv = new DataView(buf);
+    for (let i = 0; i < count; i++) lut[i] = dv.getUint16(i * 2, !bigEndian) & 0xFF;
   } else {
-    const u8 = new Uint8Array(buf);
     if (u8.length < count) return null;
-    lut.set(u8.subarray(0, count));
+    if (bigEndian) {
+      // Two 8-bit entries per OW word, and big endian stores each word high byte first.
+      for (let i = 0; i < count; i++) lut[i] = u8[i ^ 1] ?? u8[i];
+    } else lut.set(u8.subarray(0, count));
   }
   return { lut, first, count };
 }
@@ -229,7 +240,11 @@ const REDACT_RAW_TS = new Set(['', '1.2.840.10008.1.2', '1.2.840.10008.1.2.1',
                                '1.2.840.10008.1.2.1.99', '1.2.840.10008.1.2.2']);
 const REDACT_RLE_TS = '1.2.840.10008.1.2.5';
 const REDACT_MAX_BYTES = 512 * 1024 * 1024;   // uncompressed pixels, all frames
+const REDACT_MAX_FRAMES = 65535;              // one buffer per frame, whatever their size
+// Display decode budget for one frame (float cache + RGBA), checked before anything is allocated.
+const PREVIEW_MAX_BYTES = 512 * 1024 * 1024;
 const REDACT_JPEG_LOSSLESS_TS = new Set(['1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.70']);
+const REDACT_ENCAP_RAW_TS = '1.2.840.10008.1.2.1.98';
 const REDACT_JPEG_BITMAP_TS = new Set(['1.2.840.10008.1.2.4.50', '1.2.840.10008.1.2.4.51']);
 const REDACT_J2K_TS = new Set(['1.2.840.10008.1.2.4.90', '1.2.840.10008.1.2.4.91']);
 const REDACT_JPEG_LS_TS = new Set(['1.2.840.10008.1.2.4.80', '1.2.840.10008.1.2.4.81']);
@@ -240,7 +255,19 @@ const REDACT_NO_CODEC = {
   '1.2.840.10008.1.2.4.102': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.103': 'MPEG-4 AVC/H.264',
   '1.2.840.10008.1.2.4.104': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.105': 'MPEG-4 AVC/H.264',
   '1.2.840.10008.1.2.4.106': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.107': 'HEVC/H.265',
+  '1.2.840.10008.1.2.4.108': 'HEVC/H.265',
+  '1.2.840.10008.1.2.4.203': 'High-Throughput JPEG 2000',
+  '1.2.840.10008.1.2.4.92': 'JPEG 2000 Part 2 multi-component', '1.2.840.10008.1.2.4.93': 'JPEG 2000 Part 2 multi-component',
+  '1.2.840.10008.1.2.4.110': 'JPEG XL', '1.2.840.10008.1.2.4.111': 'JPEG XL', '1.2.840.10008.1.2.4.112': 'JPEG XL',
+  '1.2.840.10008.1.2.8.1': 'Deflated Image Frame Compression',
+  '1.2.840.10008.1.2.4.94': 'JPIP (pixels on a server)', '1.2.840.10008.1.2.4.95': 'JPIP (pixels on a server)',
+  '1.2.840.10008.1.2.4.204': 'JPIP (pixels on a server)', '1.2.840.10008.1.2.4.205': 'JPIP (pixels on a server)',
+  '1.2.840.113619.5.2': 'GE private big-endian',
 };
+for (const n of ['100.1', '101.1', '102.1', '103.1', '104.1', '105.1', '106.1'])
+  REDACT_NO_CODEC['1.2.840.10008.1.2.4.' + n] = n < '102' ? 'MPEG-2' : 'MPEG-4 AVC/H.264';
+for (const n of ['52', '53', '54', '55', '56', '58', '59', '60', '61', '62', '63', '64', '65', '66'])
+  REDACT_NO_CODEC['1.2.840.10008.1.2.4.' + n] = 'retired JPEG process';
 
 function metaTS(meta) {
   return String(meta?.['00020010']?.Value?.[0] ?? meta?.TransferSyntaxUID?.Value?.[0] ?? '').trim();
@@ -252,7 +279,7 @@ function redactionSupport(meta) {
   const ts = metaTS(meta);
   if (REDACT_RAW_TS.has(ts)) return { ok: true, ts, converts: false, depthLoss: false };
   // J2K and JPEG-LS (incl. lossy .91/.81) decode at full precision, so no depth loss.
-  if (ts === REDACT_RLE_TS || REDACT_JPEG_LOSSLESS_TS.has(ts)
+  if (ts === REDACT_RLE_TS || ts === REDACT_ENCAP_RAW_TS || REDACT_JPEG_LOSSLESS_TS.has(ts)
       || REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts))
     return { ok: true, ts, converts: true, depthLoss: false };
   if (REDACT_JPEG_BITMAP_TS.has(ts)) return { ok: true, ts, converts: true, depthLoss: true };
@@ -289,7 +316,10 @@ function storedRawFrames(px, ts, g) {
   const { ba, numFrames } = g.base;
   const bytes = new Uint8Array(concatBuffers(px.Value.map(v =>
     ArrayBuffer.isView(v) ? v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) : v)));
-  if (ts === '1.2.840.10008.1.2.2' && ba === 16) {
+  // OW is word-swapped under big endian whatever Bits Allocated is (PS3.5 A.3), so 8-bit
+  // samples in OW arrive pair-swapped; OB is never swapped.
+  const swap = ts === '1.2.840.10008.1.2.2' && (ba === 16 || px.vr === 'OW');
+  if (swap) {
     // dcmjs writes Explicit VR LE and ensureMeta relabels the syntax, so swap big-endian samples to match.
     for (let i = 0; i + 1 < bytes.length; i += 2) { const t = bytes[i]; bytes[i] = bytes[i + 1]; bytes[i + 1] = t; }
   }
@@ -298,15 +328,34 @@ function storedRawFrames(px, ts, g) {
   const frames = [];
   for (let f = 0; f < numFrames; f++)
     frames.push(g.asSamples(bytes.buffer.slice(f * g.frameBytes, (f + 1) * g.frameBytes)));
-  return { ...g.base, frames, raw: true, swapped: ts === '1.2.840.10008.1.2.2' && ba === 16 };
+  return { ...g.base, frames, raw: true, swapped: swap };
 }
 
-// One encapsulated buffer per frame: usually one fragment each, but a single frame may span several,
-// so join them. Returns { perFrame } or { error }.
+// Fragments grouped into one buffer per frame (PS3.5 A.4: a frame may span several fragments,
+// and the Basic Offset Table may be empty). A frame's first fragment starts with its codestream's
+// start marker (SOI / SOC / JP2 signature), so with more fragments than frames the markers say
+// where each frame begins. null when they do not add up to numFrames.
+function groupFragmentsByFrame(frags, numFrames) {
+  if (frags.length <= numFrames) return frags;
+  if (numFrames === 1) return [concatBuffers(frags)];
+  const starts = frags.map(f => f instanceof ArrayBuffer && sniffCodestreamMagic(f) !== null);
+  if (!starts[0] || starts.filter(Boolean).length !== numFrames) return null;
+  const out = [];
+  let run = [];
+  frags.forEach((f, i) => {
+    if (starts[i] && run.length) { out.push(concatBuffers(run)); run = []; }
+    run.push(f);
+  });
+  if (run.length) out.push(concatBuffers(run));
+  return out;
+}
+
+// One encapsulated buffer per frame. Returns { perFrame } or { error }.
 function storedFrameFragments(px, numFrames) {
   const frags = encapsulatedFragments(px);
-  let perFrame = frags;
-  if (numFrames === 1 && frags.length > 1) perFrame = [concatBuffers(frags)];
+  const perFrame = groupFragmentsByFrame(frags, numFrames);
+  if (!perFrame)
+    return { error: `Pixel Data holds ${frags.length} fragment(s) that could not be assigned to ${numFrames} frame(s).` };
   if (perFrame.length < numFrames)
     return { error: `Pixel Data holds ${perFrame.length} fragment(s) for ${numFrames} frame(s).` };
   return { perFrame: perFrame.slice(0, numFrames) };
@@ -321,6 +370,35 @@ function storedRleFrames(perFrame, g) {
   return { ...g.base, frames, planar: 0, raw: false };
 }
 
+// The vendored JPEG Lossless decoder parses the SOS point transform but never applies it: it starts
+// prediction from 2^(P-1) instead of 2^(P-Pt-1) (ISO 10918-1 H.1.2.1) and never shifts back up, so
+// its output is every sample shifted down by Pt plus a constant. Undo both (H.2.1): the bits the
+// encoder dropped stay zero, the rest are the real values. Raw bit patterns, signed or not; the
+// constant is exact because every predictor's weights sum to one.
+function undoPointTransform(o, frag, bytesPerSample) {
+  const h = typeof jpegLosslessHeader === 'function' ? jpegLosslessHeader(frag) : {};
+  const pt = h.pt, p = h.precision || bytesPerSample * 8;
+  if (!(pt > 0) || pt >= p) return o;
+  const mask = 2 ** p - 1, off = 2 ** (p - 1) - 2 ** (p - pt - 1);
+  const fix = v => (((v - off) & mask) << pt) & mask;
+  const out = new Uint8Array(o.buffer.slice(o.byteOffset, o.byteOffset + o.byteLength));
+  const w = bytesPerSample === 2 ? new Uint16Array(out.buffer) : out;
+  for (let i = 0; i < w.length; i++) w[i] = fix(w[i]);
+  return out;
+}
+
+// Encapsulated Uncompressed (1.2.840.10008.1.2.1.98): one fragment per frame, raw little-endian samples.
+function storedEncapsulatedRawFrames(perFrame, g) {
+  const frames = [];
+  for (const frag of perFrame) {
+    if (frag.byteLength < g.frameBytes)
+      return { error: `Pixel Data fragment holds ${frag.byteLength} bytes, short of the ${g.frameBytes} one frame needs.` };
+    const b = ArrayBuffer.isView(frag) ? frag.buffer.slice(frag.byteOffset, frag.byteOffset + g.frameBytes) : frag.slice(0, g.frameBytes);
+    frames.push(g.asSamples(b));
+  }
+  return { ...g.base, frames, raw: true };
+}
+
 async function storedJpegLosslessFrames(perFrame, g) {
   let Decoder;
   try { Decoder = await loadJpegLossless(); }
@@ -328,15 +406,26 @@ async function storedJpegLosslessFrames(perFrame, g) {
   const frames = [];
   for (const frag of perFrame) {
     try {
-      const o = new Decoder().decode(frag, 0, frag.byteLength, g.base.ba === 16 ? 2 : 1);
+      const dec = new Decoder();
+      const o = undoPointTransform(dec.decode(frag, 0, frag.byteLength, g.base.ba === 16 ? 2 : 1), frag, g.bytesPerSample);
+      // The SOF3 header is authoritative (PS3.5 A.4): it must agree with the Image Pixel Module,
+      // or a short frame would be written back zero-padded and a long one would overflow.
+      const nComp = dec.numComp ?? dec.frame?.numComp ?? g.base.spp;
+      if (dec.xDim !== g.base.cols || dec.yDim !== g.base.rows)
+        return { error: `JPEG Lossless decode failed: the decoded image (${dec.xDim}x${dec.yDim}) does not match Rows and Columns in the header (${g.base.cols}x${g.base.rows}).` };
+      if (nComp !== g.base.spp)
+        return { error: `JPEG Lossless decode failed: the codestream has ${nComp} component(s) but Samples per Pixel is ${g.base.spp}.` };
+      if (o.byteLength !== g.frameBytes)
+        return { error: `JPEG Lossless decode failed: decoded frame is ${o.byteLength} bytes, the header describes ${g.frameBytes}.` };
       frames.push(g.asSamples(o.buffer.slice(o.byteOffset, o.byteOffset + o.byteLength)));
     } catch (e) { return { error: `JPEG Lossless decode failed: ${e.message}` }; }
   }
   return { ...g.base, frames, planar: 0, raw: false };
 }
 
-// JPEG 2000 / JPEG-LS: full precision and sign kept. OpenJPEG undoes the YBR_RCT/ICT transform,
-// so colour J2K is written back as RGB.
+// JPEG 2000 / JPEG-LS: full precision and sign kept. OpenJPEG undoes the YBR_RCT/ICT transform
+// (an MCT in the codestream), so those are written back as RGB; YBR_FULL and RGB carry no MCT
+// (PS3.5 8.2.4) and keep their label.
 async function storedWasmFrames(ts, perFrame, g) {
   const { rows, cols, ba, spp, pi } = g.base;
   const kind = REDACT_J2K_TS.has(ts) ? 'j2k' : 'jls';
@@ -359,7 +448,7 @@ async function storedWasmFrames(ts, perFrame, g) {
     frames.push(g.asSamples(bytes));
   }
   return { ...g.base, frames, planar: 0, raw: false,
-           pi: (kind === 'j2k' && spp === 3) ? 'RGB' : pi };
+           pi: (kind === 'j2k' && spp === 3 && /^YBR_(RCT|ICT)$/i.test(String(pi).trim())) ? 'RGB' : pi };
 }
 
 // Baseline / extended JPEG: browser decode is 8-bit only, so 12-bit data loses depth across the
@@ -371,7 +460,9 @@ async function storedBitmapJpegFrames(perFrame, g) {
   for (const frag of perFrame) {
     let img;
     try {
-      const bitmap = await createImageBitmap(new Blob([frag], { type: 'image/jpeg' }));
+      // 'none': stored samples, not the browser's colour-managed (ICC to sRGB) rendering.
+      const bitmap = await createImageBitmap(new Blob([frag], { type: 'image/jpeg' }),
+                                             { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
       const c = document.createElement('canvas');
       c.width = bitmap.width; c.height = bitmap.height;
       const cx = c.getContext('2d');
@@ -400,6 +491,9 @@ async function decodeStoredFrames(d, meta) {
   if (!rows || !cols) return { error: 'This file has no Rows/Columns, so its stored pixels cannot be rewritten.' };
   // Only 8/16-bit samples can be rewritten.
   if (ba !== 8 && ba !== 16) return { error: `Bits Allocated ${ba} is not something this tool can rewrite.` };
+  // A frame count is a cost of its own (one buffer per frame), whatever the byte total.
+  if (!(numFrames >= 1) || numFrames > REDACT_MAX_FRAMES)
+    return { error: `Number of Frames ${numFrames} is not something this tool can rewrite.` };
 
   const px = lookupTag(d, '7fe00010');
   inflateInlinePixelData(px);
@@ -424,6 +518,7 @@ async function decodeStoredFrames(d, meta) {
   const perFrame = split.perFrame;
 
   if (ts === REDACT_RLE_TS) return storedRleFrames(perFrame, g);
+  if (ts === REDACT_ENCAP_RAW_TS) return storedEncapsulatedRawFrames(perFrame, g);
   if (REDACT_JPEG_LOSSLESS_TS.has(ts)) return storedJpegLosslessFrames(perFrame, g);
   if (REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts)) return storedWasmFrames(ts, perFrame, g);
   if (REDACT_JPEG_BITMAP_TS.has(ts)) return storedBitmapJpegFrames(perFrame, g);
@@ -503,7 +598,7 @@ async function previewDecodeJpegFamily(buf, tsi, img) {
       const LosslessDecoder = await loadJpegLossless();
       const decoder = new LosslessDecoder();
       // Output is interleaved raw samples, so route it through the raw path (handles colour too).
-      const decoded = decoder.decode(buf, 0, buf.byteLength, ba === 16 ? 2 : 1);
+      const decoded = undoPointTransform(decoder.decode(buf, 0, buf.byteLength, ba === 16 ? 2 : 1), buf, ba === 16 ? 2 : 1);
       return { bytes: decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.byteLength), planar: null };
     } catch (e) {
       return { done: { error: `JPEG Lossless decode failed: ${e.message}`, numFrames } };
@@ -714,6 +809,10 @@ async function decodeDicomPixels(d, frameIndex = 0, { meta = null, wcOvr, wwOvr 
   const fi = Math.max(0, Math.min(frameIndex, numFrames - 1));
   const framePixels = rows * cols;
   const frameByteSize = framePixels * Math.ceil(ba / 8) * spp;
+  // Rows x Columns come from the file: refuse before allocating a float cache and RGBA buffer
+  // for a header that a few hundred bytes can declare as gigapixels.
+  if (framePixels * 8 > PREVIEW_MAX_BYTES)
+    return { error: `${cols}x${rows} is too large to display in a browser tab`, numFrames };
   // Frame geometry and pixel-module values shared by the helpers above.
   const img = { rows, cols, spp, pi, ba, bs, hb, pr, pc, numFrames, fi, framePixels, frameByteSize, isMono1, isYBR };
   const tsi = previewTransferSyntax(meta);
@@ -767,6 +866,12 @@ async function decodeDicomPixels(d, frameIndex = 0, { meta = null, wcOvr, wwOvr 
   }
   const undecoded = previewUndecodedError(pxBuf, magic, tsi, codec, img);
   if (undecoded) return undecoded;
+  // A truncated raw file still parses (dcmjs clamps the element to the buffer); refuse it here
+  // instead of drawing garbage or throwing on an odd-length 16-bit view.
+  // (Subsampled raw YBR is smaller by design and refused by name in previewColorRGBA.)
+  if (pxBuf.byteLength < frameByteSize && !(isYBR && !codec.bytes && !/^YBR_FULL$/i.test(pi)))
+    return { error: fi > 0 && !codec.bytes ? `Pixel Data holds no frame ${fi + 1}` : `Pixel Data is truncated: ${pxBuf.byteLength} of ${frameByteSize} bytes`, numFrames };
+  if (ba === 16 && pxBuf.byteLength % 2) pxBuf = pxBuf.slice(0, pxBuf.byteLength - 1);
 
   if (tsi.isBigEndian && ba === 16) pxBuf = swapBytes16Copy(pxBuf);
 
@@ -818,6 +923,8 @@ function _paintPixels(pixels, rows, cols) {
   previewImageData = { width: cols, height: rows, data: imgData };
 }
 
+function finiteOrUndef(s) { const n = parseFloat(s); return Number.isFinite(n) ? n : undefined; }
+
 // Synchronous W/L redraw from the cache
 function redrawWL(wcOvr, wwOvr) {
   if (!previewRawData) return false;
@@ -834,10 +941,14 @@ function redrawWL(wcOvr, wwOvr) {
 async function drawPreview(d, frameIndex = 0) {
   const wcPending = pendingEdits.get(editKey('00281050'));
   const wwPending = pendingEdits.get(editKey('00281051'));
-  const wcOvr = wcPending ? parseFloat(wcPending.valueString) : undefined;
-  const wwOvr = wwPending ? parseFloat(wwPending.valueString) : undefined;
+  // An empty or mistyped override falls back to the file's window, never NaN (all black).
+  const wcOvr = finiteOrUndef(wcPending?.valueString);
+  const wwOvr = finiteOrUndef(wwPending?.valueString);
 
-  const result = await decodeDicomPixels(d, frameIndex, { meta, wcOvr, wwOvr });
+  let result;
+  // No decoder exception may leave the previous file's image on screen under this file's tags.
+  try { result = await decodeDicomPixels(d, frameIndex, { meta, wcOvr, wwOvr }); }
+  catch (e) { result = { error: `Pixel decode failed: ${e.message || e}`, numFrames: 1 }; }
   if (!result) {
     previewCard.style.display = 'none';
     syncImgEditCard?.();

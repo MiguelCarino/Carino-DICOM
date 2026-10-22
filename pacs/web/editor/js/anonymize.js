@@ -98,8 +98,9 @@ function randName(sex) {
 const ANON_NAME = 'ANONYMOUS';
 
 // ---- Tag access ----
-// dcmjs keys are 8-char UPPERCASE hex without 'x' ("0008103E"). An 'x'-prefixed key parses
-// to NaN and is silently dropped on write, so always canonicalise and delete stale variants.
+// dcmjs keys are 8-char UPPERCASE hex without 'x' ("0008103E"). An 'x'-prefixed key is
+// mis-parsed on write (Tag.fromString('x00181030') is (0008,1030)): the element lands under the
+// wrong tag, often group 0000. Always canonicalise and delete stale variants.
 function canonTag(t) { return (t[0] === 'x' ? t.slice(1) : t).toUpperCase(); }
 function tagVariants(t) { const h = canonTag(t); return [h, h.toLowerCase(), 'x' + h, 'x' + h.toLowerCase()]; }
 function findTagKey(d, t) { for (const k of tagVariants(t)) if (k in d) return k; return null; }
@@ -130,13 +131,55 @@ function newUID() {
 // Driven by window.DEID_PROFILE (deid-profile.js, PS3.15 Table E.1-1); applied recursively
 // so PHI nested in sequences is cleaned too.
 
-// Dummy value for the VR (actions D / X/D).
-function dummyFor(vr) {
-  if (/^(DA|DT|TM)$/.test(vr)) return '';                              // never fabricate temporal data
-  if (/^(IS|DS|US|UL|SS|SL|FL|FD|SV|UV|OB|OW|OF|OD|UN)$/.test(vr)) return ''; // numeric/binary → empty
+// Dummy value for the VR (actions D / X/D). PS3.15 E.1.1: D is a non-zero length value
+// consistent with the VR, which is what sets it apart from Z for Type 1 attributes.
+const DUMMY_BY_TAG = {
+  '04000565': 'COERCE',            // Reason for the Attribute Modification: a defined term
+};
+function dummyFor(vr, action = 'D', tag = '') {
+  if (DUMMY_BY_TAG[tag]) return DUMMY_BY_TAG[tag];
+  if (/^(DA|DT|TM)$/.test(vr)) {
+    // X/D may remove; an empty value is the conservative reading. A pure D gets an unmistakable
+    // sentinel (not PHI), so a Type 1 date stays non-empty.
+    if (action !== 'D') return '';
+    return vr === 'DA' ? '19000101' : vr === 'TM' ? '000000' : '19000101000000';
+  }
+  if (vr === 'AS') return '000Y';                                      // AS is exactly 4 bytes
+  if (vr === 'UI') return newUID();                                    // one per element: UIDs identify
+  if (vr === 'UR') return 'urn:anonymized';                            // a syntactically valid URI
+  if (/^(IS|DS|US|UL|SS|SL|FL|FD|SV|UV|OB|OW|OF|OD|OL|OV|UN|AT)$/.test(vr)) return ''; // numeric/binary → empty
   if (vr === 'PN') return 'ANON^ANON';
-  if (vr === 'SQ') return [];                                          // empty sequence
+  if (vr === 'SQ') return [];                                          // D on SQ collapses to Z (no items)
   return 'ANONYMIZED';
+}
+
+// String VRs whose bytes can be read back as text when dcmjs could only say UN.
+const TEXT_VRS = new Set(['AE','AS','CS','DA','DS','DT','IS','LO','LT','PN','SH','ST','TM','UC','UI','UR','UT']);
+const ITEM_TAG_LE = [0xFE, 0xFF, 0x00, 0xE0];   // (FFFE,E000) Item, little endian
+
+function unBytes(el) {
+  const v = Array.isArray(el?.Value) ? el.Value[0] : null;
+  if (v instanceof ArrayBuffer) return new Uint8Array(v);
+  if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  return null;
+}
+// dcmjs reads an element it has no dictionary entry for as UN: in Implicit VR (the default
+// transfer syntax) that is every attribute newer than its dictionary, including sequences of
+// defined length (PS3.5 6.2.2 Note 5). Returns 'seq' for a value that is an item sequence the
+// profile cannot see into, a resolved {vr, Value} for a text attribute, or null.
+function resolveUN(tag, el) {
+  if (!el || (el.vr && el.vr !== 'UN')) return null;
+  const b = unBytes(el);
+  if (!b) return null;
+  if (b.length >= 4 && ITEM_TAG_LE.every((x, i) => b[i] === x)) return 'seq';
+  const vr = typeof vrForTag === 'function' ? vrForTag(tag) : '';
+  if (vr === 'SQ') return b.length ? 'seq' : { vr: 'SQ', Value: [] };
+  if (!TEXT_VRS.has(vr)) return null;
+  let str = '';
+  for (const c of b) str += String.fromCharCode(c);
+  str = str.replace(/[\0 ]+$/, '');
+  const Value = /^(LT|ST|UT|UR)$/.test(vr) ? [str] : str.split('\\');
+  return { vr, Value };
 }
 
 // ---- PS3.15 optional profiles ----
@@ -165,9 +208,11 @@ function readDeidOptions() {
 // Effective action for `tag` given the enabled options; null = leave alone.
 // A 'C' row falls through to the Basic action: we cannot clean, so we remove.
 function resolveAction(tag) {
+  if (!window.DEID_PROFILE) throw new Error(DEID_MISSING);
   if (optionRetains(tag)) return null;
-  return (window.DEID_PROFILE && window.DEID_PROFILE[tag]) || null;
+  return window.DEID_PROFILE[tag] || null;
 }
+const DEID_MISSING = 'The de-identification table (deid-profile.js) did not load, so nothing was anonymized. Reload the page.';
 
 // True only for an explicit K (resolveAction's null also means "not in the table").
 function optionRetains(tag) {
@@ -180,7 +225,8 @@ function optionRetains(tag) {
 
 // Returns true if the element was removed (caller then skips recursing into it).
 function applyAction(node, key, el, action) {
-  const vr = el.vr || 'LO';
+  // An unresolved UN takes its VR from the bundled dictionary, so the dummy fits the attribute.
+  const vr = (el.vr && el.vr !== 'UN') ? el.vr : (vrForTag?.(canonTag(key)) || el.vr || 'LO');
   switch (action) {
     case 'X':                                   // remove
       delete node[key]; return true;
@@ -188,48 +234,80 @@ function applyAction(node, key, el, action) {
     case 'X/Z/U*':                              // keep so nested UIDs remap, preserving references
       return false;
     case 'D': case 'X/D':                       // dummy value
-      setTag(node, key, vr, dummyFor(vr)); return false;
+      setTag(node, key, vr, dummyFor(vr, action, canonTag(key))); return false;
     case 'Z': case 'Z/D': case 'X/Z': case 'X/Z/D':  // zero-length (never drops a maybe-required attr)
       setTag(node, key, vr, []); return false;
     default:
       return false;
   }
 }
-function applyProfile(node) {
-  if (!node || typeof node !== 'object') return;
+function applyProfile(node, notes = {}) {
+  if (!node || typeof node !== 'object') return notes;
   for (const key of Object.keys(node)) {
-    const el = node[key];
+    let el = node[key];
     if (!el || typeof el !== 'object') continue;
+    if (!isHexTag(key)) continue;                          // not an element ('_meta', naturalised names)
     const tag = canonTag(key);                             // 8-char UPPERCASE hex
     const group = parseInt(tag.slice(0, 4), 16);
-    const elem  = tag.slice(4);
     // Repeating-group attributes not in the flat table:
     if (group >= 0x5000 && group <= 0x50ff) { delete node[key]; continue; }   // Curve Data (retired)
-    if (group >= 0x6000 && group <= 0x60ff && (elem === '3000' || elem === '4000')) {
-      delete node[key]; continue;                          // Overlay Data / Overlay Comments
+    if (group >= 0x6000 && group <= 0x60ff && group % 2 === 0) {
+      // The whole Overlay Plane: Data and Comments are X in Table E.1-1, and what is left without
+      // them (descriptors, free-text Label/Description) is an invalid module that can carry text
+      // and is the signature of the retired overlay-in-pixel-data form.
+      const e = tag.slice(4);
+      if ((e === '0100' && Number(el.Value?.[0]) !== 1) || (e === '0102' && Number(el.Value?.[0]) !== 0))
+        notes.embeddedOverlay = true;
+      delete node[key]; continue;
     }
+    // A sequence dcmjs could only read as opaque UN bytes cannot be cleaned item by item, so it
+    // goes (fail-closed); a text attribute read as UN is decoded so its action can apply.
+    const un = resolveUN(tag, el);
+    if (un === 'seq') { delete node[key]; notes.opaqueSequences = (notes.opaqueSequences || 0) + 1; continue; }
+    if (un && (resolveAction(tag) || un.vr === 'UI')) { node[key] = el = un; }
     const action = resolveAction(tag);
     const removed = action ? applyAction(node, key, el, action) : false;
-    if (!removed && el.vr === 'SQ' && Array.isArray(el.Value)) {
-      el.Value.forEach(item => applyProfile(item));        // clean nested attributes
+    const cur = node[key];
+    if (!removed && cur && cur.vr === 'SQ' && Array.isArray(cur.Value)) {
+      cur.Value.forEach(item => applyProfile(item, notes));   // clean nested attributes
     }
   }
+  // (0040,A073) Verifying Observer Sequence is Type 1C on Verification Flag VERIFIED; once its
+  // items are gone the document can only say UNVERIFIED.
+  const vo = getTag(node, '0040A073');
+  if (vo && !(Array.isArray(vo.Value) && vo.Value.length) &&
+      /^VERIFIED$/i.test(String(getTag(node, '0040A493')?.Value?.[0] || '').trim()))
+    setTag(node, '0040A493', 'CS', 'UNVERIFIED');
+  return notes;
 }
 // PS3.15 (0012,0062/0063/0064): one (0012,0064) item per profile applied (Basic + enabled
 // options). (0012,0063) is LO VM 1-n: one value per meaning, since joining overflows 64 chars.
+// E.1.1 item 6: codes are ADDED to (0012,0064) and the method text added to (0012,0063), so an
+// earlier record (this tool's 113101 Clean Pixel Data, another de-identifier's codes) survives.
+// ASCII only: no Specific Character Set is written, so the default repertoire applies.
+const DEID_METHOD = 'Carino DICOM Editor - DICOM PS3.15 Basic Profile';
 function addDeidMeta(d) {
   setTag(d, '00120062', 'CS', 'YES');                      // Patient Identity Removed
   const codes = [['113100', 'Basic Application Confidentiality Profile']];
   for (const opt of DEID_OPTION_ORDER) if (deidOptions.has(opt)) codes.push(DEID_OPTION_CODES[opt]);
 
-  setTag(d, '00120063', 'LO',
-    ['Carino DICOM Editor — DICOM PS3.15 Basic Profile'].concat(codes.slice(1).map(c => c[1])));
-  delTag(d, '00120064');
-  d['00120064'] = { vr: 'SQ', Value: codes.map(([value, meaning]) => ({
+  const prevMethod = (getTag(d, '00120063')?.Value || []).map(v => String(v).trim()).filter(Boolean);
+  const method = prevMethod.slice();
+  for (const v of [DEID_METHOD].concat(codes.slice(1).map(c => c[1]))) if (!method.includes(v)) method.push(v);
+  setTag(d, '00120063', 'LO', method);
+
+  const el = getTag(d, '00120064');
+  const items = (el && el.vr === 'SQ' && Array.isArray(el.Value)) ? el.Value.filter(it => it && typeof it === 'object') : [];
+  const has = (value) => items.some(it =>
+    String(getTag(it, '00080100')?.Value?.[0] || '').trim() === value &&
+    String(getTag(it, '00080102')?.Value?.[0] || 'DCM').trim() === 'DCM');
+  for (const [value, meaning] of codes) if (!has(value)) items.push({
     '00080100': { vr: 'SH', Value: [value] },              // Code Value
     '00080102': { vr: 'SH', Value: ['DCM'] },              // Coding Scheme Designator
     '00080104': { vr: 'LO', Value: [meaning] },            // Code Meaning
-  })) };
+  });
+  delTag(d, '00120064');
+  d['00120064'] = { vr: 'SQ', Value: items };
 }
 
 // CID 7050 113101 (Clean Pixel Data). Appended beside 113100, not replacing it: a file
@@ -290,8 +368,12 @@ function fillRedactionBoxes(frames, boxes, geom, samples) {
   const framePixels = rows * cols;
   const mask = Math.pow(2, bs) - 1;
   const shift = hb - bs + 1;
-  // Mask to Bits Stored and shift to High Bit (High Bit is not always bs - 1).
-  const words = samples.map(v => (v & mask) << (shift > 0 ? shift : 0));
+  // Mask to Bits Stored and shift to High Bit (High Bit is not always bs - 1). Signed data keeps
+  // its sign extension above the window, as the surrounding samples do (both are conformant,
+  // PS3.5 8.1.1; this one also reads right as a plain int16).
+  const sh = shift > 0 ? shift : 0;
+  const signed = (geom.pr | 0) === 1;
+  const words = samples.map(v => signed ? ((v << sh) & 0xFFFF) : ((v & mask) << sh));
   let painted = 0;
   for (const fr of frames) {
     for (const b of boxes) {
@@ -332,10 +414,42 @@ function retagRedacted(d, nBoxes, nFrames) {
 
 // Tags backed up for session undo. Kept by reference, not cloned: applyRedaction
 // replaces these elements rather than mutating them.
-const REDACT_RESTORE_TAGS = ['00280301', '00120063', '00120064', '00080008', '00082111',
+const REDACT_RESTORE_TAGS = ['00280301', '00120062', '00120063', '00120064', '00080008', '00082111',
                              '00080018', '00280100', '00280101', '00280102', '00280103',
                              '00280004', '00280006', '00281050', '00281051',
-                             '7FE00001', '7FE00002'];
+                             '7FE00001', '7FE00002', '00880200'];
+
+// PS3.15 E.1.1: the Icon Image Sequence is to be removed when its pixels are not cleaned with the
+// main image (it is a thumbnail of the same burned-in frame). Removes every (0088,0200) below the
+// top level too; returns [parent, key, element] triples so a session undo can put them back.
+function stripIcons(d) {
+  const gone = [];
+  walkEls(d, (t, el, parent) => {
+    if (parent !== d && canonTag(t) === '00880200') { gone.push([parent, t, el]); delete parent[t]; }
+  });
+  delTag(d, '00880200');
+  return gone;
+}
+
+// Before a rewrite relabels a big-endian file little endian: every other word-sized binary element
+// (palette LUTs, overlay data, LUT data) must be swapped too, or it is written still big endian
+// under the new label (PS3.5 7.3, A.3). Replaces d's elements in place; returns the old ones.
+function convertBigEndianDict(d) {
+  const old = { ...d };
+  const le = bigEndianToLE(d);
+  for (const k of Object.keys(d)) delete d[k];
+  Object.assign(d, le);
+  return old;
+}
+
+// Every decoded frame must be exactly the size the header describes, or the rewrite would be
+// zero-padded (and claim clean pixels) or overflow.
+function frameSizeProblem(frames, frameBytes) {
+  for (let i = 0; i < frames.length; i++)
+    if (frames[i].byteLength !== frameBytes)
+      return `Decoded frame ${i + 1} is ${frames[i].byteLength} bytes, the header describes ${frameBytes}.`;
+  return null;
+}
 
 // Eager on click, not inside buildEditedFile: decoding may be async but buildEditedFile
 // must stay synchronous. Returns { boxes, frames, converts, depthLoss } or { error }.
@@ -348,6 +462,11 @@ async function applyRedaction(entry, boxes, opts = {}) {
   const src = await decodeStoredFrames(d, meta);
   if (src.error) return { error: src.error };
 
+  const bytesPerSample = Math.ceil(src.ba / 8);
+  const frameBytes = src.rows * src.cols * src.spp * bytesPerSample;
+  const sizeBad = frameSizeProblem(src.frames, frameBytes);
+  if (sizeBad) return { error: sizeBad };
+
   const fill = redactionFill(d, { pi: src.pi, spp: src.spp, bs: src.bs, pr: src.pr,
                                   bigEndian: src.ts === '1.2.840.10008.1.2.2' }, opts.fill);
   if (!fill) return { error: `Cannot work out a fill value for ${src.pi || 'this image'}.` };
@@ -357,8 +476,6 @@ async function applyRedaction(entry, boxes, opts = {}) {
   if (!fillRedactionBoxes(src.frames, boxes, src, fill))
     return { error: T('Those boxes cover no part of the image — nothing was redacted.') };
 
-  const bytesPerSample = Math.ceil(src.ba / 8);
-  const frameBytes = src.rows * src.cols * src.spp * bytesPerSample;
   // Pad to even length ourselves so the element length matches the buffer.
   const total = frameBytes * src.frames.length + ((frameBytes * src.frames.length) % 2);
   const outBuf = new ArrayBuffer(total);
@@ -366,6 +483,7 @@ async function applyRedaction(entry, boxes, opts = {}) {
   src.frames.forEach((fr, i) =>
     o8.set(new Uint8Array(fr.buffer, fr.byteOffset, fr.byteLength), i * frameBytes));
 
+  markSeed(entry);
   entry.redactBackup = {
     px: getTag(d, '7FE00010'),
     tags: Object.fromEntries(REDACT_RESTORE_TAGS.map(t => [t, getTag(d, t)])),
@@ -375,6 +493,8 @@ async function applyRedaction(entry, boxes, opts = {}) {
   // Privacy: the rotate/flip undo holds pre-redaction pixels, so drop it.
   entry.pixelBackup = null;
 
+  if (src.swapped) entry.redactBackup.whole = convertBigEndianDict(d);
+  entry.redactBackup.icons = stripIcons(d);
   setTag(d, '7FE00010', src.ba <= 8 ? 'OB' : 'OW', outBuf);
 
   if (!src.raw) {
@@ -400,9 +520,9 @@ async function applyRedaction(entry, boxes, opts = {}) {
   retagRedacted(d, boxes.length, src.frames.length);
 
   // Required, not a UI refresh: buildEditedFile replays entry.pending on export, and a stale
-  // copy would write the pre-redaction (0028,0301) = YES back.
-  entry.pending = seedPending(entry.dict);
-  if (files[currentFileIdx] === entry) usePendingOf(entry);
+  // copy would write the pre-redaction (0028,0301) = YES back. Typed edits to other tags stay.
+  reseedKeepingEdits(entry);
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
   datasetDirty = true;
 
   return { boxes: boxes.length, frames: src.frames.length, converts: !src.raw,
@@ -414,15 +534,22 @@ function undoRedaction(entry) {
   const b = entry?.redactBackup;
   if (!b) return false;
   const d = entry.dict;
+  markSeed(entry);
+  if (b.whole) {
+    // Back to the big-endian elements as loaded (the relabel is undone below).
+    for (const k of Object.keys(d)) delete d[k];
+    Object.assign(d, b.whole);
+  }
   delTag(d, '7FE00010');
   if (b.px) d['7FE00010'] = b.px;
   for (const [t, el] of Object.entries(b.tags)) { delTag(d, t); if (el) d[canonTag(t)] = el; }
+  for (const [parent, t, el] of b.icons || []) parent[t] = el;
   if (b.retagged) {
     if (b.tsEl) entry.meta['00020010'] = b.tsEl; else delete entry.meta['00020010'];
   }
   entry.redactBackup = null;
-  entry.pending = seedPending(d);
-  if (files[currentFileIdx] === entry) usePendingOf(entry);
+  reseedKeepingEdits(entry);
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
   return true;
 }
 

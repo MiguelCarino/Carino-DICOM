@@ -45,41 +45,72 @@ applyPrefixBtn.addEventListener('click', () => {
   if (p && p !== sharedUIDPrefix) applyPrefixToAll(p);
 });
 
+const isYes = (d, tag) => /^YES/i.test(String(getTag(d, tag)?.Value?.[0] || '').trim());
+const burnedIn = () => files.filter(f => isYes(f.dict, '00280301'));
+
 anonymizeBtn.addEventListener('click', () => {
   if (!files.length) return;
+  // Without the table nothing would be de-identified, yet (0012,0062) YES / 113100 would be
+  // written: refuse instead of claiming a profile that was not applied.
+  if (!window.DEID_PROFILE) { log('✗ ' + DEID_MISSING); toast?.(T(DEID_MISSING), 8000); return; }
   // Read the box, not deidOptions: that is only refreshed once the user confirms.
   const keepUIDs = document.querySelector('#deidOptionsRow [data-opt="rtnUIDsOpt"]')?.checked;
-  confirmDanger(T(keepUIDs
+  // Said before the irreversible step: Find burned-in text matches the file's own tags, which
+  // are gone afterwards.
+  const nb = burnedIn().length;
+  const msg = [T(keepUIDs
     ? 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers. UIDs are kept (Retain UIDs).'
-    : 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers and remaps UIDs.').replace('{n}', files.length), () => {
-    pushHistory?.();
-    if (!window.DEID_PROFILE) log('⚠ deid-profile.js failed to load — only private tags and core identifiers will be removed.');
+    : 'Anonymize all {n} loaded file(s)? This overwrites patient identifiers and remaps UIDs.').replace('{n}', files.length),
+    nb && T('Burned In Annotation = YES in {b} of {n} file(s): redact those first, because Find burned-in text stops working once the tags are anonymized.')
+      .replace('{b}', nb).replace('{n}', files.length),
+    T('Undo cannot reverse this.')].filter(Boolean).join(' ');
+  confirmDanger(msg, () => {
+    // An undo step across the rewrite would put one file back on its old identity and UIDs while
+    // (0012,0062) still says YES, so the history ends here (as Swap and UID prefix do).
+    resetEditHistory?.(); datasetDirty = true;
+    try { renderTechRow(); } catch (_) {}
     readDeidOptions();
-    files.forEach(f => anonymize(f.dict));
+    const notes = {};
+    try {
+      files.forEach(f => {
+        const r = anonymize(f.dict);
+        if (r?.embeddedOverlay) notes.embeddedOverlay = (notes.embeddedOverlay || 0) + 1;
+        if (r?.opaqueSequences) notes.opaqueSequences = (notes.opaqueSequences || 0) + r.opaqueSequences;
+        f.deid = true;                  // export names stop carrying the source path
+      });
+    } catch (err) { log('✗ ' + (err.message || err)); toast?.(err.message || String(err), 8000); return; }
     // remapUIDs ignores the profile table, so skipping it is what implements Retain UIDs.
     if (!deidOptions.has('rtnUIDsOpt')) remapUIDs();
     reseedAllPending();
     syncToUI();
     // Burned-in pixel identity needs per-image judgement, so point at Redact instead of guessing.
-    const burned = files.filter(f => /^YES/i.test(String(getTag(f.dict, '00280301')?.Value?.[0] || '')));
+    const burned = burnedIn();
     if (burned.length) log(`⚠ ${burned.length} file(s) have Burned In Annotation = YES: identity may remain in the image pixels. Use Redact in the Image edits card to overwrite it.`);
+    const faces = files.filter(f => isYes(f.dict, '00280302'));
+    if (faces.length) log(`⚠ ${faces.length} file(s) have Recognizable Visual Features = YES: the pixels themselves (e.g. a face reconstructed from a head scan) may identify the patient. This tool does not deface images.`);
+    if (notes.embeddedOverlay) log(`⚠ ${notes.embeddedOverlay} file(s) described a retired overlay stored in Pixel Data bits; the overlay group was removed, but those bits may still hold it.`);
+    if (notes.opaqueSequences) log(`⚠ ${notes.opaqueSequences} sequence(s) stored as unknown (UN) bytes could not be inspected and were removed.`);
     const n = window.DEID_PROFILE_META?.attributes || 0;
     const opts = [...deidOptions].map(o => DEID_OPTION_CODES[o][1]);
     log(`Anonymized all files — DICOM PS3.15 Basic Profile${n ? ` (${n} attributes)` : ''}`
         + (opts.length ? ` + ${opts.join(' + ')}` : ''));
     toast?.(burned.length
       ? T('Burned In Annotation = YES — identity may be burned into the pixels. Use Redact in the Edit tab.')
-      : T('All files anonymized'));
+      : T('All files anonymized'), burned.length ? 8000 : undefined);
   }, 'Anonymize');
 });
 
 randomizeBtn.addEventListener('click', () => {
   if (!files.length) return;
   // randomize() touches only the patient block, dates and two IDs; say what it leaves.
-  confirmDanger(T('Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.').replace('{n}', files.length), () => {
-    pushHistory?.();
-    files.forEach(f => randomize(f.dict));
-    remapUIDs();
+  confirmDanger(T('Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.').replace('{n}', files.length)
+      + ' ' + T('Undo cannot reverse this.'), () => {
+    resetEditHistory?.(); datasetDirty = true;
+    try { renderTechRow(); } catch (_) {}
+    randomizeAll(files);
+    // Not de-identification, so a ticked Retain UIDs (left from an earlier Anonymize) does not
+    // apply: a fake patient must never share the real study's UIDs.
+    remapUIDs({ honourOptions: false });
     reseedAllPending();
     syncToUI();
     log('Randomized all files');
@@ -142,6 +173,8 @@ function renderSwapDialog() {
     if (new Set(idx.map(i => swapValue(i, '00100020'))).size > 1)
       warn.push(T('Study {n} holds files with different Patient IDs. Every file in it gets the other study\'s patient.').replace('{n}', k + 1));
   });
+  if ([...ia, ...ib].some(i => isYes(files[i].dict, '00280301')))
+    warn.push(T('A file in these studies is marked Burned In Annotation = YES: its pixels still show the old patient. Redact it after the swap.'));
   const ul = $('swapWarn');
   ul.replaceChildren(...warn.map(w => { const li = document.createElement('li'); li.textContent = w; return li; }));
   ul.classList.toggle('hidden', !warn.length);
@@ -179,10 +212,20 @@ $('swapOk').addEventListener('click', () => {
   try { renderTechRow(); } catch (_) {}
   // Fold typed-but-unexported edits in first: reseedAllPending would otherwise drop them.
   for (const f of files) Object.assign(f.dict, withPendingEdits(f));
+  // A folded edit (a retyped Study Instance UID) can change which file belongs to which study;
+  // the swap must move what the files now say, so re-check the grouping and stop if it moved.
+  const now = groupStudies().map(g => g.indices.join(','));
+  if (now.length !== 2 || !now.includes(ia.join(',')) || !now.includes(ib.join(','))) {
+    reseedAllPending(); syncToUI();
+    toast?.(T('Swap cancelled: unexported edits change which files belong to which study.'), 7000);
+    return;
+  }
   swapPatients(ia, ib, withAcc);
-  if (newUIDs) remapUIDs();
+  if (newUIDs) remapUIDs({ honourOptions: false });
   reseedAllPending();
   syncToUI();
+  if ([...ia, ...ib].some(i => isYes(files[i].dict, '00280301')))
+    log('⚠ Burned In Annotation = YES in a swapped file: its pixels still show the previous patient. Use Redact.');
   log(`Swapped patients between 2 studies (${ia.length} + ${ib.length} files)`
       + (withAcc ? ', Accession Number included' : '') + (newUIDs ? ', new UIDs' : ''));
   toast?.(T('Patients swapped'));
@@ -203,13 +246,21 @@ $('cmpClose')?.addEventListener('click', () => {
 $('cmpDiffOnly')?.addEventListener('change', e => {
   cmpDiffOnly = e.target.checked; renderTable();
 });
-// Export menu: close after a pick, on an outside click and on Escape.
-{
-  const menu = $('exportMenu');
-  menu?.querySelector('.tb-menu-list')?.addEventListener('click', e => { if (e.target.closest('button')) menu.open = false; });
-  document.addEventListener('click', e => { if (menu?.open && !menu.contains(e.target)) menu.open = false; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu?.open) { menu.open = false; menu.querySelector('summary').focus(); } });
+// Toolbar menus: close after a pick, on an outside click and on Escape; opening one closes the other.
+for (const menu of document.querySelectorAll('.actions-row .tb-menu')) {
+  menu.querySelector('.tb-menu-list')?.addEventListener('click', e => { if (e.target.closest('button')) menu.open = false; });
+  menu.addEventListener('toggle', () => {
+    if (menu.open) document.querySelectorAll('.actions-row .tb-menu[open]').forEach(m => { if (m !== menu) m.open = false; });
+  });
+  document.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
 }
+// Tools ▸ UID root… toggles the panel under the toolbar.
+$('uidPatternBtn')?.addEventListener('click', () => {
+  uidPatternOpen = !uidPatternOpen;
+  showUIDPattern(!!sharedUIDPrefix);
+  if (uidPatternOpen) uidPrefixInput.focus();
+});
 $('cmpReport')?.addEventListener('click', () => printCompareReport());
 $('cmpDownloadB')?.addEventListener('click', () => {
   const other = compareEntry(); if (other) downloadOne(other);

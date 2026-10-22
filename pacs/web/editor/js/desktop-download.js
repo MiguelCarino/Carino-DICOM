@@ -155,6 +155,7 @@
     // openReleasePage is the sanctioned way out of app://; href keeps link semantics.
     el.addEventListener('click', (e) => { e.preventDefault(); desk.openReleasePage(); });
     // The update may already be known or arrive later; handle both (revealing twice is harmless).
-    reveal(desk.getUpdate());
+    // getUpdate() resolves (it is an IPC invoke), so wait for it rather than read the Promise.
+    Promise.resolve(desk.getUpdate()).then(reveal).catch(() => {});
     desk.onUpdate(reveal);
   })();

@@ -108,11 +108,16 @@
     // through t(), 157 with the Swap patients dialog's rows, warnings and toast,
     // 163 with Create's eye picker and its eye-photo and order messages, 169 with
     // Find burned-in text's progress and result lines, 179 with Create's
-    // send-back-to-the-worklist label and outcomes.
+    // send-back-to-the-worklist label and outcomes, 194 with the review fixes' confirm
+    // sentences, refusals and toasts (de-identification, deep links, export), 227 with the
+    // compression line's verdicts, viewer warnings, decompress confirm and Compare's pixel verdict,
+    // 245 with the point-transform, J2K-sign, JPIP/private-syntax and rendered-copy warnings,
+    // 272 with the presentation-state menu, colour-series burn-in and the Overview cards' own text,
+    // 309 with the validator's messages and format hints (shown translated in the Conformance card).
     const jsOwned = new Set(ATTR_I18N.map(([, , k]) => k));
     const unseen = Object.keys(I18N.es).filter(k => !keys.has(k) && !jsOwned.has(k));
     ok('the dictionaries have not drifted far ahead of the page',
-       unseen.length < 185, `${unseen.length} keys reached from JS or no longer reached at all`);
+       unseen.length < 330, `${unseen.length} keys reached from JS or no longer reached at all`);
   } catch (e) {
     ok('the i18n audit ran', false, (e && e.message) || String(e));
   }
@@ -124,7 +129,7 @@
   // count pills keep their count across the switch. CarinoLang.set stores the
   // choice, so put the visitor's back afterwards.
   const prevLang = CarinoLang.mode === 'manual' ? CarinoLang.current : 'auto';
-  const pillWas = createImgCount.dataset.i18nN;
+  const pillWas = fileCountPill.dataset.i18nN;
   try {
     const LOCALES = ['es', 'pt-BR', 'ja', 'ru'];
     const JS_KEYS = ['Copy every differing value onto {name}? This overwrites its values.',
@@ -151,17 +156,65 @@
     ok('?lang=ja: a toast given the English key is shown in Japanese', toastText === I18N.ja['Cleared the added files'], toastText);
     document.querySelector('.toast')?.remove();
 
-    setCountPill(createImgCount, 3);
-    ok('?lang=ja: a count pill is Japanese', createImgCount.textContent === I18N.ja['Images: {n}'].replace('{n}', 3),
-       createImgCount.textContent);
+    // fileCountPill, not Create's: a switch redraws Create's grid, which resets its pill to the real count.
+    setCountPill(fileCountPill, 3);
+    ok('?lang=ja: a count pill is Japanese', fileCountPill.textContent === I18N.ja['Files: {n}'].replace('{n}', 3),
+       fileCountPill.textContent);
     CarinoLang.set('en');
-    ok('and switching back keeps its count', createImgCount.textContent === 'Images: 3', createImgCount.textContent);
+    ok('and switching back keeps its count', fileCountPill.textContent === 'Files: 3', fileCountPill.textContent);
   } catch (e) {
     ok('the ?lang=ja confirm check ran', false, (e && e.message) || String(e));
   } finally {
     try { $('confirmCancel').click(); } catch (_) { /* already closed */ }
     CarinoLang.set(prevLang);
-    if (pillWas !== undefined) setCountPill(createImgCount, pillWas);
+    if (pillWas !== undefined) setCountPill(fileCountPill, pillWas);
+  }
+
+  // ---- a switch with a file open redraws text built at render time ----------
+  // i18n.js re-translates static markup only; the compression notes, the Overview cards and the
+  // validator badges are built with T() when drawn, and stayed in the old language (reported on
+  // an 8-bit MR whose rendered-picture warning stayed English under "COMPRESIÓN").
+  try {
+    CarinoLang.set('en');
+    const n = Forge.W * Forge.H, px8 = new Uint8Array(n);
+    for (let k = 0; k < n; k++) px8[k] = k & 0xFF;
+    const mr8 = Forge.build({ rows: Forge.H, cols: Forge.W, pi: 'MONOCHROME2', ba: 8, bs: 8, hb: 7, pr: 0,
+      modality: 'MR', sopClass: '1.2.840.10008.5.1.4.1.1.4', pixels: px8 });
+    await handleFiles([new File([mr8], 'mr8.dcm')]);
+    renderOverview();
+    const KEY = 'A {m} image with only {b}-bit pixels: this looks like a rendered picture (a screenshot or JPEG export with the contrast already applied), not the measured values. Nothing can convert it back; ask for the original DICOM.';
+    const fill = (s) => s.replace('{m}', 'MR').replace('{b}', '8');
+    const warn = () => $('imgCompNotes').querySelector('li.warn')?.textContent || '';
+    ok('switch: the 8-bit MR warning is English before the switch', warn() === fill(KEY), warn().slice(0, 60));
+    CarinoLang.set('es');
+    ok('switch: the compression notes follow the language', warn() === fill(I18N.es[KEY]), warn().slice(0, 60));
+    const head = (k) => I18N.es[k].split('{n}')[0];
+    const badges = $('ovValSummary').textContent;
+    ok('switch: the validator badges follow it', badges.includes(head('Errors: {n}')) && badges.includes(head('Warnings: {n}')), badges);
+    ok('switch: and the Overview cards', $('ovTech').textContent.includes(I18N.es['Compression']), $('ovTech').textContent.slice(0, 80));
+    const card = $('ovValIssues').textContent;
+    ok('switch: and the validator messages', card.includes(I18N.es['Missing — Type 1 required for {iod}'].split('{iod}')[0]), card.slice(0, 80));
+
+    // Every validator message, read from its source: plain push() texts, vMsg() templates and the
+    // VR format hints, in each locale with each placeholder once.
+    const src = await (await fetch('js/validator.js')).text();
+    const unq = (s) => s.replace(/\\(['\\])/g, '$1');
+    const vkeys = new Set([
+      ...[...src.matchAll(/vMsg\('((?:\\.|[^'\\])*)'/g)].map(m => unq(m[1])),
+      ...[...src.matchAll(/push\(\s*'\w+'\s*,\s*[^,'"`]+,\s*'((?:\\.|[^'\\])*)'/g)].map(m => unq(m[1])),
+      ...[...src.matchAll(/push\('\w+',\s*'\w+',\s*'((?:\\.|[^'\\])*)'/g)].map(m => unq(m[1])),
+      ...Object.values(VR_RULES).map(r => r.hint).filter(h => h && /\s/.test(h)),   // prose; a bare pattern stays as is
+    ]);
+    ok('validator messages: the source scan found them', vkeys.size >= 30, String(vkeys.size));
+    for (const loc of ['es', 'pt-BR', 'ja', 'ru']) {
+      const bad = [...vkeys].filter(k => !I18N[loc]?.[k] ||
+        (k.match(/\{\w+\}/g) || []).some(p => I18N[loc][k].split(p).length !== 2));
+      ok(`validator messages reach ${loc} with each placeholder once`, !bad.length, bad.join(' | ').slice(0, 200));
+    }
+  } catch (e) {
+    ok('the language-switch redraw check ran', false, (e && e.message) || String(e));
+  } finally {
+    CarinoLang.set(prevLang);
   }
 
   return out;

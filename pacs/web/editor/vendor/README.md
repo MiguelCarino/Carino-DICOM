@@ -20,6 +20,18 @@ The one place an off-origin URL is *written* is the tesseract.js bundles under
 `tesseract/`: three jsDelivr defaults that never resolve, because `js/ocr.js`
 always overrides all three (see "OCR, for Find burned-in text" below). A grep for
 `https://` in those two files finds them; that is expected.
+`index.html` now says the same thing to the browser: a `Content-Security-Policy`
+meta tag (from upstream, kept byte for byte) names no off-origin source for
+scripts, styles, fonts, images, workers or media. Within that, scripts may use
+`eval` and WebAssembly compilation (`'unsafe-eval'`, `'wasm-unsafe-eval'`: dcmjs and
+the codecs need them), styles may be inline, and `blob:`/`data:` are allowed for
+objects the page makes itself (images, workers, media, `connect-src`). The only
+off-origin connections it permits are `https://api.github.com`, for upstream's
+release check, which `js/desktop-download.js` only makes when the hostname is
+`dcm.carino.systems` and so never from a PACS, and `http://localhost:*` /
+`http://127.0.0.1:*`, for a PACS on the same machine. The `https://dcm.carino.systems/` URLs in its `carino:head` block
+(canonical link, Open Graph, schema.org JSON-LD) are metadata a search engine
+reads; no browser requests them.
 
 ## What is here, and under what licence
 
@@ -206,8 +218,18 @@ report that the files are missing instead of hanging — but it does remove two
 features an operator can see. The self-test in particular is worth keeping: it
 answers "does the browser on this reading-room workstation decode our studies
 correctly", in that browser, with the failures named. `tests/run.sh`,
-`tests/README.md`, `tests/realtime.py` and `tests/fixtures/` are development-only
-and are deliberately not vendored.
+`tests/README.md`, `tests/realtime.py`, `tests/boot-probe.js` (injected by
+`run.sh` only) and `tests/fixtures/make-codec-fixtures.mjs` are development-only
+and are deliberately not vendored. `tests/fixtures/worklist-frame.js` is the
+exception in that directory: the `eyephoto` suite, which the self-test runs, loads
+it as the stand-in worklist its send-back case answers to (the page's CSP forbids
+the inline script it used to be), so it is copied with the suites.
+
+The upstream repository's site and project files are not vendored either: `CNAME`,
+`404.html`, `robots.txt`, `sitemap.xml`, `AUDIT.md`, `README.md`, `CHANGELOG.md`,
+`LICENSE`, `.gitignore`, `.github/`, `docs/`, `desktop/` and `tools/`. They belong to
+dcm.carino.systems and its desktop build; copied here, the site's 404 page, robots
+rules and sitemap would be served from this engine's `/editor/`.
 
 Everything else should be copied verbatim. The two trees are meant to be
 byte-identical: a divergence here is a divergence in what a hospital is running.

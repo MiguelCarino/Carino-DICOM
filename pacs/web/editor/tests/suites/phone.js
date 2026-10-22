@@ -84,10 +84,14 @@
            thin.slice(0, 3).map(el => `${el.dataset.tag} ${Math.round(el.getBoundingClientRect().width)}px`).join('; ') || 'no inputs');
       }
       if (lang) return;
+      // The UID panel is folded behind Tools ▸ UID root…; open it so its Apply button is measured.
+      const folded = $g('uidPattern').style.display === 'none';
+      if (folded) $g('uidPatternBtn').click();
       for (const id of ['imgRedact', 'folderBtn', 'filesBtn', 'applyPrefixBtn']) {
         const why = reach(g, $g(id));
         ok(`phone: ${tag} edit: #${id} is on screen`, !why, why);
       }
+      if (folded) $g('uidPatternBtn').click();
     };
     await editNarrow(f, 390);
     // Compare's two value columns and copy arrows would be crushed to nothing, so they keep the floor.

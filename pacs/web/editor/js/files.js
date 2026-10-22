@@ -239,8 +239,10 @@ function createReadAheadQueue(arr) {
 
 // Parses one read buffer into a files[] entry; throws on a bad file.
 function parseEntry(file, path, buf) {
-  const msg = DicomMessage.readFile(buf);
+  // The hash below is of the file as loaded, so only the parser sees the normalised copy.
+  const msg = DicomMessage.readFile(definedLengthUN(buf));
   normBin(msg.dict);
+  if (metaTS(msg.meta) === '1.2.840.10008.1.2') fixImplicitSignedXS(msg.dict);
   // Keep the File handle (not bytes) for on-demand hashing. `name` stays the basename
   // because downloadOne uses it as a.download (no slashes); `path` is display-only.
   const entry = { name: file.name, path, dict: msg.dict, meta: msg.meta || {}, pending: seedPending(msg.dict), file, size: file.size, sha: null, shaState: file.size <= SHA_AUTO_LIMIT ? 'idle' : 'deferred' };
@@ -249,14 +251,167 @@ function parseEntry(file, path, buf) {
 }
 
 // Failures are only known as parse errors; the name or MIME says it was a picture.
+// PS3.5 6.2.2 Note 5: in an explicit VR dataset a UN element may have undefined length, and its
+// value is then an implicit VR LE sequence ending in a Sequence Delimitation Item. The vendored
+// dcmjs parser throws on it ("Offset is outside the bounds"), so the file could not be opened at
+// all. Rewrite each such element to the equivalent defined-length UN (same items, delimiter
+// dropped, enclosing defined lengths corrected); the app then sees an opaque UN sequence, which
+// Anonymize removes. Returns buf itself when there is nothing to do (the usual case: one byte scan).
+const UN_UNDEF = [0x55, 0x4E, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF];   // 'UN' 0000 FFFFFFFF
+const LONG_VRS = new Set(['OB', 'OD', 'OF', 'OL', 'OV', 'OW', 'SQ', 'SV', 'UC', 'UN', 'UR', 'UT', 'UV']);
+function definedLengthUN(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8.length < 140 || u8[128] !== 0x44 || u8[129] !== 0x49 || u8[130] !== 0x43 || u8[131] !== 0x4D) return buf;
+  let hit = false;
+  outer: for (let i = 132; i + 8 <= u8.length; i++) {
+    if (u8[i] !== 0x55) continue;
+    for (let k = 1; k < 8; k++) if (u8[i + k] !== UN_UNDEF[k]) continue outer;
+    hit = true; break;
+  }
+  if (!hit) return buf;
+  try {
+    const dv = new DataView(buf);
+    const U = 0xFFFFFFFF;
+    const vrAt = p => String.fromCharCode(u8[p], u8[p + 1]);
+    // File Meta (always explicit VR LE): skip it and read the Transfer Syntax.
+    let pos = 132, ts = '';
+    while (pos + 8 <= u8.length && dv.getUint16(pos, true) === 0x0002) {
+      const vr = vrAt(pos + 4), long = LONG_VRS.has(vr);
+      const len = long ? dv.getUint32(pos + 8, true) : dv.getUint16(pos + 6, true);
+      const hdr = long ? 12 : 8;
+      if (dv.getUint16(pos + 2, true) === 0x0010)
+        ts = String.fromCharCode(...u8.subarray(pos + hdr, pos + hdr + len)).replace(/[\0 ]+$/, '');
+      pos += hdr + len;
+    }
+    // Explicit VR Little Endian datasets only (big endian and deflated are left to dcmjs).
+    if (ts === '1.2.840.10008.1.2' || ts === '1.2.840.10008.1.2.2' || ts === '1.2.840.10008.1.2.1.99') return buf;
+    const isTag = (p, e) => dv.getUint16(p, true) === 0xFFFE && dv.getUint16(p + 2, true) === e;
+    // Implicit VR LE content of an undefined-length element: returns the offset of its E0DD.
+    const implicitSeqEnd = (p) => {
+      for (;;) {
+        if (isTag(p, 0xE0DD)) return p;
+        if (!isTag(p, 0xE000)) throw new Error('not an item');
+        const len = dv.getUint32(p + 4, true);
+        p = len === U ? implicitItemEnd(p + 8) : p + 8 + len;
+      }
+    };
+    const implicitItemEnd = (p) => {
+      for (;;) {
+        if (isTag(p, 0xE00D)) return p + 8;
+        const len = dv.getUint32(p + 4, true);
+        p = len === U ? implicitSeqEnd(p + 8) + 8 : p + 8 + len;
+      }
+    };
+    const head = (p, n) => u8.slice(p, p + n);
+    const withLen32 = (bytes, off, len) => { new DataView(bytes.buffer).setUint32(off, len, true); return bytes; };
+    const size = parts => parts.reduce((n, b) => n + b.length, 0);
+    // Explicit VR elements in [p, end); stops after an Item Delimitation when inItem.
+    const elements = (p, end, inItem) => {
+      const out = [];
+      while (p + 8 <= end) {
+        if (inItem && isTag(p, 0xE00D)) { out.push(head(p, 8)); return { out, p: p + 8 }; }
+        const vr = vrAt(p + 4), long = LONG_VRS.has(vr);
+        const hdr = long ? 12 : 8;
+        const len = long ? dv.getUint32(p + 8, true) : dv.getUint16(p + 6, true);
+        if (len === U && long) {
+          if (vr === 'UN') {
+            const stop = implicitSeqEnd(p + 12);
+            const body = u8.slice(p + 12, stop);
+            out.push(withLen32(head(p, 12), 8, body.length), body);
+            p = stop + 8;
+          } else if (vr === 'SQ') {
+            out.push(head(p, 12));
+            p += 12;
+            for (;;) {
+              if (isTag(p, 0xE0DD)) { out.push(head(p, 8)); p += 8; break; }
+              if (!isTag(p, 0xE000)) throw new Error('not an item');
+              const ilen = dv.getUint32(p + 4, true);
+              if (ilen === U) {
+                const sub = elements(p + 8, end, true);
+                out.push(head(p, 8), ...sub.out); p = sub.p;
+              } else {
+                const sub = elements(p + 8, p + 8 + ilen, false);
+                out.push(withLen32(head(p, 8), 4, size(sub.out)), ...sub.out); p = p + 8 + ilen;
+              }
+            }
+          } else {
+            // Encapsulated Pixel Data: fragments copied as they are.
+            let q = p + 12;
+            while (!isTag(q, 0xE0DD)) q += 8 + dv.getUint32(q + 4, true);
+            out.push(u8.slice(p, q + 8)); p = q + 8;
+          }
+        } else if (vr === 'SQ') {
+          // Defined-length sequence: its items may hold the element being rewritten.
+          const stop = Math.min(p + hdr + len, end), items = [];
+          let q = p + hdr;
+          while (q + 8 <= stop) {
+            const ilen = dv.getUint32(q + 4, true);
+            if (ilen === U) {
+              const sub = elements(q + 8, stop, true);
+              items.push(head(q, 8), ...sub.out); q = sub.p;
+            } else {
+              const sub = elements(q + 8, Math.min(q + 8 + ilen, stop), false);
+              items.push(withLen32(head(q, 8), 4, size(sub.out)), ...sub.out); q = q + 8 + ilen;
+            }
+          }
+          out.push(withLen32(head(p, 12), 8, size(items)), ...items); p = stop;
+        } else {
+          out.push(u8.slice(p, Math.min(p + hdr + len, end))); p += hdr + len;
+        }
+      }
+      if (p < end) out.push(u8.slice(p, end));
+      return { out, p };
+    };
+    const { out } = elements(pos, u8.length, false);
+    const parts = [u8.subarray(0, pos), ...out];
+    const res = new Uint8Array(size(parts));
+    let o = 0;
+    for (const b of parts) { res.set(b, o); o += b.length; }
+    return res.buffer;
+  } catch (_) {
+    return buf;               // not the structure expected: let the parser report it
+  }
+}
+
 const isImageFile = (file) => /^image\//.test(file?.type || '') ||
   /\.(png|jpe?g|gif|bmp|webp|tiff?|heic|heif|avif)$/i.test(file?.name || '');
 
+// Implicit VR carries no VR, and dcmjs reads the 'US or SS' attributes as US. With Pixel
+// Representation 1 they are signed (PS3.3 C.7.6.3 / PS3.6), so a Pixel Padding Value of -2000
+// would otherwise be exported as explicit US 63536. LUT Descriptors: only value 2 is signed.
+const XS_TAGS = ['00280106', '00280107', '00280108', '00280109', '00280110', '00280111',
+                 '00280120', '00280121', '00409211', '00409216'];
+const XS_DESCRIPTOR_TAGS = ['00281101', '00281102', '00281103', '00283002'];
+function fixImplicitSignedXS(d) {
+  if (Number(getTag(d, '00280103')?.Value?.[0]) !== 1) return;
+  const signed = v => (typeof v === 'number' && v >= 32768 && v < 65536) ? v - 65536 : v;
+  walkEls(d, (t, el, parent) => {
+    const tag = canonTag(t);
+    if (el.vr !== 'US' || !Array.isArray(el.Value)) return;
+    if (XS_TAGS.includes(tag)) parent[t] = { ...el, vr: 'SS', Value: el.Value.map(signed) };
+    else if (XS_DESCRIPTOR_TAGS.includes(tag) && el.Value.length >= 2 && el.Value[1] >= 32768 &&
+             el.Value.every((v, i) => i === 1 || v < 32768)) {
+      // US/SS/US: the first-mapped value is the one that is signed; the element stays US-typed
+      // only if it can, so write it SS with the other two (< 32768 in practice) unchanged.
+      parent[t] = { ...el, vr: 'SS', Value: el.Value.map((v, i) => i === 1 ? signed(v) : v) };
+    }
+  });
+}
+
+// File names and parser messages come from the file (a folder name, a crafted name, the file's
+// own Specific Character Set echoed by dcmjs), so they are only ever text, never markup.
 function renderLoadFailures(failures, note) {
   errorBanner.className = 'error-banner';
-  errorBanner.innerHTML = `<summary>⚠ ${failures.length} file${failures.length > 1 ? 's' : ''} failed to load — click to expand</summary><ul>${
-    failures.map(f => `<li>${f.name}: ${f.error}</li>`).join('')
-  }${note ? `<li>${note}</li>` : ''}</ul>`;
+  const summary = document.createElement('summary');
+  summary.textContent = `⚠ ${failures.length} file${failures.length > 1 ? 's' : ''} failed to load — click to expand`;
+  const ul = document.createElement('ul');
+  for (const f of failures) {
+    const li = document.createElement('li');
+    li.textContent = `${f.name}: ${f.error}`;
+    ul.appendChild(li);
+  }
+  if (note) { const li = document.createElement('li'); li.textContent = note; ul.appendChild(li); }
+  errorBanner.replaceChildren(summary, ul);
 }
 
 function showLoadedStudy() {
@@ -358,7 +513,9 @@ function assignPath(d, path, vr, valueString) {
   }
   const leaf = leafTag(path);
   if (isReadOnly(leaf, vr)) return;
-  node[leaf] = { vr, Value: parseByVR(vr, valueString, node[leaf]?.Value?.[0]) };
+  const v = parseByVR(vr, valueString, node[leaf]?.Value?.[0]);
+  if (v === null) return;          // not a value this VR can hold: the element stays as it was
+  node[leaf] = { vr, Value: v };
 }
 
 // ---- Big-endian source ----
@@ -405,12 +562,65 @@ function withPendingEdits(entry) {
     // Path keys must not reach d[t]: dcmjs parses '00081140/0/00100010' as (0008,1140)
     // and would silently replace the whole sequence with the leaf.
     if (t.includes('/')) { assignPath(d, t, vr, valueString); return; }
-    if (!isReadOnly(t, vr)) d[t] = { vr, Value: parseByVR(vr, valueString, entry.dict[t]?.Value?.[0]) };
+    if (isReadOnly(t, vr)) return;
+    const v = parseByVR(vr, valueString, entry.dict[t]?.Value?.[0]);
+    if (v === null) return;          // not a value this VR can hold: the element stays as it was
+    // Canonical key (8 UPPERCASE hex): any other spelling is written under the wrong tag, and a
+    // second spelling of an existing tag would be a duplicate element.
+    const k = /^x?[0-9a-f]{8}$/i.test(t) ? canonTag(t) : t;
+    if (k !== t) delete d[t];
+    for (const alt of [k.toLowerCase(), 'x' + k.toLowerCase(), 'x' + k]) if (alt !== k) delete d[alt];
+    d[k] = { vr, Value: v };
   });
   return d;
 }
 
+// Encapsulated transfer syntaxes the vendored dcmjs writer encapsulates (its own list). Any other
+// compressed syntax would be written as a single defined-length value holding only the first
+// frame, an unreadable file, so it is refused instead (vendor/ stays byte-identical upstream).
+const DCMJS_ENCAPSULATED_TS = new Set([
+  '1.2.840.10008.1.2.4.50', '1.2.840.10008.1.2.4.51', '1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.70',
+  '1.2.840.10008.1.2.4.80', '1.2.840.10008.1.2.4.81', '1.2.840.10008.1.2.4.90', '1.2.840.10008.1.2.4.91',
+  '1.2.840.10008.1.2.4.92', '1.2.840.10008.1.2.4.93', '1.2.840.10008.1.2.4.94', '1.2.840.10008.1.2.4.95',
+  '1.2.840.10008.1.2.5', '1.2.840.10008.1.2.6.1', '1.2.840.10008.1.2.4.100', '1.2.840.10008.1.2.4.102',
+  '1.2.840.10008.1.2.4.103',
+]);
+const UNCOMPRESSED_TS = new Set(['', '1.2.840.10008.1.2', '1.2.840.10008.1.2.1',
+                                 '1.2.840.10008.1.2.2', '1.2.840.10008.1.2.1.99']);
+
+// PS3.5 6.1.2.3: without (0008,0005) only the default repertoire (ASCII) is allowed, but dcmjs
+// always writes UTF-8. Declare it when a value (swapped in, copied across, typed) needs it.
+function hasNonAscii(d) {
+  let found = false;
+  walkEls(d, (t, el) => {
+    if (found || !el || !Array.isArray(el.Value) || isBinaryVR(el.vr) || el.vr === 'SQ') return;
+    for (const v of el.Value) {
+      const sv = v && typeof v === 'object' ? [v.Alphabetic, v.Ideographic, v.Phonetic].filter(Boolean).join('') : v;
+      if (typeof sv === 'string' && /[^\x00-\x7F]/.test(sv)) { found = true; return; }
+    }
+  });
+  return found;
+}
+
+// Encapsulated Pixel Data as one value per frame, so the writer emits one fragment per frame and
+// a Basic Offset Table entry per frame (PS3.5 A.4; RLE requires exactly one fragment per frame).
+function encapsulatedForWrite(d) {
+  const key = findTagKey(d, '7FE00010');
+  const px = key && d[key];
+  if (!px || !Array.isArray(px.Value)) return;
+  const n = Math.max(1, parseInt(String(getTag(d, '00280008')?.Value?.[0] ?? '1'), 10) || 1);
+  const bufs = px.Value.map(v => ArrayBuffer.isView(v) ? v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) : v);
+  const grouped = bufs.every(b => b instanceof ArrayBuffer) ? groupFragmentsByFrame(bufs, n) : null;
+  if (grouped && grouped.length !== px.Value.length) d[key] = { ...px, Value: grouped };
+  // The Extended Offset Table describes the source fragments; the written BOT replaces it.
+  delTag(d, '7FE00001'); delTag(d, '7FE00002');
+}
+
 function buildEditedBytes(entry) {
+  const srcTS = metaTS(entry.meta);
+  const encapsulated = !UNCOMPRESSED_TS.has(srcTS);
+  if (encapsulated && !DCMJS_ENCAPSULATED_TS.has(srcTS) && findTagKey(entry.dict, '7FE00010'))
+    throw new Error(`Pixel Data in transfer syntax ${srcTS} cannot be written back by this editor; refused rather than write an unreadable file.`);
   let d = withPendingEdits(entry);
   // Drop group length tags (gggg,0000): stale after any edit, and dcmjs throws on private ones.
   Object.keys(d).forEach(t => {
@@ -419,12 +629,15 @@ function buildEditedBytes(entry) {
   });
   // Redacted/rotated frames are already swapped, and their meta says LE, so this runs once.
   if (metaTS(entry.meta) === '1.2.840.10008.1.2.2') d = bigEndianToLE(d);
+  if (!findTagKey(d, '00080005') && hasNonAscii(d)) d['00080005'] = { vr: 'CS', Value: ['ISO_IR 192'] };
+  if (encapsulated) encapsulatedForWrite(d);
   const m = ensureMeta(d, entry.meta);
   normBin(d);
   normBin(m);
   const dd = new DicomDict(m);
   dd.dict = d;
-  const out = dd.write();
+  // Not the default re-split into 20480-byte fragments: one fragment per frame (see above).
+  const out = dd.write({ fragmentMultiframe: false });
   // Return a view, not a copy; the ZIP writer and Blob wrapper consume it directly.
   return ArrayBuffer.isView(out) ? new Uint8Array(out.buffer, out.byteOffset, out.byteLength) : new Uint8Array(out);
 }

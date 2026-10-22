@@ -62,6 +62,7 @@ function renderSeriesPanel() {
     const input = document.createElement('input');
     input.className = 'form-input';
     input.style.cssText = 'flex:1;font-size:12px;padding:5px 8px';
+    input.maxLength = 64;                              // LO (PS3.5 Table 6.2-1)
     input.placeholder = T('Description');
     input.value = s.description;
     input.addEventListener('input', () => { s.description = input.value; });
@@ -73,7 +74,7 @@ function renderSeriesPanel() {
     if (createSeries.length > 1) {
       const rm = document.createElement('button');
       rm.className = 'series-rm-btn';
-      rm.title = 'Remove series';
+      rm.title = T('Remove series');
       rm.textContent = '✕';
       rm.addEventListener('click', () => removeSeries(s.id));
       row.appendChild(rm);
@@ -134,7 +135,7 @@ function renderCreateGrid() {
 
     const sel = document.createElement('select');
     sel.className = 'img-thumb-series';
-    sel.title = 'Assign series';
+    sel.title = T('Assign series');
     sel.style.background = seriesColor(img.series) + 'cc';
     createSeries.forEach(s => {
       const opt = document.createElement('option');
@@ -182,7 +183,7 @@ clearCreateBtn.addEventListener('click', () => {
   nextSeriesId = 2;
   renderCreateGrid();
   renderSeriesPanel();
-  toast?.('Cleared all images');
+  toast?.(T('Cleared all images'));
 });
 
 createSideDropZone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
@@ -223,6 +224,9 @@ async function imageToRGB(file) {
 async function buildDicomFromImage(file, meta, instanceNum) {
   const { rows, cols, rgb } = await imageToRGB(file);
   const sopInstanceUID = newUID();
+  // A camera JPEG decoded to RGB was still lossy once; "01" may never be reset (C.7.6.1.1.5).
+  let lossy = null;
+  try { const bytes = new Uint8Array(await file.arrayBuffer()); lossy = lossyMethodFor(file, inspectJpeg(bytes)); } catch (_) {}
 
   // Keys must be 8-char uppercase hex, no 'x': dcmjs Tag.fromString parseInt()s substring(0,4).
   const d = {
@@ -250,8 +254,10 @@ async function buildDicomFromImage(file, meta, instanceNum) {
     '0020000D': { vr: 'UI', Value: [meta.studyUID] },
     '0020000E': { vr: 'UI', Value: [meta.seriesUID] },
     '00200010': { vr: 'SH', Value: ['1'] },
-    '00200011': { vr: 'IS', Value: [1] },
+    '00200011': { vr: 'IS', Value: [meta.seriesNumber || 1] },
     '00200012': { vr: 'IS', Value: [instanceNum] },
+    '00200020': { vr: 'CS', Value: [] },              // Patient Orientation, Type 2C (no plane geometry)
+    '00080064': { vr: 'CS', Value: ['WSD'] },         // Conversion Type, Type 1 (SC Equipment, C.8.6.1)
     '00200013': { vr: 'IS', Value: [instanceNum] },
     '00280002': { vr: 'US', Value: [3] },
     '00280004': { vr: 'CS', Value: ['RGB'] },
@@ -264,10 +270,16 @@ async function buildDicomFromImage(file, meta, instanceNum) {
     '00280103': { vr: 'US', Value: [0] },
     '7FE00010': { vr: 'OB', Value: [rgb.buffer] },
   };
+  if (lossy) {
+    d['00282110'] = { vr: 'CS', Value: ['01'] };
+    d['00282112'] = { vr: 'DS', Value: [String(Math.round(rows * cols * 3 / Math.max(1, file.size) * 100) / 100)] };
+    d['00282114'] = { vr: 'CS', Value: [lossy] };
+  }
   if (meta.request) d['00400275'] = { vr: 'SQ', Value: [meta.request] };
 
   // Meta also needs plain 8-char hex keys — DicomDict.write() checks meta["00020010"]
   const fileMeta = {
+    '00020001': { vr: 'OB', Value: [new Uint8Array([0, 1]).buffer] },   // Type 1 (PS3.10 7.1)
     '00020002': { vr: 'UI', Value: ['1.2.840.10008.5.1.4.1.1.7'] },
     '00020003': { vr: 'UI', Value: [sopInstanceUID] },
     '00020010': { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] },
@@ -343,7 +355,11 @@ function readJpegExif(t) {
     if (ex[0x9003]) {
       const o = u32(ex[0x9003] + 8);
       const m = /^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)/.exec(String.fromCharCode(...t.subarray(o, o + 19)));
-      if (m && m[1] !== '0000') out.taken = m.slice(1).join('');
+      // Cameras with an unset clock write zeros in every field, not only the year: a DT/DA must
+      // be a real date (PS3.5 Table 6.2-1), else the study date is used instead.
+      const [Y, M, D, h, mi, se] = m ? m.slice(1).map(Number) : [];
+      if (m && Y > 0 && M >= 1 && M <= 12 && D >= 1 && D <= 31 && h < 24 && mi < 60 && se < 60 &&
+          new Date(Date.UTC(Y, M - 1, D)).getUTCDate() === D) out.taken = m.slice(1).join('');
     }
   }
   return out;
@@ -587,6 +603,7 @@ async function buildEyePhotoDicom(file, meta, instanceNum, eye) {
   if (meta.request) d['00400275'] = { vr: 'SQ', Value: [meta.request] };
 
   const fileMeta = {
+    '00020001': { vr: 'OB', Value: [new Uint8Array([0, 1]).buffer] },   // Type 1 (PS3.10 7.1)
     '00020002': { vr: 'UI', Value: [OP8_SOP_UID] },
     '00020003': { vr: 'UI', Value: [sopInstanceUID] },
     '00020010': { vr: 'UI', Value: [ts] },
@@ -724,8 +741,9 @@ async function* createDicomOutputs() {
 //   #create=eye&patient_name=DOE%5EJANE&patient_id=123&patient_birthdate=19800102&patient_sex=F
 //     &accession=A1&study_desc=Fundus%20photos&procedure_id=RP1&sps_id=SPS1&study_uid=1.2.3&referring=…
 //       Values URL-encoded. "create" alone opens Create; "create=eye" also picks Eye photo.
-//       The hash is dropped from the address bar once read: patient details do not belong in
-//       the browser's history.
+//       The hash is dropped from the address bar and back/forward once read, but NOT from the
+//       browser's own History database (the visit is recorded before any script runs), so a
+//       sender should put patient details in the bridge order below, not in a link.
 //
 //   Carino Bridge (#carino-bridge): a file named *.carino-create.json beside any photos, holding
 //     { "carinoCreate": 1, "kind": "eye", "patient_name": "DOE^JANE", … same keys … }
@@ -756,8 +774,11 @@ function parseCreateHash(hash) {
 function applyCreatePrefill(p) {
   const v = {};
   for (const [k, max] of Object.entries(CREATE_PREFILL_FIELDS)) {
-    const s = typeof p[k] === 'string' ? p[k].trim() : (typeof p[k] === 'number' ? String(p[k]) : '');
-    if (s && s.length <= max && !/[\\\u0000-\u001f]/.test(s)) v[k] = s;
+    // Strings only: a JSON number loses digits past 2^53 and leading zeros, and a changed Patient
+    // ID is a different patient.
+    const s = typeof p[k] === 'string' ? p[k].trim() : '';
+    // C0, DEL and C1 control characters are not allowed in DICOM strings (PS3.5 6.1.2.3).
+    if (s && [...s].length <= max && !/[\\\u0000-\u001f\u007f-\u009f]/.test(s)) v[k] = s;
   }
   const dob = (v.patient_birthdate || '').replace(/-/g, '');
   if (!/^\d{8}$/.test(dob)) delete v.patient_birthdate;

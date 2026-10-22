@@ -1,14 +1,19 @@
 // Structured Report viewer and preview navigation enhancements.
 // ---- SR viewer ----
 
+// PS3.4 Table B.5-1: every SR Storage SOP Class under 1.2.840.10008.5.1.4.1.1.88.* uses the SR
+// Document Content Module this viewer renders, so the whole family is recognised.
 const SR_SOP_UIDS = new Set([
   '1.2.840.10008.5.1.4.1.1.88.11','1.2.840.10008.5.1.4.1.1.88.22',
   '1.2.840.10008.5.1.4.1.1.88.33','1.2.840.10008.5.1.4.1.1.88.34',
-  '1.2.840.10008.5.1.4.1.1.88.35','1.2.840.10008.5.1.4.1.1.88.50',
-  '1.2.840.10008.5.1.4.1.1.88.59','1.2.840.10008.5.1.4.1.1.88.65',
-  '1.2.840.10008.5.1.4.1.1.88.67','1.2.840.10008.5.1.4.1.1.88.68',
-  '1.2.840.10008.5.1.4.1.1.88.69','1.2.840.10008.5.1.4.1.1.88.70',
+  '1.2.840.10008.5.1.4.1.1.88.35','1.2.840.10008.5.1.4.1.1.88.40',
+  '1.2.840.10008.5.1.4.1.1.88.50','1.2.840.10008.5.1.4.1.1.88.59',
+  '1.2.840.10008.5.1.4.1.1.88.65','1.2.840.10008.5.1.4.1.1.88.67',
+  '1.2.840.10008.5.1.4.1.1.88.68','1.2.840.10008.5.1.4.1.1.88.69',
+  '1.2.840.10008.5.1.4.1.1.88.70','1.2.840.10008.5.1.4.1.1.88.71',
   '1.2.840.10008.5.1.4.1.1.88.72','1.2.840.10008.5.1.4.1.1.88.73',
+  '1.2.840.10008.5.1.4.1.1.88.74','1.2.840.10008.5.1.4.1.1.88.75',
+  '1.2.840.10008.5.1.4.1.1.88.76','1.2.840.10008.5.1.4.1.1.88.77',
 ]);
 
 const srToggleBtn = $('srToggleBtn');
@@ -16,16 +21,23 @@ const srView      = $('srView');
 let   srMode      = false;
 
 function detectSR(d) {
-  const sopUID = lookupTag(d,'00080016')?.Value?.[0]||'';
-  return SR_SOP_UIDS.has(sopUID);
+  const sopUID = String(lookupTag(d,'00080016')?.Value?.[0]||'').trim();
+  return SR_SOP_UIDS.has(sopUID) || /^1\.2\.840\.10008\.5\.1\.4\.1\.1\.88\.\d+$/.test(sopUID);
 }
+
+// Content items are raw dcmjs datasets (keys like '0040A040', UPPERCASE): read every field
+// through the case-tolerant lookup, never a literal key.
+const srv = (n, t) => n && typeof n === 'object' ? lookupTag(n, t) : undefined;
+const srFirst = (n, t) => srv(n, t)?.Value?.[0];
+const srItems = (n, t) => { const v = srv(n, t)?.Value; return Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []; };
+const srMeaning = (seqOwner, t) => String(srFirst(srItems(seqOwner, t)[0], '00080104') ?? '');
+const srPN = (pn) => pn && typeof pn === 'object' ? (pn.Alphabetic || '') : String(pn ?? '');
 
 function renderSRNode(item, depth=0) {
   const el = document.createElement('div');
   el.className = 'sr-node';
-  const vt  = item['0040a040']?.Value?.[0] || item.ValueType?.Value?.[0] || '';
-  const cnSeq = item['0040a043']?.Value || item.ConceptNameCodeSequence?.Value || [];
-  const label = cnSeq[0]?.['00080104']?.Value?.[0] || cnSeq[0]?.CodeMeaning?.Value?.[0] || '';
+  const vt  = String(srFirst(item, '0040A040') ?? '').trim();
+  const label = srMeaning(item, '0040A043');
 
   const lEl = document.createElement('div');
   lEl.className = 'sr-label';
@@ -34,38 +46,50 @@ function renderSRNode(item, depth=0) {
 
   const vEl = document.createElement('div');
   vEl.className = 'sr-value';
+  const muted = (s) => { vEl.className = 'sr-value muted'; vEl.textContent = s; };
 
   switch (vt.toUpperCase()) {
-    case 'TEXT': {
-      const v = item['0040a160']?.Value?.[0] || item.TextValue?.Value?.[0] || '';
-      vEl.textContent = v; break;
-    }
+    case 'TEXT':
+      vEl.textContent = String(srFirst(item, '0040A160') ?? ''); break;
     case 'NUM': {
-      const ms = item['0040a300']?.Value || item.MeasuredValueSequence?.Value || [];
-      const mv = ms[0]; const val = mv?.['0040a30a']?.Value?.[0]??mv?.NumericValue?.Value?.[0]??'';
-      const unit = mv?.['004008ea']?.Value?.[0]?.['00080104']?.Value?.[0] || '';
-      vEl.className = 'sr-value num'; vEl.textContent = val + (unit ? ' ' + unit : ''); break;
+      const mv = srItems(item, '0040A300')[0];
+      const val = srFirst(mv, '0040A30A');
+      const unit = srMeaning(mv, '004008EA');
+      vEl.className = 'sr-value num';
+      if (val != null && String(val) !== '') vEl.textContent = String(val) + (unit ? ' ' + unit : '');
+      else vEl.textContent = srMeaning(item, '0040A301') || '';    // Numeric Value Qualifier
+      break;
     }
-    case 'CODE': {
-      const cs = item['0040a168']?.Value || item.ConceptCodeSequence?.Value || [];
-      const cv = cs[0]?.['00080104']?.Value?.[0] || cs[0]?.CodeMeaning?.Value?.[0] || '';
-      vEl.className = 'sr-value code'; vEl.textContent = cv; break;
-    }
+    case 'CODE':
+      vEl.className = 'sr-value code'; vEl.textContent = srMeaning(item, '0040A168'); break;
     case 'DATETIME': case 'DATE': case 'TIME': {
-      const v = item['0040a120']?.Value?.[0] || item['0040a121']?.Value?.[0] || item['0040a122']?.Value?.[0] || '';
-      vEl.className = 'sr-value datetime'; vEl.textContent = v; break;
+      const v = srFirst(item, '0040A120') ?? srFirst(item, '0040A121') ?? srFirst(item, '0040A122') ?? '';
+      vEl.className = 'sr-value datetime'; vEl.textContent = String(v); break;
     }
-    case 'PNAME': {
-      const pn = item['0040a123']?.Value?.[0] || item.PersonName?.Value?.[0] || {};
-      vEl.textContent = typeof pn==='object' ? (pn.Alphabetic||'') : String(pn||''); break;
+    case 'PNAME':
+      vEl.textContent = srPN(srFirst(item, '0040A123')); break;
+    case 'UIDREF':
+      vEl.className = 'sr-value datetime'; vEl.textContent = String(srFirst(item, '0040A124') ?? ''); break;
+    case 'IMAGE': case 'COMPOSITE': case 'WAVEFORM': {
+      const uids = srItems(item, '00081199').map(r => String(srFirst(r, '00081155') ?? '')).filter(Boolean);
+      vEl.className = 'sr-value datetime'; vEl.textContent = uids.join(', ') || `[${vt}]`; break;
     }
+    case 'SCOORD': case 'SCOORD3D':
+      muted(`[${vt} ${String(srFirst(item, '00700023') ?? '').trim()}]`.replace(' ]', ']')); break;
+    case 'TCOORD':
+      muted(`[TCOORD ${String(srFirst(item, '0040A130') ?? '').trim()}]`.replace(' ]', ']')); break;
     case 'CONTAINER': vEl.remove(); break;
-    default: break;
+    default: {
+      // A by-reference item has no Value Type: name what it points at.
+      const ref = srv(item, '0040DB73')?.Value;
+      if (!vt && Array.isArray(ref) && ref.length) muted('→ item ' + ref.join('.'));
+      else if (vt) muted(`[${vt} not rendered]`);
+    }
   }
 
   if (vEl.parentElement || vt.toUpperCase()!=='CONTAINER') el.appendChild(vEl);
 
-  const children = item['0040a730']?.Value || item.ContentSequence?.Value || [];
+  const children = srItems(item, '0040A730');
   if (children.length) {
     const cont = document.createElement('div');
     cont.className = 'sr-container';
@@ -79,12 +103,12 @@ function renderSR(d) {
   srView.innerHTML = '';
   const title = document.createElement('div');
   title.className = 'sr-section-title';
-  const sopUID = lookupTag(d,'00080016')?.Value?.[0]||'';
+  const sopUID = String(lookupTag(d,'00080016')?.Value?.[0]||'').trim();
   const sopName = SOP_ATTRS[sopUID]?.name || 'Structured Report';
   title.textContent = sopName;
   srView.appendChild(title);
 
-  const root = lookupTag(d,'0040a730')?.Value || [];
+  const root = srItems(d, '0040A730');
   if (!root.length) {
     const msg = document.createElement('p');
     msg.style.cssText='color:var(--text-muted);font-size:12px;margin-top:8px';
@@ -95,12 +119,15 @@ function renderSR(d) {
   root.forEach(item => srView.appendChild(renderSRNode(item)));
 }
 
+// The working copy (with pending edits), as the table and Download show it.
+const srDataset = () => files[currentFileIdx] ? withPendingEdits(files[currentFileIdx]) : dict;
+
 srToggleBtn?.addEventListener('click', () => {
   srMode = !srMode;
   srToggleBtn.classList.toggle('active', srMode);
   srView.classList.toggle('hidden', !srMode);
   previewBox.classList.toggle('hidden', srMode);
-  if (srMode && dict) renderSR(dict);
+  if (srMode && dict) renderSR(srDataset());
 });
 
 
@@ -145,6 +172,8 @@ nextFileBtn?.addEventListener('click', () => { if (currentFileIdx < files.length
 document.addEventListener('keydown', e => {
   if (activeTab !== 'editor' || !files.length) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Not while redacting or viewing full screen: the boxes belong to the image on screen.
+  if (redactUI.active || fullscreenOverlay.classList.contains('visible')) return;
   if (e.key === 'ArrowLeft'  && currentFileIdx > 0)               switchFile(currentFileIdx - 1);
   if (e.key === 'ArrowRight' && currentFileIdx < files.length - 1) switchFile(currentFileIdx + 1);
 });

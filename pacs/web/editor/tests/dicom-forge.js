@@ -232,7 +232,7 @@
    * Build a complete DICOM file.
    *
    * cfg: { ts, rows, cols, pi, spp, ba, bs, hb, pr, planar, frames,
-   *        wc, ww, slope, intercept, modality, pixels | encapsulated, extra }
+   *        wc, ww, slope, intercept, modality, pixels | encapsulated | noImage, extra }
    * `pixels` is a typed array holding every frame back to back.
    * `encapsulated` is an array of one compressed buffer per frame.
    * `extra` is { tag: {vr, v} } merged over the defaults.
@@ -274,6 +274,8 @@
     if (cfg.intercept != null) ds['00281052'] = { vr: 'DS', v: [String(cfg.intercept)] };
     if (cfg.slope != null)     ds['00281053'] = { vr: 'DS', v: [String(cfg.slope)] };
     Object.assign(ds, cfg.extra || {});
+    // noImage: a non-image object (a presentation state): no Image Pixel Module, no Pixel Data.
+    if (cfg.noImage) for (const t of Object.keys(ds)) if (t.startsWith('0028') && !(cfg.extra || {})[t]) delete ds[t];
 
     const body = [];
     for (const tag of Object.keys(ds).sort()) {
@@ -284,7 +286,9 @@
 
     // Pixel data last: OW for 16-bit raw, OB for 8-bit and for anything
     // encapsulated. Implicit VR carries no VR at all, so the app has to infer.
-    if (cfg.encapsulated) {
+    if (cfg.noImage) {
+      // nothing to add
+    } else if (cfg.encapsulated) {
       const g = parseInt('7fe0', 16), e = parseInt('0010', 16);
       const items = encapsulate(cfg.encapsulated, be);
       const head = implicit

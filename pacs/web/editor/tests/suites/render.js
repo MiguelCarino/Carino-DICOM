@@ -129,9 +129,14 @@
     searchInput.value = '';
     [...filterBtns].find(b => b.dataset.cat === 'all')?.click();
     uncount();
+    // The panel stays folded until Tools ▸ UID root… opens it; the scan only enables that item.
     ok('the UID panel still holds the prefix the scan found',
-       uidPrefixInput.value.length > 0 && uidPattern.style.display === 'flex',
+       uidPrefixInput.value.length > 0 && !$('uidPatternBtn').disabled && uidPattern.style.display === 'none',
        `${uidPrefixInput.value} / ${uidPattern.style.display}`);
+    $('uidPatternBtn').click();
+    ok('Tools ▸ UID root… opens the panel', uidPattern.style.display === 'flex', uidPattern.style.display);
+    $('uidPatternBtn').click();
+    ok('and a second click folds it again', uidPattern.style.display === 'none', uidPattern.style.display);
 
     // ---- applying a new UID root ----------------------------------------------
     // One click used to turn CT Image Storage into 9.9.840.10008… and break every
@@ -163,12 +168,12 @@
         ok('uid: the shared root leaves the standard SOP Class UIDs out', uidPrefixInput.value === ROOT, uidPrefixInput.value);
         const before = allUIDs();
 
-        apply('9.9');
+        apply('2.16.9');
         ok('uid: Apply asks before it rewrites anything', overlay.classList.contains('visible'));
         // Four distinct UIDs: study, series and two instances. The (0008,1155) back-references
         // and the second file's copies of the study and series UID are the same four values.
         ok('uid: and says how many distinct UIDs in how many files, and that it is final',
-           $('confirmMsg').textContent === 'Rewrite 4 UIDs in 2 files to start with 9.9? This cannot be undone.',
+           $('confirmMsg').textContent === 'Rewrite 4 UIDs in 2 files to start with 2.16.9? This cannot be undone.',
            $('confirmMsg').textContent);
         ok('uid: and nothing has changed while it asks', allUIDs().join() === before.join());
         $('confirmCancel').click();
@@ -184,17 +189,17 @@
         ok('uid: and the refusals changed nothing', allUIDs().join() === before.join());
 
         pushHistory();   // an earlier edit, so there is an undo step to cross
-        apply('9.9');
+        apply('2.16.9');
         $('confirmOk').click();
         const f0 = files[0], f1 = files[1];
         ok('uid: the instance UIDs move to the new root',
-           uidOf(f0, '0020000d') === '9.9.1' && uidOf(f0, '0020000e') === '9.9.2' && uidOf(f1, '00080018') === '9.9.3.2',
+           uidOf(f0, '0020000d') === '2.16.9.1' && uidOf(f0, '0020000e') === '2.16.9.2' && uidOf(f1, '00080018') === '2.16.9.3.2',
            `${uidOf(f0, '0020000d')} ${uidOf(f0, '0020000e')} ${uidOf(f1, '00080018')}`);
         ok('uid: (0008,0016) SOP Class UID is unchanged', uidOf(f0, '00080016') === CT && uidOf(f1, '00080016') === CT, uidOf(f0, '00080016'));
         ok('uid: so is a standard UID inside a sequence', refOf(f0) === CT && refOf(f1) === CT, refOf(f0));
         const after = allUIDs();
         ok('uid: no two different UIDs end up the same', new Set(after).size === new Set(before).size, `${new Set(before).size} → ${new Set(after).size}`);
-        ok('uid: the panel shows the new root', uidPrefixInput.value === '9.9' && sharedUIDPrefix === '9.9', uidPrefixInput.value);
+        ok('uid: the panel shows the new root', uidPrefixInput.value === '2.16.9' && sharedUIDPrefix === '2.16.9', uidPrefixInput.value);
         ok('uid: the shown File Meta SOP Instance UID follows', String(f0.meta['00020003'].Value[0]) === uidOf(f0, '00080018'));
 
         // Undo restores only the open file's pending edits, so an undo step across the rewrite
@@ -204,12 +209,12 @@
         const studyRoots = await Promise.all(files.map(async f =>
           String(DicomMessage.readFile(await buildEditedFile(f).arrayBuffer()).dict['0020000D']?.Value?.[0] ?? '')));
         ok('uid: and Undo afterwards leaves every file on the one new root',
-           studyRoots.every(u => u === '9.9.1') && uidPrefixInput.value === '9.9' && sharedUIDPrefix === '9.9', studyRoots.join(' '));
+           studyRoots.every(u => u === '2.16.9.1') && uidPrefixInput.value === '2.16.9' && sharedUIDPrefix === '2.16.9', studyRoots.join(' '));
 
         const out = DicomMessage.readFile(await buildEditedFile(f0).arrayBuffer());
         const m = (t) => String(out.meta[t]?.Value?.[0] ?? '');
         const d = (t) => String(out.dict[t]?.Value?.[0] ?? '');
-        ok('uid: the exported (0002,0003) equals its (0008,0018)', m('00020003') === d('00080018') && d('00080018') === '9.9.3.1', `${m('00020003')} / ${d('00080018')}`);
+        ok('uid: the exported (0002,0003) equals its (0008,0018)', m('00020003') === d('00080018') && d('00080018') === '2.16.9.3.1', `${m('00020003')} / ${d('00080018')}`);
         ok('uid: the exported (0002,0010) Transfer Syntax is unchanged', m('00020010') === '1.2.840.10008.1.2.1', m('00020010'));
         ok('uid: the exported (0002,0002) and (0008,0016) are still CT Image Storage', m('00020002') === CT && d('00080016') === CT, `${m('00020002')} / ${d('00080016')}`);
         ok('uid: the exported Implementation Class UID is unchanged', m('00020012') === '1.2.826.0.1.3680043.10.743', m('00020012'));
@@ -221,7 +226,8 @@
           pixels: new Uint16Array(Forge.W * Forge.H),
         })], `n${i}.dcm`)));
         ok('uid: UIDs that share no full component get no UID Pattern panel',
-           sharedUIDPrefix === '' && uidPattern.style.display === 'none', `${sharedUIDPrefix} / ${uidPattern.style.display}`);
+           sharedUIDPrefix === '' && uidPattern.style.display === 'none' && $('uidPatternBtn').disabled,
+           `${sharedUIDPrefix} / ${uidPattern.style.display}`);
       } finally { window.alert = realAlert; }
     }
   } catch (e) {

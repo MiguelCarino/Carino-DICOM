@@ -43,28 +43,33 @@ function zipSafeName(p) {
 }
 
 // Duplicate names get _2, _3… before the extension (extractors overwrite or refuse duplicates).
+// Keyed case- and normalisation-insensitively: macOS file systems treat NFC and NFD as one name.
 function zipUniqueNames(names) {
   const taken = new Set();
+  const key = s => s.normalize('NFC').toLowerCase();
   return names.map(n => {
     let out = n, i = 1;
-    while (taken.has(out.toLowerCase())) {
+    while (taken.has(key(out))) {
       i++;
       const dot = n.lastIndexOf('.');
       out = dot > n.lastIndexOf('/') ? `${n.slice(0, dot)}_${i}${n.slice(dot)}` : `${n}_${i}`;
     }
-    taken.add(out.toLowerCase());
+    taken.add(key(out));
     return out;
   });
 }
 
 // Split entries into groups that each fit a non-ZIP64 archive (more archives, not more
 // per-file downloads, which would hit the browser's download limit).
+const zipEnc = new TextEncoder();
 function zipChunks(entries) {
   const out = [];
   let cur = [], bytes = 0;
   for (const e of entries) {
-    // Local header + central record + name twice, rounded up (safe, not tight).
-    const cost = e.bytes.length + 76 + 2 * e.name.length + 8;
+    // Local header + central record + the UTF-8 name twice (as zipStore writes it, plus room for
+    // a _NN de-duplication suffix), plus the end record: safe, not tight.
+    const nb = zipEnc.encode(zipSafeName(e.name)).length;
+    const cost = e.bytes.length + 76 + 2 * (nb + 4) + 22;
     if (cur.length && (cur.length >= ZIP_MAX_ENTRIES || bytes + cost > ZIP_MAX_BYTES)) {
       out.push(cur); cur = []; bytes = 0;
     }
@@ -77,26 +82,32 @@ function zipChunks(entries) {
 // Save as few archives as 32-bit ZIP allows; returns how many entries were actually saved.
 // A lone entry too big for any archive is saved as itself.
 function saveArchives(entries, base, mime, logFn) {
-  const chunks = zipChunks(entries);
-  const n = chunks.length;
-  let saved = 0;
-  chunks.forEach((chunk, i) => {
+  // A chunk the writer refuses is halved until every part fits; only a lone entry too big for any
+  // archive is saved as itself. The counts are of what was actually written.
+  const groups = [];
+  const fit = (chunk) => {
     const parts = zipStore(chunk);
-    if (parts) {
-      saveBlob(new Blob(parts, { type: 'application/zip' }),
-               zipStamp(n === 1 ? base : `${base}-${i + 1}of${n}`));
-      saved += chunk.length;
-      return;
+    if (parts) { groups.push({ chunk, parts }); return; }
+    if (chunk.length === 1) { groups.push({ chunk, parts: null }); return; }
+    const mid = chunk.length >> 1;
+    fit(chunk.slice(0, mid)); fit(chunk.slice(mid));
+  };
+  zipChunks(entries).forEach(fit);
+  const n = groups.filter(g => g.parts).length;
+  let saved = 0, archives = 0, loose = 0;
+  for (const g of groups) {
+    if (g.parts) {
+      archives++;
+      saveBlob(new Blob(g.parts, { type: 'application/zip' }),
+               zipStamp(n === 1 ? base : `${base}-${archives}of${n}`));
+      saved += g.chunk.length;
+    } else {
+      saveBlob(new Blob([g.chunk[0].bytes], { type: mime }), g.chunk[0].name.replace(/[\\/]/g, '_'));
+      saved += 1; loose++;
     }
-    if (chunk.length === 1) {
-      saveBlob(new Blob([chunk[0].bytes], { type: mime }), chunk[0].name.replace(/[\\/]/g, '_'));
-      saved += 1;
-      return;
-    }
-    logFn(`⚠ ${T('Too large for one archive — saving the files one at a time.')}`);
-    for (const e of chunk) { saveBlob(new Blob([e.bytes], { type: mime }), e.name.replace(/[\\/]/g, '_')); saved += 1; }
-  });
-  return { saved, archives: n };
+  }
+  if (loose) logFn(`⚠ ${T('Too large for one archive — saving the files one at a time.')}`);
+  return { saved, archives, loose };
 }
 
 // Returns parts for `new Blob(parts)` (no concatenated copy), or null if ZIP64 would be
@@ -113,6 +124,8 @@ function zipStore(entries) {
   for (let i = 0; i < entries.length; i++) {
     const bytes = entries[i].bytes;
     const nameBytes = enc.encode(names[i]);
+    // The name length is a 2-byte field (APPNOTE 4.4.10); a longer name would corrupt the archive.
+    if (nameBytes.length > 0xFFFF) return null;
     const size = bytes.length;
     // Size check before the CRC, to bail out without hashing data we will refuse.
     if (offset + 30 + nameBytes.length + size > ZIP_MAX_BYTES) return null;
@@ -178,17 +191,36 @@ function zipStamp(base) {
   return `${base}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.zip`;
 }
 
+// After Anonymize the source path (often a patient-named folder, e.g. DOE^JOHN_123456/CT/IM0001)
+// must not travel with the file: name it by its (remapped) UIDs instead.
+const uidOf = (entry, tag) => String(getTag(entry?.dict || {}, tag)?.Value?.[0] ?? '').trim().replace(/[^0-9.]/g, '');
+function exportBaseName(entry) {
+  if (!entry) return 'dicom';
+  if (entry.deid) return uidOf(entry, '00080018') || ('IM' + (files.indexOf(entry) + 1));
+  return entry.name.replace(/\.[^.]+$/, '');
+}
+
 // Inside the archive, use entry.path (keeps the source folder); entry.name is only a basename.
 function zipNameFor(entry) {
+  if (entry.deid) return `${uidOf(entry, '0020000E') || 'series'}/${exportBaseName(entry)}.dcm`;
   return (entry.path || entry.name).replace(/\.[^./]+$/, '') + '.edited.dcm';
+}
+
+// An anonymized file whose pixels may still show the patient is said so at export time too.
+function warnBurnedOnExport(list) {
+  const n = list.filter(e => /^YES/i.test(String(getTag(e.dict, '00120062')?.Value?.[0] || '').trim()) &&
+                             /^YES/i.test(String(getTag(e.dict, '00280301')?.Value?.[0] || '').trim())).length;
+  if (n) log(`⚠ ${n} exported file(s) are marked Patient Identity Removed = YES but also Burned In Annotation = YES: identity may remain in the pixels.`);
 }
 
 function downloadOne(entry) {
   try {
-    saveBlob(buildEditedFile(entry), `${entry.name.replace(/\.[^.]+$/, '')}.edited.dcm`);
-    log(`⬇ ${entry.name}`);
+    saveBlob(buildEditedFile(entry), entry.deid ? `${exportBaseName(entry)}.dcm` : `${exportBaseName(entry)}.edited.dcm`);
+    log(`⬇ ${entry.deid ? exportBaseName(entry) : entry.name}`);
+    warnBurnedOnExport([entry]);
   } catch (e) {
     log(`✗ Download ${entry.name}: ${e.message || e}`);
+    toast?.(`${T('Download failed:')} ${e.message || e}`, 7000);
   }
 }
 
@@ -217,9 +249,12 @@ async function downloadRange(start, end) {
       // Yield every 8th file so the progress overlay can paint.
       if ((i & 7) === 7) await new Promise(r => setTimeout(r, 0));
     }
+    if (packed.length < range.length)
+      toast?.(T('{n} file(s) could not be written and were left out; see the log.').replace('{n}', range.length - packed.length), 7000);
     if (!packed.length) return;
-    const { saved, archives } = saveArchives(packed, 'dicom-edited', 'application/dicom', log);
-    log(`⬇ ${saved} file(s) → ${archives === 1 ? 'one archive' : `${archives} archives`}`);
+    warnBurnedOnExport(range);
+    const { saved, archives, loose } = saveArchives(packed, 'dicom-edited', 'application/dicom', log);
+    log(`⬇ ${saved} file(s) → ${archives === 1 ? 'one archive' : `${archives} archives`}${loose ? ` + ${loose} saved one at a time` : ''}`);
   } catch (e) {
     // Archive assembly (e.g. out of memory) has no per-file guard; report it to the log.
     log(`✗ Download: ${e.message || e}`);

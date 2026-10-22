@@ -655,6 +655,8 @@
       color: var(--text-muted);
       cursor: not-allowed;
     }
+    /* A value its VR cannot hold: not written on export (the element keeps its value). */
+    .val-input.invalid { border-color: #ef4444; }
     .readonly-row .tag-code,
     .readonly-row .desc-cell { color: var(--text-muted); }
 
@@ -719,6 +721,8 @@
       color: var(--text); font: 500 12px var(--font); cursor: pointer;
     }
     .tb-menu-item:hover, .tb-menu-item:focus-visible { background: var(--surface-hover); color: var(--accent); outline: none; }
+    .tb-menu-item:disabled { opacity: .4; cursor: not-allowed; background: none; color: var(--text); }
+    .tb-menu-list { white-space: nowrap; }
     
     /* ---- Right sidebar ---- */
     /* The column never scrolls: tools keep their height, the tail (Load Files, Log) shrinks first and
@@ -905,7 +909,10 @@
       max-height: 100%;
       border-radius: 0;
       image-rendering: pixelated;
+      /* Finger drags draw boxes; without this the browser takes them as pans and cancels them. */
+      touch-action: none;
     }
+    .fullscreen-overlay.redacting { overscroll-behavior: none; }
     .redact-panel {
       position: absolute;
       left: 50%;
@@ -1415,12 +1422,28 @@
     .cmp-stat.s-match { color: var(--cat-equipment); }
     .cmp-stat.s-diff  { color: var(--cat-image); }
     .cmp-stat.s-only  { color: var(--text-muted); }
+    .cmp-px { flex: 1 1 100%; font: 500 11px var(--font); color: var(--text-muted); }
+    .cmp-px:empty { display: none; }
+    .cmp-px.same { color: var(--cat-equipment); }
+    .cmp-px.diff { color: var(--cat-image); }
+    .cmp-comp { flex: 1 1 100%; width: auto; border-collapse: collapse; margin-top: 2px; font: 500 11px var(--font); }
+    .cmp-comp td { padding: 2px 14px 2px 0; color: var(--cat-image); vertical-align: top; max-width: 46ch; overflow-wrap: anywhere; }
+    .cmp-comp td:first-child { color: var(--text-muted); white-space: nowrap; }
 
     /* ---- Window / level ---- */
     /* Buttons sized to their labels and wrapped: equal-width shares waste card height in a narrow column. */
     .img-edit-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .img-edit-row .btn { flex: 0 0 auto; padding: 6px 12px; font-size: 12px; }
     .img-edit-note { font: 500 10px var(--font); color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
+    /* Compression line: label, verdict, and the convert-back buttons on one row; notes beneath. */
+    .img-comp { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .img-comp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+    .img-comp-k { font: 600 10px var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .img-comp-v { font: 500 12px var(--mono, var(--font)); color: var(--text); flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+    .img-comp-notes { margin: 6px 0 0; padding-left: 14px; font: 500 10px var(--font); color: var(--text-muted); line-height: 1.5; }
+    .img-comp-notes:empty { display: none; }
+    .img-comp-notes li.warn { color: var(--warn); }
+    .ov-kv-warn { font-size: 11px; line-height: 1.5; color: var(--warn); padding: 4px 0 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
     /* Brief highlight when opened from the Overview's "Edit image", so the click visibly lands. */
     .card-called-out { animation: cardCallout 1.6s ease-out 1; }
     @keyframes cardCallout {
@@ -1525,7 +1548,8 @@
     .sr-node + .sr-node { margin-top:6px; }
     .sr-container { border-left:2px solid var(--border); margin-left:8px; padding-left:10px; margin-top:4px; }
     .sr-label { font:700 11px var(--mono); color:var(--text-muted); text-transform:uppercase; }
-    .sr-value { color:var(--text); margin-top:2px; line-height:1.5; }
+    .sr-value { color:var(--text); margin-top:2px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .sr-value.muted { color:var(--text-muted); font-style:italic; }
     .sr-value.num { color:var(--accent); font:13px var(--mono); }
     .sr-value.code { color:var(--cat-patient); }
     .sr-value.datetime { color:var(--cat-uid); font:11px var(--mono); }

@@ -24,18 +24,37 @@ function ocrSimdSupported() {
   } catch (_) { return false; }
 }
 
+const OCR_START_TIMEOUT_MS = 60000;
 async function createOcrWorker() {
   await loadVendorScript('./' + OCR_DIR + 'tesseract.min.js');
   if (typeof window.Tesseract?.createWorker !== 'function') throw new Error('Tesseract did not load');
   const dir = new URL(OCR_DIR, location.href).href;
-  const worker = await window.Tesseract.createWorker('eng', 1 /* OEM LSTM_ONLY */, {
+  // tesseract.js only rejects createWorker for a failed 'load' step: a model that will not
+  // download (or a failed initialise) is reported to errorHandler and the promise never settles.
+  // So race it against that handler and a deadline, or Find would wait forever. The handler also
+  // stops each rejected job from being re-thrown as an uncaught page error.
+  let fail;
+  const failed = new Promise((_, reject) => { fail = reject; });
+  let abandoned = false;
+  const created = window.Tesseract.createWorker('eng', 1 /* OEM LSTM_ONLY */, {
     workerPath: dir + 'worker.min.js',
     corePath: dir + (ocrSimdSupported() ? 'tesseract-core-simd-lstm.js' : 'tesseract-core-lstm.js'),
     langPath: dir.replace(/\/$/, ''),       // fetches <langPath>/eng.traineddata.gz
     gzip: true,
     cacheMethod: 'none',                    // no copy of the model left in IndexedDB
     workerBlobURL: false,
+    errorHandler: (m) => fail(new Error(String(m && m.message || m).replace(/^Error:\s*/, ''))),
   });
+  // If it does start after we gave up, do not leave it running.
+  created.then((w) => { if (abandoned) w.terminate(); }, () => {});
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('the text reader did not start')), OCR_START_TIMEOUT_MS);
+  });
+  let worker;
+  try { worker = await Promise.race([created, failed, deadline]); }
+  catch (e) { abandoned = true; throw e; }
+  finally { clearTimeout(timer); }
   // PSM 11, sparse text: overlays are scattered fragments, not a page of paragraphs.
   await worker.setParameters({ tessedit_pageseg_mode: '11' });
   return worker;
@@ -45,8 +64,12 @@ async function createOcrWorker() {
 // Compared after folding case, accents, separators and the glyphs OCR confuses, both sides
 // through the same map, so "D0E^J0HN", "doe john" and "DOEAJOHN" all meet "DOE^JOHN".
 const OCR_CONFUSABLE = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2', G: '6' };
+// Latin letters with no canonical decomposition would otherwise be deleted, not folded.
+const OCR_UNDECOMPOSED = { 'Ł': 'L', 'ł': 'l', 'Ø': 'O', 'ø': 'o', 'Đ': 'D', 'đ': 'd', 'Ð': 'D', 'ð': 'd',
+  'Æ': 'AE', 'æ': 'ae', 'Œ': 'OE', 'œ': 'oe', 'Þ': 'TH', 'þ': 'th', 'Ħ': 'H', 'ħ': 'h', 'Ŧ': 'T', 'ŧ': 't', 'ß': 'SS' };
 function ocrNorm(s) {
-  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+  return String(s ?? '').replace(/[ŁłØøĐđÐðÆæŒœÞþĦħŦŧß]/g, (c) => OCR_UNDECOMPOSED[c])
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
     .replace(/[|!]/g, '1').replace(/[^A-Z0-9]/g, '')
     .replace(/[OQDILSBZG]/g, (c) => OCR_CONFUSABLE[c]);
 }
@@ -77,10 +100,22 @@ const OCR_PHI_TAGS = [
   ['00080031', 'TM', 'Series Time'],
   ['00080032', 'TM', 'Acquisition Time'],
   ['00080033', 'TM', 'Content Time'],
+  // Also X/Z/D in Table E.1-1 and commonly burned into US / CR / eye-camera banners.
+  ['00181000', 'ID', 'Device Serial Number'],
+  ['00321032', 'PN', 'Requesting Physician'],
+  ['00081060', 'PN', 'Reading Physician'],
+  ['00101005', 'PN', "Patient's Birth Name"],
+  ['00101060', 'PN', "Mother's Birth Name"],
+  ['00080081', 'TEXT', 'Institution Address'],
+  ['00081040', 'TEXT', 'Department'],
 ];
+// Abbreviations and full names (en / es / pt), as banners print them.
 const OCR_MONTHS = [
-  ['JAN', 'ENE'], ['FEB'], ['MAR'], ['APR', 'ABR'], ['MAY'], ['JUN'],
-  ['JUL'], ['AUG', 'AGO'], ['SEP', 'SET'], ['OCT', 'OUT'], ['NOV'], ['DEC', 'DIC', 'DEZ'],
+  ['JAN', 'ENE', 'JANUARY', 'ENERO', 'JANEIRO'], ['FEB', 'FEV', 'FEBRUARY', 'FEBRERO', 'FEVEREIRO'],
+  ['MAR', 'MARCH', 'MARZO', 'MARCO'], ['APR', 'ABR', 'APRIL', 'ABRIL'], ['MAY', 'MAI', 'MAYO', 'MAIO'],
+  ['JUN', 'JUNE', 'JUNIO', 'JUNHO'], ['JUL', 'JULY', 'JULIO', 'JULHO'], ['AUG', 'AGO', 'AUGUST', 'AGOSTO'],
+  ['SEP', 'SET', 'SEPT', 'SEPTEMBER', 'SEPTIEMBRE', 'SETEMBRO'], ['OCT', 'OUT', 'OCTOBER', 'OCTUBRE', 'OUTUBRO'],
+  ['NOV', 'NOVEMBER', 'NOVIEMBRE', 'NOVEMBRO'], ['DEC', 'DIC', 'DEZ', 'DECEMBER', 'DICIEMBRE', 'DEZEMBRO'],
 ];
 
 // A PN arrives as a string in the raw dict, or as {Alphabetic, ...} when naturalised.
@@ -91,24 +126,33 @@ function ocrValues(el) {
 
 // The spellings a DA value is burned in as: ISO, day-first, month-first, two-digit year,
 // unpadded, and with a month abbreviation. Separators are already folded away by ocrNorm.
+// Returns [form, sep] pairs; sep names the separator pattern the OCR word must show for the
+// form to count (a bare 6-digit yymmdd is also any six-digit number on the image).
+const OCR_SEP_DATE = /\d{1,2}[-./]\d{1,2}[-./]\d{2}(?!\d)/;
+const OCR_SEP_TIME = /\d{1,2}:\d{2}/;
 function ocrDateForms(da) {
-  const m = /^(\d{4})(\d{2})(\d{2})/.exec(String(da).trim());
+  // ACR-NEMA YYYY.MM.DD is still met in the wild (PS3.5 6.2).
+  const m = /^(\d{4})\.?(\d{2})\.?(\d{2})/.exec(String(da).trim());
   if (!m) return [];
   const [, y, mo, d] = m, yy = y.slice(2), ud = String(+d), um = String(+mo);
-  const out = [y + mo + d, d + mo + y, mo + d + y, d + mo + yy, mo + d + yy, yy + mo + d,
-               ud + um + y, um + ud + y];
+  const out = [y + mo + d, d + mo + y, mo + d + y, ud + um + y, um + ud + y];
+  const sep = [d + mo + yy, mo + d + yy, yy + mo + d, ud + um + yy, um + ud + yy];
   for (const mon of OCR_MONTHS[+mo - 1] || []) {
-    out.push(d + mon + y, ud + mon + y, mon + d + y, mon + ud + y, d + mon + yy, y + mon + d);
+    out.push(d + mon + y, ud + mon + y, mon + d + y, mon + ud + y, d + mon + yy, y + mon + d, mon);
   }
-  return out;
+  return out.map((f) => [f, null]).concat(sep.map((f) => [f, OCR_SEP_DATE]));
 }
 
 // TM is HHMMSS.FFFFFF with seconds optional (PS3.5 6.2); banners show HH:MM:SS or HH:MM,
 // so a stored HHMM is also looked for with :00 seconds.
+// The bare HHMM form only counts where the word itself is a time (10:30), not 1030 or 10.30 cm.
 function ocrTimeForms(tm) {
   const m = /^(\d{2})(\d{2})(\d{2})?/.exec(String(tm).trim());
   if (!m) return [];
-  return [m[1] + m[2] + (m[3] || '00'), m[1] + m[2]];
+  const out = [[m[1] + m[2] + (m[3] || '00'), null], [m[1] + m[2], OCR_SEP_TIME]];
+  const h = +m[1];
+  if (h > 12) out.push([String(h - 12).padStart(2, '0') + m[2], OCR_SEP_TIME], [String(h - 12) + m[2], OCR_SEP_TIME]);
+  return out;
 }
 
 // AS is nnnD/W/M/Y (PS3.5 6.2); a banner drops the leading zeros: "045Y" shows as "45Y".
@@ -121,9 +165,12 @@ function ocrAgeForms(as) {
 // came from. Short terms (< 5 chars) only ever match whole words; see ocrMatchLine.
 function ocrPhiTerms(d) {
   const terms = new Map();
-  const add = (raw, field) => {
+  const add = (raw, field, sep = null) => {
     const norm = ocrNorm(raw);
-    if (norm.length >= 2 && !terms.has(norm)) terms.set(norm, { norm, field, short: norm.length < 5 });
+    // A short name that folds to digits ('Li^So' -> 11, 50) must not claim plain numbers on the
+    // image: such a term only matches a word that has a letter in it.
+    const alpha = norm.length < 5 && /\p{L}/u.test(String(raw)) && /^\d+$/.test(norm);
+    if (norm.length >= 2 && !terms.has(norm)) terms.set(norm, { norm, field, short: norm.length < 5, sep, alpha });
   };
   const fromTag = (node, tag, kind, field) => {
     for (const v of ocrValues(getTag(node, tag))) {
@@ -135,15 +182,17 @@ function ocrPhiTerms(d) {
         add(s, field);
         if (parts.length >= 2) add(parts[1] + parts[0], field);   // "John Doe" order
       } else if (kind === 'DA') {
-        ocrDateForms(s).forEach((f) => add(f, field));
+        ocrDateForms(s).forEach(([f, sep]) => add(f, field, sep));
       } else if (kind === 'TM') {
-        ocrTimeForms(s).forEach((f) => add(f, field));
+        ocrTimeForms(s).forEach(([f, sep]) => add(f, field, sep));
       } else if (kind === 'AS') {
         ocrAgeForms(s).forEach((f) => add(f, field));
       } else if (kind === 'DT') {
-        ocrDateForms(s.slice(0, 8)).forEach((f) => add(f, field));
-        ocrTimeForms(s.slice(8)).forEach((f) => add(f, field));
+        ocrDateForms(s.slice(0, 8)).forEach(([f, sep]) => add(f, field, sep));
+        ocrTimeForms(s.slice(8)).forEach(([f, sep]) => add(f, field, sep));
       } else {
+        // A two-letter Station Name ('CT') is also the modality label on every image.
+        if (kind === 'TEXT' && s.length < 3) continue;
         add(s, field);
         // An institution is burned in whole or as its distinctive words.
         if (kind === 'TEXT') s.split(/\s+/).filter((w) => w.length >= 4).forEach((w) => add(w, field));
@@ -204,6 +253,8 @@ function ocrMatchLine(words, terms) {
         if (span !== t.norm && !(fuzzy && ocrWithinOne(span, t.norm))) continue;
         const got = new Map();
         for (let k = i; k < i + n; k++) got.set(owner[k], (got.get(owner[k]) || 0) + 1);
+        if (t.sep && ![...got.keys()].some((p) => t.sep.test(String(words[wordOf[p]].text ?? '')))) continue;
+        if (t.alpha && ![...got.keys()].some((p) => /\p{L}/u.test(String(words[wordOf[p]].text ?? '')))) continue;
         for (const [p, c] of got) if (c * 2 > len[p]) hit[wordOf[p]] = hit[wordOf[p]] || t.field;
       }
     }
@@ -240,21 +291,30 @@ function ocrMergeBoxes(dets, cols, rows) {
     const same = out.find((o) => ocrOverlap(o, c) > 0.5 * Math.min(o.w * o.h, c.w * c.h));
     if (same) ocrAbsorb(same, c); else out.push(c);
   }
-  for (let merged = true; merged;) {
-    merged = false;
-    for (let i = 0; i < out.length && !merged; i++) {
-      for (let j = i + 1; j < out.length && !merged; j++) {
-        const a = out[i], b = out[j];
-        const vOver = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-        const gap = Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w);
-        const sameLine = vOver >= 0.5 * Math.min(a.h, b.h) && gap <= 0.8 * Math.max(a.h, b.h);
-        const touching = ocrOverlap(a, b) > 0;
-        if ((a.phi === b.phi && sameLine) || (a.phi !== b.phi && touching)) {
-          ocrAbsorb(a, b); out.splice(j, 1); merged = true;
+  // Two phases, so the result does not depend on detection order: first a PHI word absorbs the
+  // other-kind WORDS it touches, then same-kind boxes on a line join. (One pass doing both let a
+  // label already joined to a measurement drag the whole line into the PHI box.)
+  const pass = (join) => {
+    for (let merged = true; merged;) {
+      merged = false;
+      for (let i = 0; i < out.length && !merged; i++) {
+        for (let j = i + 1; j < out.length && !merged; j++) {
+          const a = out[i], b = out[j];
+          if (join(a, b)) {
+            const [keep, gone] = a.phi || !b.phi ? [a, b] : [b, a];
+            ocrAbsorb(keep, gone); out.splice(out.indexOf(gone), 1); merged = true;
+          }
         }
       }
     }
-  }
+  };
+  pass((a, b) => a.phi !== b.phi && ocrOverlap(a, b) > 0);
+  pass((a, b) => {
+    if (a.phi !== b.phi) return false;
+    const vOver = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    const gap = Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w);
+    return vOver >= 0.5 * Math.min(a.h, b.h) && gap <= 0.8 * Math.max(a.h, b.h);
+  });
   return out.map((c) => {
     const pad = Math.max(2, Math.round(c.h * 0.2));
     const x0 = Math.max(0, c.x - pad), y0 = Math.max(0, c.y - pad);
@@ -359,8 +419,8 @@ async function findBurnedInText(entry, onProgress) {
   // The window the user is looking at, as drawPreview uses it (pending edits are per file).
   const pend = files[currentFileIdx] === entry ? pendingEdits : pendingOf(entry);
   const wcP = pend.get(editKey('00281050')), wwP = pend.get(editKey('00281051'));
-  const opts = { meta, wcOvr: wcP ? parseFloat(wcP.valueString) : undefined,
-                 wwOvr: wwP ? parseFloat(wwP.valueString) : undefined };
+  const opts = { meta, wcOvr: finiteOrUndef(wcP?.valueString),
+                 wwOvr: finiteOrUndef(wwP?.valueString) };
   const stopped = new Promise((r) => { ocrRun.stop = r; });
   const unlessStopped = (p) => Promise.race([p, stopped]);
   try {

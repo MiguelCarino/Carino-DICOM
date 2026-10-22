@@ -177,14 +177,22 @@
 
     cmpApplyAll(true);
     const stillDiffer = [...tagBody.querySelectorAll('tr.cmp-diff')];
+    // Identity UIDs and the Image Pixel Module are copy-locked: copying them would give two
+    // files one SOP Instance UID, or a header that no longer matches its pixels.
+    const lockedRow = tr => tr.classList.contains('readonly-row') ||
+      isCopyLocked(tr.dataset.path, lookupTag(files[1].dict, tr.dataset.path)?.vr || lookupTag(files[0].dict, tr.dataset.path)?.vr);
     ok('copy-all settles every editable difference',
-       stillDiffer.every(tr => tr.classList.contains('readonly-row')),
+       stillDiffer.every(lockedRow),
        stillDiffer.map(tr => tr.querySelector('.tag-code').textContent).join(' '));
     // File Meta is shown for reference and never written from the dataset, so a
     // difference there is meant to survive a copy-all.
-    ok('and leaves File Meta alone',
-       stillDiffer.length > 0 && stillDiffer.every(tr => /^\(0002,/.test(tr.querySelector('.tag-code').textContent)),
+    ok('and leaves File Meta and the identity UIDs alone',
+       stillDiffer.length > 0 && stillDiffer.every(tr => /^\((0002,|0008,0018)/.test(tr.querySelector('.tag-code').textContent)),
        stillDiffer.map(tr => tr.querySelector('.tag-code').textContent).join(' '));
+    ok('so the other file keeps its own SOP Instance UID',
+       !files[1].pending.has(editKey('00080018')) ||
+       files[1].pending.get(editKey('00080018')).valueString === elToString(lookupTag(files[1].dict, '00080018')));
+    ok('and the UID rows carry no copy arrow', !rowFor('00080018').querySelector('.cmp-copy-btn'));
     ok('copy-all creates the tags the receiving file lacked',
        rowFor('00181030')?.classList.contains('cmp-match'), rowFor('00181030')?.className);
 

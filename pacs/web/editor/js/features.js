@@ -29,7 +29,9 @@ function showLoading(visible, text = 'Loading…', progress, count) {
 }
 
 // ---- Confirm dialog for destructive actions ----
-function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel) {
+// opts.safeDefault: Cancel has the focus and Enter means Cancel (a grant that is remembered must
+// never be given by a stray Enter in a freshly focused window).
+function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel, opts = {}) {
   const ov = $('confirmOverlay');
   const ok = $('confirmOk');
   const cancel = $('confirmCancel');
@@ -45,13 +47,13 @@ function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel) {
   const dismiss = () => { close(); onCancel?.(); };
   const onKey = e => {
     if (e.key === 'Escape') dismiss();
-    else if (e.key === 'Enter') { close(); onConfirm(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (opts.safeDefault) dismiss(); else { close(); onConfirm(); } }
   };
   ok.onclick = () => { close(); onConfirm(); };
   cancel.onclick = dismiss;
   document.addEventListener('keydown', onKey);
   ov.classList.add('visible');
-  ok.focus();
+  (opts.safeDefault ? cancel : ok).focus();
 }
 
 // ---- Toast ----
@@ -83,6 +85,14 @@ function pushHistory() {
   datasetDirty = true;          // batch mutation (anonymize / randomize / remap)
   updateHistoryBtns();
   try { renderTechRow(); } catch (_) {}
+}
+// The undo stack holds whole working copies of the open file. After a batch rewrite (anonymize,
+// randomize, swap, UID prefix), a pixel edit or a file switch, an older snapshot would stamp stale
+// values (another file's identity, pre-rewrite UIDs, pre-rotation Rows/Columns) back, so it ends.
+function resetEditHistory() {
+  editHistory = []; editFuture = [];
+  clearTimeout(editDebounceTimer); preEditSnapshot = null;
+  updateHistoryBtns();
 }
 function updateHistoryBtns() {
   undoBtn.disabled = editHistory.length === 0;
@@ -139,7 +149,9 @@ function natCmp(a, b) {
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
-// PACS order: Series Number (0020,0011), then Instance Number (0020,0013), then name.
+// PACS order: study (first seen), Series Number (0020,0011), series (first seen), Instance
+// Number (0020,0013), then name. Study and series ranks keep each study and each series
+// contiguous, so paging never steps from one patient into another.
 // Safe to reorder: nothing downstream reads files[] positionally.
 function sortFiles() {
   if (files.length < 2) return;
@@ -147,13 +159,20 @@ function sortFiles() {
     const v = parseInt(String(lookupTag(d, tag)?.Value?.[0] ?? '').trim(), 10);
     return Number.isFinite(v) ? v : Infinity;   // unnumbered sorts after numbered
   };
+  const uidOf = (d, tag, i) => String(lookupTag(d, tag)?.Value?.[0] ?? '').trim() || ('__none_' + i);
+  const studyRank = new Map(), seriesRank = new Map();
+  const rank = (m, k) => { if (!m.has(k)) m.set(k, m.size); return m.get(k); };
   // Precompute keys once; lookupTag is too slow to call inside the comparator.
   const keys = new Map();
-  files.forEach((f, i) => keys.set(f, { s: num(f.dict, '00200011'), n: num(f.dict, '00200013'), i }));
+  files.forEach((f, i) => keys.set(f, {
+    st: rank(studyRank, uidOf(f.dict, '0020000d', i)),
+    s: num(f.dict, '00200011'),
+    se: rank(seriesRank, uidOf(f.dict, '0020000e', i)),
+    n: num(f.dict, '00200013'), i }));
   const cmp = (x, y) => x === y ? 0 : (x < y ? -1 : 1);   // not x - y: Infinity - Infinity is NaN
   files.sort((a, b) => {
     const A = keys.get(a), B = keys.get(b);
-    return cmp(A.s, B.s) || cmp(A.n, B.n) || natCmp(a.name, b.name) || (A.i - B.i);
+    return cmp(A.st, B.st) || cmp(A.s, B.s) || cmp(A.se, B.se) || cmp(A.n, B.n) || natCmp(a.name, b.name) || (A.i - B.i);
   });
 }
 
@@ -161,7 +180,7 @@ function sortFiles() {
 function groupStudies() {
   const map = new Map(), order = [];
   files.forEach((f, i) => {
-    const uid = (lookupTag(f.dict, '0020000d')?.Value?.[0]) || ('__nostudy_' + i);
+    const uid = String(lookupTag(f.dict, '0020000d')?.Value?.[0] ?? '').trim() || ('__nostudy_' + i);
     let s = map.get(uid);
     if (!s) { s = { indices: [] }; map.set(uid, s); order.push(s); }
     s.indices.push(i);
@@ -218,6 +237,10 @@ function renderFileBrowser() {
 // view's W/L; editorStale makes the Edit tab catch up when opened.
 function switchFile(idx, opts) {
   if (idx === currentFileIdx || !files[idx]) return;
+  // Boxes drawn on one image must never be applied to another.
+  if (typeof redactUI !== 'undefined' && redactUI.active) closeRedactWorkspace?.();
+  // The undo stack is the previous file's; replaying it here would write that file's values.
+  resetEditHistory();
   currentFileIdx = idx;
   dict  = files[idx].dict;
   meta  = files[idx].meta;
@@ -266,8 +289,13 @@ function initWLSliders() {
   // lookupTag is case-insensitive on keys (x7FE00010 vs x7fe00010).
   if (!lookupTag(dict, '7fe00010')) { wlSection.classList.add('hidden'); return; }
 
-  wcOriginal = parseFloat(lookupTag(dict, '00281050')?.Value?.[0]) || null;
-  wwOriginal = parseFloat(lookupTag(dict, '00281051')?.Value?.[0]) || null;
+  // Hide for colour: Window Center/Width apply to MONOCHROME1/2 only (PS3.3 C.11.2.1.2.2).
+  const piWL = String(lookupTag(dict, '00280004')?.Value?.[0] || 'MONOCHROME2').trim().toUpperCase();
+  if (piWL !== 'MONOCHROME1' && piWL !== 'MONOCHROME2') { wlSection.classList.add('hidden'); return; }
+  // A Window Center of 0 is a value, not a missing one.
+  const fin = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  wcOriginal = fin(lookupTag(dict, '00281050')?.Value?.[0]);
+  wwOriginal = fin(lookupTag(dict, '00281051')?.Value?.[0]);
 
   // Prefer pending edits if W/L was already changed this session.
   const wc = parseFloat(pendingEdits.get(editKey('00281050'))?.valueString ?? wcOriginal ?? 40);
@@ -295,8 +323,8 @@ function setWL(wc, ww, updatePending = true) {
   if (wlSummary) wlSummary.textContent = `${wc} / ${ww}`;
 
   if (updatePending) {
-    pendingEdits.set(editKey('00281050'), { vr: 'DS', valueString: String(wc) });
-    pendingEdits.set(editKey('00281051'), { vr: 'DS', valueString: String(ww) });
+    pendingEdits.set(editKey('00281050'), { vr: 'DS', valueString: wlValue('00281050', wc) });
+    pendingEdits.set(editKey('00281051'), { vr: 'DS', valueString: wlValue('00281051', ww) });
     const wcInp = tagBody.querySelector(`[data-tag="${editKey('00281050')}"]`);
     const wwInp = tagBody.querySelector(`[data-tag="${editKey('00281051')}"]`);
     if (wcInp) wcInp.value = String(wc);
@@ -306,10 +334,19 @@ function setWL(wc, ww, updatePending = true) {
   }
 }
 
+// Window Center/Width may be multi-valued pairs with (0028,1055) explanations of the same count
+// (PS3.3 C.11.2.1.2.2): the sliders set pair 1 and leave the others alone.
+function wlValue(tag, v) {
+  const cur = pendingEdits.get(editKey(tag))?.valueString ?? elToString(lookupTag(dict || {}, tag));
+  const parts = String(cur ?? '').split('\\');
+  if (parts.length < 2) return String(v);
+  parts[0] = String(v);
+  return parts.join('\\');
+}
 function _applyWLInput(wc, ww) {
   trackEditStart();
-  pendingEdits.set(editKey('00281050'), { vr: 'DS', valueString: String(wc) });
-  pendingEdits.set(editKey('00281051'), { vr: 'DS', valueString: String(ww) });
+  pendingEdits.set(editKey('00281050'), { vr: 'DS', valueString: wlValue('00281050', wc) });
+  pendingEdits.set(editKey('00281051'), { vr: 'DS', valueString: wlValue('00281051', ww) });
   const wcInp = tagBody.querySelector(`[data-tag="${editKey('00281050')}"]`);
   const wwInp = tagBody.querySelector(`[data-tag="${editKey('00281051')}"]`);
   if (wcInp) wcInp.value = String(wc);
@@ -319,30 +356,34 @@ function _applyWLInput(wc, ww) {
   if (!redrawWL(wc, ww) && dict) drawPreview(dict, currentFrame);
 }
 
+// The other control's value comes from its number box, which is never clamped to the slider's
+// range or step (a typed 6000 or 40.5 stays what it is).
+const WL_MAX = 1e15;           // keeps String(v) within DS's 16 characters
+const wlNum = (el, fallback) => { const n = Number(el.value); return Number.isFinite(n) ? n : fallback; };
 wcSlider.addEventListener('input', () => {
   const v = parseInt(wcSlider.value);
   wcNum.value = v; wcDisplay.textContent = v;
-  _applyWLInput(v, parseInt(wwSlider.value));
+  _applyWLInput(v, Math.max(1, wlNum(wwNum, parseInt(wwSlider.value))));
 });
 wwSlider.addEventListener('input', () => {
   const v = Math.max(1, parseInt(wwSlider.value));
   wwNum.value = v; wwDisplay.textContent = v;
-  _applyWLInput(parseInt(wcSlider.value), v);
+  _applyWLInput(wlNum(wcNum, parseInt(wcSlider.value)), v);
 });
 wcNum.addEventListener('input', () => {
-  const v = parseInt(wcNum.value);
-  if (isNaN(v)) return;
+  const v = Number(wcNum.value);
+  if (!Number.isFinite(v) || Math.abs(v) > WL_MAX) return;
   if (v < parseInt(wcSlider.min)) wcSlider.min = v;
   if (v > parseInt(wcSlider.max)) wcSlider.max = v;
   wcSlider.value = v; wcDisplay.textContent = v;
-  _applyWLInput(v, parseInt(wwSlider.value));
+  _applyWLInput(v, Math.max(1, wlNum(wwNum, parseInt(wwSlider.value))));
 });
 wwNum.addEventListener('input', () => {
-  const v = Math.max(1, parseInt(wwNum.value));
-  if (isNaN(v)) return;
+  const v = Math.max(1, Number(wwNum.value));
+  if (!Number.isFinite(v) || v > WL_MAX) return;
   if (v > parseInt(wwSlider.max)) wwSlider.max = v;
   wwSlider.value = v; wwDisplay.textContent = v;
-  _applyWLInput(parseInt(wcSlider.value), v);
+  _applyWLInput(wlNum(wcNum, parseInt(wcSlider.value)), v);
 });
 wlPreset.addEventListener('change', () => {
   const val = wlPreset.value;
@@ -356,6 +397,15 @@ wlResetBtn.addEventListener('click', () => {
   if (wcOriginal == null && wwOriginal == null) return;
   pushHistory();
   setWL(wcOriginal ?? 40, wwOriginal ?? 400);
+  // Back to the file: a tag the file never had is not invented, and the file's own strings
+  // (multi-valued, fractional) come back as they were.
+  for (const t of ['00281050', '00281051']) {
+    const el = lookupTag(dict, t);
+    if (el) pendingEdits.set(editKey(t), { vr: el.vr || 'DS', valueString: elToString(el) });
+    else pendingEdits.delete(editKey(t));
+  }
+  renderTable();
+  if (dict) drawPreview(dict, currentFrame);
   toast(T('Window / Level reset to file values'));
 });
 
@@ -399,8 +449,63 @@ function syncImgEditCard() {
   // Undo names its op in the title, not the label (static i18n markup, would wrap).
   const b = entry.pixelBackup;
   imgEditUndo.classList.toggle('hidden', !b);
-  if (b) imgEditUndo.title = T(PIXEL_OPS[b.op].label);
+  if (b) imgEditUndo.title = T(b.op === 'decompress' ? 'Decompress' : PIXEL_OPS[b.op].label);
+  syncCompressionRow(entry);
 }
+
+// Compression line: encoding + verdict, why, viewer warnings, and the way back to uncompressed.
+function syncCompressionRow(entry) {
+  const can = decompressSupport(entry);
+  $('imgCompName').textContent = compressionLabel(can.info);
+  $('imgCompName').title = can.info.ts;
+  const notes = $('imgCompNotes');
+  // The why-lines matter only when there is something to explain; plain uncompressed needs none.
+  const why = can.info.compressed || can.info.everLossy ? can.info.why : [];
+  notes.replaceChildren(...why.concat(can.info.warnings).map((t, i) => {
+    const li = document.createElement('li');
+    li.textContent = t;
+    if (i >= why.length) li.className = 'warn';
+    return li;
+  }));
+  const one = $('imgDecompress');
+  one.classList.toggle('hidden', !can.info.compressed);
+  one.disabled = !can.ok;
+  one.title = can.ok ? T("Rewrite this file's pixels uncompressed (Explicit VR Little Endian)") : can.why;
+  const n = files.filter(f => decompressSupport(f).ok).length;
+  const all = $('imgDecompressAll');
+  all.classList.toggle('hidden', n < 2);
+  all.textContent = T('All {n}').replace('{n}', n);
+  all.title = T('Decompress every loaded file that is compressed');
+}
+
+// Decompress one file or all; files that cannot be converted are listed in the log, not fatal.
+async function runDecompress(list) {
+  const go = async () => {
+    let done = 0, before = 0, after = 0;
+    for (const entry of list) {
+      const res = await decompressDicom(entry);
+      if (res.error) { log(`✗ ${entry.name}: ${res.error}`); continue; }
+      done++; before += res.before; after += res.after;
+      log(`⇲ ${entry.name}: ${res.from} → Explicit VR Little Endian` + (res.lossless === false ? ` (${T('lossy source: lost detail stays lost')})` : ''));
+    }
+    const mb = n => (n / 1048576).toFixed(1);
+    toast(`${T('Decompressed')} ${done}/${list.length} · ${mb(before)} → ${mb(after)} MB`);
+    renderTable();
+    if (typeof renderOverview === 'function') renderOverview();
+    if (dict) await drawPreview(dict, currentFrame);
+    syncImgEditCard();
+    showDownload();
+  };
+  const lossy = list.some(f => decompressSupport(f).info.lossless === false);
+  const msg = [T('The pixels are rewritten uncompressed (Explicit VR Little Endian), so every viewer reads the values directly. Files get larger; the SOP Instance UID stays the same.')];
+  if (lossy) msg.push(T('Some of these were lossy-compressed: decompressing cannot bring back what was discarded, and (0028,2110) Lossy Image Compression stays 01.'));
+  confirmDanger(msg.join('\n\n'), go, 'Decompress');
+}
+$('imgDecompress')?.addEventListener('click', () => {
+  const entry = files[currentFileIdx];
+  if (entry) runDecompress([entry]);
+});
+$('imgDecompressAll')?.addEventListener('click', () => runDecompress(files.filter(f => decompressSupport(f).ok)));
 
 // Decode, transform, retag, then redraw everything that reads the dataset; logged like redaction.
 async function runImgEdit(opKey) {
@@ -554,16 +659,19 @@ function redactUpdateCount() {
 
 function openRedactWorkspace() {
   const entry = files[currentFileIdx];
-  if (!entry || !previewImageData) return;
+  if (!entry) return;
+  if (!previewImageData) { toast(T('The image could not be decoded for preview, so there is nothing to draw on.')); return; }
   const sup = redactionSupport(entry.meta);
   if (!sup.ok) {
     toast(`${T('This image cannot be redacted: its pixel data uses a compression this browser cannot decode.')} (${sup.codec})`);
     return;
   }
   redactUI.active = true;
+  redactUI.entry = entry;        // Apply targets the file the boxes were drawn on
   redactUI.drag = null;
   redactUI.boxes = [];
   redactUI.metrics = null;
+  redactUI.fill = $('redactFill')?.value || redactUI.fill;
   if (typeof ocrResetWorkspace === 'function') ocrResetWorkspace();
   // Background is the previewed frame; redaction still applies to every frame.
   redactUI.base = previewImageData.data;
@@ -574,12 +682,29 @@ function openRedactWorkspace() {
   fullscreenHint?.classList.add('hidden');
   fullscreenOverlay.classList.add('redacting');
   fullscreenOverlay.classList.add('visible');
+  fitRedactCanvas();
   redactDraw();
 }
+
+// The CSS box (full height, at most the width) does not keep a wide image's aspect ratio on its
+// own, so shrink it to the image's shape inside that box. Pointer mapping scales each axis from
+// the drawn rect, so it stays exact either way.
+function fitRedactCanvas() {
+  const c = fullscreenCanvas;
+  c.style.width = c.style.height = '';
+  if (!redactUI.active || !c.width || !c.height) return;
+  const r = c.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const k = Math.min(r.width / c.width, r.height / c.height);
+  c.style.width = (c.width * k) + 'px';
+  c.style.height = (c.height * k) + 'px';
+}
+window.addEventListener('resize', () => { if (redactUI.active) fitRedactCanvas(); });
 
 function closeRedactWorkspace() {
   if (typeof ocrResetWorkspace === 'function') ocrResetWorkspace();
   redactUI.active = false;
+  redactUI.entry = null;
   redactUI.drag = null;
   redactUI.boxes = [];
   redactUI.base = null;
@@ -588,6 +713,7 @@ function closeRedactWorkspace() {
   fullscreenHint?.classList.remove('hidden');
   fullscreenOverlay.classList.remove('redacting');
   fullscreenOverlay.classList.remove('visible');
+  fullscreenCanvas.style.width = fullscreenCanvas.style.height = '';
 }
 
 $('imgRedact')?.addEventListener('click', openRedactWorkspace);
@@ -606,6 +732,7 @@ $('redactTop')?.addEventListener('click', () => {
 // Canvas rect is measured once per drag (at pointerdown) to avoid a layout per move.
 fullscreenCanvas.addEventListener('pointerdown', e => {
   if (!redactUI.active) return;
+  if (e.button !== 0) return;               // primary button / touch / pen only
   const metrics = fullscreenCanvas.getBoundingClientRect();
   const pt = redactPointToImage(e.clientX, e.clientY, metrics);
   if (!pt) return;
@@ -624,10 +751,13 @@ fullscreenCanvas.addEventListener('pointermove', e => {
   if (dr.mode === 'new') {
     dr.box.x = Math.min(dr.ox, pt.x); dr.box.y = Math.min(dr.oy, pt.y);
     dr.box.w = Math.abs(pt.x - dr.ox); dr.box.h = Math.abs(pt.y - dr.oy);
+    redactClamp(dr.box);
   } else {
-    dr.box.x = pt.x - dr.dx; dr.box.y = pt.y - dr.dy;
+    // A move keeps the box's size: clamp its position so it stays on the image.
+    const W = fullscreenCanvas.width, H = fullscreenCanvas.height;
+    dr.box.x = Math.min(Math.max(0, pt.x - dr.dx), Math.max(0, W - dr.box.w));
+    dr.box.y = Math.min(Math.max(0, pt.y - dr.dy), Math.max(0, H - dr.box.h));
   }
-  redactClamp(dr.box);
   redactDraw();
 });
 const endRedactDrag = (e) => {
@@ -638,6 +768,8 @@ const endRedactDrag = (e) => {
   if (dr.mode === 'new') {
     const box = redactClamp(dr.box);
     if (box.w >= MIN_BOX && box.h >= MIN_BOX) redactUI.boxes.push(box);
+  } else if (dr.box.w < MIN_BOX || dr.box.h < MIN_BOX) {
+    redactUI.boxes.splice(redactUI.boxes.indexOf(dr.box), 1);
   } else if (dr.box.ocr && e?.type === 'pointerup' && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) < 4) {
     // A click (not a drag) on found text selects or unselects it.
     dr.box.on = dr.box.on === false;
@@ -657,12 +789,17 @@ fullscreenCanvas.addEventListener('dblclick', e => {
 
 // Esc and Cancel are the only exits; a backdrop click is a missed box, not a close.
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && redactUI.active) { e.preventDefault(); closeRedactWorkspace(); }
+  if (e.key !== 'Escape' || !redactUI.active) return;
+  // Escape on a confirm over the workspace answers the confirm, not the workspace.
+  if ($('confirmOverlay')?.classList.contains('visible')) return;
+  e.preventDefault(); closeRedactWorkspace();
 });
 
+let redactBusy = false;
 $('redactApply')?.addEventListener('click', () => {
-  const entry = files[currentFileIdx];
-  if (!entry) return;
+  const entry = redactUI.entry || files[currentFileIdx];
+  if (!entry || redactBusy) return;
+  if (entry !== files[currentFileIdx]) { closeRedactWorkspace(); return; }
   if (!redactSelected().length) {
     // Find's proposals may all be unselected (a de-identified file, or the user's clicks).
     toast(T(redactUI.boxes.some(b => b.ocr) ? 'Click a yellow box to select it, or draw a box.'
@@ -672,11 +809,20 @@ $('redactApply')?.addEventListener('click', () => {
   const sup = redactionSupport(entry.meta);
   // Copy now: closeRedactWorkspace() empties the array while applyRedaction is async.
   const boxes = redactSelected().map(({ x, y, w, h }) => ({ x, y, w, h }));
+  // Read the control, not only its change event: a browser-restored select fires none.
+  const fill = $('redactFill')?.value || redactUI.fill;
   const go = async () => {
+    if (redactBusy) return;
+    redactBusy = true;
+    const applyBtn = $('redactApply');
+    if (applyBtn) applyBtn.disabled = true;
+    try {
     if (sup.depthLoss) {
       log(`⚠ ${T('This image was compressed with lossy JPEG; redacting it will store 8 bits per sample.')}`);
     }
-    const res = await applyRedaction(entry, boxes, { fill: redactUI.fill });
+    let res;
+    try { res = await applyRedaction(entry, boxes, { fill }); }
+    catch (err) { res = { error: err.message || String(err) }; }
     if (res.error) { log(`✗ ${entry.name}: ${res.error}`); toast(res.error); return; }
     const msg = T('Redacted {n} region(s) across {m} frame(s) — pixels overwritten.')
       .replace('{n}', res.boxes).replace('{m}', res.frames);
@@ -687,6 +833,10 @@ $('redactApply')?.addEventListener('click', () => {
     if (typeof renderOverview === 'function') renderOverview();   // re-decodes from the new pixels
     if (dict) await drawPreview(dict, currentFrame);
     syncImgEditCard();
+    } finally {
+      redactBusy = false;
+      if (applyBtn) applyBtn.disabled = false;
+    }
   };
   if (sup.converts) {
     confirmDanger(T('Redacting decompresses this image to uncompressed Explicit VR Little Endian. The file will be larger and its Transfer Syntax will change. Continue?'), go, 'Redact pixels');
@@ -752,11 +902,21 @@ addTagConfirm.addEventListener('click', () => {
   if (!dict) { toast(T('No file loaded')); return; }
   const raw = addTagCode.value.trim().replace(/[()]/g, '').replace(',', '').replace(/\s/g, '');
   if (!/^[0-9a-fA-F]{8}$/.test(raw)) { toast(T('Invalid code — use format (GGGG,EEEE)')); return; }
-  const key = 'x' + raw.toLowerCase();
-  const vr  = addTagVR.value;
+  // The dcmjs key form (8 UPPERCASE hex, no 'x'): any other spelling is written under the wrong
+  // tag (Tag.fromString('x00181030') is (0008,1030)). editKey finds the tag if it already exists,
+  // so an add of an existing tag edits it instead of duplicating it (PS3.5 7.1).
+  const key = editKey(raw);
+  const g = parseInt(raw.slice(0, 4), 16);
+  // Groups 0000-0007 are command / file meta / directory / reserved (PS3.5 7.1, PS3.10 7.1), and
+  // Pixel Data is not a text value: neither belongs in a dataset edit.
+  if (g <= 0x0007 || canonTag(raw) === '7FE00010') { toast(T('That tag cannot be added here.')); return; }
+  // Prefer the dictionary's VR for a known tag (PN for Patient Name, not the default LO).
+  const known = vrForTag(raw);
+  const vr  = (known && /^[A-Z]{2}$/.test(known) && known !== 'SQ') ? known : addTagVR.value;
+  if (isReadOnly(key, vr)) { toast(T('That tag cannot be added here.')); return; }
   const val = addTagVal.value.trim();
   pushHistory();
-  dict[key] = { vr, Value: parseByVR(vr, val, dict[key]?.Value?.[0]) };
+  // Working copy only: withPendingEdits writes it on export, and Undo removes it again.
   pendingEdits.set(key, { vr, valueString: val });
   addTagRow.classList.add('hidden');
   addTagCode.value = '';
@@ -787,7 +947,7 @@ exportJsonBtn.addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (files[currentFileIdx]?.name || 'dicom').replace(/\.[^.]+$/, '') + '_tags.json';
+  a.download = exportBaseName(files[currentFileIdx]) + '_tags.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
   toast(T('Exported JSON'));
@@ -803,7 +963,7 @@ exportCsvBtn.addEventListener('click', () => {
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (files[currentFileIdx]?.name || 'dicom').replace(/\.[^.]+$/, '') + '_tags.csv';
+  a.download = exportBaseName(files[currentFileIdx]) + '_tags.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
   toast(T('Exported CSV'));
@@ -872,3 +1032,18 @@ createDicomBtn.addEventListener('click', async () => {
   setCreateButtonLabel();
 });
 
+
+// ---- Language switch ----
+// i18n.js re-translates static markup (data-i18n, ATTR_I18N); text built at render time keeps the
+// language it was drawn in until redrawn, so redraw what is built from T() here. Nothing is reset.
+window.addEventListener('carino:langchange', () => {
+  renderSeriesPanel(); renderCreateGrid(); renderCreateOrder();
+  renderExtractorGrid();
+  updateDeidOptsCount();
+  if (!dict) return;
+  renderFileBrowser();
+  syncImgEditCard();          // and the compression row inside it
+  renderCompareUI();
+  renderTable();
+  window.ovRetranslate?.();
+});
