@@ -173,7 +173,6 @@
             <button class="ov-act" id="ovActCompare" data-tab="editor" title="Diff two files side by side" data-i18n>⇄ Compare</button>
           </div>
           <button class="ov-print-btn" id="ovPrintBtn" title="Print / save this overview as a PDF" data-i18n>🖨 Print</button>
-          <button class="ov-open-btn" id="ovOpenBtn" title="Open another DICOM file" data-i18n>＋ Open</button>
         </div>
 
         <div class="ov-grid">
@@ -235,6 +234,18 @@
 
           <!-- Info column -->
           <div class="ov-info">
+            <!-- Same card, same place as in Edit, Extract and Create: files in at the top of the right column. -->
+            <section class="card" id="ovLoadCard">
+              <div class="card-title" data-i18n>Load Files</div>
+              <div class="drop-zone compact" id="ovLoadZone">
+                <h4 data-i18n>Drop DICOM files</h4>
+                <p data-i18n>or click to browse</p>
+                <div class="drop-zone-actions">
+                  <button class="drop-zone-btn" id="ovLoadFilesBtn" data-i18n>📄 Open files</button>
+                  <button class="drop-zone-btn folder" id="ovLoadFolderBtn" data-i18n>📁 Open folder</button>
+                </div>
+              </div>
+            </section>
             <section class="ov-card">
               <div class="ov-card-h"><span data-i18n>Featured</span> <span class="ov-card-sub" data-i18n>clinical</span></div>
               <div class="ov-kv" id="ovCore"></div>
@@ -362,7 +373,19 @@
           <button class="filter-btn" data-cat="uid"><span class="dot"></span><span data-i18n>UIDs</span></button>
           <button class="filter-btn" data-cat="private"><span class="dot"></span><span data-i18n>Private</span></button>
           <button class="filter-btn" data-cat="other"><span class="dot"></span><span data-i18n>Other</span></button>
-          
+          <!-- A phone shows this instead of the chips above; js/events.js keeps the two in step. -->
+          <select id="catSelect" class="cmp-select cat-select" title="Show only tags of this kind">
+            <option value="all" data-i18n>All</option>
+            <option value="patient" data-i18n>Patient</option>
+            <option value="study" data-i18n>Study</option>
+            <option value="series" data-i18n>Series</option>
+            <option value="image" data-i18n>Image</option>
+            <option value="equipment" data-i18n>Equipment</option>
+            <option value="uid" data-i18n>UIDs</option>
+            <option value="private" data-i18n>Private</option>
+            <option value="other" data-i18n>Other</option>
+          </select>
+
           <div class="actions-spacer"></div>
 
           <select id="compareWith" class="cmp-select hidden" title="Show a second loaded file beside this one">
@@ -425,8 +448,22 @@
       <input id="fileInput" type="file" multiple hidden />
       <input id="folderInput" type="file" webkitdirectory multiple hidden />
 
-        <!-- Image tools and preview first and never scrolled (see .sidebar in app.css); Load Files and the
-             Log take the scrolling tail. -->
+        <!-- First, as in every module: files in at the top of the right column. Not in the shrinking tail:
+             a squeezed drop target cannot be aimed at. (Window-wide drop also works.) -->
+        <div class="card" id="loadFilesCard">
+          <div class="card-title" data-i18n>Load Files</div>
+          <div class="drop-zone" id="dropZone">
+            <h4 data-i18n>Drop DICOM files</h4>
+            <p data-i18n>or click to browse</p>
+            <div class="drop-zone-actions">
+              <button class="drop-zone-btn" id="filesBtn" data-i18n>📄 Open files</button>
+              <button class="drop-zone-btn folder" id="folderBtn" data-i18n>📁 Open folder</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Then the image tools and preview, never scrolled (see .sidebar in app.css); the Log takes the
+             scrolling tail. -->
         <!-- Rotate / flip rewrite the stored pixels, so the export matches the sidebar. The Overview's
              buttons only change the view. -->
         <div class="card" id="imgEditCard" style="display:none">
@@ -532,19 +569,6 @@
           </div>
         </div>
 
-        <!-- Not in the shrinking tail: a squeezed drop target cannot be aimed at. (Window-wide drop also works.) -->
-        <div class="card" id="loadFilesCard">
-          <div class="card-title" data-i18n>Load Files</div>
-          <div class="drop-zone" id="dropZone">
-            <h4 data-i18n>Drop DICOM files</h4>
-            <p data-i18n>or click to browse</p>
-            <div class="drop-zone-actions">
-              <button class="drop-zone-btn" id="filesBtn" data-i18n>📄 Open files</button>
-              <button class="drop-zone-btn folder" id="folderBtn" data-i18n>📁 Open folder</button>
-            </div>
-          </div>
-        </div>
-
         <!-- Only the Log may be squeezed; it scrolls inside whatever height is left. -->
         <div class="sidebar-rest">
           <div class="card" id="logCard" style="display:none">
@@ -560,16 +584,19 @@
     <div class="create-left">
       <div class="top-bar">
         <div class="pill" id="createImgCount" data-i18n data-i18n-key="Images: {n}" data-i18n-n="0">Images: 0</div>
-        <button class="btn" id="createAddBtn" data-i18n>+ Add Images</button>
         <input id="createFileInput" type="file" multiple accept="image/*" hidden />
-        <div class="actions-spacer"></div>
         <button class="btn" id="clearCreateBtn" data-i18n>Clear All</button>
+        <div class="actions-spacer"></div>
+        <!-- Files out at the right end of the top bar, as in Edit and Extract: on screen however far
+             the form below has been scrolled. -->
+        <button class="btn primary" id="createDicomBtn" data-i18n>⬇ Create DICOM</button>
       </div>
+      <div class="create-block hidden" id="cdBlock" role="alert"></div>
       <div class="img-grid-wrap" id="createImgWrap">
         <div id="createImgGrid">
           <div class="img-empty">
             <div class="img-empty-icon">🖼</div>
-            <span data-i18n>Drop images here or click "+ Add Images"</span>
+            <span data-i18n>Drop images here</span>
             <span class="img-empty-hint" data-i18n>PNG · JPEG · BMP · WebP supported</span>
           </div>
         </div>
@@ -582,8 +609,10 @@
         <div class="drop-zone" id="createSideDropZone">
           <h4 data-i18n>Drop images here</h4>
           <p>PNG · JPEG · BMP · WebP</p>
+          <div class="drop-zone-actions">
+            <button class="drop-zone-btn folder" id="createSideAddBtn" data-i18n>📄 Open files</button>
+          </div>
         </div>
-        <button id="createSideAddBtn" class="btn btn-block" data-i18n>+ Browse Files</button>
       </div>
       <div class="card">
         <div class="card-title" data-i18n>File type</div>
@@ -762,8 +791,6 @@
         <div class="series-list" id="seriesList"></div>
         <button class="series-add-btn" id="addSeriesBtn" data-i18n>+ Add Series</button>
       </div>
-      <div class="create-block hidden" id="cdBlock" role="alert"></div>
-      <button class="btn primary" id="createDicomBtn" data-i18n>⬇ Create DICOM</button>
     </div>
   </div>
   <!-- Extractor Tab -->
@@ -772,10 +799,12 @@
       <div class="top-bar">
         <div class="pill" id="extractorCount" data-i18n data-i18n-key="Files: {n}" data-i18n-n="0">Files: 0</div>
         <span class="extractor-source" id="extractorSource" hidden></span>
-        <button class="btn" id="extractorAddBtn" data-i18n>+ Add other files</button>
         <input id="extractorFileInput" type="file" multiple hidden />
+        <button class="btn" id="clearExtractorBtn" hidden><span class="lbl-long" data-i18n>Clear added files</span><span class="lbl-short" data-i18n>Clear</span></button>
         <div class="actions-spacer"></div>
-        <button class="btn" id="clearExtractorBtn" data-i18n hidden>Clear added files</button>
+        <!-- Files out at the right end of the top bar, as in Edit and Create. -->
+        <button class="btn" id="extractSelectedBtn"><span class="lbl-long" data-i18n>&#8595; Extract First Frames Only</span><span class="lbl-short" data-i18n>&#8595; First frames</span></button>
+        <button class="btn primary" id="extractAllBtn"><span class="lbl-long" data-i18n>&#8595; Extract All as PNG</span><span class="lbl-short" data-i18n>&#8595; All as PNG</span></button>
       </div>
       <div class="extractor-grid-wrap" id="extractorGridWrap">
         <div id="extractorGrid">
@@ -792,18 +821,13 @@
       <div class="card">
         <div class="card-title" data-i18n>Load Files</div>
         <div class="drop-zone" id="extractorDropZone">
-          <h4 data-i18n>Drop .dcm files</h4>
+          <h4 data-i18n>Drop DICOM files</h4>
           <p data-i18n>or click to browse</p>
           <div class="drop-zone-actions">
             <button class="drop-zone-btn" id="extractorSideAddBtn" data-i18n>📄 Open files</button>
             <button class="drop-zone-btn folder" id="extractorFolderBtn" data-i18n>📁 Open folder</button>
           </div>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title" data-i18n>Export</div>
-        <button class="btn primary btn-block" id="extractAllBtn" data-i18n>&#8595; Extract All as PNG</button>
-        <button class="btn btn-block" id="extractSelectedBtn" data-i18n>&#8595; Extract First Frames Only</button>
       </div>
       <div class="card" id="extractorLogCard" style="display:none">
         <div class="card-title" data-i18n>Log</div>

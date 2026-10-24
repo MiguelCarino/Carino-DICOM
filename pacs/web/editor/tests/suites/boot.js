@@ -217,6 +217,24 @@
     CarinoLang.set(prevLang);
   }
 
+  // ---- files in and files out sit in the same place in every module --------
+  // In: Load Files is the first card of the right column. Out: the primary
+  // button is the last thing in the top bar. Markup order, so no layout needed.
+  {
+    const cols = { Overview: '.ov-info', Edit: '#editorTab .sidebar', Extract: '.extractor-sidebar', Create: '.create-sidebar' };
+    for (const [name, sel] of Object.entries(cols)) {
+      const first = document.querySelector(sel)?.querySelector(':scope > .card, :scope > .ov-card');
+      ok(`${name}: the first card in the right column is Load Files`,
+         !!first?.querySelector('.drop-zone .drop-zone-actions'), first?.id || first?.className || 'none');
+    }
+    const bars = { Edit: '#editorTab .actions-row', Extract: '#extractorTab .top-bar', Create: '#createTab .top-bar' };
+    for (const [name, sel] of Object.entries(bars)) {
+      const last = [...(document.querySelector(sel)?.children || [])].filter(e => e.tagName === 'BUTTON').pop();
+      ok(`${name}: the top bar ends with the primary save button`,
+         !!last?.classList.contains('primary') || last?.id === 'downloadAllBtn', last?.id || 'none');
+    }
+  }
+
   return out;
 };
 

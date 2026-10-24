@@ -290,8 +290,14 @@ filterBtns.forEach(btn => btn.addEventListener('click', () => {
   filterBtns.forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   activeCat = btn.dataset.cat;
+  $('catSelect').value = activeCat;
   renderTable({ datasetsUnchanged: true });
 }));
+
+// The phone's menu drives the chips, so both stay one control.
+$('catSelect').addEventListener('change', e => {
+  [...filterBtns].find(b => b.dataset.cat === e.target.value)?.click();
+});
 
 previewBox.addEventListener('click', showFullscreen);
 fullscreenOverlay.addEventListener('click', hideFullscreen);

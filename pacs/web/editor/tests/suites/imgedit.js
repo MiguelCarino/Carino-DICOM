@@ -627,20 +627,19 @@
            /downloadOne\(/.test(String(downloadRange)));
       }
 
-      // The controls sit above the picture they act on, and both sit above
-      // everything else in the column — they are the two things you had to
-      // scroll for. Order in the DOM, so it holds before anything is laid out.
+      // Load Files opens the column, as it does in every module (files in at
+      // the top right); then the controls, above the picture they act on.
+      // Order in the DOM, so it holds before anything is laid out.
       {
         const sb = document.querySelector('.sidebar');
         const kids = [...sb.children];
         const at = (sel) => kids.findIndex(e => e.matches(sel));
-        ok('the image tools come before the preview in the sidebar',
-           at('#imgEditCard') >= 0 && at('#imgEditCard') < at('#previewCard'),
-           `tools@${at('#imgEditCard')} preview@${at('#previewCard')}`);
-        ok('and both come before Load Files and the Log',
-           at('#previewCard') < at('#loadFilesCard') &&
-           at('#loadFilesCard') < at('.sidebar-rest'),
-           `preview@${at('#previewCard')} load@${at('#loadFilesCard')} rest@${at('.sidebar-rest')}`);
+        ok('Load Files is the first card in the sidebar',
+           at('#loadFilesCard') >= 0 && at('#loadFilesCard') < at('#imgEditCard'),
+           `load@${at('#loadFilesCard')} tools@${at('#imgEditCard')}`);
+        ok('the image tools come before the preview, and both before the Log',
+           at('#imgEditCard') < at('#previewCard') && at('#previewCard') < at('.sidebar-rest'),
+           `tools@${at('#imgEditCard')} preview@${at('#previewCard')} rest@${at('.sidebar-rest')}`);
         // Only the Log may be squeezed away — it is a transcript of what already
         // happened. The drop zone is a target and has to stay aimable.
         ok('the Log is the only thing in the scrolling tail',

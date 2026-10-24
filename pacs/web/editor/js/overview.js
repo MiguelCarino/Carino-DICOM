@@ -611,8 +611,11 @@
   $('ovFilesBtn')?.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
   $('ovFolderBtn')?.addEventListener('click', e => { e.stopPropagation(); openFolder('study'); });
 
-  // Open another file at any time (button, or drop anywhere on the loaded overview).
-  $('ovOpenBtn')?.addEventListener('click', () => fileInput.click());
+  // Open another file at any time (the Load Files card, or drop anywhere on the loaded overview).
+  // The buttons sit inside the zone, whose click also opens the picker.
+  $('ovLoadZone')?.addEventListener('click', () => fileInput.click());
+  $('ovLoadFilesBtn')?.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
+  $('ovLoadFolderBtn')?.addEventListener('click', e => { e.stopPropagation(); openFolder('study'); });
   const ovContent = $('ovContent');
   if (ovContent) {
     ovContent.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); ovContent.classList.add('ov-dragover'); });
@@ -694,7 +697,7 @@
 
     const body = `${imgTag}${sectionHtml}${valHtml}`;
     carinoBrandedPrint({
-      title: 'DICOM Study Overview',
+      title: 'DICOM Study Report',
       subtitle: `${fileName} · generated ${stamp}`,
       meta: 'Carino DICOM Editor',
       body

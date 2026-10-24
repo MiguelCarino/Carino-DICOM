@@ -163,6 +163,10 @@
     @media (max-width: 700px) {
       .header.top-header { flex-wrap: wrap; row-gap: 8px; }
       .header.top-header .tab-nav { order: 3; flex: 1 1 100%; min-width: 0; }
+      /* No language picker on a phone: the browser's language (or ?lang=) still applies. */
+      .header-right > #cnLangBtn { display: none; }
+      /* The four tabs share the row in equal widths. */
+      .header.top-header .tab-nav > .tab-btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; text-align: center; }
     }
     /* 320-375px: a full row still clips ru/es/pt-BR/en tabs at 16px side padding. */
     @media (max-width: 380px) { .header.top-header .tab-nav > .tab-btn { padding: 6px 8px; } }
@@ -277,9 +281,9 @@
     .ov-nav-btn:disabled { opacity: .3; cursor: default; }
     .ov-studyinfo { flex: 1; text-align: left; min-width: 0; }
     .ov-study-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ov-study-idx { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 8px; }
-    .ov-open-btn { padding: 7px 14px; border: 1px solid var(--accent); background: var(--accent-faint); color: var(--accent); border-radius: 6px; cursor: pointer; font: 600 12px var(--font); white-space: nowrap; transition: .15s; flex-shrink: 0; }
-    .ov-open-btn:hover { background: var(--accent); color: var(--on-accent); }
+    .ov-study-idx { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 8px; white-space: nowrap; }
+    /* A phone has no room beside the buttons: the file name takes its own line instead of a sliver. */
+    @media (max-width: 640px) { .ov-studyinfo { flex-basis: 100%; } }
     .ov-print-btn { padding: 7px 14px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 6px; cursor: pointer; font: 600 12px var(--font); white-space: nowrap; transition: .15s; flex-shrink: 0; }
     .ov-print-btn:hover { border-color: var(--accent); color: var(--accent); }
     .ov-content.ov-dragover { outline: 2px dashed var(--accent); outline-offset: 8px; border-radius: 14px; }
@@ -502,6 +506,19 @@
       color: var(--text);
       border-color: var(--accent);
       background: rgba(234,179,8,0.1);
+    }
+    /* Desktop shows the chips; a phone shows #catSelect instead (see the 700px block below). */
+    .cat-select { display: none; }
+    /* Buttons carrying two labels show the short one on a phone. */
+    .lbl-short { display: none; }
+    @media (max-width: 700px) {
+      .filters-row > .filter-btn { display: none; }
+      .filters-row > .cat-select { display: block; }
+      .lbl-long { display: none; }
+      .lbl-short { display: inline; }
+      /* Extract: count and source on one line, then its three buttons sharing the next. */
+      #extractorTab .top-bar > .actions-spacer { order: 1; flex: 0 0 100%; height: 0; }
+      #extractorTab .top-bar > .btn { order: 2; flex: 1 1 0; align-self: stretch; padding-inline: 8px; }
     }
     .filter-btn .dot {
       width: 8px;

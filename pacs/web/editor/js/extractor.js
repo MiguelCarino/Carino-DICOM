@@ -5,7 +5,6 @@
 let extractorFiles = [];
 let extractorRenderGen = 0;
 
-const extractorAddBtn    = $('extractorAddBtn');
 const extractorFileInput = $('extractorFileInput');
 const extractorGridWrap  = $('extractorGridWrap');
 const extractorGrid         = $('extractorGrid');
@@ -32,7 +31,6 @@ function extractorLog(msg) {
   extractorLogArea.scrollTop = extractorLogArea.scrollHeight;
 }
 
-extractorAddBtn.addEventListener('click', () => extractorFileInput.click());
 // Stop propagation: the enclosing drop zone's click opens the same picker.
 extractorSideAddBtn.addEventListener('click', e => { e.stopPropagation(); extractorFileInput.click(); });
 extractorFileInput.addEventListener('change', e => { if (e.target.files?.length) addExtractorFiles(e.target.files); });
@@ -144,6 +142,7 @@ async function renderExtractorGrid() {
   const items = extractorItems();
   const nStudy = items.length - extractorFiles.length;
   setCountPill(extractorCount, items.length);
+  extractorDropZone.classList.toggle('compact', items.length > 0);
   extractorSource.hidden = !nStudy;
   extractorSource.textContent = T('Includes the open study ({n}), with your edits').replace('{n}', nStudy);
   clearExtractorBtn.hidden = !extractorFiles.length;

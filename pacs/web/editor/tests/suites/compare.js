@@ -246,9 +246,9 @@
       doc.getElementById('compareWith').value = '1';
       doc.getElementById('compareWith').dispatchEvent(new win.Event('change'));
       previewsSideBySide(doc, `${w}x${h}`);
-      const pv = doc.getElementById('previewCard').getBoundingClientRect().bottom;
-      const lf = doc.getElementById('loadFilesCard').getBoundingClientRect().top;
-      ok(`${w}x${h}: Load Files starts below the Preview card`, lf >= pv - 0.5, `${Math.round(lf)} < ${Math.round(pv)}`);
+      const pv = doc.getElementById('previewCard').getBoundingClientRect().top;
+      const lf = doc.getElementById('loadFilesCard').getBoundingClientRect().bottom;
+      ok(`${w}x${h}: Load Files ends above the Preview card`, lf <= pv + 0.5, `${Math.round(lf)} > ${Math.round(pv)}`);
       const side = doc.querySelector('.sidebar');
       if (h === 600) ok('1280x600: the sidebar scrolls to reach it', side.scrollHeight > side.clientHeight,
                         `${side.scrollHeight}/${side.clientHeight}`);

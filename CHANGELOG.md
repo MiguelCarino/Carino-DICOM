@@ -6,6 +6,14 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 ## [Unreleased]
 
 ### Added
+- **One place for files in and files out in the bundled editor** (re-synced to upstream
+  `af9856d`). Load Files is the first card of the right column in Overview, Edit, Extract
+  and Create; the save action is the yellow button at the right end of each top bar
+  (Extract's buttons and Create DICOM move up there), and the repeated Open / Add buttons
+  are gone. On a phone the language picker is hidden, the tabs share their row evenly,
+  Edit's tag categories become one menu and Extract's buttons share a row with short
+  labels. The Overview printout is titled "DICOM Study Report". The worklist's eye-photo
+  hand-off is unchanged.
 - **Activity → Worklist queries.** Every attribute each modality's worklist query asks
   for, per calling AE title — sequences as paths, filter or fill-in — and how the answer
   carried it: filled, sent empty, or not sent. Missing attributes are listed first, so a

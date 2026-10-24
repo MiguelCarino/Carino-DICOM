@@ -7,7 +7,6 @@ const SERIES_COLORS = ['#a78bfa','#22d3ee','#f472b6','#fb923c','#4ade80','#facc1
 let createSeries = [{ id: 1, description: '', color: SERIES_COLORS[0] }];
 let nextSeriesId = 2;
 
-const createAddBtn   = $('createAddBtn');
 const createSideAddBtn = $('createSideAddBtn');
 const createFileInput  = $('createFileInput');
 const createImgWrap  = $('createImgWrap');
@@ -102,12 +101,13 @@ function removeSeries(id) {
 
 function renderCreateGrid() {
   setCountPill(createImgCount, createImages.length);
+  createSideDropZone.classList.toggle('compact', createImages.length > 0);
   refreshCreateBlock();
   if (!createImages.length) {
     createImgGrid.innerHTML = `
       <div class="img-empty">
         <div class="img-empty-icon">🖼</div>
-        <span>${T('Drop images here or click "+ Add Images"')}</span>
+        <span>${T('Drop images here')}</span>
         <span class="img-empty-hint">${T('PNG · JPEG · BMP · WebP supported')}</span>
       </div>`;
     return;
@@ -169,8 +169,8 @@ function renderCreateGrid() {
   createImgGrid.appendChild(grid);
 }
 
-createAddBtn.addEventListener('click', () => createFileInput.click());
-createSideAddBtn.addEventListener('click', () => createFileInput.click());
+// Inside the drop zone, which opens the picker on click too.
+createSideAddBtn.addEventListener('click', e => { e.stopPropagation(); createFileInput.click(); });
 createSideDropZone.addEventListener('click', () => createFileInput.click());
 createFileInput.addEventListener('change', e => {
   if (e.target.files?.length) addCreateImages(Array.from(e.target.files));

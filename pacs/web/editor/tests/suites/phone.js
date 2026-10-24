@@ -61,6 +61,42 @@
       }
     }
 
+    // The four tabs share their row in equal widths.
+    {
+      const ws = [...f.doc.querySelectorAll('.tab-nav > .tab-btn')].map(b => b.getBoundingClientRect().width);
+      ok('phone: the four tabs are the same width', ws.length === 4 && Math.max(...ws) - Math.min(...ws) < 1,
+         ws.map(Math.round).join(','));
+    }
+
+    // Edit: the category chips give way to one menu, and the menu filters.
+    {
+      $('editorTabBtn').click();
+      const shownChips = [...f.doc.querySelectorAll('.filter-btn')].filter(b => b.getBoundingClientRect().width);
+      ok('phone: the tag category chips are hidden', !shownChips.length, `${shownChips.length} shown`);
+      const sel = $('catSelect');
+      ok('phone: the tag category menu is shown, on screen', !reach(f, sel), reach(f, sel));
+      sel.value = 'patient';
+      sel.dispatchEvent(new f.win.Event('change'));
+      ok('phone: choosing Patient in the menu filters the table', f.win.eval('activeCat') === 'patient',
+         f.win.eval('activeCat'));
+      f.doc.querySelector('.filter-btn[data-cat="all"]').click();
+      ok('and the menu follows the chips back to All', sel.value === 'all', sel.value);
+    }
+
+    // Extract: its save buttons share one row, each showing its short label.
+    {
+      $('extractorTabBtn').click();
+      const btns = ['extractSelectedBtn', 'extractAllBtn'].map($);
+      const tops = btns.map(b => Math.round(b.getBoundingClientRect().top));
+      ok('phone: Extract\'s save buttons are on one row', new Set(tops).size === 1, tops.join(','));
+      ok('and each shows its short label',
+         btns.every(b => b.querySelector('.lbl-short').getBoundingClientRect().width > 0 &&
+                         !b.querySelector('.lbl-long').getBoundingClientRect().width),
+         btns.map(b => b.textContent.trim()).join(' | '));
+      const why = btns.map(b => reach(f, b)).filter(Boolean).join('; ');
+      ok('and both are on screen', !why, why);
+    }
+
     // Edit, stacked: Value is the only editable column, and the tag table scrolls sideways, so an
     // input past the wrap's edge is reachable only by a scroll nobody expects on a phone.
     const editNarrow = async (g, W, lang) => {
@@ -111,6 +147,11 @@
     const right = f.doc.querySelector('.header-right').getBoundingClientRect();
     ok('phone: the tab strip sits on its own row below the header controls', nav.top >= right.bottom - 0.5,
        `${Math.round(nav.top)} < ${Math.round(right.bottom)}`);
+
+    // No language picker on a phone; the browser's language still applies.
+    const lb = f.doc.getElementById('cnLangBtn');
+    ok('phone: the language picker is hidden', !!lb && !lb.getBoundingClientRect().width,
+       lb ? `${Math.round(lb.getBoundingClientRect().width)}px wide` : 'carino-lang.js did not add it');
 
     // ru has the longest tab labels. 660 is in the old 641-700 band where the one-row strip clipped
     // Create, 701 is one row again, 320 is the narrowest tab row.
