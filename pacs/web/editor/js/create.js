@@ -60,7 +60,7 @@ function renderSeriesPanel() {
 
     const input = document.createElement('input');
     input.className = 'form-input';
-    input.style.cssText = 'flex:1;font-size:12px;padding:5px 8px';
+    input.style.cssText = 'flex:1;font-size:var(--fs-sm);padding:5px 8px';
     input.maxLength = 64;                              // LO (PS3.5 Table 6.2-1)
     input.placeholder = T('Description');
     input.value = s.description;

@@ -6,6 +6,14 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 ## [Unreleased]
 
 ### Added
+- **Fleet layout in the bundled editor** (re-synced to upstream's page-type work). Its
+  modules move from the header into a slice bar under the shared Carino navbar, and each
+  module has its own link (`#overview`, `#edit`, `#extract`, `#create`); the existing
+  `#sample=`, `#case=`, `#create=` and bridge links still work. The settings rail sits on
+  the left, text uses the fleet type scale, and the editor loads the shared
+  `carino-ui.css`/`carino-ui.js`, `carino-navbar.js` and `fonts/carino-fonts.css` (the old
+  `fonts.css` is gone), all served from this engine, nothing off-origin. The worklist's
+  eye-photo hand-off and PN round-trip are unchanged.
 - **One place for files in and files out in the bundled editor** (re-synced to upstream
   `af9856d`). Load Files is the first card of the right column in Overview, Edit, Extract
   and Create; the save action is the yellow button at the right end of each top bar

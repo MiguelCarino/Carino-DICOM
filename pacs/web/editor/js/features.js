@@ -62,9 +62,13 @@ let _toastTimer = null;
 function toast(msg, ms = 2400) {
   if (_toastEl) _toastEl.remove();
   _toastEl = document.createElement('div');
-  _toastEl.className = 'toast';
+  // carino-ui.css's toast (#toast): it fades in once .show is added, after the first paint.
+  _toastEl.className = 'toast info';
+  _toastEl.setAttribute('role', 'status');
   _toastEl.textContent = T(msg);
   document.body.appendChild(_toastEl);
+  const el = _toastEl;
+  requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => { _toastEl?.remove(); _toastEl = null; }, ms);
 }

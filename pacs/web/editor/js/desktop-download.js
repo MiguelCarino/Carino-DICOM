@@ -7,6 +7,9 @@
   // Fetched rather than hardcoded so the card stays hidden until a release exists.
   (function () {
     if (location.hostname !== 'dcm.carino.systems') return;
+    // The privacy line names the one outside request, here and only here.
+    const also = document.getElementById('ovPrivacyAlso');
+    if (also) also.hidden = false;
 
     const T = (k) => (window.t || String)(k);
     const card = document.getElementById('ovGet');

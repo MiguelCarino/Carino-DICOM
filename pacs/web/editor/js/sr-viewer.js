@@ -111,7 +111,7 @@ function renderSR(d) {
   const root = srItems(d, '0040A730');
   if (!root.length) {
     const msg = document.createElement('p');
-    msg.style.cssText='color:var(--text-muted);font-size:12px;margin-top:8px';
+    msg.style.cssText='color:var(--text-muted);font-size:var(--fs-sm);margin-top:8px';
     msg.textContent=T('No content items found in Content Sequence.');
     srView.appendChild(msg);
     return;

@@ -21,55 +21,26 @@
   <script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebApplication", "name": "Carino DICOM Editor", "url": "https://dcm.carino.systems/", "description": "Inspect and modify X-ray metadata tags for HIPAA compliance and PACS interoperability.", "operatingSystem": "Any (runs in a web browser)", "isAccessibleForFree": true, "author": {"@type": "Person", "name": "Miguel Cariño", "url": "https://carino.systems/"}}</script>
   <!-- /carino:head -->
   <script src="carino-bridge.js" defer></script>
-  <script src="carino-clock.js" defer></script>
+  <!-- The shared navbar (it loads carino-clock.js itself), then the slice router. -->
+  <script src="carino-navbar.js" data-app="DCM" data-repo="Carino-DICOM-Editor" defer></script>
+  <script src="carino-ui.js" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
-  <link href="fonts.css" rel="stylesheet">
+  <link href="fonts/carino-fonts.css" rel="stylesheet">
+  <link rel="stylesheet" href="carino-ui.css">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <div class="app">
-    <header class="header top-header">
-      <div class="header-left">
-        <span class="cn-brand">
-          <a class="brand-name" href="https://carino.systems/" title="Carino Systems — back to hub">Carino</a>
-          <a class="app-tag" href="./" title="DCM — reload">DCM</a>
-        </span>
-        <div class="header-clock" aria-hidden="true">
-          <span class="clock-time" id="clockLocal">00:00:00</span>
-          <span class="clock-tz" id="tzName">LOCAL</span>
-          <span class="brand-greeting" id="greeting">Ready.</span>
-        </div>
-      </div>
-
-      <nav class="tab-nav">
-        <button class="tab-btn active" id="overviewTabBtn" data-i18n>Overview</button>
-        <button class="tab-btn" id="editorTabBtn" data-i18n>Edit</button>
-        <button class="tab-btn" id="extractorTabBtn" data-i18n>Extract</button>
-        <button class="tab-btn" id="createTabBtn" data-i18n>Create</button>
-      </nav>
-
-      <div class="header-right">
-        <!-- Desktop shell only (this file is also served on the web and by the PACS): shown only when
-             the Electron preload publishes window.carinoDesktop. The .hidden class is the guarantee
-             ([hidden] loses to any authored display rule); .app-tag reuses the header pill style. -->
-        <a class="app-tag hidden" id="deskUpdate" hidden data-i18n>Update available ↗</a>
-        <div class="social-row">
-          <a href="https://carino.systems/legal.html" class="icon-btn" id="cnLegal" title="Legal notice &amp; privacy" aria-label="Legal notice &amp; privacy">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          </a>
-          <a href="https://github.com/MiguelCarino/Carino-DICOM-Editor" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
-          </a>
-          <a href="https://www.linkedin.com/in/miguelcarino94/" target="_blank" rel="noopener" class="icon-btn" title="LinkedIn" aria-label="LinkedIn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
-          </a>
-        </div>
-        <button class="status-toggle" id="diagToggle" title="File info" aria-label="File info" aria-haspopup="true" aria-expanded="false" aria-controls="diagBox">
-          <span data-i18n>Info</span><div class="pulse-dot"></div>
-        </button>
-      </div>
-
+  <!-- App controls, moved into the shared navbar by carino-navbar.js. The Info toggle and its
+       dropdown travel together (data-priority="1" keeps them in the bar on a phone). -->
+  <div class="dcm-actions" data-carino-actions>
+    <!-- Desktop shell only (this file is also served on the web and by the PACS): shown only when
+         the Electron preload publishes window.carinoDesktop. The .hidden class is the guarantee. -->
+    <a class="desk-update hidden" id="deskUpdate" hidden data-i18n>Update available ↗</a>
+    <div class="diag-wrap" data-priority="1">
+      <button class="status-toggle" id="diagToggle" title="File info" aria-label="File info" aria-haspopup="true" aria-expanded="false" aria-controls="diagBox">
+        <span data-i18n>Info</span><div class="pulse-dot"></div>
+      </button>
       <!-- Diagnostics dropdown -->
       <div class="diag-dropdown" id="diagBox">
         <div class="diag-section" data-i18n>File</div>
@@ -90,7 +61,18 @@
         <div class="diag-section" data-i18n>Session</div>
         <div class="diag-row"><span class="diag-lbl" data-i18n>Local time</span><span class="diag-val" id="diagClock">--:--:--</span></div>
       </div>
-    </header>
+    </div>
+  </div>
+
+  <div class="app">
+    <!-- The modules: a slice bar, collapsed from the start because every module works on the same
+         files. Each is #overview, #edit, #extract or #create (js/events.js routes them). -->
+    <nav class="slice-menu collapsed" id="moduleMenu" aria-label="Modules">
+      <button type="button" class="slice active" id="overviewTabBtn" data-id="overview"><span class="s-num">01</span><span class="s-text" data-i18n>Overview</span></button>
+      <button type="button" class="slice" id="editorTabBtn" data-id="edit"><span class="s-num">02</span><span class="s-text" data-i18n>Edit</span></button>
+      <button type="button" class="slice" id="extractorTabBtn" data-id="extract"><span class="s-num">03</span><span class="s-text" data-i18n>Extract</span></button>
+      <button type="button" class="slice" id="createTabBtn" data-id="create"><span class="s-num">04</span><span class="s-text" data-i18n>Create</span></button>
+    </nav>
 
     <!-- ============================ Overview Tab ============================ -->
     <div class="ov-main" id="overviewTab">
@@ -99,19 +81,11 @@
         <!-- A file input is `multiple` or `webkitdirectory`, never both, so the box holds two buttons.
              Not role="button" since it contains buttons; clicking the background still opens files. -->
         <!-- Page h1. Two plain spans because the i18n pass overwrites textContent. -->
-        <section class="ov-hero">
-          <div class="ov-hero-mark" aria-hidden="true">
-            <img src="logo.svg" alt="" width="64" height="64" decoding="async">
-            <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
-              <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
-              <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
-            </svg>
-          </div>
+        <section class="short-hero ov-hero">
+          <img class="mark" src="logo.svg" alt="" width="48" height="48" decoding="async">
           <h1><span data-i18n>That file has a patient in it.</span><br><span class="gold" data-i18n>Nothing you open here leaves this machine.</span></h1>
-          <p class="ov-hero-lede">
-            <span data-i18n>Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.</span>
-            <span data-i18n>It all runs in this tab — no server, no upload, no account — which is why it still works with the network unplugged.</span>
-          </p>
+          <p class="sh-lede" data-i18n>Read and edit every tag, apply the PS3.15 de-identification profile, paint out identity burned into the picture itself, and compare a study side by side.</p>
+          <p class="privacy-line"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span><span class="pl-also" id="ovPrivacyAlso" hidden> <span data-i18n>This site also asks GitHub for the latest desktop version.</span></span></p>
         </section>
 
         <div class="ov-ways">
@@ -237,7 +211,7 @@
             <!-- Same card, same place as in Edit, Extract and Create: files in at the top of the right column. -->
             <section class="card" id="ovLoadCard">
               <div class="card-title" data-i18n>Load Files</div>
-              <div class="drop-zone compact" id="ovLoadZone">
+              <div class="dropzone compact" id="ovLoadZone">
                 <h4 data-i18n>Drop DICOM files</h4>
                 <p data-i18n>or click to browse</p>
                 <div class="drop-zone-actions">
@@ -283,8 +257,8 @@
       </div>
     </div>
 
-    <div class="main" id="editorTab" style="display:none">
-      <div class="left-panel">
+    <div class="main ws ws-stack" id="editorTab" style="display:none">
+      <div class="left-panel ws-pane">
         <!-- One row, grouped by job: history · de-identification · tools (menu) · export (menu) · download.
              Occasional tools live in menus so the tag table starts high; their rows open below on demand.
              The two pills are kept for their counts (read by tests and the log) but the series strip
@@ -443,7 +417,7 @@
         </div>
       </div>
 
-      <div class="sidebar">
+      <aside class="sidebar ws-rail">
       <!-- No accept filter: PACS exports name slices IM000001 / I0000001 / bare numbers. -->
       <input id="fileInput" type="file" multiple hidden />
       <input id="folderInput" type="file" webkitdirectory multiple hidden />
@@ -452,7 +426,7 @@
              a squeezed drop target cannot be aimed at. (Window-wide drop also works.) -->
         <div class="card" id="loadFilesCard">
           <div class="card-title" data-i18n>Load Files</div>
-          <div class="drop-zone" id="dropZone">
+          <div class="dropzone" id="dropZone">
             <h4 data-i18n>Drop DICOM files</h4>
             <p data-i18n>or click to browse</p>
             <div class="drop-zone-actions">
@@ -576,12 +550,12 @@
             <pre class="log-area" id="logArea"></pre>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
 
   <!-- Create DICOM Tab -->
-  <div class="create-panel" id="createTab" style="display:none">
-    <div class="create-left">
+  <div class="create-panel ws ws-stack" id="createTab" style="display:none">
+    <div class="create-left ws-pane">
       <div class="top-bar">
         <div class="pill" id="createImgCount" data-i18n data-i18n-key="Images: {n}" data-i18n-n="0">Images: 0</div>
         <input id="createFileInput" type="file" multiple accept="image/*" hidden />
@@ -603,10 +577,10 @@
       </div>
     </div>
 
-    <div class="create-sidebar">
+    <aside class="create-sidebar ws-rail">
       <div class="card">
         <div class="card-title" data-i18n>Load Images</div>
-        <div class="drop-zone" id="createSideDropZone">
+        <div class="dropzone" id="createSideDropZone">
           <h4 data-i18n>Drop images here</h4>
           <p>PNG · JPEG · BMP · WebP</p>
           <div class="drop-zone-actions">
@@ -791,11 +765,11 @@
         <div class="series-list" id="seriesList"></div>
         <button class="series-add-btn" id="addSeriesBtn" data-i18n>+ Add Series</button>
       </div>
-    </div>
+    </aside>
   </div>
   <!-- Extractor Tab -->
-  <div class="extractor-panel" id="extractorTab" style="display:none">
-    <div class="extractor-left">
+  <div class="extractor-panel ws ws-stack" id="extractorTab" style="display:none">
+    <div class="extractor-left ws-pane">
       <div class="top-bar">
         <div class="pill" id="extractorCount" data-i18n data-i18n-key="Files: {n}" data-i18n-n="0">Files: 0</div>
         <span class="extractor-source" id="extractorSource" hidden></span>
@@ -817,10 +791,10 @@
       </div>
     </div>
 
-    <div class="extractor-sidebar">
+    <aside class="extractor-sidebar ws-rail">
       <div class="card">
         <div class="card-title" data-i18n>Load Files</div>
-        <div class="drop-zone" id="extractorDropZone">
+        <div class="dropzone" id="extractorDropZone">
           <h4 data-i18n>Drop DICOM files</h4>
           <p data-i18n>or click to browse</p>
           <div class="drop-zone-actions">
@@ -833,7 +807,7 @@
         <div class="card-title" data-i18n>Log</div>
         <pre class="log-area" id="extractorLogArea"></pre>
       </div>
-    </div>
+    </aside>
   </div>
 
   <!-- Compare Tab -->

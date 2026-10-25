@@ -61,11 +61,16 @@
       }
     }
 
-    // The four tabs share their row in equal widths.
+    // The four modules share the slice bar in equal widths, labels only, 44px high.
     {
-      const ws = [...f.doc.querySelectorAll('.tab-nav > .tab-btn')].map(b => b.getBoundingClientRect().width);
-      ok('phone: the four tabs are the same width', ws.length === 4 && Math.max(...ws) - Math.min(...ws) < 1,
+      const sl = [...f.doc.querySelectorAll('#moduleMenu > .slice')];
+      const ws = sl.map(b => b.getBoundingClientRect().width);
+      ok('phone: the four module slices are the same width', ws.length === 4 && Math.max(...ws) - Math.min(...ws) < 1,
          ws.map(Math.round).join(','));
+      ok('phone: the slice bar is 44px high', Math.round(f.doc.getElementById('moduleMenu').getBoundingClientRect().height) === 44,
+         String(Math.round(f.doc.getElementById('moduleMenu').getBoundingClientRect().height)));
+      ok('phone: each slice shows its label, not just a number',
+         sl.every(b => b.querySelector('.s-text').getBoundingClientRect().width > 0 && !b.querySelector('.s-num').getBoundingClientRect().width));
     }
 
     // Edit: the category chips give way to one menu, and the menu filters.
@@ -142,23 +147,22 @@
       else ok(`phone: ${W}px ${lang || ''} edit: sample loaded`, false);
     }
 
-    // The tabs get their own full-width row under brand and controls.
-    const nav = f.doc.querySelector('.tab-nav').getBoundingClientRect();
-    const right = f.doc.querySelector('.header-right').getBoundingClientRect();
-    ok('phone: the tab strip sits on its own row below the header controls', nav.top >= right.bottom - 0.5,
-       `${Math.round(nav.top)} < ${Math.round(right.bottom)}`);
+    // The slice bar gets its own full-width row under the shared navbar.
+    const nav = f.doc.getElementById('moduleMenu').getBoundingClientRect();
+    const bar = f.doc.getElementById('carinoNav').getBoundingClientRect();
+    ok('phone: the slice bar sits on its own row below the navbar', nav.top >= bar.bottom - 0.5 && nav.width >= f.win.innerWidth - 0.5,
+       `${Math.round(nav.top)} < ${Math.round(bar.bottom)}`);
 
-    // No language picker on a phone; the browser's language still applies.
-    const lb = f.doc.getElementById('cnLangBtn');
-    ok('phone: the language picker is hidden', !!lb && !lb.getBoundingClientRect().width,
-       lb ? `${Math.round(lb.getBoundingClientRect().width)}px wide` : 'carino-lang.js did not add it');
+    // The navbar never squeezes the brand out (carino-navbar.js folds controls into its menu first).
+    const brand = f.doc.querySelector('#carinoNav .cn-brand');
+    ok('phone: the Carino brand is fully on screen', !reach(f, brand), reach(f, brand));
 
-    // ru has the longest tab labels. 660 is in the old 641-700 band where the one-row strip clipped
-    // Create, 701 is one row again, 320 is the narrowest tab row.
+    // ru has the longest module labels. 660 and 701 were once clipped in the old header's tab strip;
+    // 320 is the narrowest slice bar.
     for (const W of [320, 660, 701]) {
       const g = await open(W, 700, 'ru');
       const why = g.loaded ? reach(g, g.doc.getElementById('createTabBtn')) : 'sample did not load';
-      ok(`phone: ${W}px ru: #createTabBtn is not clipped by the tab strip`, !why, why);
+      ok(`phone: ${W}px ru: #createTabBtn is not clipped by the slice bar`, !why, why);
     }
   } catch (e) {
     ok('suite ran to completion', false, (e && e.stack ? e.stack.split('\n')[0] : String(e)));

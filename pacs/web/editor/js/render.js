@@ -675,7 +675,7 @@ function rebuildBatch() {
   const sz = n > 1000 ? 500 : n > 200 ? 100 : n > 50 ? 50 : 10;
 
   const lbl = document.createElement('span');
-  lbl.style.cssText = 'font-size:11px;color:var(--text-muted);white-space:nowrap';
+  lbl.style.cssText = 'font-size:var(--fs-btn);color:var(--text-muted);white-space:nowrap';
   lbl.textContent = T('Range:');
 
   const sel = document.createElement('select');

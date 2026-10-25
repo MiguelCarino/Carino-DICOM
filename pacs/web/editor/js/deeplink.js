@@ -1,4 +1,6 @@
 // Deep-link loader: open a study from Carino DICOM (PACS) or a forged sample/test case.
+// The hash may name a module first (#edit&sample=ct); js/events.js routes that part, and every
+// parser below looks for its own key after a "#" or "&", so either order works.
 //  (A) Carino Bridge (#carino-bridge): for an HTTPS editor and an http://localhost PACS, where
 //      mixed content blocks fetching; the PACS posts the bytes instead.
 //  (B) Direct fetch (#load=<manifestUrl>): same-origin / localhost editor.
@@ -61,10 +63,12 @@ window.addEventListener('load', () => {
 
   // ---- (A1a) Create prefill: #create[=eye]&patient_id=… (format in js/create.js) ----
   // From the hash only (parseCreateHash refuses a query string, which reaches server logs).
+  // A bare #create is only the module link (js/events.js has opened it); an order names a kind
+  // (#create=eye) or carries a field.
   const order = parseCreateHash(location.hash);
-  if (order) {
-    // Read once, then gone from the address bar and from history.
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+  if (order && (order.kind || Object.keys(order).length > 1)) {
+    // Read once, then gone from the address bar and from history; the module stays named.
+    try { history.replaceState(null, '', location.pathname + location.search + '#create'); } catch (_) {}
     applyCreatePrefill(order);
     return;
   }

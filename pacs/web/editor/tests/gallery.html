@@ -4,37 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forge gallery — DICOM test images</title>
-<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../fonts/carino-fonts.css">
+<link rel="stylesheet" href="../carino-ui.css">
 <style>
-  /* A copy of the token block at the top of ../app.css, kept in step by hand.
-     Verified identical value by value on 2026-08-08. One page is not enough
-     consumers to justify extracting a shared stylesheet, but if a third one
-     appears, extract it rather than making a third copy. */
-  :root {
-    --surface: #0d0d0d; --surface-solid: #080808; --border: #262626;
-    --text: #fff; --text-dim: #a3a3a3; --text-muted: #666;
-    --accent: #eab308; --accent-glow: rgba(234,179,8,.15);
-    --font: 'IBM Plex Sans', 'Red Hat Text', 'Liberation Sans', system-ui, sans-serif;
-    --mono: 'IBM Plex Mono', 'Liberation Mono', ui-monospace, monospace;
-    --r-md: 10px; --r-sm: 4px;
-  }
+  /* Branding's tokens come from ../carino-ui.css, as in the app; these are app.css's extras. */
+  :root { --surface-solid: #080808; --r-md: 10px; --r-sm: 4px; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--surface-solid); color: var(--text);
-         font-family: var(--font); font-size: 14px; line-height: 1.55; }
+         font-family: var(--sans); font-size: 14px; line-height: 1.55; }
   header { border-bottom: 1px solid var(--border); padding: 28px 24px 22px; }
   h1 { margin: 0 0 6px; font-size: 1.25rem; letter-spacing: -.01em; }
   h1 span { color: var(--accent); }
-  header p { margin: 0 0 14px; color: var(--text-dim); max-width: 68ch; }
+  header p { margin: 0 0 14px; color: var(--text-sec); max-width: 68ch; }
   .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   button { font: inherit; font-size: .8rem; padding: 7px 14px; border-radius: var(--r-sm);
-           border: 1px solid var(--border); background: var(--surface); color: var(--text);
+           border: 1px solid var(--border); background: var(--bg-elev); color: var(--text);
            cursor: pointer; }
   button:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
   .count { color: var(--text-muted); font-family: var(--mono); font-size: .75rem; }
   main { display: grid; gap: 16px; padding: 24px;
          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-  .card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+  .card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-elev);
           overflow: hidden; display: flex; flex-direction: column; }
   .shot { background: #000; display: flex; align-items: center; justify-content: center;
           aspect-ratio: 1; padding: 12px; }
@@ -44,16 +35,16 @@
   .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
   .id { font-family: var(--mono); font-size: .68rem; color: var(--accent); letter-spacing: .02em; }
   .title { font-size: .84rem; font-weight: 600; }
-  .note { font-size: .76rem; color: var(--text-dim); flex: 1; }
+  .note { font-size: .76rem; color: var(--text-sec); flex: 1; }
   .frames { font-family: var(--mono); font-size: .68rem; color: var(--text-muted); }
   .acts { display: flex; gap: 6px; }
   .acts > * { flex: 1; text-align: center; }
   .acts a { text-decoration: none; }
   .sec { grid-column: 1 / -1; margin: 6px 0 0; font-size: .95rem; }
-  .sec + .sec-note { grid-column: 1 / -1; margin: -6px 0 2px; color: var(--text-dim); max-width: 72ch; }
+  .sec + .sec-note { grid-column: 1 / -1; margin: -6px 0 2px; color: var(--text-sec); max-width: 72ch; }
   .back { display: inline-block; margin-bottom: 10px; font-size: .8rem; text-decoration: none; }
   .back:hover { text-decoration: underline; }
-  footer { border-top: 1px solid var(--border); padding: 20px 24px 40px; color: var(--text-dim); }
+  footer { border-top: 1px solid var(--border); padding: 20px 24px 40px; color: var(--text-sec); }
   footer code { font-family: var(--mono); font-size: .78rem; color: var(--text); }
   a { color: var(--accent); }
 </style>

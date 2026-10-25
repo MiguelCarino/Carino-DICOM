@@ -327,8 +327,22 @@ const ALL_TABS = [
   ['extractor', extractorTabBtn, extractorTabPanel, 'grid'],
 ];
 
-function switchTab(tab) {
+// Each module is linkable as #<module>, extra parameters after "&" (#edit&sample=ct, read by
+// js/deeplink.js). The hash names differ from the internal tab ids, which tests and the log use.
+const TAB_HASH = { overview: 'overview', editor: 'edit', extractor: 'extract', create: 'create' };
+let slicer = null;   // CarinoUI.slices handle, set on DOMContentLoaded (carino-ui.js is deferred)
+
+function switchTab(tab, fromRoute) {
   activeTab = tab;
+  // A switch made in code (a button, a hand-off) writes the hash too, so Back and a reload agree
+  // with the screen. The router's own call (fromRoute) must not write it back.
+  if (!fromRoute && slicer) {
+    const cur = location.hash.replace(/^#/, '').split('&')[0];
+    if (cur !== TAB_HASH[tab]) {
+      try { history.pushState(null, '', location.pathname + location.search + '#' + TAB_HASH[tab]); } catch (_) {}
+      slicer.route();
+    }
+  }
   for (const [id, btn, panel, display] of ALL_TABS) {
     btn.classList.toggle('active', id === tab);
     panel.style.display = id === tab ? display : 'none';
@@ -344,4 +358,21 @@ function switchTab(tab) {
 }
 
 for (const [id, btn] of ALL_TABS) btn.addEventListener('click', () => switchTab(id));
+
+// The slice bar's router. An empty or unknown first part (#sample=…, #case=…, #carino-bridge,
+// #selftest) is the Overview; deeplink.js reads those parameters itself, after this has run.
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.CarinoUI) return;
+  const tabOf = id => Object.keys(TAB_HASH).find(k => TAB_HASH[k] === id);
+  slicer = CarinoUI.slices({
+    menu: $('moduleMenu'),
+    collapsed: true,
+    onRoute(id) {
+      const tab = tabOf(id) || (id ? null : 'overview');
+      if (tab && tab !== activeTab) switchTab(tab, true);
+      // CarinoUI marks only a named module; an empty hash is still the Overview.
+      for (const [t, btn] of ALL_TABS) btn.classList.toggle('active', t === activeTab);
+    },
+  });
+});
 
