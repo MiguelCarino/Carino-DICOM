@@ -265,6 +265,9 @@
       vEl.textContent = tt('Version') + ' ';
       vEl.appendChild(strong);
     }
+    // The footer names the same version the buttons hand out.
+    var fv = document.getElementById("footVersion");
+    if (fv && shownTag != null) fv.textContent = "v" + String(shownTag).replace(/^v/, "");
   }
   // Order against i18n.js's own listener does not matter: t() resolves the
   // locale through window.CarinoLang.current on every call, and carino-lang.js
@@ -358,6 +361,8 @@
   function pointManual(lang) {
     if (!manualLink) return;
     manualLink.href = MANUALS[lang] || MANUALS.en;
+    var footManual = document.getElementById("footManual");
+    if (footManual) footManual.href = manualLink.href;
     // Say where it actually goes when that is not the language being read. This
     // is the only route to the manual on the page, so a reader pressing a label
     // in their own language and landing in English has to be told before the
@@ -413,6 +418,28 @@
       var inside = e.clientX >= r.left && e.clientX <= r.right &&
                    e.clientY >= r.top && e.clientY <= r.bottom;
       if (!inside) dlg.close();
+    });
+  });
+
+  // ---- copy buttons --------------------------------------------------------
+  // Every command block is a Branding terminal. Copy takes the .cmd spans only,
+  // one per line, so the "$" prompts never land in the clipboard.
+  document.querySelectorAll(".term-copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var wrap = btn.closest(".terminal-wrapper");
+      var text = Array.prototype.map.call(wrap.querySelectorAll(".cmd"),
+        function (c) { return c.textContent; }).join("\n");
+      var label = btn.querySelector("span") || btn;
+      var done = function (msg, ok) {
+        label.textContent = tt(msg);
+        btn.classList.toggle("done", ok);
+        setTimeout(function () { label.textContent = tt("Copy"); btn.classList.remove("done"); }, 1600);
+      };
+      // The clipboard API needs a secure origin and permission; say what to do
+      // instead of failing quietly.
+      if (!navigator.clipboard) { done("Press Ctrl+C", false); return; }
+      navigator.clipboard.writeText(text).then(function () { done("Copied", true); },
+        function () { done("Press Ctrl+C", false); });
     });
   });
 

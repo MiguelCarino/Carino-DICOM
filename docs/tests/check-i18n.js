@@ -29,7 +29,8 @@ const LOCALES = ['es', 'pt-BR', 'ja', 'ru'];
 // as [data-i18n] in the markup, so the orphan check has to know about them.
 // '#version' starts as plain text and is translated by applyVersionPlaceholder,
 // so it carries no data-i18n attribute either.
-const RUNTIME_KEYS = ['Version', 'Checking for the latest version…'];
+// 'Copied' and 'Press Ctrl+C' are the copy buttons' feedback, set by app.js.
+const RUNTIME_KEYS = ['Version', 'Checking for the latest version…', 'Copied', 'Press Ctrl+C'];
 // Greetings belong to the shared navbar (carino-navbar.js), not to this page.
 const NAVBAR_KEYS = ['Late shift.', 'Good morning.', 'Good afternoon.', 'Good evening.'];
 

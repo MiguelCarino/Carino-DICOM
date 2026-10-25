@@ -16,6 +16,8 @@
   <script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Carino DICOM", "url": "https://dicom.carino.systems/", "description": "A self-hosted DICOM gateway and continuity appliance: receives, routes, forwards and de-identifies studies, answers Query/Retrieve and DICOMweb, and serves an emergency worklist when the PACS is down. Not a medical device, not for primary diagnosis.", "operatingSystem": "Linux, Windows, macOS", "isAccessibleForFree": true, "author": {"@type": "Person", "name": "Miguel Cariño", "url": "https://carino.systems/"}}</script>
   <!-- /carino:head -->
   <link rel="icon" href="favicon.webp" />
+  <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <link rel="stylesheet" href="carino-ui.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -25,8 +27,8 @@
   <script src="i18n.js" defer></script>
 
   <!-- ── Hero + downloads (above the fold) ────────────────────────── -->
-  <header class="hero">
-    <div class="wrap">
+  <header class="hero landing-hero">
+    <div class="wrap lh-wrap">
       <!-- The badge said this above the headline and the headline said something
            else; two hooks competing for the same second of attention. This is
            the one that names the reader's problem, so it is the headline now. -->
@@ -39,9 +41,9 @@
       <!-- The mark sits above the trace, which reads as its underline. Both are
            aria-hidden: the navbar already says "Carino DICOM" in text, and a logo
            announced twice is noise. -->
-      <div class="hero-mark" aria-hidden="true">
+      <div class="hero-mark lh-mark" aria-hidden="true">
         <img class="mark" src="logo.svg" alt="" width="100" height="100" decoding="async">
-        <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
+        <svg class="ekg lh-motif" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
           <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
           <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
         </svg>
@@ -50,8 +52,8 @@
       <!-- One plain sentence, then the three situations it is for (README "Who
            this is for"). The protocol list that used to sit here lives in the
            Features and technical sheets, where the people who need it look. -->
-      <p class="lede"><strong>Carino DICOM</strong> sits between your imaging equipment and your archive, and keeps studies moving when something breaks — on your own hardware, with no cloud.</p>
-      <ul class="situations">
+      <p class="lede lh-lede" id="lede"><strong>Carino DICOM</strong> sits between your imaging equipment and your archive, and keeps studies moving when something breaks — on your own hardware, with no cloud.</p>
+      <ul class="situations lh-situations">
         <li data-i18n>A scanner that can only print? It captures the film so it can be filed like any study.</li>
         <li data-i18n>No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.</li>
         <li data-i18n>The PACS went down? It keeps the worklist running, holds what arrives, and sends it on when the PACS is back.</li>
@@ -61,7 +63,9 @@
            and a label that follows the thing it labels is a label you read
            second. app.js rewrites the tag if a newer release actually carries
            installers, so this line and the buttons can never disagree. -->
-      <p class="version" id="version">Checking for the latest version…</p>
+      <!-- The systems line: the version app.js fills in, then every system it
+           runs on and the licence, so no visitor has to guess either. -->
+      <p class="version sys-line"><span id="version">Checking for the latest version…</span> · Windows · macOS · Linux · Docker · AGPL-3.0</p>
 
       <!-- These three hrefs are the no-JS path and must stay byte-identical to
            PINNED in app.js: the same tag, the same asset names, derived from the
@@ -102,6 +106,10 @@
       <p class="dl-all"><a href="https://github.com/MiguelCarino/Carino-DICOM/releases"
          target="_blank" rel="noopener" data-i18n>All versions and changelogs →</a></p>
 
+      <!-- Literally true: the one request this page makes is the release
+           lookup in app.js, so the line names it. -->
+      <p class="privacy-line dl-privacy"><span data-i18n>This page runs in your browser and sends nothing anywhere.</span>&nbsp;<span class="pl-also" data-i18n>It asks api.github.com for the latest release.</span></p>
+
       <!-- The buttons name both builds where an OS has two (app.js turns each
            into two links once it reads the release); this line only has to say
            why to look. Pre-releases stay under All versions. -->
@@ -123,6 +131,19 @@
       </nav>
     </div>
   </header>
+
+  <!-- The Product footer (Branding #footer). The hero grows to fill the
+       screen, so this sits at the bottom of it rather than mid-page. -->
+  <footer class="site-foot wrap">
+    <div class="sf-links">
+      <a href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener" data-i18n>Source</a>
+      <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n>Changelog</a>
+      <a href="manual/" id="footManual" data-i18n>Manual</a>
+      <a href="https://github.com/MiguelCarino/Carino-DICOM#licence" target="_blank" rel="noopener" data-i18n>Third-party notices</a>
+      <a href="https://carino.systems/legal.html" data-i18n>Legal &amp; privacy</a>
+    </div>
+    <div class="sf-line">Carino DICOM <span id="footVersion">v1.3.0</span> · AGPL-3.0-or-later · <span data-i18n>part of carino.systems</span></div>
+  </footer>
 
   <!-- ── Server chooser ────────────────────────────────────────────────
        A native <dialog>: it gets the focus trap, Escape, the backdrop and the
@@ -148,40 +169,40 @@
       <article>
         <h3>🐳 Docker</h3>
         <p data-i18n>Compose file, everything on loopback. The first boot prints an access token — open http://127.0.0.1:8042/ and paste it when the dashboard asks.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-DICOM
-mkdir -p data
-echo "PACS_UID=$(id -u)" &gt;&gt; .env
-echo "PACS_GID=$(id -g)" &gt;&gt; .env
-docker compose up -d --build
-docker compose logs -f pacs</code></pre>
+<div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">git clone https://github.com/MiguelCarino/Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">cd Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">mkdir -p data</span>
+<span class="prompt">$</span> <span class="cmd">echo "PACS_UID=$(id -u)" &gt;&gt; .env</span>
+<span class="prompt">$</span> <span class="cmd">echo "PACS_GID=$(id -g)" &gt;&gt; .env</span>
+<span class="prompt">$</span> <span class="cmd">docker compose up -d --build</span>
+<span class="prompt">$</span> <span class="cmd">docker compose logs -f pacs</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Docker commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
       <article>
         <h3>🦭 Podman</h3>
         <p data-i18n>Rootless, and systemd owns it. Needs no compose provider, and the token prints to the journal on first boot.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-DICOM
-[ -d ~/CarinoPACS ] &amp;&amp; [ ! -d ~/CarinoDICOM ] &amp;&amp; mv ~/CarinoPACS ~/CarinoDICOM
-mkdir -p ~/CarinoDICOM
-podman build --format docker -t carino-dicom:local .
-install -Dm644 packaging/podman/carino-dicom.container \
-        ~/.config/containers/systemd/carino-dicom.container
-systemctl --user daemon-reload
-systemctl --user start carino-dicom
-journalctl --user -u carino-dicom -f</code></pre>
+<div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">git clone https://github.com/MiguelCarino/Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">cd Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">[ -d ~/CarinoPACS ] &amp;&amp; [ ! -d ~/CarinoDICOM ] &amp;&amp; mv ~/CarinoPACS ~/CarinoDICOM</span>
+<span class="prompt">$</span> <span class="cmd">mkdir -p ~/CarinoDICOM</span>
+<span class="prompt">$</span> <span class="cmd">podman build --format docker -t carino-dicom:local .</span>
+<span class="prompt">$</span> <span class="cmd">install -Dm644 packaging/podman/carino-dicom.container \
+        ~/.config/containers/systemd/carino-dicom.container</span>
+<span class="prompt">$</span> <span class="cmd">systemctl --user daemon-reload</span>
+<span class="prompt">$</span> <span class="cmd">systemctl --user start carino-dicom</span>
+<span class="prompt">$</span> <span class="cmd">journalctl --user -u carino-dicom -f</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Podman commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/podman/carino-dicom.container" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
       <article>
         <h3>🐧 systemd</h3>
         <p data-i18n>From source, as a system service with an account of its own. The installer stops before starting it — opening listeners that accept patient data stays your decision.</p>
-<pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-DICOM
-sudo packaging/systemd/install.sh
-# then edit /var/lib/carino-pacs/config.json and:
-sudo systemctl enable --now carino-pacs</code></pre>
+<div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">git clone https://github.com/MiguelCarino/Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">cd Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">sudo packaging/systemd/install.sh</span>
+<span class="cmd"># then edit /var/lib/carino-pacs/config.json and:</span>
+<span class="prompt">$</span> <span class="cmd">sudo systemctl enable --now carino-pacs</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the systemd commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
     </div>
@@ -292,16 +313,19 @@ sudo systemctl enable --now carino-pacs</code></pre>
     <div class="firstrun">
         <ul>
           <li id="fr-win"><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
-          <li id="fr-mac"><strong>macOS:</strong> open the app once and dismiss the warning, then go to
+          <li><span id="fr-mac"><strong>macOS:</strong> open the app once and dismiss the warning, then go to
             <em>System Settings → Privacy &amp; Security</em> and click <em>Open Anyway</em>. If that option
-            is not there, or macOS says the app is <em>"damaged"</em>, run this in Terminal instead:
-            <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code></li>
-          <li id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
+            is not there, or macOS says the app is <em>"damaged"</em>, run this in Terminal instead:</span>
+            <div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the macOS command"><span data-i18n>Copy</span></button></div></li>
+          <li><span id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
             <code>.deb</code> (Debian/Ubuntu) from the
             <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>.
-            The <code>.AppImage</code> needs FUSE — <code>sudo dnf install fuse-libs</code>
-            (Fedora) / <code>sudo apt install libfuse2</code> (Debian), or run it with
-            <code>--appimage-extract-and-run</code>.</li>
+            The <code>.AppImage</code> needs FUSE: install it with the line for your distribution, or run
+            the AppImage with <code>--appimage-extract-and-run</code>.</span>
+            <div class="terminal-wrapper"><div class="terminal"><code><span class="cmd"># Fedora</span>
+<span class="prompt">$</span> <span class="cmd">sudo dnf install fuse-libs</span>
+<span class="cmd"># Debian / Ubuntu</span>
+<span class="prompt">$</span> <span class="cmd">sudo apt install libfuse2</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Linux commands"><span data-i18n>Copy</span></button></div></li>
         </ul>
         <p data-i18n>The warning appears because the app isn't code-signed yet — it's safe.</p>    </div>
     </div>
@@ -336,10 +360,10 @@ sudo systemctl enable --now carino-pacs</code></pre>
             <li id="tl-ui">Web dashboard, headless CLI (<code>pacs serve|receive|send|print|echo|ris|mwl|qr|init</code>),
               tray app, Docker image, or systemd unit. DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
           </ul>
-          <pre><code>git clone https://github.com/MiguelCarino/Carino-DICOM
-cd Carino-DICOM &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
-./run.sh init                    # scaffold config.json + folders
-./run.sh serve                   # dashboard → http://127.0.0.1:8042</code></pre>
+          <div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">git clone https://github.com/MiguelCarino/Carino-DICOM</span>
+<span class="prompt">$</span> <span class="cmd">cd Carino-DICOM &amp;&amp; ./setup.sh      # Windows: .\setup.ps1</span>
+<span class="prompt">$</span> <span class="cmd">./run.sh init                    # scaffold config.json + folders</span>
+<span class="prompt">$</span> <span class="cmd">./run.sh serve                   # dashboard → http://127.0.0.1:8042</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the source commands"><span data-i18n>Copy</span></button></div>
           <div class="tech-links">
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">GitHub</a>
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/README.md" target="_blank" rel="noopener">README</a>

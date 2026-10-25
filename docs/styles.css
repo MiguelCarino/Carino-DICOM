@@ -7,16 +7,13 @@
    break mid-token (overflow-wrap: anywhere), and shell commands scroll inside
    their own box rather than wrap. `word-break: break-all` is never used —
    a value cut at an arbitrary character is a value read wrong. */
+/* Tokens and the shared components (.landing-hero, .terminal, .copy-btn,
+   .site-foot, .privacy-line) come from carino-ui.css, linked before this file;
+   only this page's own names are declared here. */
 :root {
-  --accent: #eab308;
-  --bg: #050505;
   --bg-2: #0d0d0d;
   --panel: #111;
-  --border: #262626;
-  --text: #f5f5f5;
-  --muted: #8a8a8a;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --muted: var(--text-muted);
 
   /* Surplus height: how much taller this viewport is than the point where the
      page stops being short of room. Measured, not guessed — the hero has 48px
@@ -40,7 +37,8 @@ html { scroll-behavior: smooth; }
    `justify-content: center` — both of those clip the top of the content when it
    does not fit, and this has to degrade into an ordinary scrolling page on a
    short screen, at 200% zoom, or in a locale that runs long. */
-body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55;
+/* 16px, not carino-ui's 15px: every size on this page was measured against it. */
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.55;
   min-height: 100dvh; display: flex; flex-direction: column; }
 .hero { flex: 1 0 auto; display: flex; }
 /* Anchored to the top, not centred. Centring put 288px of nothing between the
@@ -56,7 +54,7 @@ a { color: var(--accent); }
   display: inline-block; font-family: var(--mono); font-size: min(1.05rem, calc(.8rem + var(--tall) * .009)); letter-spacing: .04em;
   text-transform: uppercase; font-weight: 700; text-decoration: none; cursor: pointer;
   padding: min(19px, calc(9px + var(--tall) * .026)) min(32px, calc(16px + var(--tall) * .04)); border-radius: 7px; border: 1px solid var(--border); color: var(--muted);
-  background: transparent; transition: .15s;
+  background: transparent; transition: .15s; height: auto;
 }
 .btn.ghost:hover { color: var(--accent); border-color: var(--accent); }
 
@@ -203,22 +201,23 @@ a { color: var(--accent); }
    a title and an ✕, a scrolling body — so this reads as the same component
    wherever it turns up in the fleet.
 
-   The title is --sans, not the reference's --display: this page self-hosts no
-   fonts, so Red Hat Display is not here to use. The treatment is the same. */
+   carino-ui.css supplies the anatomy; these rules only fit it to <dialog>. */
 /* `display` only when open. The reference's .modal is a div inside a scrim that
-   carries `hidden`; on a <dialog> a bare `display: flex` overrides the UA's
-   `dialog:not([open]) { display: none }` and every sheet renders inline, always. */
+   carries `hidden`, and carino-ui.css gives it `display: flex`; on a <dialog>
+   that overrides the UA's `dialog:not([open]) { display: none }` and every
+   sheet renders inline, always. */
+dialog.modal:not([open]) { display: none; }
 .modal[open] { display: flex; }
 .modal {
   flex-direction: column; padding: 0; overflow: hidden;
-  width: min(92vw, 640px); max-height: min(88vh, 900px);
+  width: min(92vw, 640px); max-width: none; max-height: min(88vh, 900px);
   background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
   box-shadow: 0 30px 80px rgba(0,0,0,.75); color: var(--text);
 }
 .modal.wide { width: min(94vw, 1080px); }
 .modal::backdrop { background: rgba(0,0,0,.65); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 .modal-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
-.modal-title { margin: 0; flex: 1; font-family: var(--sans); font-weight: 900; font-size: 1.05rem;
+.modal-title { margin: 0; flex: 1; font-weight: 900; font-size: 1.05rem;
   text-transform: uppercase; letter-spacing: .5px; }
 .modal-sub { margin: 0; font-family: var(--mono); font-size: .65rem; color: var(--muted);
   text-transform: uppercase; letter-spacing: .08em; }
@@ -226,7 +225,7 @@ a { color: var(--accent); }
 .modal-x { border: none; background: transparent; color: var(--muted); font-size: 1.05rem; line-height: 1;
   cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: .15s; }
 .modal-x:hover { color: var(--accent); background: var(--accent-faint, rgba(234,179,8,.1)); }
-.modal-body { padding: 18px; overflow-y: auto; }
+.modal-body { padding: 18px; overflow-y: auto; color: var(--text); font-size: inherit; }
 
 /* ---- the row that opens them ----
    Buttons, not a bespoke pill: the reference has one button component and its
@@ -271,16 +270,15 @@ a { color: var(--accent); }
 .server-opts h3 { margin: 0; font-size: 1rem; grid-column: 1; }
 .server-opts p { margin: 0; color: var(--muted); font-size: .84rem; grid-column: 1; }
 /* The commands are the one place a horizontal scrollbar is the right answer:
-   a wrapped shell command is a command someone will paste wrong. */
-.server-opts pre { margin: 0; overflow-x: auto; grid-column: 2; grid-row: 1 / span 3;
-  background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 13px; }
-.server-opts pre code { font-family: var(--mono); font-size: .76rem; line-height: 1.65;
-  color: #e8e8e8; white-space: pre; }
+   a wrapped shell command is a command someone will paste wrong. The block is
+   Branding's .terminal; this only places it in the grid. */
+.server-opts .terminal-wrapper { min-width: 0; grid-column: 2; grid-row: 1 / span 3; }
+.server-opts .terminal { padding-top: 13px; padding-bottom: 13px; }
 .server-opts a { color: var(--accent); text-decoration: none; font-size: .82rem; grid-column: 1; }
 .server-opts a:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .server-opts article { grid-template-columns: 1fr; }
-  .server-opts pre { grid-column: 1; grid-row: auto; }
+  .server-opts .terminal-wrapper { grid-column: 1; grid-row: auto; }
 }
 .server-foot { margin: 18px 0 0; font-size: .84rem; }
 .server-foot a { color: var(--accent); text-decoration: none; }
@@ -400,8 +398,20 @@ a { color: var(--accent); }
    break-word only breaks a word that cannot fit a line on its own, which is
    exactly the case here and nowhere else in the list. */
 .tech-list li { margin-bottom: 7px; word-break: normal; overflow-wrap: break-word; }
-.tech-body pre { background: #000; border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow-x: auto; }
-.tech-body pre code { background: none; padding: 0; font-size: .8rem; line-height: 1.7; color: #e8e8e8;
-  white-space: pre; overflow-wrap: normal; }
+/* Command blocks inside the sheets: Branding's .terminal, spaced like the
+   paragraphs around them. The inline-code rule above must not reach in. */
+.tech-body .terminal-wrapper, .firstrun .terminal-wrapper { margin: 10px 0 14px; }
+.terminal code { background: none; padding: 0; border-radius: 0; overflow-wrap: normal; }
 .tech-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 
+
+/* ---- privacy line and footer ----
+   Branding's components. The privacy line is centred as a block under the
+   install links while its own text stays left-aligned beside the lock. */
+.dl-privacy { display: inline-block; max-width: min(720px, 94vw);
+  margin: min(18px, calc(8px + var(--tall) * .03)) 0 0; }
+.site-foot { flex: none; margin-top: min(28px, calc(10px + var(--tall) * .03)); padding-bottom: 20px; }
+/* The first-launch sheet is narrow and the xattr line is long, so it would
+   scroll under the floating Copy. It takes Branding's phone form at every width:
+   the button gets its own band above the command. */
+.firstrun .terminal-wrapper:has(.term-copy) .terminal { padding: 3.1rem 1.1rem 1.1rem; }

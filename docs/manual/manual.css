@@ -12,21 +12,16 @@
    `word-break: break-all` is never used: a value cut at an arbitrary
    character is a value read wrong, and here the values are AE titles, ports
    and paths. */
+/* Tokens and fonts come from ../carino-ui.css and ../fonts, linked first. */
 :root {
-  --accent: #eab308;
-  --bg: #050505;
   --bg-2: #0d0d0d;
   --panel: #111;
-  --border: #262626;
-  --text: #f5f5f5;
-  --muted: #8a8a8a;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --muted: var(--text-muted);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-  line-height: 1.65; }
+  font-size: 16px; line-height: 1.65; }
 a { color: var(--accent); }
 
 .doc { width: min(820px, 90%); margin: 0 auto; padding: 34px 0 60px; }

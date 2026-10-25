@@ -12,6 +12,18 @@
 
 const I18N = {
     es: {
+        // Install commands, privacy line and footer
+        "Copy": "Copiar",
+        "Copied": "Copiado",
+        "Press Ctrl+C": "Pulsa Ctrl+C",
+        "This page runs in your browser and sends nothing anywhere.": "Esta página funciona en tu navegador y no envía nada a ningún sitio.",
+        "It asks api.github.com for the latest release.": "Solo consulta a api.github.com la última versión.",
+        "Source": "Código fuente",
+        "Changelog": "Cambios",
+        "Manual": "Manual",
+        "Third-party notices": "Avisos de terceros",
+        "Legal & privacy": "Aviso legal y privacidad",
+        "part of carino.systems": "parte de carino.systems",
         'Late shift.': 'Turno nocturno.',
         'Good morning.': 'Buenos días.',
         'Good afternoon.': 'Buenas tardes.',
@@ -98,6 +110,18 @@ const I18N = {
         'Every service is off until you turn it on. The tag on each card is the release it ships in.': 'Cada servicio está apagado hasta que usted lo enciende. La etiqueta de cada tarjeta es la versión en la que sale.',
     },
     'pt-BR': {
+        // Install commands, privacy line and footer
+        "Copy": "Copiar",
+        "Copied": "Copiado",
+        "Press Ctrl+C": "Pressione Ctrl+C",
+        "This page runs in your browser and sends nothing anywhere.": "Esta página roda no seu navegador e não envia nada a lugar nenhum.",
+        "It asks api.github.com for the latest release.": "Ela só consulta api.github.com para saber a versão mais recente.",
+        "Source": "Código-fonte",
+        "Changelog": "Mudanças",
+        "Manual": "Manual",
+        "Third-party notices": "Avisos de terceiros",
+        "Legal & privacy": "Aviso legal e privacidade",
+        "part of carino.systems": "parte de carino.systems",
         'Late shift.': 'Turno da noite.',
         'Good morning.': 'Bom dia.',
         'Good afternoon.': 'Boa tarde.',
@@ -175,6 +199,18 @@ const I18N = {
         'Every service is off until you turn it on. The tag on each card is the release it ships in.': 'Cada serviço fica desligado até você ligá-lo. A etiqueta de cada cartão é a versão em que ele sai.',
     },
     ja: {
+        // Install commands, privacy line and footer
+        "Copy": "コピー",
+        "Copied": "コピーしました",
+        "Press Ctrl+C": "Ctrl+C を押してください",
+        "This page runs in your browser and sends nothing anywhere.": "このページはブラウザ内で動作し、どこにも何も送信しません。",
+        "It asks api.github.com for the latest release.": "最新リリースを api.github.com に問い合わせるだけです。",
+        "Source": "ソース",
+        "Changelog": "変更履歴",
+        "Manual": "マニュアル",
+        "Third-party notices": "サードパーティの表示",
+        "Legal & privacy": "法的情報とプライバシー",
+        "part of carino.systems": "carino.systems の一部",
         'Late shift.': '夜勤お疲れさま。',
         'Good morning.': 'おはようございます。',
         'Good afternoon.': 'こんにちは。',
@@ -252,6 +288,18 @@ const I18N = {
         'Every service is off until you turn it on. The tag on each card is the release it ships in.': '各サービスは有効にするまで停止しています。カードのタグは、その機能が入るリリースを示します。',
     },
     ru: {
+        // Install commands, privacy line and footer
+        "Copy": "Копировать",
+        "Copied": "Скопировано",
+        "Press Ctrl+C": "Нажмите Ctrl+C",
+        "This page runs in your browser and sends nothing anywhere.": "Эта страница работает в вашем браузере и ничего никуда не отправляет.",
+        "It asks api.github.com for the latest release.": "Она лишь запрашивает у api.github.com последний выпуск.",
+        "Source": "Исходный код",
+        "Changelog": "Изменения",
+        "Manual": "Руководство",
+        "Third-party notices": "Сторонние лицензии",
+        "Legal & privacy": "Правовая информация и конфиденциальность",
+        "part of carino.systems": "часть carino.systems",
         'Late shift.': 'Ночная смена.',
         'Good morning.': 'Доброе утро.',
         'Good afternoon.': 'Добрый день.',
@@ -338,7 +386,7 @@ const RICH = {
     // RICH is innerHTML and nothing checks inside it, so these four have to be
     // moved by hand whenever the English lede moves. The lede is one plain
     // sentence now; the three situations under it are ordinary [data-i18n] keys.
-    '.lede': {
+    '#lede': {
         es: '<strong>Carino DICOM</strong> se coloca entre tus equipos de imagen y tu archivo, y mantiene los estudios en movimiento cuando algo falla: en tu propio hardware, sin nube.',
         'pt-BR': '<strong>Carino DICOM</strong> fica entre os seus equipamentos de imagem e o seu arquivo, e mantém os estudos circulando quando algo quebra: no seu próprio hardware, sem nuvem.',
         ja: '<strong>Carino DICOM</strong> は画像装置とアーカイブの間に入り、何かが止まっても検査の流れを止めません。自前のハードウェアで動き、クラウドは不要です。',
@@ -351,16 +399,16 @@ const RICH = {
         ru: '<strong>Windows:</strong> <em>Подробнее</em> → <em>Выполнить в любом случае</em>.',
     },
     '#fr-mac': {
-        es: '<strong>macOS:</strong> abre la app una vez y cierra el aviso; luego ve a <em>Ajustes del Sistema → Privacidad y seguridad</em> y pulsa <em>Abrir igualmente</em>. Si no aparece esa opción, o si dice que está <em>«dañada»</em>, ejecuta en Terminal: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        'pt-BR': '<strong>macOS:</strong> abra o app uma vez e feche o aviso; depois vá em <em>Ajustes do Sistema → Privacidade e Segurança</em> e clique em <em>Abrir Mesmo Assim</em>. Se essa opção não aparecer, ou se disser que está <em>"danificado"</em>, execute no Terminal: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        ja: '<strong>macOS:</strong> アプリを一度開いて警告を閉じ、<em>システム設定 → プライバシーとセキュリティ</em>で<em>このまま開く</em>をクリックしてください。表示されない場合や<em>「壊れている」</em>と表示される場合は、ターミナルで次を実行してください: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
-        ru: '<strong>macOS:</strong> откройте приложение один раз и закройте предупреждение, затем в <em>Системных настройках → Конфиденциальность и безопасность</em> нажмите <em>Всё равно открыть</em>. Если этой кнопки нет или пишет <em>«повреждено»</em>, выполните в Терминале: <code>xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</code>',
+        es: '<strong>macOS:</strong> abre la app una vez y cierra el aviso; luego ve a <em>Ajustes del Sistema → Privacidad y seguridad</em> y pulsa <em>Abrir igualmente</em>. Si no aparece esa opción, o si dice que está <em>«dañada»</em>, ejecuta en Terminal:',
+        'pt-BR': '<strong>macOS:</strong> abra o app uma vez e feche o aviso; depois vá em <em>Ajustes do Sistema → Privacidade e Segurança</em> e clique em <em>Abrir Mesmo Assim</em>. Se essa opção não aparecer, ou se disser que está <em>"danificado"</em>, execute no Terminal:',
+        ja: '<strong>macOS:</strong> アプリを一度開いて警告を閉じ、<em>システム設定 → プライバシーとセキュリティ</em>で<em>このまま開く</em>をクリックしてください。表示されない場合や<em>「壊れている」</em>と表示される場合は、ターミナルで次を実行してください:',
+        ru: '<strong>macOS:</strong> откройте приложение один раз и закройте предупреждение, затем в <em>Системных настройках → Конфиденциальность и безопасность</em> нажмите <em>Всё равно открыть</em>. Если этой кнопки нет или пишет <em>«повреждено»</em>, выполните в Терминале:',
     },
     '#fr-linux': {
-        es: '<strong>Linux:</strong> lo más fácil es el <code>.rpm</code> (Fedora/RHEL) o el <code>.deb</code> (Debian/Ubuntu) de los <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>. El <code>.AppImage</code> necesita FUSE — <code>sudo dnf install fuse-libs</code> (Fedora) / <code>sudo apt install libfuse2</code> (Debian), o ejecútalo con <code>--appimage-extract-and-run</code>.',
-        'pt-BR': '<strong>Linux:</strong> o mais fácil é o <code>.rpm</code> (Fedora/RHEL) ou o <code>.deb</code> (Debian/Ubuntu) dos <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>. O <code>.AppImage</code> precisa de FUSE — <code>sudo dnf install fuse-libs</code> (Fedora) / <code>sudo apt install libfuse2</code> (Debian), ou execute com <code>--appimage-extract-and-run</code>.',
-        ja: '<strong>Linux:</strong> 一番簡単なのは<a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">リリース</a>の<code>.rpm</code>（Fedora/RHEL）または<code>.deb</code>（Debian/Ubuntu）です。<code>.AppImage</code>にはFUSEが必要 — <code>sudo dnf install fuse-libs</code>（Fedora）/ <code>sudo apt install libfuse2</code>（Debian）、または<code>--appimage-extract-and-run</code>を付けて実行してください。',
-        ru: '<strong>Linux:</strong> проще всего <code>.rpm</code> (Fedora/RHEL) или <code>.deb</code> (Debian/Ubuntu) со страницы <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">релизов</a>. Для <code>.AppImage</code> нужен FUSE — <code>sudo dnf install fuse-libs</code> (Fedora) / <code>sudo apt install libfuse2</code> (Debian), либо запустите с <code>--appimage-extract-and-run</code>.',
+        es: '<strong>Linux:</strong> lo más fácil es el <code>.rpm</code> (Fedora/RHEL) o el <code>.deb</code> (Debian/Ubuntu) de los <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>. El <code>.AppImage</code> necesita FUSE: instálalo con la línea de tu distribución, o ejecuta el AppImage con <code>--appimage-extract-and-run</code>.',
+        'pt-BR': '<strong>Linux:</strong> o mais fácil é o <code>.rpm</code> (Fedora/RHEL) ou o <code>.deb</code> (Debian/Ubuntu) dos <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>. O <code>.AppImage</code> precisa de FUSE: instale com a linha da sua distribuição, ou execute o AppImage com <code>--appimage-extract-and-run</code>.',
+        ja: '<strong>Linux:</strong> 一番簡単なのは<a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">リリース</a>の<code>.rpm</code>（Fedora/RHEL）または<code>.deb</code>（Debian/Ubuntu）です。<code>.AppImage</code>にはFUSEが必要です。お使いのディストリビューションの行でインストールするか、<code>--appimage-extract-and-run</code>を付けてAppImageを実行してください。',
+        ru: '<strong>Linux:</strong> проще всего <code>.rpm</code> (Fedora/RHEL) или <code>.deb</code> (Debian/Ubuntu) со страницы <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">релизов</a>. Для <code>.AppImage</code> нужен FUSE: установите его командой для вашего дистрибутива или запустите AppImage с <code>--appimage-extract-and-run</code>.',
     },
     '#tech-intro': {
         es: 'Construido sobre <code>pynetdicom</code>/<code>pydicom</code> con un panel en Flask; la app de escritorio es un shell de bandeja en Electron sobre el mismo motor.',
