@@ -268,7 +268,7 @@
           <div class="pill" id="fileCountPill" data-i18n data-i18n-key="Files: {n}" data-i18n-n="0">Files: 0</div>
         </div>
         <div class="actions-row">
-          <div class="tb-seg" role="group" aria-label="Undo / redo">
+          <div class="tb-seg" id="undoRedoSeg" role="group" aria-label="Undo / redo">
             <button id="undoBtn" class="btn tb-icon" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↩</button>
             <button id="redoBtn" class="btn tb-icon" disabled title="Redo (Ctrl+Y)" aria-label="Redo">↪</button>
           </div>
@@ -277,7 +277,7 @@
             <button id="deidOptsBtn" class="btn" title="PS3.15 de-identification options">⚙ <span data-i18n>Options</span><span id="deidOptsCount"></span></button>
           </div>
           <details class="tb-menu" id="toolsMenu">
-            <summary class="btn" title="More tools for the loaded files"><span data-i18n>Tools</span><span class="tb-caret" aria-hidden="true">▾</span></summary>
+            <summary class="btn" id="toolsMenuSum" title="More tools for the loaded files"><span data-i18n>Tools</span><span class="tb-caret" aria-hidden="true">▾</span></summary>
             <div class="tb-menu-list">
               <button id="addTagBtn" class="tb-menu-item" title="Add a new tag to this file" data-i18n>+ Tag</button>
               <button id="uidPatternBtn" class="tb-menu-item" title="Move every instance UID under a new root" data-i18n>UID root…</button>
@@ -286,7 +286,7 @@
             </div>
           </details>
           <details class="tb-menu" id="exportMenu">
-            <summary class="btn" title="Export or print this file's tags"><span data-i18n>Export</span><span class="tb-caret" aria-hidden="true">▾</span></summary>
+            <summary class="btn" id="exportMenuSum" title="Export or print this file's tags"><span data-i18n>Export</span><span class="tb-caret" aria-hidden="true">▾</span></summary>
             <div class="tb-menu-list">
               <button id="exportJsonBtn" class="tb-menu-item" title="Export tags as JSON">JSON</button>
               <button id="exportCsvBtn" class="tb-menu-item" title="Export tags as CSV">CSV</button>
@@ -404,7 +404,7 @@
           <table>
             <thead id="tagHead">
               <tr>
-                <th class="col-tag">Tag</th>
+                <th class="col-tag" data-i18n>Tag</th>
                 <th data-i18n>Description</th>
                 <th class="col-vr">VR</th>
                 <th class="col-val" data-i18n>Value</th>
@@ -824,8 +824,10 @@
     <div class="load-count" id="loadCount"></div>
   </div>
 
-  <div class="confirm-overlay" id="confirmOverlay">
-    <div class="confirm-box">
+  <!-- Opened with CarinoUI.modal (js/features.js confirmDanger), which keeps Tab inside and gives
+       focus back to the opener; .visible is what shows it. -->
+  <div class="modal-scrim confirm-overlay" id="confirmOverlay" hidden>
+    <div class="modal confirm-box" role="alertdialog" aria-modal="true" aria-describedby="confirmMsg">
       <div class="confirm-msg" id="confirmMsg"></div>
       <div class="confirm-actions">
         <button class="btn" id="confirmCancel" data-i18n>Cancel</button>

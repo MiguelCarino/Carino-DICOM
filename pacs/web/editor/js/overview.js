@@ -286,7 +286,7 @@
       if (r.error) { toast?.(r.error, 7000); log(`✗ ${r.error}`); return; }
       if (r.files.length === 1) saveBlob(new Blob([r.files[0].bytes], { type: 'application/dicom' }), r.files[0].name.replace('/', '-'));
       else saveArchives(r.files, `series-${r.series.number}-color`, 'application/dicom', log);
-      log(`⬇ ${r.files.length} image(s) → series ${r.series.number} "${r.series.description}"`);
+      log('⬇ ' + TF('{n} image(s) → series {s} "{d}"', { n: r.files.length, s: r.series.number, d: r.series.description }));
       toast?.(T('Colour series saved: {n} image(s), series {s}. Send it to the PACS beside the original.')
         .replace('{n}', r.files.length).replace('{s}', r.series.number), 7000);
     } catch (e) {

@@ -70,7 +70,7 @@ async function addExtractorFiles(fileList) {
       console.warn('[extractor] failed to parse', path, e);
     }
   }
-  if (skipped.length) log(`Extractor: ${skipped.length} file(s) skipped (parse error): ${skipped.join(', ')}`);
+  if (skipped.length) log(TF('Extractor: {n} file(s) skipped (parse error): {list}', { n: skipped.length, list: skipped.join(', ') }));
   renderExtractorGrid();
 }
 
@@ -100,7 +100,7 @@ function savePngZip(pngs, base) {
     return;
   }
   const { saved, archives } = saveArchives(pngs, base, 'image/png', extractorLog);
-  extractorLog(`⬇ ${saved} image(s) → ${archives === 1 ? 'one archive' : `${archives} archives`}`);
+  extractorLog('⬇ ' + TF(archives === 1 ? '{n} image(s) → one archive' : '{n} image(s) → {m} archives', { n: saved, m: archives }));
 }
 
 async function renderDcmToCanvas(dict, canvas, meta = null) {
@@ -208,14 +208,14 @@ extractAllBtn.addEventListener('click', async () => {
   const items = extractorItems();
   if (!items.length) return;
   const pngs = [];
-  showLoading?.(true, 'Extracting frames…', 0, `0 / ${items.length}`);
+  showLoading?.(true, T('Extracting frames…'), 0, `0 / ${items.length}`);
   try {
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx];
       const nf = parseInt(lookupTag(item.dict, '00280008')?.Value?.[0] || '1') || 1;
       const base = extractorZipBase(item);
       for (let fi = 0; fi < nf; fi++) {
-        showLoading?.(true, `Extracting: ${item.name} [${fi + 1}/${nf}]`,
+        showLoading?.(true, `${TF('Extracting: {name}', { name: item.name })} [${fi + 1}/${nf}]`,
                       (idx + (fi + 1) / nf) / items.length, `${idx + 1} / ${items.length}`);
         const result = await decodeDicomPixels(item.dict, fi, { meta: item.meta || null });
         if (!result || result.error) continue;
@@ -244,13 +244,13 @@ extractSelectedBtn.addEventListener('click', async () => {
   const items = extractorItems();
   if (!items.length) return;
   const pngs = [];
-  showLoading?.(true, 'Extracting frame 1 of each file…', 0, `0 / ${items.length}`);
+  showLoading?.(true, T('Extracting frame 1 of each file…'), 0, `0 / ${items.length}`);
   try {
     for (let idx = 0; idx < items.length; idx++) {
       const item = items[idx];
-      showLoading?.(true, `Extracting: ${item.name}`, (idx + 1) / items.length, `${idx + 1} / ${items.length}`);
+      showLoading?.(true, TF('Extracting: {name}', { name: item.name }), (idx + 1) / items.length, `${idx + 1} / ${items.length}`);
       const result = await decodeDicomPixels(item.dict, 0, { meta: item.meta || null });
-      if (!result || result.error) { extractorLog(`✗ ${item.name}: ${result?.error ?? 'no image data'}`); continue; }
+      if (!result || result.error) { extractorLog(`✗ ${item.name}: ${result?.error ?? T('no image data')}`); continue; }
       const { pixels, rows, cols } = result;
       const canvas = document.createElement('canvas');
       canvas.width = cols; canvas.height = rows;

@@ -113,11 +113,12 @@
     // compression line's verdicts, viewer warnings, decompress confirm and Compare's pixel verdict,
     // 245 with the point-transform, J2K-sign, JPIP/private-syntax and rendered-copy warnings,
     // 272 with the presentation-state menu, colour-series burn-in and the Overview cards' own text,
-    // 309 with the validator's messages and format hints (shown translated in the Conformance card).
+    // 309 with the validator's messages and format hints (shown translated in the Conformance card),
+    // 339 with the Log card's lines, the loading/extracting overlay text and Create's Remove title.
     const jsOwned = new Set(ATTR_I18N.map(([, , k]) => k));
     const unseen = Object.keys(I18N.es).filter(k => !keys.has(k) && !jsOwned.has(k));
     ok('the dictionaries have not drifted far ahead of the page',
-       unseen.length < 330, `${unseen.length} keys reached from JS or no longer reached at all`);
+       unseen.length < 350, `${unseen.length} keys reached from JS or no longer reached at all`);
   } catch (e) {
     ok('the i18n audit ran', false, (e && e.message) || String(e));
   }
@@ -137,7 +138,8 @@
       '{host} wants to open {n} file(s) in this editor.', 'Loaded {n} image(s) from {from}',
       'Nothing from {from} could be read as DICOM', 'Tag {tag} added', 'Images: {n}', 'Files: {n}',
       'Copy →', 'Copy ←', 'Cleared the added files', 'Cleared all images', 'PACS hand-off failed:',
-      'PACS deep-link failed:', 'No response from Carino DICOM'];
+      'PACS deep-link failed:', 'No response from Carino DICOM', 'Loading image…', 'Loading images…',
+      'Extracting frames…', 'Extracting: {name}', 'Loading {n} file(s)...', 'Copying study from {from}…'];
     for (const loc of LOCALES) {
       const bad = JS_KEYS.filter(k => !I18N[loc]?.[k] ||
         (k.match(/\{\w+\}/g) || []).some(p => I18N[loc][k].split(p).length !== 2));

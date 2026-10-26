@@ -28,6 +28,15 @@ const I18N = {
         'Good morning.': 'Buenos días.',
         'Good afternoon.': 'Buenas tardes.',
         'Good evening.': 'Buenas noches.',
+        'More': 'Más',
+        'More about Carino DICOM': 'Más sobre Carino DICOM',
+        'Close': 'Cerrar',
+        'Copy the Docker commands': 'Copiar los comandos de Docker',
+        'Copy the Podman commands': 'Copiar los comandos de Podman',
+        'Copy the systemd commands': 'Copiar los comandos de systemd',
+        'Copy the macOS command': 'Copiar el comando de macOS',
+        'Copy the Linux commands': 'Copiar los comandos de Linux',
+        'Copy the source commands': 'Copiar los comandos del código fuente',
         // Hero
         'Your PACS is down?': '¿Tu PACS está caído?',
         'A scanner that can only print? It captures the film so it can be filed like any study.': '¿Un equipo que solo sabe imprimir? Captura la placa para que se archive como cualquier estudio.',
@@ -126,6 +135,15 @@ const I18N = {
         'Good morning.': 'Bom dia.',
         'Good afternoon.': 'Boa tarde.',
         'Good evening.': 'Boa noite.',
+        'More': 'Mais',
+        'More about Carino DICOM': 'Mais sobre o Carino DICOM',
+        'Close': 'Fechar',
+        'Copy the Docker commands': 'Copiar os comandos do Docker',
+        'Copy the Podman commands': 'Copiar os comandos do Podman',
+        'Copy the systemd commands': 'Copiar os comandos do systemd',
+        'Copy the macOS command': 'Copiar o comando do macOS',
+        'Copy the Linux commands': 'Copiar os comandos do Linux',
+        'Copy the source commands': 'Copiar os comandos do código-fonte',
         'Your PACS is down?': 'Seu PACS caiu?',
         'A scanner that can only print? It captures the film so it can be filed like any study.': 'Um equipamento que só sabe imprimir? Ele captura o filme para ser arquivado como qualquer estudo.',
         'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': 'Os pedidos não chegam ao equipamento? Ele recebe pedidos HL7, ou os que você digita, e os serve como worklist.',
@@ -215,6 +233,15 @@ const I18N = {
         'Good morning.': 'おはようございます。',
         'Good afternoon.': 'こんにちは。',
         'Good evening.': 'こんばんは。',
+        'More': 'その他',
+        'More about Carino DICOM': 'Carino DICOMの詳細',
+        'Close': '閉じる',
+        'Copy the Docker commands': 'Dockerのコマンドをコピー',
+        'Copy the Podman commands': 'Podmanのコマンドをコピー',
+        'Copy the systemd commands': 'systemdのコマンドをコピー',
+        'Copy the macOS command': 'macOSのコマンドをコピー',
+        'Copy the Linux commands': 'Linuxのコマンドをコピー',
+        'Copy the source commands': 'ソースからのコマンドをコピー',
         'Your PACS is down?': 'PACSがダウン？',
         'A scanner that can only print? It captures the film so it can be filed like any study.': '印刷しかできない装置？フィルムを取り込み、ほかの検査と同じように保存できます。',
         'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': '装置にオーダーが届かない？HL7オーダーや手入力したオーダーを受け取り、ワークリストとして配信します。',
@@ -304,6 +331,15 @@ const I18N = {
         'Good morning.': 'Доброе утро.',
         'Good afternoon.': 'Добрый день.',
         'Good evening.': 'Добрый вечер.',
+        'More': 'Ещё',
+        'More about Carino DICOM': 'Подробнее о Carino DICOM',
+        'Close': 'Закрыть',
+        'Copy the Docker commands': 'Скопировать команды Docker',
+        'Copy the Podman commands': 'Скопировать команды Podman',
+        'Copy the systemd commands': 'Скопировать команды systemd',
+        'Copy the macOS command': 'Скопировать команду для macOS',
+        'Copy the Linux commands': 'Скопировать команды для Linux',
+        'Copy the source commands': 'Скопировать команды сборки из исходников',
         'Your PACS is down?': 'PACS не работает?',
         'A scanner that can only print? It captures the film so it can be filed like any study.': 'Аппарат умеет только печатать? Он примет плёнку, и её можно будет архивировать как любое исследование.',
         'No orders reaching the scanner? It takes HL7 orders, or ones you type, and serves them as a worklist.': 'Заказы не доходят до аппарата? Он принимает заказы HL7 или введённые вручную и раздаёт их как рабочий список.',
@@ -513,9 +549,19 @@ function applyVersionPlaceholder() {
     if (isPlaceholder) el.textContent = t(KEY);
 }
 
+// Accessible names: elements carrying data-i18n-aria use their original
+// English aria-label as the key, captured once like data-i18n above.
+function applyAriaI18n() {
+    document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+        if (!el.dataset.i18nAriaKey) el.dataset.i18nAriaKey = el.getAttribute('aria-label') || '';
+        el.setAttribute('aria-label', t(el.dataset.i18nAriaKey));
+    });
+}
+
 function applyAll() {
     setLocale(currentFleetLang());
     applyStaticI18n();
+    applyAriaI18n();
     applyRichI18n();
     applyVersionPlaceholder();
 }

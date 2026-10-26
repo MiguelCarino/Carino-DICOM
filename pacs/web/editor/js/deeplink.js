@@ -41,7 +41,7 @@ window.addEventListener('load', () => {
       try {
         if (await takeCreateHandoff(incoming, info)) { showLoading?.(false); return; }
       } catch (err) { showLoading?.(false); toast?.(err.message || String(err)); return false; }
-      showLoading?.(true, 'Copying study from Carino DICOM…');
+      showLoading?.(true, TF('Copying study from {from}…', { from: 'Carino DICOM' }));
       try {
         const n = await handleFiles(incoming);   // shows its own per-image progress
         // Label by actual origin: a user-approved origin is still not the bundled PACS.
@@ -56,7 +56,7 @@ window.addEventListener('load', () => {
     },
   });
   if (armed) {
-    showLoading?.(true, 'Copying study from Carino DICOM…');       // spinner until the bytes arrive
+    showLoading?.(true, TF('Copying study from {from}…', { from: 'Carino DICOM' }));       // spinner until the bytes arrive
     giveUp = setTimeout(() => { dropBridgeMarker(); showLoading?.(false); toast?.(T('No response from Carino DICOM')); }, 60000);
     return;
   }

@@ -31,20 +31,30 @@ function showLoading(visible, text = 'Loading…', progress, count) {
 // ---- Confirm dialog for destructive actions ----
 // opts.safeDefault: Cancel has the focus and Enter means Cancel (a grant that is remembered must
 // never be given by a stray Enter in a freshly focused window).
+let _confirmUnwire = null; // the open confirm's cleanup, if one is open
 function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel, opts = {}) {
   const ov = $('confirmOverlay');
   const ok = $('confirmOk');
   const cancel = $('confirmCancel');
+  // A second confirm over an open one replaces it: drop the first one's Enter handler.
+  _confirmUnwire?.();
   // Most callers pass T() text already; this catches the ones that pass the English key.
   $('confirmMsg').textContent = T(message);
   ok.textContent = T(confirmLabel);
-  const close = () => {
-    ov.classList.remove('visible');
+  const unwire = () => {
     ok.onclick = null; cancel.onclick = null;
     document.removeEventListener('keydown', onKey);
+    if (_confirmUnwire === unwire) _confirmUnwire = null;
   };
-  // Cancel/Escape calls onCancel so an awaiting caller always gets an answer.
+  const close = () => {
+    unwire();
+    ov.classList.remove('visible');
+    window.CarinoUI?.modal.close(ov);
+  };
+  // Cancel, Esc and a click on the backdrop call onCancel so an awaiting caller always gets an answer.
   const dismiss = () => { close(); onCancel?.(); };
+  // Tab and Esc are CarinoUI.modal's (it traps focus and stops Esc first); Enter is ours, and Esc
+  // only reaches here if carino-ui.js never loaded.
   const onKey = e => {
     if (e.key === 'Escape') dismiss();
     else if (e.key === 'Enter') { e.preventDefault(); if (opts.safeDefault) dismiss(); else { close(); onConfirm(); } }
@@ -52,7 +62,10 @@ function confirmDanger(message, onConfirm, confirmLabel = 'Confirm', onCancel, o
   ok.onclick = () => { close(); onConfirm(); };
   cancel.onclick = dismiss;
   document.addEventListener('keydown', onKey);
+  _confirmUnwire = unwire;
   ov.classList.add('visible');
+  // .visible shows it even if carino-ui.js (deferred) has not run yet.
+  window.CarinoUI?.modal.open(ov, { onDismiss: dismiss });
   (opts.safeDefault ? cancel : ok).focus();
 }
 
@@ -522,7 +535,7 @@ async function runImgEdit(opKey) {
     const res = await applyPixelTransform(entry, opKey);
     if (res.error) { log(`✗ ${entry.name}: ${res.error}`); toast(res.error); return; }
     const label = T(PIXEL_OPS[opKey].label);
-    log(`⟳ ${entry.name}: ${label} — ${res.cols}×${res.rows}, ${res.frames} frame(s)`);
+    log(`⟳ ${entry.name}: ${label} — ${res.cols}×${res.rows}, ${TF('{n} frame(s)', { n: res.frames })}`);
     if (res.unmoved?.length)
       log(`⚠ ${T('Not moved with the pixels:')} ${res.unmoved.join(', ')}`);
     toast(label);
@@ -1040,7 +1053,9 @@ createDicomBtn.addEventListener('click', async () => {
 // ---- Language switch ----
 // i18n.js re-translates static markup (data-i18n, ATTR_I18N); text built at render time keeps the
 // language it was drawn in until redrawn, so redraw what is built from T() here. Nothing is reset.
-window.addEventListener('carino:langchange', () => {
+// The same redraw once at boot: these scripts draw before the deferred i18n.js exists, so a page opened
+// in another language (?lang=, cookie, browser) would keep their English until the first switch.
+function redrawTranslated() {
   renderSeriesPanel(); renderCreateGrid(); renderCreateOrder();
   renderExtractorGrid();
   updateDeidOptsCount();
@@ -1050,4 +1065,8 @@ window.addEventListener('carino:langchange', () => {
   renderCompareUI();
   renderTable();
   window.ovRetranslate?.();
+}
+window.addEventListener('carino:langchange', redrawTranslated);
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.CarinoLang && window.CarinoLang.current !== 'en') redrawTranslated();
 });

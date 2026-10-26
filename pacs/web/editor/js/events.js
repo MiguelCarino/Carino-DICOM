@@ -52,7 +52,7 @@ anonymizeBtn.addEventListener('click', () => {
   if (!files.length) return;
   // Without the table nothing would be de-identified, yet (0012,0062) YES / 113100 would be
   // written: refuse instead of claiming a profile that was not applied.
-  if (!window.DEID_PROFILE) { log('✗ ' + DEID_MISSING); toast?.(T(DEID_MISSING), 8000); return; }
+  if (!window.DEID_PROFILE) { log('✗ ' + T(DEID_MISSING)); toast?.(T(DEID_MISSING), 8000); return; }
   // Read the box, not deidOptions: that is only refreshed once the user confirms.
   const keepUIDs = document.querySelector('#deidOptionsRow [data-opt="rtnUIDsOpt"]')?.checked;
   // Said before the irreversible step: Find burned-in text matches the file's own tags, which
@@ -85,14 +85,14 @@ anonymizeBtn.addEventListener('click', () => {
     syncToUI();
     // Burned-in pixel identity needs per-image judgement, so point at Redact instead of guessing.
     const burned = burnedIn();
-    if (burned.length) log(`⚠ ${burned.length} file(s) have Burned In Annotation = YES: identity may remain in the image pixels. Use Redact in the Image edits card to overwrite it.`);
+    if (burned.length) log('⚠ ' + TF('{n} file(s) have Burned In Annotation = YES: identity may remain in the image pixels. Use Redact in the Image edits card to overwrite it.', { n: burned.length }));
     const faces = files.filter(f => isYes(f.dict, '00280302'));
-    if (faces.length) log(`⚠ ${faces.length} file(s) have Recognizable Visual Features = YES: the pixels themselves (e.g. a face reconstructed from a head scan) may identify the patient. This tool does not deface images.`);
-    if (notes.embeddedOverlay) log(`⚠ ${notes.embeddedOverlay} file(s) described a retired overlay stored in Pixel Data bits; the overlay group was removed, but those bits may still hold it.`);
-    if (notes.opaqueSequences) log(`⚠ ${notes.opaqueSequences} sequence(s) stored as unknown (UN) bytes could not be inspected and were removed.`);
+    if (faces.length) log('⚠ ' + TF('{n} file(s) have Recognizable Visual Features = YES: the pixels themselves (e.g. a face reconstructed from a head scan) may identify the patient. This tool does not deface images.', { n: faces.length }));
+    if (notes.embeddedOverlay) log('⚠ ' + TF('{n} file(s) described a retired overlay stored in Pixel Data bits; the overlay group was removed, but those bits may still hold it.', { n: notes.embeddedOverlay }));
+    if (notes.opaqueSequences) log('⚠ ' + TF('{n} sequence(s) stored as unknown (UN) bytes could not be inspected and were removed.', { n: notes.opaqueSequences }));
     const n = window.DEID_PROFILE_META?.attributes || 0;
     const opts = [...deidOptions].map(o => DEID_OPTION_CODES[o][1]);
-    log(`Anonymized all files — DICOM PS3.15 Basic Profile${n ? ` (${n} attributes)` : ''}`
+    log(T('Anonymized all files — DICOM PS3.15 Basic Profile') + (n ? ' ' + TF('({n} attributes)', { n }) : '')
         + (opts.length ? ` + ${opts.join(' + ')}` : ''));
     toast?.(burned.length
       ? T('Burned In Annotation = YES — identity may be burned into the pixels. Use Redact in the Edit tab.')
@@ -113,7 +113,7 @@ randomizeBtn.addEventListener('click', () => {
     remapUIDs({ honourOptions: false });
     reseedAllPending();
     syncToUI();
-    log('Randomized all files');
+    log(T('Randomized all files'));
     toast?.(T('All files given a fake patient'));
   }, 'Make fake patient');
 });
@@ -225,9 +225,9 @@ $('swapOk').addEventListener('click', () => {
   reseedAllPending();
   syncToUI();
   if ([...ia, ...ib].some(i => isYes(files[i].dict, '00280301')))
-    log('⚠ Burned In Annotation = YES in a swapped file: its pixels still show the previous patient. Use Redact.');
-  log(`Swapped patients between 2 studies (${ia.length} + ${ib.length} files)`
-      + (withAcc ? ', Accession Number included' : '') + (newUIDs ? ', new UIDs' : ''));
+    log('⚠ ' + T('Burned In Annotation = YES in a swapped file: its pixels still show the previous patient. Use Redact.'));
+  log(TF('Swapped patients between 2 studies ({a} + {b} files)', { a: ia.length, b: ib.length })
+      + (withAcc ? T(', Accession Number included') : '') + (newUIDs ? T(', new UIDs') : ''));
   toast?.(T('Patients swapped'));
 });
 

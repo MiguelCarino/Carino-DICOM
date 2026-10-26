@@ -138,11 +138,11 @@ async function loadStudy(res) {
   await handleFiles(keep);
 
   // Logged after handleFiles, which clears the log.
-  if (skippedIndex) log('Skipped DICOMDIR (the disc index, not an image)');
+  if (skippedIndex) log(T('Skipped DICOMDIR (the disc index, not an image)'));
   // Non-DICOM files go to the log, not the failure banner (reserved for real parse failures).
-  if (junk) log(`Skipped ${junk} non-DICOM file(s) in the folder`);
+  if (junk) log(TF('Skipped {n} non-DICOM file(s) in the folder', { n: junk }));
   if (res.truncated) {
-    log(`Folder scan stopped at ${MAX_SCAN_FILES} files`);
+    log(TF('Folder scan stopped at {n} files', { n: MAX_SCAN_FILES }));
     toast?.(T('Only the first {n} files in that folder were scanned.').replace('{n}', MAX_SCAN_FILES));
   }
 }
@@ -436,17 +436,18 @@ async function handleFiles(list) {
   const arr = toLoadItems(list);
   if (!arr.length) return 0;
 
-  showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, 0, `0 / ${arr.length}`);
+  const loadingMsg = arr.length > 1 ? 'Loading images…' : 'Loading image…';
+  showLoading?.(true, loadingMsg, 0, `0 / ${arr.length}`);
 
   const parsed = [], failures = [];
   // Logged after the reset below, which clears the log.
-  const lines = [`Loading ${arr.length} file(s)...`];
+  const lines = [TF('Loading {n} file(s)...', { n: arr.length })];
   const reads = createReadAheadQueue(arr);
 
   let lastYield = performance.now();
   for (let i = 0; i < arr.length; i++) {
     const { file, path } = arr[i];
-    showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, (i + 1) / arr.length, `${i + 1} / ${arr.length}`);
+    showLoading?.(true, loadingMsg, (i + 1) / arr.length, `${i + 1} / ${arr.length}`);
     // Pre-read buffers resolve as microtasks and never yield a frame; yield a real
     // task every ~100 ms so the progress overlay repaints.
     if (performance.now() - lastYield > 100) {

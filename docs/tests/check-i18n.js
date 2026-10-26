@@ -8,7 +8,8 @@
  *
  * Checks, in order of what they would have caught:
  *   1. every locale carries the same key set (no locale short of the others)
- *   2. every [data-i18n] key in index.html exists in every locale
+ *   2. every [data-i18n] key (and [data-i18n-aria] label) in index.html exists
+ *      in every locale
  *   3. no orphan keys: a locale entry that matches nothing on the page is
  *      either a typo or a leftover, and both are invisible at runtime
  *   4. no [data-i18n] element has child elements — applyStaticI18n() writes
@@ -32,7 +33,7 @@ const LOCALES = ['es', 'pt-BR', 'ja', 'ru'];
 // 'Copied' and 'Press Ctrl+C' are the copy buttons' feedback, set by app.js.
 const RUNTIME_KEYS = ['Version', 'Checking for the latest version…', 'Copied', 'Press Ctrl+C'];
 // Greetings belong to the shared navbar (carino-navbar.js), not to this page.
-const NAVBAR_KEYS = ['Late shift.', 'Good morning.', 'Good afternoon.', 'Good evening.'];
+const NAVBAR_KEYS = ['Late shift.', 'Good morning.', 'Good afternoon.', 'Good evening.', 'More'];
 
 const failures = [];
 function check(ok, msg) { if (!ok) failures.push(msg); }
@@ -57,7 +58,7 @@ function decode(s) {
 }
 
 function pageKeys(html) {
-    const re = /<([a-z0-9]+)\b[^>]*\sdata-i18n(?:=["'][^"']*["'])?[^>]*>([\s\S]*?)<\/\1>/gi;
+    const re = /<([a-z0-9]+)\b[^>]*\sdata-i18n(?![\w-])(?:=["'][^"']*["'])?[^>]*>([\s\S]*?)<\/\1>/gi;
     const keys = [];
     let m;
     while ((m = re.exec(html)) !== null) {
@@ -72,6 +73,12 @@ function pageKeys(html) {
 const { I18N, RICH } = loadDicts();
 const html = fs.readFileSync(path.join(DOCS, 'index.html'), 'utf8');
 const used = pageKeys(html);
+// [data-i18n-aria] elements: the English aria-label is the key.
+for (const m of html.matchAll(/<[a-z0-9]+\b[^>]*\sdata-i18n-aria\b[^>]*>/gi)) {
+    const al = m[0].match(/\saria-label="([^"]*)"/);
+    check(!!al, `[data-i18n-aria] element has no aria-label: ${m[0].slice(0, 60)}`);
+    if (al) used.push(decode(al[1]));
+}
 
 check(used.length > 0, 'no [data-i18n] elements found in index.html — did the extractor break?');
 

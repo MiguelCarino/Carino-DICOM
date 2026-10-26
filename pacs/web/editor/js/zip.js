@@ -210,7 +210,7 @@ function zipNameFor(entry) {
 function warnBurnedOnExport(list) {
   const n = list.filter(e => /^YES/i.test(String(getTag(e.dict, '00120062')?.Value?.[0] || '').trim()) &&
                              /^YES/i.test(String(getTag(e.dict, '00280301')?.Value?.[0] || '').trim())).length;
-  if (n) log(`⚠ ${n} exported file(s) are marked Patient Identity Removed = YES but also Burned In Annotation = YES: identity may remain in the pixels.`);
+  if (n) log('⚠ ' + TF('{n} exported file(s) are marked Patient Identity Removed = YES but also Burned In Annotation = YES: identity may remain in the pixels.', { n }));
 }
 
 function downloadOne(entry) {
@@ -219,7 +219,7 @@ function downloadOne(entry) {
     log(`⬇ ${entry.deid ? exportBaseName(entry) : entry.name}`);
     warnBurnedOnExport([entry]);
   } catch (e) {
-    log(`✗ Download ${entry.name}: ${e.message || e}`);
+    log(`✗ ${T('Download failed:')} ${entry.name}: ${e.message || e}`);
     toast?.(`${T('Download failed:')} ${e.message || e}`, 7000);
   }
 }
@@ -243,7 +243,7 @@ async function downloadRange(start, end) {
       try {
         packed.push({ name: zipNameFor(range[i]), bytes: buildEditedBytes(range[i]) });
       } catch (e) {
-        log(`✗ Download ${range[i].name}: ${e.message || e}`);
+        log(`✗ ${T('Download failed:')} ${range[i].name}: ${e.message || e}`);
       }
       showLoading?.(true, 'Packing files…', (i + 1) / range.length, `${i + 1} / ${range.length}`);
       // Yield every 8th file so the progress overlay can paint.
@@ -254,10 +254,11 @@ async function downloadRange(start, end) {
     if (!packed.length) return;
     warnBurnedOnExport(range);
     const { saved, archives, loose } = saveArchives(packed, 'dicom-edited', 'application/dicom', log);
-    log(`⬇ ${saved} file(s) → ${archives === 1 ? 'one archive' : `${archives} archives`}${loose ? ` + ${loose} saved one at a time` : ''}`);
+    log('⬇ ' + TF(archives === 1 ? '{n} file(s) → one archive' : '{n} file(s) → {m} archives', { n: saved, m: archives })
+        + (loose ? ' ' + TF('+ {n} saved one at a time', { n: loose }) : ''));
   } catch (e) {
     // Archive assembly (e.g. out of memory) has no per-file guard; report it to the log.
-    log(`✗ Download: ${e.message || e}`);
+    log(`✗ ${T('Download failed:')} ${e.message || e}`);
   } finally {
     packingRange = false;
     showLoading?.(false);

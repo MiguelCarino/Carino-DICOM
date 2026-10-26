@@ -123,7 +123,7 @@
            Two chips open the same dialog: "what it is" and "what it is not" are
            one thought, and separating them is how the honest half ended up being
            the half nobody read. data-focus scrolls the second one into view. -->
-      <nav class="chips" aria-label="More about Carino DICOM">
+      <nav class="chips" data-i18n-aria aria-label="More about Carino DICOM">
         <button class="btn sm" type="button" data-sheet="whatDialog" data-i18n>What it is (and is not)</button>
         <button class="btn sm" type="button" data-sheet="doesDialog" data-i18n>Features</button>
         <button class="btn sm" type="button" data-sheet="firstrunDialog" data-i18n>First launch</button>
@@ -160,7 +160,7 @@
   <dialog class="modal wide" id="serverDialog" aria-labelledby="serverDialogTitle">
     <div class="modal-head">
       <h2 class="modal-title" id="serverDialogTitle" data-i18n>Run it on a server</h2>
-      <form method="dialog"><button class="modal-x" id="serverClose" aria-label="Close">✕</button></form>
+      <form method="dialog"><button class="modal-x" id="serverClose" data-i18n-aria aria-label="Close">✕</button></form>
     </div>
     <div class="modal-body">
     <p class="server-lede" data-i18n>No installer for these — all three run the same application. Pick the one your machine already speaks.</p>
@@ -175,7 +175,7 @@
 <span class="prompt">$</span> <span class="cmd">echo "PACS_UID=$(id -u)" &gt;&gt; .env</span>
 <span class="prompt">$</span> <span class="cmd">echo "PACS_GID=$(id -g)" &gt;&gt; .env</span>
 <span class="prompt">$</span> <span class="cmd">docker compose up -d --build</span>
-<span class="prompt">$</span> <span class="cmd">docker compose logs -f pacs</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Docker commands"><span data-i18n>Copy</span></button></div>
+<span class="prompt">$</span> <span class="cmd">docker compose logs -f pacs</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the Docker commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/docker-compose.yml" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
@@ -191,7 +191,7 @@
         ~/.config/containers/systemd/carino-dicom.container</span>
 <span class="prompt">$</span> <span class="cmd">systemctl --user daemon-reload</span>
 <span class="prompt">$</span> <span class="cmd">systemctl --user start carino-dicom</span>
-<span class="prompt">$</span> <span class="cmd">journalctl --user -u carino-dicom -f</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Podman commands"><span data-i18n>Copy</span></button></div>
+<span class="prompt">$</span> <span class="cmd">journalctl --user -u carino-dicom -f</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the Podman commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/podman/carino-dicom.container" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
 
@@ -202,7 +202,7 @@
 <span class="prompt">$</span> <span class="cmd">cd Carino-DICOM</span>
 <span class="prompt">$</span> <span class="cmd">sudo packaging/systemd/install.sh</span>
 <span class="cmd"># then edit /var/lib/carino-pacs/config.json and:</span>
-<span class="prompt">$</span> <span class="cmd">sudo systemctl enable --now carino-pacs</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the systemd commands"><span data-i18n>Copy</span></button></div>
+<span class="prompt">$</span> <span class="cmd">sudo systemctl enable --now carino-pacs</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the systemd commands"><span data-i18n>Copy</span></button></div>
         <a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/packaging/systemd/install.sh" target="_blank" rel="noopener" data-i18n>Details →</a>
       </article>
     </div>
@@ -222,7 +222,7 @@
   <dialog class="modal wide" id="whatDialog" aria-labelledby="whatTitle">
     <div class="modal-head">
       <h2 class="modal-title" id="whatTitle" data-i18n>What it is (and is not)</h2>
-      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+      <form method="dialog"><button class="modal-x" data-i18n-aria aria-label="Close">✕</button></form>
     </div>
     <div class="modal-body">
 
@@ -253,7 +253,7 @@
   <dialog class="modal wide" id="doesDialog" aria-labelledby="doesTitle">
     <div class="modal-head">
       <h2 class="modal-title" id="doesTitle" data-i18n>Features</h2>
-      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+      <form method="dialog"><button class="modal-x" data-i18n-aria aria-label="Close">✕</button></form>
     </div>
     <div class="modal-body">
 
@@ -307,7 +307,7 @@
   <dialog class="modal" id="firstrunDialog" aria-labelledby="firstrunTitle">
     <div class="modal-head">
       <h2 class="modal-title" id="firstrunTitle" data-i18n>First launch shows a security warning? Here's how to open it</h2>
-      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+      <form method="dialog"><button class="modal-x" data-i18n-aria aria-label="Close">✕</button></form>
     </div>
     <div class="modal-body">
     <div class="firstrun">
@@ -316,7 +316,7 @@
           <li><span id="fr-mac"><strong>macOS:</strong> open the app once and dismiss the warning, then go to
             <em>System Settings → Privacy &amp; Security</em> and click <em>Open Anyway</em>. If that option
             is not there, or macOS says the app is <em>"damaged"</em>, run this in Terminal instead:</span>
-            <div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the macOS command"><span data-i18n>Copy</span></button></div></li>
+            <div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">xattr -dr com.apple.quarantine /Applications/Carino-DICOM.app</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the macOS command"><span data-i18n>Copy</span></button></div></li>
           <li><span id="fr-linux"><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
             <code>.deb</code> (Debian/Ubuntu) from the
             <a href="https://github.com/MiguelCarino/Carino-DICOM/releases" target="_blank" rel="noopener">releases</a>.
@@ -325,7 +325,7 @@
             <div class="terminal-wrapper"><div class="terminal"><code><span class="cmd"># Fedora</span>
 <span class="prompt">$</span> <span class="cmd">sudo dnf install fuse-libs</span>
 <span class="cmd"># Debian / Ubuntu</span>
-<span class="prompt">$</span> <span class="cmd">sudo apt install libfuse2</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the Linux commands"><span data-i18n>Copy</span></button></div></li>
+<span class="prompt">$</span> <span class="cmd">sudo apt install libfuse2</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the Linux commands"><span data-i18n>Copy</span></button></div></li>
         </ul>
         <p data-i18n>The warning appears because the app isn't code-signed yet — it's safe.</p>    </div>
     </div>
@@ -335,7 +335,7 @@
     <div class="modal-head">
       <h2 class="modal-title" id="techTitle" data-i18n>For technical users</h2>
       <p class="modal-sub" data-i18n>— DICOM details, CLI &amp; source</p>
-      <form method="dialog"><button class="modal-x" aria-label="Close">✕</button></form>
+      <form method="dialog"><button class="modal-x" data-i18n-aria aria-label="Close">✕</button></form>
     </div>
     <div class="modal-body">
     <div class="techbox">
@@ -363,7 +363,7 @@
           <div class="terminal-wrapper"><div class="terminal"><code><span class="prompt">$</span> <span class="cmd">git clone https://github.com/MiguelCarino/Carino-DICOM</span>
 <span class="prompt">$</span> <span class="cmd">cd Carino-DICOM &amp;&amp; ./setup.sh      # Windows: .\setup.ps1</span>
 <span class="prompt">$</span> <span class="cmd">./run.sh init                    # scaffold config.json + folders</span>
-<span class="prompt">$</span> <span class="cmd">./run.sh serve                   # dashboard → http://127.0.0.1:8042</span></code></div><button type="button" class="copy-btn term-copy" aria-label="Copy the source commands"><span data-i18n>Copy</span></button></div>
+<span class="prompt">$</span> <span class="cmd">./run.sh serve                   # dashboard → http://127.0.0.1:8042</span></code></div><button type="button" class="copy-btn term-copy" data-i18n-aria aria-label="Copy the source commands"><span data-i18n>Copy</span></button></div>
           <div class="tech-links">
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM" target="_blank" rel="noopener">GitHub</a>
             <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/README.md" target="_blank" rel="noopener">README</a>

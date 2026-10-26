@@ -129,7 +129,7 @@ function renderCreateGrid() {
 
     const rmBtn = document.createElement('button');
     rmBtn.className = 'img-thumb-remove';
-    rmBtn.title = 'Remove';
+    rmBtn.title = T('Remove');
     rmBtn.textContent = '✕';
     rmBtn.addEventListener('click', e => { e.stopPropagation(); removeCreateImage(i); });
 

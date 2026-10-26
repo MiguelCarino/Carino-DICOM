@@ -2,6 +2,8 @@
 // ---- Elements ----
 const $ = (id) => document.getElementById(id);
 const T = (s) => (window.t || String)(s);   // i18n.js loads deferred, so resolve per call
+// Translate a {name} template, then fill it: TF('Skipped {n} files', { n: 3 }).
+const TF = (s, vars = {}) => Object.entries(vars).reduce((out, [k, v]) => out.split(`{${k}}`).join(String(v)), T(s));
 // The pill keeps its count so i18n.js can redo the text on a language switch.
 const setCountPill = (el, n) => { el.dataset.i18nN = n; el.textContent = T(el.dataset.i18nKey).replace('{n}', n); };
 const body = document.body;
@@ -393,7 +395,7 @@ function applyPrefixToAll(newP) {
     uidPrefixInput.value = newP;
     uidPatternDisplay.textContent = `${newP}.*`;
     renderTable();
-    log(`Applied UID prefix: ${newP}`);
+    log(TF('Applied UID prefix: {p}', { p: newP }));
   }, 'Rewrite UIDs');
 }
 

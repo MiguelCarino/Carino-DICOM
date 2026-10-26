@@ -1512,7 +1512,7 @@
     /* ---- Confirm dialog ---- */
     .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 2500; }
     .confirm-overlay.visible { display: flex; }
-    .confirm-box { background: var(--surface-solid); border: 1px solid var(--border); border-radius: var(--r-md); padding: 20px; width: 90%; max-width: 360px; box-shadow: var(--elev); }
+    .confirm-box { background: var(--surface-solid); border: 1px solid var(--border); border-radius: var(--r-md); padding: 20px; width: 90%; max-width: 360px; box-shadow: var(--elev); overflow-y: auto; }
     .confirm-msg { font: 500 var(--fs-sec) var(--sans); color: var(--text); margin-bottom: 18px; line-height: 1.5; white-space: pre-line; }
     .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
@@ -1576,6 +1576,9 @@
       /* The rail stacks above the pane (carino-ui.css .ws-stack): files in is its first card. */
       .main, .create-panel, .extractor-panel {
         grid-template-columns: minmax(0, 1fr);
+        /* The panel keeps the app's full-height row; without this, a short (empty) module's spare height
+           is shared out to the stacked rows and the rail grows taller than its cards. */
+        align-content: start;
         overflow-y: auto;
         overflow-x: hidden;
       }
@@ -1591,6 +1594,8 @@
 
       /* Stacked, the page scrolls: the sidebar is a plain stack again and the preview is sized by width. */
       .sidebar, .sidebar-rest { flex: none; overflow: visible; }
+      /* With the Log hidden the tail is empty, and would still add a gap under the last card. */
+      .sidebar-rest:has(> #logCard[style*="none"]) { display: none; }
       #imgEditCard, #previewCard { flex: none; }
       #previewCard .preview-box {
         flex: none;
