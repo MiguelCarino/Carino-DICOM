@@ -6,7 +6,7 @@
 // Must match tests/suites (a browser cannot glob it); tests/suites/selftest.js checks this.
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
 const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'presentation', 'render', 'phone',
-                         'sequences', 'series', 'edits', 'imgedit', 'compression', 'compare', 'deid', 'swap',
+                         'sequences', 'series', 'edits', 'imgedit', 'compression', 'compare', 'pdf', 'deid', 'swap',
                          'redact', 'samples', 'eyephoto', 'zip'];
 // Suites the visitor's self-test leaves out, and why; tests/suites/selftest.js counts these as
 // listed. ocr: it would fetch the ~8 MB OCR engine and model, which the page promises to load

@@ -114,7 +114,7 @@
     ok('the bar counts one tag on each side alone',
        stats.includes(`1 ${T('only here')}`) && stats.includes(`1 ${T('only there')}`), stats);
 
-    // The printed report covers the same tags the bar counts; the print itself is stubbed out.
+    // The report covers the same tags the bar counts; the PDF itself is stubbed out (tests/suites/pdf.js makes one).
     {
       const realPrint = window.carinoBrandedPrint;
       let printed = null;

@@ -51,6 +51,15 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   the upstream CHANGELOG covers only the last two.
 
 ### Changed
+- **The bundled editor's reports download as PDF files** (re-synced to upstream v1.2.0,
+  `5cb03f9`). The tag dump, the Overview's report and the Comparison report no longer open the
+  print dialog: they are laid out at A4, cut into pages between table rows and saved as
+  `<file>_<report>.pdf`, in the editor's own fonts and in every script a patient name may use.
+  Pages are pictures, so the PDF's text is not selectable. This adds
+  `editor/vendor/html2canvas.min.js` (MIT, `LICENSE-html2canvas.txt`), fetched only when a
+  report is made and making no request of its own, so the air-gapped guarantee holds. The
+  editor's copy of `carino-lang.js` is level with the fleet's canonical one again (translated
+  language-switcher tooltip).
 - **De-identification removes (3004,007F) Dose Calculation Model Name**, the PS3.15 2026d
   row the editor's table gained. `pacs/deid.py`'s embedded table is regenerated from it
   and still 656 rows: the hand-added (0002,0013) Implementation Version Name row is gone

@@ -700,7 +700,8 @@
       title: 'DICOM Study Report',
       subtitle: `${fileName} · generated ${stamp}`,
       meta: 'Carino DICOM Editor',
-      body
+      body,
+      fileBase: exportBaseName(files[currentFileIdx])
     });
   }
   $('ovPrintBtn')?.addEventListener('click', printOverview);

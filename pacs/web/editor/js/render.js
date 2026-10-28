@@ -1,6 +1,7 @@
-// Rendering: branded print/PDF, file compare, the tag table and dataset walk/normalize helpers.
-// ---- Branded print / PDF ----
-// Shared Carino report layout. Self-contained (system fonts, inline CSS, logo as data URI) so it prints offline.
+// Rendering: branded PDF reports, file compare, the tag table and dataset walk/normalize helpers.
+// ---- Branded PDF ----
+// Shared Carino report layout. Self-contained (inline CSS, logo as data URI; the app's own fonts are linked
+// when it is drawn) so it renders offline.
 const _pesc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 let CARINO_LOGO_URI = '';
 (function loadCarinoLogo() {
@@ -12,14 +13,25 @@ let CARINO_LOGO_URI = '';
   } catch (_) {}
 })();
 
-// Print a branded document around a body-HTML fragment.
-function carinoBrandedPrint({ title, subtitle, meta, body }) {
+// A4 portrait in PDF points with 15 mm margins. The report is laid out PDF_CSS_W CSS pixels wide,
+// which maps onto the printable width, so page breaks are measured in the layout's own unit.
+const PDF_PAGE = { w: 595.28, h: 841.89, margin: 42.52 };
+const PDF_CSS_W = 680;
+const PDF_PT_PER_PX = (PDF_PAGE.w - 2 * PDF_PAGE.margin) / PDF_CSS_W;
+const PDF_CSS_H = Math.floor((PDF_PAGE.h - 2 * PDF_PAGE.margin) / PDF_PT_PER_PX);
+const PDF_SCALE = 2;              // canvas pixels per CSS pixel: about 190 dpi on paper
+const PDF_CHUNK_PAGES = 4;        // pages drawn per html2canvas pass; keeps each canvas inside Safari's area limit
+
+// Make a branded PDF around a body-HTML fragment and download it. No print dialog: the pages are
+// drawn by html2canvas from the browser's own layout (so every script renders as on screen) and
+// written into the PDF here. fileBase prefixes the file name. Resolves once the download starts.
+async function carinoBrandedPrint({ title, subtitle, meta, body, fileBase }) {
   const logo = CARINO_LOGO_URI ? `<img class="ph-logo" src="${CARINO_LOGO_URI}" alt="Carino Systems">` : '';
   const metaHtml = meta ? `<div class="ph-meta">${meta}</div>` : '';
   const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${_pesc(title)}</title><style>
     :root{ --primary:#b45309; --ink:#1f2937; --muted:#6b7280; --border:#e5e7eb; }
     html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-    *{box-sizing:border-box;} body{font:12px/1.5 'IBM Plex Sans',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);margin:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    *{box-sizing:border-box;} body{font:12px/1.5 'IBM Plex Sans',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .ph{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid var(--primary);padding-bottom:16px;margin-bottom:20px;}
     .ph h1{font-family:'Red Hat Display','IBM Plex Sans',sans-serif;font-weight:900;font-size:20px;letter-spacing:.01em;margin:0;color:var(--primary);}
     .ph-date{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--muted);margin:6px 0 0;}
@@ -51,7 +63,6 @@ function carinoBrandedPrint({ title, subtitle, meta, body }) {
     .adv{border:1px solid var(--border);border-left-width:4px;padding:8px 12px;margin:0 0 16px;font-size:11px;border-radius:4px;}
     .adv-info{border-left-color:#2b8fce;background:#eff8ff;} .adv-warn{border-left-color:#d99000;background:#fff8e8;} .adv-danger{border-left-color:#cc2b2b;background:#fdeeee;}
     footer{margin-top:22px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:#9aa0a8;}
-    @media print{body{margin:0;} @page{margin:15mm;}}
   </style></head><body>
     <header class="ph"><div class="ph-l"><h1>${_pesc(title)}</h1>${subtitle ? `<p class="ph-date">${_pesc(subtitle)}</p>` : ''}</div>
       <div class="ph-r">${logo}${metaHtml}</div></header>
@@ -59,20 +70,196 @@ function carinoBrandedPrint({ title, subtitle, meta, body }) {
     <footer>Generated locally by Carino Systems — no data left this device.</footer>
   </body></html>`;
 
-  const ifr = document.createElement('iframe');
-  ifr.setAttribute('aria-hidden', 'true');
-  ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-  document.body.appendChild(ifr);
-  const w = ifr.contentWindow, d = w.document;
-  d.open(); d.write(doc); d.close();
-  const cleanup = () => setTimeout(() => { try { ifr.remove(); } catch (_) {} }, 500);
-  w.onafterprint = cleanup;
-  const go = () => { try { w.focus(); w.print(); } catch (_) { cleanup(); } };
-  const img = d.querySelector('img.ov-shot');
-  if (img && !img.complete) { img.onload = go; img.onerror = go; }
-  else setTimeout(go, 60);
+  // Letters and digits of any script survive; anything a file system might refuse becomes '-'.
+  const name = [fileBase, title].filter(Boolean).join('_').replace(/[^\p{L}\p{N}_.-]+/gu, '-') + '.pdf';
+  if (window.toast) toast(T('Creating the PDF…'));
+  try {
+    saveBlob(await reportToPdf(doc, title), name);
+  } catch (e) {
+    console.error(e);
+    if (window.toast) toast(`${T('Could not create the PDF:')} ${(e && e.message) || e}`, 5000);
+  }
 }
 window.carinoBrandedPrint = carinoBrandedPrint;
+
+// Lay the report out in an off-screen iframe at the PDF's width, cut it into pages, draw them and
+// write the PDF. The iframe is on screen as far as layout is concerned (html2canvas needs that),
+// just outside the viewport.
+async function reportToPdf(html, title) {
+  await loadVendorScript('./vendor/html2canvas.min.js');
+  if (typeof window.html2canvas !== 'function') throw new Error('html2canvas did not load');
+  const ifr = document.createElement('iframe');
+  ifr.setAttribute('aria-hidden', 'true');
+  ifr.tabIndex = -1;
+  ifr.style.cssText = `position:fixed;left:-${PDF_CSS_W + 200}px;top:0;width:${PDF_CSS_W}px;height:${PDF_CSS_H}px;border:0;`;
+  document.body.appendChild(ifr);
+  try {
+    const d = ifr.contentDocument;
+    d.open(); d.write(html); d.close();
+    // The page's own web fonts. html2canvas draws on a canvas of this page, where IBM Plex is
+    // loaded; a report laid out without it would be drawn in Plex at a fallback font's positions.
+    const fonts = d.createElement('link');
+    fonts.rel = 'stylesheet';
+    fonts.href = new URL('fonts/carino-fonts.css', document.baseURI).href;
+    await new Promise(r => { fonts.onload = fonts.onerror = r; d.head.appendChild(fonts); });
+    await Promise.all([...d.images].map(img => img.complete ? null
+      : new Promise(r => { img.onload = img.onerror = r; })));
+    if (d.fonts) await Promise.all([...d.fonts].map(f => f.load().catch(() => null)));
+    pdfSpellOutText(d);
+
+    // Page ends are fractional CSS pixels (rows are rarely whole pixels tall). Round them once, in
+    // canvas pixels, so neighbouring pages share each edge exactly and no row leaves a sliver.
+    const ends = pdfPageBreaks(d).map(b => Math.round(b * PDF_SCALE));
+    const pages = [];
+    for (let i = 0; i < ends.length - 1;) {
+      // Several pages per pass: html2canvas clones the whole document each time it is called.
+      let j = i + 1;
+      while (j < ends.length - 1 && j - i < PDF_CHUNK_PAGES) j++;
+      const chunk = await window.html2canvas(d.body, {
+        x: 0, y: ends[i] / PDF_SCALE, width: PDF_CSS_W, height: (ends[j] - ends[i]) / PDF_SCALE,
+        windowWidth: PDF_CSS_W, scale: PDF_SCALE, backgroundColor: '#ffffff', logging: false,
+      });
+      for (let k = i; k < j; k++) {
+        const page = document.createElement('canvas');
+        page.width = Math.round(PDF_CSS_W * PDF_SCALE);
+        page.height = ends[k + 1] - ends[k];
+        const g = page.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, page.width, page.height);   // the PDF's pages carry no alpha
+        g.drawImage(chunk, 0, ends[k] - ends[i], page.width, page.height, 0, 0, page.width, page.height);
+        pages.push({ ...await pdfPageImage(page), w: page.width, h: page.height, cssH: page.height / PDF_SCALE });
+      }
+      i = j;
+    }
+    return buildPdf(pages, title);
+  } finally {
+    ifr.remove();
+  }
+}
+
+// One page's pixels for the PDF. Deflated RGB (FlateDecode) where the browser has CompressionStream:
+// lossless, so text stays sharp, and smaller than JPEG on a mostly white page of text (a page of
+// tag rows: 338 KB against 517 KB at quality 0.92). JPEG otherwise.
+async function pdfPageImage(canvas) {
+  if (typeof CompressionStream === 'function') {
+    const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const rgb = new Uint8Array(px.length / 4 * 3);
+    for (let i = 0, j = 0; i < px.length; i += 4) { rgb[j++] = px[i]; rgb[j++] = px[i + 1]; rgb[j++] = px[i + 2]; }
+    const z = await new Response(new Blob([rgb]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
+    return { data: new Uint8Array(z), filter: 'FlateDecode' };
+  }
+  const jpeg = await new Promise((res, rej) => canvas.toBlob(b => b ? res(b) : rej(new Error('could not encode a page')), 'image/jpeg', 0.92));
+  return { data: new Uint8Array(await jpeg.arrayBuffer()), filter: 'DCTDecode' };
+}
+
+// System-font keywords a canvas font string cannot name. Left in, the browser lays text out in one
+// font (SF Mono for ui-monospace) and html2canvas draws another at those positions: letters land
+// on top of each other and spaces vanish.
+const PDF_CANVAS_UNKNOWN_FONT = /(^|,)\s*(ui-monospace|ui-sans-serif|ui-serif|ui-rounded|system-ui|-apple-system|BlinkMacSystemFont)\s*(?=,|$)/gi;
+
+// html2canvas fonts, breaks and cases text by its own rules, and parts from the browser's in three
+// places the reports hit. Spell them out in this off-screen copy before it is measured: font stacks
+// without the keywords above, so layout and drawing pick the same font; capitals typed rather than
+// transformed; and a zero-width space where the browser wrapped inside a word, or a UID or hash that
+// word-break wraps is drawn as one line running off the page.
+function pdfSpellOutText(d) {
+  const view = d.defaultView;
+  for (const el of [d.body, ...d.body.querySelectorAll('*')]) {
+    const family = view.getComputedStyle(el).fontFamily;
+    const usable = family.replace(PDF_CANVAS_UNKNOWN_FONT, '').replace(/^\s*,\s*/, '');
+    if (usable !== family) el.style.fontFamily = usable || 'sans-serif';
+  }
+  const walk = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
+  const texts = [];
+  while (walk.nextNode()) texts.push(walk.currentNode);
+  const upper = new Set();
+  for (const node of texts) {
+    const el = node.parentElement;
+    if (view.getComputedStyle(el).textTransform === 'uppercase') { node.data = node.data.toUpperCase(); upper.add(el); }
+  }
+  for (const el of upper) el.style.textTransform = 'none';
+  // Only where a wrap really happened, found by the line each character sits on: one space per
+  // wrap keeps the layout identical, where one per character made html2canvas ten times slower.
+  const range = d.createRange();
+  const lineOf = (node, i) => { range.setStart(node, i); range.setEnd(node, i + 1); return range.getBoundingClientRect().top; };
+  for (const node of texts) {
+    const cuts = [];
+    for (const m of node.data.matchAll(/\S{12,}/g)) {
+      let top = lineOf(node, m.index);
+      for (let i = m.index + 1; i < m.index + m[0].length; i++) {
+        if ((node.data.charCodeAt(i) & 0xfc00) === 0xdc00) continue;   // second half of a surrogate pair
+        const t = lineOf(node, i);
+        if (t > top + 1) { cuts.push(i); top = t; }
+      }
+    }
+    for (const i of cuts.reverse()) node.data = node.data.slice(0, i) + '​' + node.data.slice(i);
+  }
+}
+
+// Where each page ends, in CSS pixels from the top of the report: the lowest bottom edge of a row,
+// section, paragraph, picture or note that still fits, so no page cuts through a line of text.
+// Headings and table header rows are never an end, so a page never finishes on one. A single
+// block taller than a page is cut where the page runs out.
+function pdfPageBreaks(d) {
+  const total = d.documentElement.getBoundingClientRect().height;
+  const ends = [...d.querySelectorAll('header, section, table, tbody > tr, p, .adv, img, footer')]
+    .map(el => el.getBoundingClientRect().bottom)
+    .sort((a, b) => a - b);
+  const breaks = [0];
+  let top = 0;
+  while (total - top > PDF_CSS_H) {
+    const limit = top + PDF_CSS_H;
+    let cut = 0;
+    for (const e of ends) { if (e > limit) break; if (e > top) cut = e; }
+    if (!cut) cut = limit;
+    breaks.push(cut);
+    top = cut;
+  }
+  breaks.push(total);
+  return breaks;
+}
+
+// A PDF 1.4 file with one picture per page, each drawn across the printable area from the top margin.
+// Objects: 1 catalog, 2 page tree, 3 info, then page / content stream / image for every page.
+function buildPdf(pages, title) {
+  const enc = new TextEncoder();
+  const parts = [], offsets = [];
+  let length = 0;
+  const put = (x) => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); length += b.length; };
+  const obj = (n, dict, stream) => {
+    offsets[n] = length;
+    put(`${n} 0 obj\n${dict}\n`);
+    if (stream) { put('stream\n'); put(stream); put('\nendstream\n'); }
+    put('endobj\n');
+  };
+  const num = v => String(Math.round(v * 100) / 100);
+  // Text strings as UTF-16BE with a BOM, so a title in any script survives.
+  const pdfText = s => '<FEFF' + [...String(s)].map(c => {
+    const u = c.codePointAt(0);
+    const units = u > 0xffff ? [0xd800 + ((u - 0x10000) >> 10), 0xdc00 + ((u - 0x10000) & 0x3ff)] : [u];
+    return units.map(x => x.toString(16).padStart(4, '0')).join('');
+  }).join('') + '>';
+  const now = new Date(), p2 = v => String(v).padStart(2, '0');
+  const created = `D:${now.getUTCFullYear()}${p2(now.getUTCMonth() + 1)}${p2(now.getUTCDate())}${p2(now.getUTCHours())}${p2(now.getUTCMinutes())}${p2(now.getUTCSeconds())}Z`;
+
+  const { w, h, margin } = PDF_PAGE;
+  const first = i => 4 + i * 3;
+  put(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));  // %PDF-1.4, binary marker
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, i) => `${first(i)} 0 R`).join(' ')}] >>`);
+  obj(3, `<< /Title ${pdfText(title)} /Producer ${pdfText('Carino DICOM Editor')} /CreationDate (${created}) >>`);
+  pages.forEach((p, i) => {
+    const n = first(i), drawW = w - 2 * margin, drawH = p.cssH * PDF_PT_PER_PX;
+    const content = enc.encode(`q ${num(drawW)} 0 0 ${num(drawH)} ${num(margin)} ${num(h - margin - drawH)} cm /Im0 Do Q`);
+    obj(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`);
+    obj(n + 1, `<< /Length ${content.length} >>`, content);
+    obj(n + 2, `<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /${p.filter} /Length ${p.data.length} >>`, p.data);
+  });
+  const size = first(pages.length), xref = length;
+  put(`xref\n0 ${size}\n0000000000 65535 f \n` +
+      offsets.slice(1).map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join(''));
+  put(`trailer\n<< /Size ${size} /Root 1 0 R /Info 3 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
 
 // Print every tag (meta + dataset, sequences walked) of the current file.
 function printAllTags() {
@@ -98,7 +285,8 @@ function printAllTags() {
   const body = `<section class="tagsec"><h2>All DICOM tags — ${entries.length}</h2>
     <table class="tags"><thead><tr><th class="c-tag">Tag</th><th class="c-desc">Description</th><th class="c-vr">VR</th><th>Value</th></tr></thead>
     <tbody>${rows}</tbody></table></section>`;
-  carinoBrandedPrint({ title: 'DICOM Tag Dump', subtitle: `${fileName} · ${entries.length} tags · generated ${stamp}`, meta: 'Carino DICOM Editor', body });
+  carinoBrandedPrint({ title: 'DICOM Tag Dump', subtitle: `${fileName} · ${entries.length} tags · generated ${stamp}`, meta: 'Carino DICOM Editor', body,
+                       fileBase: exportBaseName(files[currentFileIdx]) });
 }
 window.printAllTags = printAllTags;
 $('printTagsBtn')?.addEventListener('click', printAllTags);
@@ -344,7 +532,7 @@ function printCompareReport() {
   const now = new Date(), p2 = v => String(v).padStart(2, '0');
   const stamp = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}`;
   carinoBrandedPrint({ title: 'DICOM Comparison Report', subtitle: `${a.name} ↔ ${b.name} · generated ${stamp}`,
-                       meta: 'Carino DICOM Editor', body });
+                       meta: 'Carino DICOM Editor', body, fileBase: `${exportBaseName(a)}_vs_${exportBaseName(b)}` });
   return n;
 }
 window.printCompareReport = printCompareReport;
