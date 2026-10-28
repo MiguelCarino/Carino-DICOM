@@ -60,6 +60,54 @@ def replace(src: str, dst: str) -> None:
             time.sleep(0.01)
 
 
+def open_append_nofollow(path: str, mode: int = 0o600) -> int:
+    """os.open(path, O_WRONLY|O_CREAT|O_APPEND) that never writes through a link.
+
+    POSIX asks for O_NOFOLLOW. Windows has none, and os.open there follows a
+    symlink, junction or other reparse point planted at *path* and appends to
+    whatever it names. So on Windows the file is opened with CreateFileW and
+    FILE_FLAG_OPEN_REPARSE_POINT — the link itself is opened, never its target,
+    and a dangling one creates nothing — and a handle that turns out to be a
+    reparse point is closed unwritten. Either way a link raises OSError(ELOOP).
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if os.name != "nt":
+        return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
+    import ctypes
+    import errno
+    import msvcrt
+    import stat
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = k32.CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    handle = create(os.fspath(path),
+                    0x40000000,                     # GENERIC_WRITE (FlushFileBuffers needs it)
+                    0x1 | 0x2 | 0x4,                # share read, write, delete
+                    None,
+                    4,                              # OPEN_ALWAYS
+                    0x80 | 0x00200000,              # NORMAL | FILE_FLAG_OPEN_REPARSE_POINT
+                    None)
+    if handle is None or handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, flags)
+    except OSError:
+        k32.CloseHandle(wintypes.HANDLE(handle))
+        raise
+    try:
+        attrs = os.fstat(fd).st_file_attributes
+    except OSError:
+        os.close(fd)
+        raise
+    if attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        os.close(fd)
+        raise OSError(errno.ELOOP, "refusing to write through a link", path)
+    return fd
+
+
 def _open_temp(directory: str, base: str, mode: int) -> tuple[int, str]:
     for _ in range(8):
         tmp = os.path.join(directory, f"{TMP_PREFIX}{base}.{secrets.token_hex(6)}")

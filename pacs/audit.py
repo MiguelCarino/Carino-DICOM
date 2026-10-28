@@ -67,6 +67,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
+from .atomicio import open_append_nofollow
+
 CURRENT = "audit.jsonl"
 ARCHIVE_GLOB = "audit-*.jsonl"
 # Only names this module writes count as archives: a stray audit-backup.jsonl
@@ -462,8 +464,7 @@ class AuditLog:
                 line = json.dumps(record, sort_keys=True, separators=(",", ":"),
                                   default=str)
                 created = not os.path.exists(self.path)
-                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                             | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                fd = open_append_nofollow(self.path, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
                     if self.fsync:

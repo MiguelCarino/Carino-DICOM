@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Optional
 
+from .atomicio import open_append_nofollow
+
 
 class SendState:
     """The record of what has already been delivered, shared by every thread.
@@ -184,9 +186,7 @@ class SendState:
             if durable:
                 line = json.dumps({"path": key, "size": size, "mtime": mtime, "pin": names})
                 try:
-                    fd = os.open(self.journal_path,
-                                 os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                                 | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                    fd = open_append_nofollow(self.journal_path, 0o600)
                     try:
                         os.write(fd, (line + "\n").encode("utf-8"))
                         os.fsync(fd)

@@ -15,6 +15,8 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+from .atomicio import open_append_nofollow
+
 
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DAY_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.log$")
@@ -120,8 +122,7 @@ class LogBuffer:
                 # of every node this box talks to. On a shared machine that is a
                 # patient list any unprivileged account could read.
                 path = os.path.join(self.log_dir, day + ".log")
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                             | getattr(os, "O_NOFOLLOW", 0), 0o640)
+                fd = open_append_nofollow(path, 0o640)  # a planted link is refused, never followed
                 try:
                     if os.fstat(fd).st_mode & 0o027:
                         os.fchmod(fd, 0o640)      # an older 0644 file is tightened

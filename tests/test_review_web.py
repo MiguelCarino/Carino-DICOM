@@ -540,16 +540,24 @@ def test_log_files_are_tightened_and_never_followed():
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
         for bad in ("../../etc/passwd", "2026-01-01/../x", "2026-01-01.log"):
             assert log.day_file(bad) is None
-        # Not following a planted link rests on O_NOFOLLOW, which Windows lacks
-        # (pacs/logbuf.py asks for it with getattr); there the writer would follow.
-        if os.name != "posix":
-            return
+        # A planted link is refused on every platform: O_NOFOLLOW on POSIX, an
+        # open of the reparse point itself on Windows (atomicio.open_append_nofollow).
         os.remove(path)
         victim = os.path.join(d, "victim.txt")
-        open(victim, "w").write("untouched")
-        os.symlink(victim, path)
+        with open(victim, "w") as fh:
+            fh.write("untouched")
+        try:
+            os.symlink(victim, path)
+        except OSError as exc:              # Windows without the symlink privilege
+            pytest.skip(f"cannot create a symlink here: {exc}")
         log.info("third")
-        assert open(victim).read() == "untouched"
+        with open(victim) as fh:
+            assert fh.read() == "untouched"
+        dangling = os.path.join(d, "nowhere.txt")
+        os.remove(path)
+        os.symlink(dangling, path)
+        log.info("fourth")
+        assert not os.path.exists(dangling)
 
 
 def test_a_line_break_cannot_forge_a_log_line():

@@ -69,6 +69,12 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   an untouched save's dataset rather than the whole file, and checks that identity.
 
 ### Fixed
+- **On Windows a link planted at a log, audit or journal path was written through.** The dated
+  activity log, the audit trail and the hold-and-forward journal refused a symlink only through
+  `O_NOFOLLOW`, which Windows lacks, so there they appended to whatever the link named. They now
+  open the path with `FILE_FLAG_OPEN_REPARSE_POINT` on Windows and refuse the write when it is a
+  symlink, junction or other reparse point (the log skips the line, the audit trail reports
+  itself broken); POSIX behaviour is unchanged.
 - **The manual served by the appliance arrived without its fonts and shared styles.** Since the
   manual moved to the fleet fonts it asks for `../fonts/carino-fonts.css` and `../carino-ui.css`,
   which on the appliance resolve to `/fonts/` and `/carino-ui.css` — files only the website had.
