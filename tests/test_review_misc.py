@@ -1128,7 +1128,7 @@ for (const host of ['::1', '::', ' 127.0.0.1 ', '0.0.0.0', '', '10.0.0.5']) {
 }
 r.expand = h.expandUser('~svc/tls/c.pem', '/home/me', path.posix);
 r.home = h.expandUser('~/c.pem', '/home/me', path.posix);
-r.win = h.expandUser('~svc\\tls\\c.pem', 'C:\\Users\\me', path.win32);
+r.win = h.expandUser('~svc\\\\tls\\\\c.pem', 'C:\\\\Users\\\\me', path.win32);
 console.log(JSON.stringify(r));
 """)
     assert got["::1"]["url"] == "http://[::1]:8042/"

@@ -30,14 +30,17 @@ from pacs.logbuf import LogBuffer                          # noqa: E402
 from pacs.qr import QrSCP, query_filters                   # noqa: E402
 
 
-def _rename_to_undecodable(src: bytes, dst: bytes) -> None:
-    """Give a file a name that is not valid UTF-8, or skip: only some file
-    systems can hold one. Linux takes any bytes; APFS refuses them (EILSEQ) and
-    Windows cannot even decode the bytes path it is handed."""
+def _rename_to_undecodable(path: str) -> bytes:
+    """Rename *path* to P\\xe9rez.dcm beside it, a name that is not valid UTF-8,
+    and return the new bytes path; or skip, since only some file systems can hold
+    one. Linux takes any bytes; APFS refuses them (EILSEQ), and Windows cannot
+    even decode a bytes path that carries one."""
     try:
-        os.rename(src, dst)
+        bad = os.path.join(os.path.dirname(path).encode(), b"P\xe9rez.dcm")
+        os.rename(path.encode(), bad)
     except (OSError, UnicodeError) as e:
         pytest.skip(f"this file system cannot hold a non-UTF-8 name ({type(e).__name__})")
+    return bad
 
 
 def free_port() -> int:
@@ -161,8 +164,7 @@ def test_a_bad_file_name_does_not_abort_the_rescan():
     for _ in range(5):
         write(e.root)
     path, _ = write(e.root)
-    bad = os.path.join(os.path.dirname(path).encode(), b"P\xe9rez.dcm")
-    _rename_to_undecodable(path.encode(), bad)
+    _rename_to_undecodable(path)
     idx = InstanceIndex(os.path.join(e.tmp, "fresh.db"), e.log)
     counts = idx.rescan({"received": e.root})
     assert counts["failed"] >= 1
@@ -176,8 +178,7 @@ def test_a_bad_file_name_does_not_sink_its_async_batch():
     try:
         paths = [write(e.root)[0] for _ in range(5)]
         p, _ = write(e.root)
-        bad = os.path.join(os.path.dirname(p).encode(), b"P\xe9rez.dcm")
-        _rename_to_undecodable(p.encode(), bad)
+        bad = _rename_to_undecodable(p)
         for q in paths:
             idx.enqueue_file(q, "received")
         idx.enqueue_file(os.fsdecode(bad), "received")

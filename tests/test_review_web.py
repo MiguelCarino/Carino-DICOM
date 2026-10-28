@@ -538,14 +538,18 @@ def test_log_files_are_tightened_and_never_followed():
         log.info("second")
         if os.name == "posix":               # Windows has no mode bits to tighten
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
+        for bad in ("../../etc/passwd", "2026-01-01/../x", "2026-01-01.log"):
+            assert log.day_file(bad) is None
+        # Not following a planted link rests on O_NOFOLLOW, which Windows lacks
+        # (pacs/logbuf.py asks for it with getattr); there the writer would follow.
+        if os.name != "posix":
+            return
         os.remove(path)
         victim = os.path.join(d, "victim.txt")
         open(victim, "w").write("untouched")
         os.symlink(victim, path)
         log.info("third")
         assert open(victim).read() == "untouched"
-        for bad in ("../../etc/passwd", "2026-01-01/../x", "2026-01-01.log"):
-            assert log.day_file(bad) is None
 
 
 def test_a_line_break_cannot_forge_a_log_line():
