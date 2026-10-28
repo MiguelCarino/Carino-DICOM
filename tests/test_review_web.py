@@ -536,7 +536,8 @@ def test_log_files_are_tightened_and_never_followed():
         path = os.path.join(d, day + ".log")
         os.chmod(path, 0o644)
         log.info("second")
-        assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
+        if os.name == "posix":               # Windows has no mode bits to tighten
+            assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
         os.remove(path)
         victim = os.path.join(d, "victim.txt")
         open(victim, "w").write("untouched")

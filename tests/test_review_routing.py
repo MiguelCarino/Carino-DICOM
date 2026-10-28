@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest                                              # noqa: E402
+import pydicom                                             # noqa: E402
 from pydicom.dataset import Dataset, FileMetaDataset       # noqa: E402
 
 from pacs import routing                                   # noqa: E402
@@ -99,7 +100,12 @@ def test_a_same_size_replacement_that_keeps_its_mtime_is_reread():
         os.utime(p, (1_700_000_000, 1_700_000_000))
         cache = HeaderCache()
         assert cache.attributes(p)["patient_id"] == "AAAA"
-        q = write_dicom(os.path.join(tmp, "new"), patient_id="BBBB")
+        # Derived from p, not written afresh: generate_uid() varies in length, so
+        # two separately written files are only usually the same size.
+        q = os.path.join(tmp, "new")
+        ds = pydicom.dcmread(p)
+        ds.PatientID = "BBBB"
+        ds.save_as(q)
         assert os.path.getsize(p) == os.path.getsize(q)
         os.utime(q, (1_700_000_000, 1_700_000_000))
         os.replace(q, p)

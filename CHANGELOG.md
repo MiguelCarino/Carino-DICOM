@@ -68,6 +68,18 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   Name into the file meta of every file it saves, so `tests/pn-roundtrip.e2e.mjs` compares
   an untouched save's dataset rather than the whole file, and checks that identity.
 
+### Fixed
+- **The manual served by the appliance arrived without its fonts and shared styles.** Since the
+  manual moved to the fleet fonts it asks for `../fonts/carino-fonts.css` and `../carino-ui.css`,
+  which on the appliance resolve to `/fonts/` and `/carino-ui.css` — files only the website had.
+  `pacs/web/` now carries its own copies (with the fonts' OFL licence), as it already did for the
+  clock and the favicon, so an offline box shows the manual as published.
+- **CI is green again on Windows, macOS and Python 3.10–3.12.** The October review's tests assumed
+  POSIX file modes, `os.geteuid`, a directory fsync, `ntpath.isreserved` (Python 3.13+) and a file
+  system that accepts non-UTF-8 names; each now checks what the platform can do. Index tests close
+  their database before Windows deletes the folder, and the same-size replacement test no longer
+  depends on two random UIDs having the same length.
+
 ## [1.3.0] — 2026-10-16
 
 ### Added

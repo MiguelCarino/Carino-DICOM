@@ -371,6 +371,8 @@ def test_the_ledger_survives_concurrent_mutation(reader):
 
 
 def test_the_ledgers_are_private(monkeypatch):
+    if os.name != "posix":
+        pytest.skip("POSIX file modes")
     from pacs.handsent import HandSends
     old = os.umask(0o022)
     try:

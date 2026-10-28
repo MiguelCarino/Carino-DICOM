@@ -171,7 +171,8 @@ def test_windows_device_names_never_reach_a_path_component(pid):
     p = dest_path("C:\\r", ct(sop="1.2.5", patient=pid), True)
     parts = p.replace("\\", "/").split("/")
     for comp in parts[1:]:
-        assert not ntpath.isreserved(os.path.join("C:\\r", comp)), comp
+        if hasattr(ntpath, "isreserved"):    # Python 3.13+; the check below runs everywhere
+            assert not ntpath.isreserved(os.path.join("C:\\r", comp)), comp
         assert comp.split(".")[0].upper() not in ("CON", "NUL", "AUX", "PRN", "COM1", "LPT1")
 
 
@@ -277,7 +278,9 @@ def test_a_store_is_fsynced_before_success(monkeypatch):
         real = os.fsync
         monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd))[1])
         assert scp._handle_store(Event(ct(sop="1.2.11"))) == 0x0000
-        assert len(synced) >= 2          # the file, then its directory
+        # The file, then its directory. Windows cannot open a directory to sync
+        # it (pacs/atomicio.fsync_dir says so and skips), so there it is the file.
+        assert len(synced) >= (2 if os.name == "posix" else 1)
 
 
 def test_a_failing_callback_is_logged_and_the_store_still_succeeds():

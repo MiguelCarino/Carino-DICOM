@@ -30,6 +30,16 @@ from pacs.logbuf import LogBuffer                          # noqa: E402
 from pacs.qr import QrSCP, query_filters                   # noqa: E402
 
 
+def _rename_to_undecodable(src: bytes, dst: bytes) -> None:
+    """Give a file a name that is not valid UTF-8, or skip: only some file
+    systems can hold one. Linux takes any bytes; APFS refuses them (EILSEQ) and
+    Windows cannot even decode the bytes path it is handed."""
+    try:
+        os.rename(src, dst)
+    except (OSError, UnicodeError) as e:
+        pytest.skip(f"this file system cannot hold a non-UTF-8 name ({type(e).__name__})")
+
+
 def free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -152,7 +162,7 @@ def test_a_bad_file_name_does_not_abort_the_rescan():
         write(e.root)
     path, _ = write(e.root)
     bad = os.path.join(os.path.dirname(path).encode(), b"P\xe9rez.dcm")
-    os.rename(path.encode(), bad)
+    _rename_to_undecodable(path.encode(), bad)
     idx = InstanceIndex(os.path.join(e.tmp, "fresh.db"), e.log)
     counts = idx.rescan({"received": e.root})
     assert counts["failed"] >= 1
@@ -167,7 +177,7 @@ def test_a_bad_file_name_does_not_sink_its_async_batch():
         paths = [write(e.root)[0] for _ in range(5)]
         p, _ = write(e.root)
         bad = os.path.join(os.path.dirname(p).encode(), b"P\xe9rez.dcm")
-        os.rename(p.encode(), bad)
+        _rename_to_undecodable(p.encode(), bad)
         for q in paths:
             idx.enqueue_file(q, "received")
         idx.enqueue_file(os.fsdecode(bad), "received")
@@ -178,8 +188,8 @@ def test_a_bad_file_name_does_not_sink_its_async_batch():
 
 
 def test_an_unreadable_folder_is_not_purged():
-    if os.geteuid() == 0:
-        pytest.skip("root reads everything")
+    if os.name != "posix" or os.geteuid() == 0:
+        pytest.skip("needs POSIX permissions and a non-root user")
     e = Env()
     p1 = os.path.join(e.root, "P1")
     p2 = os.path.join(e.root, "P2")
@@ -207,8 +217,11 @@ def test_an_emptied_root_is_not_purged():
     assert any("empty" in x["message"] for x in e.log.tail(20))
 
 
+# Windows will not delete a folder that holds an open file, and the index keeps
+# one sqlite handle per thread: these tests close what they opened, and their
+# temporary folders tolerate a handle another thread has not let go of yet.
 def test_an_emptied_root_does_not_block_purging_the_other_groups():
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Windows: see above
         recv = os.path.join(tmp, "recv")
         out = os.path.join(tmp, "out")
         idx = InstanceIndex(os.path.join(tmp, "i.db"), LogBuffer())
@@ -220,41 +233,50 @@ def test_an_emptied_root_does_not_block_purging_the_other_groups():
         os.remove(gone)                      # a stale row in a healthy group
         import shutil
         shutil.rmtree(os.path.dirname(held))  # the outgoing root now looks unmounted
-        counts = idx.rescan({"received": recv, "outgoing": out}, purge=True)
-        assert counts["removed"] == 1
-        assert idx.stats()["files"] == 2      # the received survivor + the outgoing row kept
+        try:
+            counts = idx.rescan({"received": recv, "outgoing": out}, purge=True)
+            assert counts["removed"] == 1
+            assert idx.stats()["files"] == 2  # the received survivor + the outgoing row kept
+        finally:
+            idx.close()
 
 
 def test_a_nested_sent_folder_keeps_its_own_group():
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Windows: see above
         out = os.path.join(tmp, "out")
         sent = os.path.join(out, "sent")
         write(sent)
         idx = InstanceIndex(os.path.join(tmp, "i.db"), LogBuffer())
         roots = {"sent": sent, "outgoing": out}
-        idx.rescan(roots)
-        assert idx.stats()["groups"] == {"sent": 1}
-        c = idx.rescan(roots)
-        assert idx.stats()["groups"] == {"sent": 1}
-        assert c["added"] == 0 and c["skipped"] == 1
+        try:
+            idx.rescan(roots)
+            assert idx.stats()["groups"] == {"sent": 1}
+            c = idx.rescan(roots)
+            assert idx.stats()["groups"] == {"sent": 1}
+            assert c["added"] == 0 and c["skipped"] == 1
+        finally:
+            idx.close()
 
 
 def test_remove_under_is_a_folder_boundary():
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Windows: see above
         idx = InstanceIndex(os.path.join(tmp, "i.db"), LogBuffer())
         a, _ = write(os.path.join(tmp, "r", "a"))
         b, _ = write(os.path.join(tmp, "r", "ab"))
-        idx.add_file(a, "received")
-        idx.add_file(b, "received")
-        assert idx.remove_under(os.path.join(tmp, "r", "a")) == 1
-        assert idx.stats()["files"] == 1
+        try:
+            idx.add_file(a, "received")
+            idx.add_file(b, "received")
+            assert idx.remove_under(os.path.join(tmp, "r", "a")) == 1
+            assert idx.stats()["files"] == 1
+        finally:
+            idx.close()
 
 
 def test_a_root_change_starts_a_rescan():
     from pacs.config import Config
     from pacs.server import PacsServer
     import copy
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Windows: see above
         cfg = Config(os.path.join(tmp, "config.json"))
         cfg.data["scp"]["enabled"] = False
         cfg.data["index"]["path"] = os.path.join(tmp, "index.db")

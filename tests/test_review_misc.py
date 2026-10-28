@@ -131,7 +131,8 @@ def test_config_save_is_private_and_sweeps_planted_temps():
         os.symlink(victim, p + ".tmp")
         cfg = C.Config(p)
         cfg.save()
-        assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+        if os.name == "posix":               # Windows has no mode bits to check
+            assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
         assert not os.path.lexists(p + ".tmp") and open(victim).read() == "keep"
 
 
@@ -196,6 +197,8 @@ def test_a_corrupt_order_file_is_set_aside_not_overwritten():
 
 
 def test_the_order_file_is_private():
+    if os.name != "posix":
+        pytest.skip("POSIX file modes")
     old = os.umask(0o022)
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -781,6 +784,8 @@ def test_a_rotation_failure_stays_visible(monkeypatch):
 
 
 def test_the_trail_is_private():
+    if os.name != "posix":
+        pytest.skip("POSIX file modes")
     old = os.umask(0o022)
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -981,7 +986,8 @@ def test_caught_rounds_are_private_bounded_and_tolerant():
         with tempfile.TemporaryDirectory() as d:
             st = CaughtStore(d)
             st.add_round("CT1", {}, [])
-            assert stat.S_IMODE(os.stat(os.path.join(d, "caught.json")).st_mode) & 0o077 == 0
+            if os.name == "posix":           # Windows has no mode bits to check
+                assert stat.S_IMODE(os.stat(os.path.join(d, "caught.json")).st_mode) & 0o077 == 0
             p = os.path.join(d, "caught.json")
             open(p, "w").write('{"rounds":[{"id":"x","probes":5}]}')
             CaughtStore(d)
@@ -1081,7 +1087,9 @@ def test_the_entrypoint_never_follows_a_planted_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real(fd))[1])
     ep.prepare_config(str(p))
     assert victim.read_text() == "keep"
-    assert not os.path.islink(p) and stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    assert not os.path.islink(p)
+    if os.name == "posix":                   # Windows has no mode bits to check
+        assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
     assert synced
 
 
@@ -1118,8 +1126,9 @@ const r = {};
 for (const host of ['::1', '::', ' 127.0.0.1 ', '0.0.0.0', '', '10.0.0.5']) {
   r[host] = {url: h.serverUrlFor('http', host, 8042), bind: h.bindHostFor(host)};
 }
-r.expand = h.expandUser('~svc/tls/c.pem', '/home/me', path);
-r.home = h.expandUser('~/c.pem', '/home/me', path);
+r.expand = h.expandUser('~svc/tls/c.pem', '/home/me', path.posix);
+r.home = h.expandUser('~/c.pem', '/home/me', path.posix);
+r.win = h.expandUser('~svc\\tls\\c.pem', 'C:\\Users\\me', path.win32);
 console.log(JSON.stringify(r));
 """)
     assert got["::1"]["url"] == "http://[::1]:8042/"
@@ -1128,6 +1137,7 @@ console.log(JSON.stringify(r));
     assert got["0.0.0.0"]["url"] == "http://127.0.0.1:8042/" and got["0.0.0.0"]["bind"] == "0.0.0.0"
     assert got[""]["url"] == "http://127.0.0.1:8042/" and got[""]["bind"] == ""
     assert got["expand"] == "/home/svc/tls/c.pem" and got["home"] == "/home/me/c.pem"
+    assert got["win"] == "C:\\Users\\svc\\tls\\c.pem"
 
 
 def test_the_desktop_engine_is_not_forced_onto_loopback():

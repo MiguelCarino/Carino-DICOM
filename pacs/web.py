@@ -55,9 +55,12 @@ if not os.path.isdir(WEB_DIR) and hasattr(sys, "_MEIPASS"):
 # the same docs/manual/ that GitHub Pages publishes — one copy, not a fork —
 # which is why the routes below mount it at /manual/ and nothing rewrites its
 # markup. Every relative path in those pages then resolves against the
-# dashboard: ../carino-clock.js, ../carino-lang.js, ../carino-navbar.js and
-# ../favicon.webp land on this server's own copies (that is what the clock and
-# the favicon in pacs/web/ are for), and the "back to Carino DICOM" link lands
+# dashboard: ../carino-clock.js, ../carino-lang.js, ../carino-navbar.js,
+# ../favicon.webp, ../carino-ui.css and ../fonts/carino-fonts.css land on this
+# server's own copies (that is what the clock, the favicon, carino-ui.css and
+# fonts/ in pacs/web/ are for; the last two are docs/'s copies, and
+# tests/test_manual.py fails if the manual asks for one that is not here), and
+# the "back to Carino DICOM" link lands
 # on the dashboard instead of on the marketing page. A page that renders
 # identically in both places can only do so if neither copy is edited for the
 # other, so nothing here may "fix" a path.
