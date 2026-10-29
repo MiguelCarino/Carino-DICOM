@@ -16,13 +16,70 @@
   <script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Carino DICOM", "url": "https://dicom.carino.systems/", "description": "A self-hosted DICOM gateway and continuity appliance: receives, routes, forwards and de-identifies studies, answers Query/Retrieve and DICOMweb, and serves an emergency worklist when the PACS is down. Not a medical device, not for primary diagnosis.", "operatingSystem": "Linux, Windows, macOS", "isAccessibleForFree": true, "author": {"@type": "Person", "name": "Miguel Cariño", "url": "https://carino.systems/"}}</script>
   <!-- /carino:head -->
   <link rel="icon" href="favicon.webp" />
+  <!-- Theme before first paint, so neither theme flashes the other:
+       ?theme=gold|color (review links; not stored) > carino-theme cookie
+       (shared across *.carino.systems) > localStorage > Gold & Black. -->
+  <meta name="theme-color" content="#050505" id="carinoThemeColor">
+  <script>
+  (function () {
+    var d = document.documentElement, t = null;
+    function pick(v) { return v === 'gold' ? 'gold' : (v === 'color' || v === 'colour') ? 'color' : null; }
+    try { t = pick(new URLSearchParams(location.search).get('theme')); } catch (e) {}
+    if (!t) { try { var m = document.cookie.match(/(?:^|;\s*)carino-theme=([^;]*)/); if (m) t = pick(decodeURIComponent(m[1])); } catch (e) {} }
+    if (!t) { try { t = pick(localStorage.getItem('carino-theme')); } catch (e) {} }
+    t = t || 'gold';
+    d.setAttribute('data-carino-theme', t);
+    var dark = d.getAttribute('data-theme') !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    var meta = document.getElementById('carinoThemeColor');
+    if (meta) meta.content = t === 'gold' ? '#050505' : (dark ? '#0e1420' : '#eef3fc');
+  })();
+  </script>
   <link rel="stylesheet" href="fonts/carino-fonts.css" />
   <link rel="stylesheet" href="carino-ui.css" />
   <link rel="stylesheet" href="styles.css" />
+  <!-- Colourful theme + the switch; nothing applies until data-carino-theme="color". -->
+  <link rel="stylesheet" href="carino-theme.css" />
+  <style>
+    /* the hero mark in both colourings; the theme picks one */
+    .mark.mk-color, :root[data-carino-theme="color"] .mark.mk-gold { display: none; }
+    :root[data-carino-theme="color"] .mark.mk-color { display: block; }
+    /* Colourful: carino-theme.css remaps the tokens, so everything that reads
+       one follows; these are styles.css's values written for black. */
+    :root[data-carino-theme="color"] { --bg-2: var(--bg-elev); --panel: var(--bg-card); }
+    :root[data-carino-theme="color"] body { background-image: var(--stage-grad); }
+    :root[data-carino-theme="color"] .hero { background: none; }
+    :root[data-carino-theme="color"] .ekg .pulse { filter: none; }
+    :root[data-carino-theme="color"] .lede,
+    :root[data-carino-theme="color"] .situations,
+    :root[data-carino-theme="color"] .firstrun ul,
+    :root[data-carino-theme="color"] .isbox li,
+    :root[data-carino-theme="color"] .notbox li,
+    :root[data-carino-theme="color"] .tech-body,
+    :root[data-carino-theme="color"] .svc-item p { color: var(--text-sec); }
+    :root[data-carino-theme="color"] .dl-btn,
+    :root[data-carino-theme="color"] .svc-item { background: var(--bg-card); box-shadow: var(--ct-shadow-1); }
+    :root[data-carino-theme="color"] .dl-btn .fmt a { border-bottom-color: var(--accent-dim); }
+    :root[data-carino-theme="color"] .dl-btn.recommended { background: var(--accent); color: var(--ct-on-accent); box-shadow: var(--ct-shadow-2); }
+    :root[data-carino-theme="color"] .dl-btn.recommended .fmt,
+    :root[data-carino-theme="color"] .dl-btn.recommended .fmt a { color: var(--ct-on-accent); border-bottom-color: currentColor; opacity: .85; }
+    :root[data-carino-theme="color"] .dl-btn.recommended .rec { background: var(--bg-card); }
+    :root[data-carino-theme="color"] .modal { box-shadow: var(--ct-shadow-3); }
+    :root[data-carino-theme="color"] .modal::backdrop { background: var(--ct-scrim); }
+    :root[data-carino-theme="color"] .btn.sm:hover { background: var(--accent-faint); }
+    :root[data-carino-theme="color"] .firstrun code,
+    :root[data-carino-theme="color"] .techbox code,
+    :root[data-carino-theme="color"] .tech-body code { background: var(--ct-inline-code); }
+    :root[data-carino-theme="color"] .terminal code { background: none; }
+    :root[data-carino-theme="color"] .isbox { background: var(--accent-faint); }
+    :root[data-carino-theme="color"] .notbox { border-color: var(--ct-err-line); border-left-color: var(--err); background: var(--ct-err-bg); }
+    :root[data-carino-theme="color"] .notbox h2,
+    :root[data-carino-theme="color"] .notbox li b { color: var(--ct-err-fg); }
+  </style>
 </head>
 <body>
   <!-- Carino navbar self-injects at the top of <body> (loads carino-clock.js locally) -->
   <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
+  <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
 
@@ -42,7 +99,8 @@
            aria-hidden: the navbar already says "Carino DICOM" in text, and a logo
            announced twice is noise. -->
       <div class="hero-mark lh-mark" aria-hidden="true">
-        <img class="mark" src="logo.svg" alt="" width="100" height="100" decoding="async">
+        <img class="mark mk-gold" src="logo.svg" alt="" width="100" height="100" decoding="async">
+        <img class="mark mk-color" src="logo-color.svg" alt="" width="100" height="100" decoding="async">
         <svg class="ekg lh-motif" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
           <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
           <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
