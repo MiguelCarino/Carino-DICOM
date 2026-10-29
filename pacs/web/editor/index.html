@@ -68,11 +68,14 @@
       --cat-series: var(--ct-pink);      --cat-series-bg: color-mix(in srgb, var(--ct-pink) 14%, transparent);
       --cat-image: var(--ct-amber);      --cat-image-bg: color-mix(in srgb, var(--ct-amber) 14%, transparent);
       --cat-equipment: var(--ct-green);  --cat-equipment-bg: color-mix(in srgb, var(--ct-green) 14%, transparent);
-      --cat-uid: var(--warn);            --cat-uid-bg: color-mix(in srgb, var(--warn) 14%, transparent);
+      /* UIDs borrowed --warn and matched Image amber in dark; indigo is the one unused category hue */
+      --cat-uid: var(--ct-indigo);       --cat-uid-bg: color-mix(in srgb, var(--ct-indigo) 14%, transparent);
       --cat-private: var(--ct-red);      --cat-private-bg: color-mix(in srgb, var(--ct-red) 14%, transparent);
       --cat-other: var(--text-muted);    --cat-other-bg: color-mix(in srgb, var(--text-muted) 14%, transparent);
       --sev-error: var(--err); --sev-warning: var(--ct-amber); --sev-phi: var(--warn);
     }
+    /* the shared status-dot ::before paints an accent disc over each category dot: reveal the designed colours */
+    :root[data-carino-theme="color"] .filter-btn .dot::before { content: none; }
     :root[data-carino-theme="color"] body { background-image: var(--stage-grad); }
     :root[data-carino-theme="color"] .diag-dropdown { background: var(--bg-card); box-shadow: var(--ct-shadow-3); }
     :root[data-carino-theme="color"] .tb-menu-list { box-shadow: var(--ct-shadow-2); }

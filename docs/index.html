@@ -59,11 +59,15 @@
     :root[data-carino-theme="color"] .svc-item p { color: var(--text-sec); }
     :root[data-carino-theme="color"] .dl-btn,
     :root[data-carino-theme="color"] .svc-item { background: var(--bg-card); box-shadow: var(--ct-shadow-1); }
-    :root[data-carino-theme="color"] .dl-btn .fmt a { border-bottom-color: var(--accent-dim); }
-    :root[data-carino-theme="color"] .dl-btn.recommended { background: var(--accent); color: var(--ct-on-accent); box-shadow: var(--ct-shadow-2); }
+    /* Downloads stay yellow in both themes: the buttons carry .ct-cat-amber,
+       so the recommended one is filled amber and the rest take amber links
+       and an amber edge under the pointer. */
+    :root[data-carino-theme="color"] .dl-btn:hover { border-color: var(--c); }
+    :root[data-carino-theme="color"] .dl-btn .fmt a { color: var(--tt); border-bottom-color: color-mix(in srgb, var(--c) 55%, transparent); }
+    :root[data-carino-theme="color"] .dl-btn.recommended { background: var(--c); border-color: var(--c); color: var(--on); box-shadow: var(--ct-shadow-2); }
     :root[data-carino-theme="color"] .dl-btn.recommended .fmt,
-    :root[data-carino-theme="color"] .dl-btn.recommended .fmt a { color: var(--ct-on-accent); border-bottom-color: currentColor; opacity: .85; }
-    :root[data-carino-theme="color"] .dl-btn.recommended .rec { background: var(--bg-card); }
+    :root[data-carino-theme="color"] .dl-btn.recommended .fmt a { color: var(--on); border-bottom-color: currentColor; opacity: .85; }
+    :root[data-carino-theme="color"] .dl-btn.recommended .rec { background: var(--bg-card); color: var(--tt); border-color: var(--c); }
     :root[data-carino-theme="color"] .modal { box-shadow: var(--ct-shadow-3); }
     :root[data-carino-theme="color"] .modal::backdrop { background: var(--ct-scrim); }
     :root[data-carino-theme="color"] .btn.sm:hover { background: var(--accent-faint); }
@@ -134,11 +138,11 @@
            can read the release. The format slot says which one you are getting
            without it. -->
       <div class="downloads" id="downloads">
-        <a class="dl-btn" data-os="windows" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-Setup-1.1.0-x64.exe" target="_blank" rel="noopener">
+        <a class="dl-btn ct-cat-amber" data-os="windows" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-Setup-1.1.0-x64.exe" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b>🪟 Windows</b><span class="fmt">.exe · x86-64</span></a>
-        <a class="dl-btn" data-os="macos" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0-arm64.dmg" target="_blank" rel="noopener">
+        <a class="dl-btn ct-cat-amber" data-os="macos" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0-arm64.dmg" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b> macOS</b><span class="fmt">.dmg · Apple Silicon</span></a>
-        <a class="dl-btn" data-os="linux" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0.AppImage" target="_blank" rel="noopener">
+        <a class="dl-btn ct-cat-amber" data-os="linux" href="https://github.com/MiguelCarino/Carino-DICOM/releases/download/v1.1.0/Carino-DICOM-1.1.0.AppImage" target="_blank" rel="noopener">
           <span class="rec" data-i18n>recommended</span><b>🐧 Linux</b><span class="fmt">.AppImage · x86-64</span></a>
         <!-- A button, not a link: there is nothing to download. The three
              server deployments run from a container image you build or from
@@ -146,7 +150,7 @@
              It never gets .recommended — OS detection is about the machine you
              are reading this on, and a server is a decision rather than a
              detection. -->
-        <button class="dl-btn dl-server" data-os="server" id="serverBtn" type="button"
+        <button class="dl-btn dl-server ct-cat-amber" data-os="server" id="serverBtn" type="button"
                 aria-haspopup="dialog" aria-expanded="false" aria-controls="serverDialog">
           <b data-i18n>🖥 Server</b><span class="fmt">Docker · Podman · systemd</span></button>
       </div>
