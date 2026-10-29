@@ -36,7 +36,7 @@
       --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
       --display: 'Red Hat Display', var(--sans);
       --radius: 10px;
-      --nav-h: 60px;     /* carino-navbar.js height; it scrolls with the page */
+      --nav-h: 60px;     /* carino-navbar.js height; it stays on screen, so stick things under it */
       /* Breakpoints (media queries cannot read a token, so these are the rule):
          900px and below, a workspace settings rail becomes a drawer;
          640px and below, the phone layout. Nothing else. */
@@ -556,14 +556,14 @@
        it) and leaves as soon as there is work. Mark, a two-line claim with
        the second line gold, a lede of two lines at most, one input target,
        example chips, then the privacy line. .rail-head is the compact form
-       for tools that always open with content (Desk, Password, Aldis). */
+       for tools that always open with content (Desk, Password, Aldis): the
+       name and lede only, never the mark, which the navbar already shows. */
     .short-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; max-width: 640px; margin: 0 auto; padding: 40px 16px; }
     .short-hero .mark { width: 48px; height: 48px; display: block; }
     .short-hero h1 { font-family: var(--sans); font-weight: 800; font-size: var(--fs-h1); line-height: 1.15; letter-spacing: -.01em; margin: 0; }
     .sh-lede { color: var(--text-sec); font-size: var(--fs-sec); line-height: 1.55; max-width: 52ch; margin: 0; }
     .sh-input { width: 100%; }
     .short-hero.rail-head { flex-direction: row; align-items: center; text-align: left; gap: 12px; max-width: none; margin: 0; padding: 0 0 14px; border-bottom: 1px solid var(--border); }
-    .short-hero.rail-head .mark { width: 32px; height: 32px; flex: none; }
     .short-hero.rail-head h1 { font-size: var(--fs-h3); }
     .short-hero.rail-head .sh-lede { font-size: var(--fs-sm); }
 
@@ -643,7 +643,7 @@
     .slice .s-text { font-family: var(--display); font-weight: 900; text-transform: uppercase; font-size: var(--fs-sec); letter-spacing: 0.5px; }
     .slice .s-blurb { font-size: var(--fs-sm); color: var(--text-sec); line-height: 1.45; }
     .slice-menu.collapsed, body.state-module .slice-menu {
-      position: sticky; top: 0; z-index: 40; min-height: 0; height: 44px; border-radius: 0; border-width: 0 0 1px;
+      position: sticky; top: var(--nav-h); z-index: 40; min-height: 0; height: 44px; border-radius: 0; border-width: 0 0 1px;
     }
     .slice-menu.collapsed .slice, body.state-module .slice-menu .slice { flex-direction: row; align-items: center; justify-content: center; gap: 10px; padding: 0 12px; }
     .slice-menu.collapsed .slice:hover, body.state-module .slice-menu .slice:hover { flex: 1; }
@@ -690,7 +690,7 @@
        A search box never comes first; past ~300 entries a Find may follow
        the chips. Reference: Law. */
     .fchips {
-      position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+      position: sticky; top: var(--nav-h); z-index: 50; display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
       padding: 10px 0; background: rgba(5,5,5,0.88); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: var(--fs-label);
     }
@@ -763,14 +763,10 @@
     .progress-pill { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: var(--fs-label); color: var(--text-sec); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-variant-numeric: tabular-nums; }
     .progress-pill .progress { width: 90px; height: 5px; }
 
-    /* ============ footer ============
-       Hub, Reference, Learning and Product pages end in one. Links are
-       short and mono; the line below names licence and source honestly. */
-    .site-foot { border-top: 1px solid var(--border); padding: 18px 0 28px; display: flex; flex-direction: column; gap: 8px; font-family: var(--mono); font-size: var(--fs-label); color: var(--text-muted); }
-    .sf-links { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-    .sf-links a { color: var(--text-sec); text-decoration: none; }
-    .sf-links a:hover { color: var(--accent); }
-    .sf-line { line-height: 1.6; }
+    /* ============ no footer ============
+       Pages end where their content ends. What a footer used to say lives
+       in the page's [data-carino-about] block, which carino-navbar.js moves
+       into the shield's About & legal panel. */
 
     /* ============ play stage ============
        Games and ambient pieces: the body is a column, the navbar on top and

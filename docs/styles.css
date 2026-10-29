@@ -8,7 +8,7 @@
    their own box rather than wrap. `word-break: break-all` is never used —
    a value cut at an arbitrary character is a value read wrong. */
 /* Tokens and the shared components (.landing-hero, .terminal, .copy-btn,
-   .site-foot, .privacy-line) come from carino-ui.css, linked before this file;
+   .privacy-line) come from carino-ui.css, linked before this file;
    only this page's own names are declared here. */
 :root {
   --bg-2: #0d0d0d;
@@ -410,7 +410,6 @@ dialog.modal:not([open]) { display: none; }
    install links while its own text stays left-aligned beside the lock. */
 .dl-privacy { display: inline-block; max-width: min(720px, 94vw);
   margin: min(18px, calc(8px + var(--tall) * .03)) 0 0; }
-.site-foot { flex: none; margin-top: min(28px, calc(10px + var(--tall) * .03)); padding-bottom: 20px; }
 /* The first-launch sheet is narrow and the xattr line is long, so it would
    scroll under the floating Copy. It takes Branding's phone form at every width:
    the button gets its own band above the command. */

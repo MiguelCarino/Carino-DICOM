@@ -77,6 +77,9 @@
     /* The slice bar is row 1 of .app (where the old header was), so carino-ui.css's sticky offset is
        not needed; 44px from carino-ui.css. */
     .app > .slice-menu { position: relative; z-index: 50; }
+    /* .app is the scroller and already starts under the navbar, so the menu
+       sticks at its own top, not at carino-ui's top: var(--nav-h) */
+    body .app > .slice-menu { top: 0; }
 
     /* ---- App controls in the shared navbar ---- */
     .dcm-actions { display: flex; align-items: center; gap: 8px; }
