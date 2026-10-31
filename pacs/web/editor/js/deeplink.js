@@ -22,7 +22,7 @@ window.addEventListener('load', () => {
   const armed = window.CarinoBridge && CarinoBridge.receive({
     legacy: true,                 // PACS builds older than the bridge still speak carino-pacs-*
     allow: ['same-origin',        // the editor Carino DICOM serves itself
-            'https://media.carino.systems'],   // and the fleet's file screen
+            'https://files.carino.systems'],   // and the fleet's file screen
     otherwise: 'ask',             // anyone else: shown to the user, by origin
     remember: true,               // and only asked about once per browser
     ask: (origin, count) => new Promise(resolve => {

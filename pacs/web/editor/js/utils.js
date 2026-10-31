@@ -118,6 +118,7 @@ function reseedKeepingEdits(entry) {
     });
   }
   delete entry._seedBefore;
+  entry.rewritten = true;          // its dict changed: entryHasEdits
   entry.pending = fresh;
   if (files[currentFileIdx] === entry) usePendingOf(entry);
 }
@@ -378,7 +379,7 @@ function applyPrefixToAll(newP) {
   confirmDanger(T('Rewrite {n} UIDs in {m} files to start with {p}? This cannot be undone.').replace('{n}', n).replace('{m}', m).replace('{p}', newP), () => {
     // Undo only restores the open file's pending edits, so any undo step across this rewrite
     // would put that one file back on the old root and split the study.
-    editHistory = []; editFuture = []; datasetDirty = true;
+    editHistory = []; editFuture = []; datasetDirty = true; studyRewritten = true;
     clearTimeout(editDebounceTimer); preEditSnapshot = null;
     updateHistoryBtns();
     try { renderTechRow(); } catch (_) {}

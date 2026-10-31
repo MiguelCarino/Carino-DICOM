@@ -580,6 +580,8 @@ const I18N = {
         'Validation unavailable': 'Validación no disponible',
         'The image could not be decoded for preview, so there is nothing to draw on.': 'La imagen no se pudo decodificar para la vista previa, así que no hay sobre qué dibujar.',
         'Download failed:': 'Error en la descarga:',
+        'Open in Files': 'Abrir en Files',
+        'Could not open Files': 'No se pudo abrir Files',
         '{n} file(s) could not be written and were left out; see the log.': '{n} archivo(s) no se pudieron escribir y se omitieron; consulte el registro.',
         // Toolbar titles, tag table header, colormap
         'Tag': 'Tag',
@@ -1185,6 +1187,8 @@ const I18N = {
         'Validation unavailable': 'Validação indisponível',
         'The image could not be decoded for preview, so there is nothing to draw on.': 'A imagem não pôde ser decodificada para a pré-visualização, então não há onde desenhar.',
         'Download failed:': 'Falha no download:',
+        'Open in Files': 'Abrir no Files',
+        'Could not open Files': 'Não foi possível abrir o Files',
         '{n} file(s) could not be written and were left out; see the log.': '{n} arquivo(s) não puderam ser gravados e foram deixados de fora; veja o registro.',
         // Toolbar titles, tag table header, colormap
         'Tag': 'Tag',
@@ -1790,6 +1794,8 @@ const I18N = {
         'Validation unavailable': '検証を実行できません',
         'The image could not be decoded for preview, so there is nothing to draw on.': 'プレビュー用に画像をデコードできなかったため、描画できるものがありません。',
         'Download failed:': 'ダウンロードに失敗しました：',
+        'Open in Files': 'Filesで開く',
+        'Could not open Files': 'Filesを開けませんでした',
         '{n} file(s) could not be written and were left out; see the log.': '{n}件のファイルは書き出せなかったため除外されました。ログを確認してください。',
         // Toolbar titles, tag table header, colormap
         'Tag': 'タグ',
@@ -2395,6 +2401,8 @@ const I18N = {
         'Validation unavailable': 'Проверка недоступна',
         'The image could not be decoded for preview, so there is nothing to draw on.': 'Изображение не удалось декодировать для просмотра, поэтому рисовать не на чем.',
         'Download failed:': 'Ошибка загрузки:',
+        'Open in Files': 'Открыть в Files',
+        'Could not open Files': 'Не удалось открыть Files',
         '{n} file(s) could not be written and were left out; see the log.': '{n} файл(ов) не удалось записать, они пропущены; см. журнал.',
         // Toolbar titles, tag table header, colormap
         'Tag': 'Тег',

@@ -5,6 +5,7 @@
 // Edits never change it; the UI shows a "working copy edited" note when dirty.
 const SHA_AUTO_LIMIT = 64 * 1024 * 1024;   // hash on load below this; button above
 let datasetDirty = false;                  // any edit/anonymize/randomize this session
+let studyRewritten = false;                // a whole-study rewrite (randomize, swap, UID root) this session
 
 async function sha256Hex(buf) {
   const h = await crypto.subtle.digest('SHA-256', buf);
@@ -158,6 +159,19 @@ function hasUnsavedWork() {
     return false;
   });
 }
+// One file's edits, for handing that file on (Open in Files): datasetDirty and the
+// undo stack are study-wide, so an edit to file A must not make file B look edited.
+// A dict rewrite (pixel edits, redaction, compression) goes through reseedKeepingEdits,
+// which marks its entry; a de-identified file says so; typed edits differ from the seed.
+function entryHasEdits(entry) {
+  if (!entry) return false;
+  if (studyRewritten || entry.deid || entry.rewritten) return true;
+  if (entry === files[currentFileIdx] && (editHistory.length || preEditSnapshot !== null)) return true;
+  if (!entry.pending) return false;
+  const seed = seedPending(entry.dict);
+  for (const [k, v] of entry.pending) if (seed.get(k)?.valueString !== v.valueString) return true;
+  return false;
+}
 // Every UI path that opens a study comes through here. handleFiles and loadStudy never
 // ask: deep links and the test suites call them directly.
 function openStudy(res) {
@@ -201,6 +215,7 @@ function resetStudyState() {
   editHistory = [];
   editFuture  = [];
   datasetDirty = false;
+  studyRewritten = false;
   dropZone.classList.remove('compact');
 }
 

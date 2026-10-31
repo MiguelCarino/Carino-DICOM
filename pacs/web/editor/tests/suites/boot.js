@@ -114,11 +114,12 @@
     // 245 with the point-transform, J2K-sign, JPIP/private-syntax and rendered-copy warnings,
     // 272 with the presentation-state menu, colour-series burn-in and the Overview cards' own text,
     // 309 with the validator's messages and format hints (shown translated in the Conformance card),
-    // 339 with the Log card's lines, the loading/extracting overlay text and Create's Remove title.
+    // 339 with the Log card's lines, the loading/extracting overlay text and Create's Remove title,
+    // about 349 by the time Export's Open in Files brought its failure toast, so the alarm moved to 360.
     const jsOwned = new Set(ATTR_I18N.map(([, , k]) => k));
     const unseen = Object.keys(I18N.es).filter(k => !keys.has(k) && !jsOwned.has(k));
     ok('the dictionaries have not drifted far ahead of the page',
-       unseen.length < 350, `${unseen.length} keys reached from JS or no longer reached at all`);
+       unseen.length < 360, `${unseen.length} keys reached from JS or no longer reached at all`);
   } catch (e) {
     ok('the i18n audit ran', false, (e && e.message) || String(e));
   }

@@ -4,7 +4,7 @@
  * no server in the middle, no re-encoding, no size limit worth worrying about.
  * In the fleet:
  *
- *   media.carino.systems  →  metadata.carino.systems   (one file, to inspect)
+ *   files.carino.systems  →  dcm.carino.systems       (a DICOM file, to edit)
  *   Carino DICOM          →  Carino DICOM Editor       (a whole study)
  *   fiscal.carino.systems →  quote.carino.systems      (one tax card)
  *

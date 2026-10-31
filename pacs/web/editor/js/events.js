@@ -105,7 +105,7 @@ randomizeBtn.addEventListener('click', () => {
   // randomize() touches only the patient block, dates and two IDs; say what it leaves.
   confirmDanger(T('Give all {n} loaded file(s) a made-up patient name, IDs, birth date and study dates? This is NOT de-identification: institution, device, physician, private tags and burned-in text are kept.').replace('{n}', files.length)
       + ' ' + T('Undo cannot reverse this.'), () => {
-    resetEditHistory?.(); datasetDirty = true;
+    resetEditHistory?.(); datasetDirty = true; studyRewritten = true;
     try { renderTechRow(); } catch (_) {}
     randomizeAll(files);
     // Not de-identification, so a ticked Retain UIDs (left from an earlier Anonymize) does not
@@ -206,7 +206,7 @@ $('swapOk').addEventListener('click', () => {
   closeSwapDialog();
   // Undo only restores the open file's pending edits, so an undo step across the swap would
   // put one file back on the old patient and split the study.
-  editHistory = []; editFuture = []; datasetDirty = true;
+  editHistory = []; editFuture = []; datasetDirty = true; studyRewritten = true;
   clearTimeout(editDebounceTimer); preEditSnapshot = null;
   updateHistoryBtns();
   try { renderTechRow(); } catch (_) {}
@@ -255,6 +255,33 @@ for (const menu of document.querySelectorAll('.actions-row .tb-menu')) {
   document.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
 }
+// Export ▸ Open in Files: hand the file on screen to files.carino.systems. Edited this session,
+// it goes as [original, edited] (the edited one named as ⬇ This file names it), and Files opens
+// the pair on Compare. Files admits dcm.carino.systems only, so the PACS's LAN copy and the
+// desktop shell keep the item hidden.
+(() => {
+  const btn = $('openInFilesBtn');
+  if (!btn) return;
+  btn.hidden = location.origin !== 'https://dcm.carino.systems';
+  if (btn.hidden) return;
+  const FILES_URL = 'https://files.carino.systems/';
+  btn.addEventListener('click', () => {
+    const entry = files[currentFileIdx];
+    if (!entry) return;
+    if (!window.CarinoBridge) { window.open(FILES_URL, '_blank', 'noopener'); return; }
+    // Built once Files says it is listening; the tab itself opens straight from the click.
+    window.CarinoBridge.send(FILES_URL + '#carino-bridge', () => {
+      const original = entry.file instanceof File ? entry.file
+        : new File([entry.file], entry.name, { type: 'application/dicom' });
+      if (!entryHasEdits(entry)) return [original];
+      const name = entry.deid ? `${exportBaseName(entry)}.dcm` : `${exportBaseName(entry)}.edited.dcm`;
+      return [original, new File([buildEditedFile(entry)], name, { type: 'application/dicom' })];
+    }, { timeout: 30000 }).catch(e => {
+      console.error(e);
+      toast?.('Could not open Files', 5000);
+    });
+  });
+})();
 // Tools ▸ UID root… toggles the panel under the toolbar.
 $('uidPatternBtn')?.addEventListener('click', () => {
   uidPatternOpen = !uidPatternOpen;
