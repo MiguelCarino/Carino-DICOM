@@ -265,9 +265,8 @@
       vEl.textContent = tt('Version') + ' ';
       vEl.appendChild(strong);
     }
-    // The footer names the same version the buttons hand out.
-    var fv = document.getElementById("footVersion");
-    if (fv && shownTag != null) fv.textContent = "v" + String(shownTag).replace(/^v/, "");
+    // The navbar's About tab names the same version the buttons hand out.
+    if (shownTag != null && window.CarinoNav && window.CarinoNav.version) window.CarinoNav.version(String(shownTag));
   }
   // Order against i18n.js's own listener does not matter: t() resolves the
   // locale through window.CarinoLang.current on every call, and carino-lang.js

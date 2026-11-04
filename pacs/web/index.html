@@ -10,8 +10,18 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<!-- Key words: the navbar shows them, translated, under its Language tab. -->
+<ul data-carino-words hidden>
+  <li>📥 Received</li>
+  <li>📤 Outgoing</li>
+  <li>Destinations</li>
+  <li>This machine</li>
+  <li>De-identification settings</li>
+  <li>Test a study</li>
+</ul>
+
   <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
-  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" defer></script>
+  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" data-license="AGPL-3.0-or-later" data-mark="logo.svg" defer></script>
   <!-- Deferred, in this order: i18n.js reads window.CarinoLang. -->
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>

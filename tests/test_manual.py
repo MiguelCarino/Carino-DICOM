@@ -158,7 +158,7 @@ def test_the_assets_the_manual_borrows_from_the_dashboard_are_present(client):
     pacs/web/ for this one; nothing in the markup says so, so nothing would
     report their absence except a manual that renders wrong."""
     for asset in ("carino-clock.js", "carino-lang.js", "carino-navbar.js",
-                  "favicon.webp"):
+                  "favicon.webp", "logo.svg"):
         assert client.get("/" + asset).status_code == 200, asset
 
 

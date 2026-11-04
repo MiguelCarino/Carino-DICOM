@@ -82,8 +82,17 @@
   </style>
 </head>
 <body>
+<!-- Key words: the navbar shows them, translated, under its Language tab. -->
+<ul data-carino-words hidden>
+  <li>What it is</li>
+  <li>What it is not</li>
+  <li>Features</li>
+  <li>First launch</li>
+  <li>Manual</li>
+</ul>
+
   <!-- Carino navbar self-injects at the top of <body> (loads carino-clock.js locally) -->
-  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" data-license="AGPL-3.0-or-later" defer></script>
+  <script src="carino-navbar.js" data-app="DICOM" data-repo="Carino-DICOM" data-license="AGPL-3.0-or-later" data-version="1.3.0" data-changelog="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CHANGELOG.md" defer></script>
   <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
@@ -171,7 +180,6 @@
 
       <!-- Literally true: the one request this page makes is the release
            lookup in app.js, so the line names it. -->
-      <p class="privacy-line dl-privacy"><span data-i18n>This page runs in your browser and sends nothing anywhere.</span>&nbsp;<span class="pl-also" data-i18n>It asks api.github.com for the latest release.</span></p>
 
       <!-- The buttons name both builds where an OS has two (app.js turns each
            into two links once it reads the release); this line only has to say
@@ -198,8 +206,13 @@
   <!-- The Product footer (Branding #footer). The hero grows to fill the
        screen, so this sits at the bottom of it rather than mid-page. -->
   <div data-carino-about hidden>
-    <p><a href="https://github.com/MiguelCarino/Carino-DICOM/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-i18n>Changelog</a> · <a href="manual/" id="footManual" data-i18n>Manual</a> · <a href="https://github.com/MiguelCarino/Carino-DICOM#licence" target="_blank" rel="noopener" data-i18n>Third-party notices</a></p>
-    <p class="cn-ab-meta">Carino DICOM <span id="footVersion">v1.3.0</span></p>
+    <p><span data-i18n>This page runs in your browser and sends nothing anywhere.</span>&nbsp;<span class="pl-also" data-i18n>It asks api.github.com for the latest release.</span></p>
+  </div>
+  <div data-carino-howto hidden>
+    <p><a href="manual/" id="footManual" data-i18n>Manual</a></p>
+  </div>
+  <div data-carino-licence hidden>
+    <p><a href="https://github.com/MiguelCarino/Carino-DICOM#licence" target="_blank" rel="noopener" data-i18n>Third-party notices</a></p>
   </div>
 
   <!-- ── Server chooser ────────────────────────────────────────────────

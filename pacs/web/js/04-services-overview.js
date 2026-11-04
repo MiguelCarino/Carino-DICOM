@@ -241,6 +241,8 @@ function renderOverview(s) {
     ? rx.aet + ":" + rx.port + (rx.running ? "" : " · " + T("not listening"))
     : "");
   txt("ovVersionV", dash(s.version));
+  // The navbar's About tab shows the version this server is running.
+  if (s.version && window.CarinoNav && window.CarinoNav.version) window.CarinoNav.version(s.version);
   setPath("ovConfigPath", setup.config_path || s.config_path);
   setPath("ovStorageDir", rx.storage_dir);
   setPath("ovLogsDir", s.logs_dir);

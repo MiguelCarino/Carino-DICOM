@@ -7,10 +7,12 @@
 
      <script src="carino-lang.js" defer></script>
 
-   It injects a compact language button (a language glyph + AUTO,
-   or the picked code: EN / ES / PT / 日本語 / RU) into the header's
-   right cluster, left of the Sys. Status control. Clicking it opens
-   a dropdown: Auto (follow the browser) plus the five languages.
+   Next to the shared navbar it draws no button: the navbar's About
+   window has a Language tab that calls CarinoLang.set(). Only a bespoke
+   header (the hub's inline one) still gets the compact language button
+   (a language glyph + AUTO, or the picked code: EN / ES / PT / 日本語 /
+   RU), left of its Sys. Status control, which opens a dropdown: Auto
+   (follow the browser) plus the five languages.
 
    AUTOMATIC: the language resolves without any user action —
      ?lang= in the URL  >  fleet-wide choice  >  browser language
@@ -221,9 +223,11 @@
 
   /* ---- UI ---- */
 
-  // The shield link to carino.systems/legal.html (#cnLegal) sits in every
-  // header, shared or bespoke. Its tooltip is translated here, the one script
-  // all of those headers load, rather than in each site's own dictionary.
+  // The shield (#cnLegal) sits in every header, shared or bespoke. Its
+  // tooltip is translated here, the one script all of those headers load,
+  // rather than in each site's own dictionary. In the shared navbar it is a
+  // button, About, that opens the about popup and names itself; a bespoke header's shield is
+  // still a plain link to carino.systems/legal.html.
   var LEGAL = { en: 'Legal notice & privacy', es: 'Aviso legal y privacidad', 'pt-BR': 'Aviso legal e privacidade',
                 ja: '法的通知とプライバシー', ru: 'Правовая информация и конфиденциальность' };
 
@@ -250,7 +254,8 @@
       btn.setAttribute('aria-label', btn.title);
     }
     var legal = document.getElementById('cnLegal');
-    if (legal) { legal.title = LEGAL[current] || LEGAL.en; legal.setAttribute('aria-label', legal.title); }
+    // the shared navbar's About button names itself; only a plain link is ours
+    if (legal && legal.tagName === 'A') { legal.title = LEGAL[current] || LEGAL.en; legal.setAttribute('aria-label', legal.title); }
   }
 
   function renderRows() {
@@ -333,6 +338,9 @@
   // injected navbar's .cn-right (carino-navbar.js). Sit LEFT of Sys. Status.
   function tryAttach() {
     var nav = document.getElementById('carinoNav');
+    // The shared navbar shows the languages in its About window (a Language
+    // tab that calls CarinoLang.set), so it gets no button here.
+    if (nav && nav.hasAttribute('data-cn-lang')) return true;
     if (nav) {
       var right = nav.querySelector('.cn-right');
       if (right) { build(right, document.getElementById('cnDiagBtn') || right.querySelector('.social-row')); return true; }
