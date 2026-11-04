@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import os
+import struct
+from typing import Iterator, Optional
 
 from pydicom.dataset import Dataset
 
@@ -24,6 +27,72 @@ SAVE_KWARGS = (
 _HAS_PREAD = hasattr(os, "pread")
 
 
+ZERO_PREAMBLE = b"\x00" * 128
+
+
+def clear_preamble(ds) -> bool:
+    """Blank the 128-byte preamble of *ds*. True when there was content to clear.
+
+    PS3.10 7.1 leaves the preamble to the application, so nothing stops it from
+    holding something else, and the best-known use is hostile: a Windows
+    executable header there turns one file into a valid DICOM object and a
+    runnable program at once (CVE-2019-11687). Nothing this appliance does
+    reads a preamble, so every file it writes gets the zeros PS3.10 recommends.
+    pydicom writes zeros for ``None`` when it produces a full Part 10 file."""
+    pre = getattr(ds, "preamble", None)
+    if pre is None:
+        return False
+    ds.preamble = None
+    return bytes(pre) != ZERO_PREAMBLE
+
+
+def _body_offset(head: bytes) -> Optional[int]:
+    """Where the data set starts in a Part 10 file whose first 144 bytes are
+    *head*, worked out from the File Meta group length. None when the head is
+    not shaped like the files this package writes."""
+    if len(head) < 144 or head[128:132] != b"DICM":
+        return None
+    if head[132:138] != b"\x02\x00\x00\x00UL" or head[138:140] != b"\x04\x00":
+        return None
+    return 144 + struct.unpack("<I", head[140:144])[0]
+
+
+def file_body_digest(path: str) -> Optional[str]:
+    """SHA-256 of the data set in a Part 10 file, read in chunks, leaving out the
+    preamble and the File Meta group. The meta group names the sending AE and
+    the implementation that wrote the file, so two copies of one object that
+    arrived from different senders differ there and nowhere else. None when the
+    file cannot be read or is not shaped like a Part 10 file."""
+    try:
+        with open(path, "rb") as fh:
+            start = _body_offset(fh.read(144))
+            if start is None:
+                return None
+            fh.seek(start)
+            h = hashlib.sha256()
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+            return h.hexdigest()
+    except OSError:
+        return None
+
+
+def servable_chunks(path: str, chunk: int = 1024 * 1024) -> Iterator[bytes]:
+    """Yield the bytes of *path* for a download, with the preamble zeroed.
+
+    Files written here already have a zero preamble. Files in the outgoing and
+    sent folders were put there by somebody else, as were files stored before
+    this was in place. A download hands a file to a workstation, so the one
+    part of the file that can make it executable is blanked on the way out."""
+    with open(path, "rb") as fh:
+        head = fh.read(132)
+        if len(head) == 132 and head[128:132] == b"DICM" and head[:128] != ZERO_PREAMBLE:
+            head = ZERO_PREAMBLE + head[128:]
+        yield head
+        for block in iter(lambda: fh.read(chunk), b""):
+            yield block
+
+
 def save_dicom(ds, path, fsync: bool = True) -> None:
     """Write *ds* as a complete Part 10 file, whatever pydicom version is installed.
 
@@ -32,8 +101,10 @@ def save_dicom(ds, path, fsync: bool = True) -> None:
     that fails part-way — an element that cannot be encoded, a full disk, a
     crash — therefore leaves the previous copy of the instance intact and no
     truncated .dcm at the final name, and two writers of the same path are
-    serialised so the last complete object wins whole."""
+    serialised so the last complete object wins whole. The preamble is always
+    written as zeros (see :func:`clear_preamble`)."""
     from .atomicio import atomic_write, path_lock
+    clear_preamble(ds)
     with path_lock(path):
         atomic_write(path, lambda fh: ds.save_as(fh, **SAVE_KWARGS), fsync=fsync)
 

@@ -21,7 +21,6 @@ from pynetdicom.sop_class import Verification
 
 from .assocwords import caller_of, listener_refusal
 from .connections import listener_handlers
-from .dicomfs import save_dicom
 from .logbuf import LogBuffer
 from .netclaim import cap_per_host, claim, limit_listener
 
@@ -144,6 +143,108 @@ def _existing_patient(path: str) -> Optional[str]:
         return None
 
 
+# What to do when an object arrives under the SOP Instance UID of one already
+# stored and the two differ. Both keep both copies; they disagree on which one
+# stays in the archive.
+CONFLICT_POLICIES = ("keep", "replace")
+
+# file_instance() outcomes.
+STORED = "stored"          # nothing was there; written
+IDENTICAL = "identical"    # a resend of the same object; the stored file is untouched
+KEPT = "kept"              # differed: the stored copy stays, the incoming one is quarantined
+REPLACED = "replaced"      # differed: the incoming copy is stored, the old one is quarantined
+
+INSTANCE_CONFLICT = "instance.conflict"     # the audit action
+
+
+def default_quarantine_dir(storage_dir: str) -> str:
+    """Beside the storage folder, never inside it: anything inside is indexed
+    and can be retrieved, which is what quarantine is for keeping it out of."""
+    return os.path.join(os.path.dirname(os.path.abspath(storage_dir)), "quarantine")
+
+
+def file_instance(ds, path: str, *, quarantine_dir: str, policy: str = "keep",
+                  log=None, audit=None, source: str = "C-STORE", sender: str = "") -> str:
+    """Write *ds* at *path*, never silently replacing a different object.
+
+    A sender may resend an instance it already sent, and that is normal: when
+    the data set is byte-for-byte the one on disk, the stored file is left alone
+    and IDENTICAL comes back. A data set that differs under the same SOP
+    Instance UID is something else. A modality does not edit an image it has
+    already sent; the published attack is to retrieve a study, plant a payload
+    in it and store it back under the same UIDs, so it waits for whoever opens
+    it next. The two copies are therefore both kept: *policy* ``keep`` leaves
+    the stored copy in the archive and puts the incoming one in
+    *quarantine_dir*, ``replace`` does the opposite. Either way an error is
+    logged and an audit record names both digests.
+
+    Comparison is on the encoded data set (the File Meta group names the sender,
+    so it is left out). A resend in another transfer syntax therefore counts as
+    different: the pixels may be equal, but proving that would mean decoding
+    both, and the conservative answer still loses nothing.
+
+    Nothing is encoded into memory: a first store streams to disk exactly as
+    before, and a resend is written to a scratch file beside *path* (the
+    atomicio prefix, so nothing indexes it) and compared from there.
+
+    Raises what the write raises; on any failure the stored copy is unchanged.
+    """
+    from .atomicio import TMP_PREFIX, atomic_copy, atomic_write, fsync_dir, path_lock
+    from .dicomfs import SAVE_KWARGS, clear_preamble, file_body_digest
+    import uuid
+
+    clear_preamble(ds)
+
+    def write(fh):
+        ds.save_as(fh, **SAVE_KWARGS)
+
+    with path_lock(path):
+        if not os.path.lexists(path):
+            atomic_write(path, write)
+            return STORED
+        folder = os.path.dirname(os.path.abspath(path))
+        scratch = os.path.join(folder, f"{TMP_PREFIX}{uuid.uuid4().hex}.resend")
+        try:
+            atomic_write(scratch, write)
+            new_digest = file_body_digest(scratch)
+            old_digest = file_body_digest(path)
+            if new_digest is not None and new_digest == old_digest:
+                return IDENTICAL
+            os.makedirs(quarantine_dir, exist_ok=True)
+            sop = os.path.basename(path)[:-4] if path.endswith(".dcm") else os.path.basename(path)
+            stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            tag = "replaced" if policy == "replace" else "incoming"
+            qpath = os.path.join(quarantine_dir, f"{stamp}_{uuid.uuid4().hex[:8]}_{sop}_{tag}.dcm")
+            if policy == "replace":
+                atomic_copy(path, qpath)
+                os.replace(scratch, path)
+                fsync_dir(folder)
+                outcome = REPLACED
+            else:
+                atomic_copy(scratch, qpath)
+                outcome = KEPT
+        finally:
+            try:
+                os.remove(scratch)
+            except OSError:
+                pass
+    who = sender or "?"
+    qname = os.path.basename(qpath)
+    if log is not None:
+        if outcome == KEPT:
+            log.error(f"{source} from {who}: a different object arrived for {sop}. The stored copy "
+                      f"was kept; the incoming one is in quarantine as {qname}", kind="store", path=path)
+        else:
+            log.warn(f"{source} from {who}: a different object arrived for {sop} and replaced the "
+                     f"stored copy (scp.on_conflict is 'replace'); the previous one is in "
+                     f"quarantine as {qname}", kind="store", path=path)
+    if audit is not None:
+        audit.record(INSTANCE_CONFLICT, actor=None, target=sop, outcome=outcome, source=source,
+                     detail={"sender": who, "quarantined": qname,
+                             "stored_sha256": old_digest or "", "incoming_sha256": new_digest or ""})
+    return outcome
+
+
 # errno values that genuinely mean "out of resources": the only failures a
 # sender should treat as temporary and retry (PS3.4 Table B.2-1, A7xx).
 _RESOURCE_ERRNOS = {getattr(errno, n) for n in ("ENOSPC", "EDQUOT", "EFBIG")
@@ -170,6 +271,9 @@ class StorageSCP:
         journal=None,
         max_associations: Optional[int] = None,
         max_per_host: Optional[int] = None,
+        quarantine_dir: str = "",
+        on_conflict: str = "keep",
+        audit=None,
     ):
         self.aet = aet
         # connections.ConnectionJournal, or None outside PacsServer.
@@ -184,6 +288,12 @@ class StorageSCP:
         self.port = port
         self.storage_dir = storage_dir
         self.organize = organize
+        if on_conflict not in CONFLICT_POLICIES:
+            raise ValueError(f"on_conflict must be one of {', '.join(CONFLICT_POLICIES)}")
+        self.on_conflict = on_conflict
+        self.quarantine_dir = quarantine_dir or default_quarantine_dir(storage_dir)
+        # pacs.audit.AuditLog, or None outside PacsServer.
+        self.audit = audit
         self.min_free_mb = max(0, int(min_free_mb or 0))
         self.log = log
         self.allowed_aets = [a for a in (allowed_aets or []) if str(a).strip()]
@@ -207,6 +317,9 @@ class StorageSCP:
         self.received_count = 0
         self.error_count = 0
         self.refused_count = 0
+        # Objects that arrived under a stored SOP Instance UID with different
+        # content (see file_instance). Counted apart from received_count.
+        self.conflict_count = 0
         # Last instance stored by THIS object — None until one arrives, and gone
         # again when the receiver is rebuilt (a config save replaces it), which is
         # why the dashboard shows it against started_at above.
@@ -300,7 +413,9 @@ class StorageSCP:
                     f"C-STORE from {caller or '?'} replaces {os.path.basename(path)} "
                     f"with a different PatientID (same SOP Instance UID) — check the sender",
                     kind="store", path=path)
-            save_dicom(ds, path)
+            outcome = file_instance(ds, path, quarantine_dir=self.quarantine_dir,
+                                    policy=self.on_conflict, log=self.log, audit=self.audit,
+                                    source="C-STORE", sender=f"{caller or '?'} @ {_peer_addr(event)}")
         except OSError as exc:
             with self._lock:
                 self.error_count += 1
@@ -315,6 +430,17 @@ class StorageSCP:
                 self.error_count += 1
             self.log.error(f"Failed to store instance: {exc}", kind="store")
             return 0xC211
+        if outcome == KEPT:
+            # The archive still holds what it held. Success to the sender all the
+            # same: the object is safe on disk, and a failure status would only
+            # make a modality resend it forever. Nothing downstream runs, since
+            # indexing or order matching would act on a copy that is not stored.
+            with self._lock:
+                self.conflict_count += 1
+            return 0x0000
+        if outcome == REPLACED:
+            with self._lock:
+                self.conflict_count += 1
         # Read the tags OUTSIDE the lock and assign the finished dict inside
         # it: the critical section stays two attribute writes, and a reader
         # only ever sees a complete snapshot (we never mutate one in place).

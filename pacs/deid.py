@@ -599,9 +599,9 @@ def load_profile_table(path: str = PROFILE_JS) -> dict:
 
 
 def write_dataset(ds: Dataset, path: str) -> None:
-    """Write a full Part-10 file (preamble + meta), across pydicom 2 and 3."""
-    if getattr(ds, "preamble", None) is not None and ds.get("PatientIdentityRemoved", "") != "":
-        ds.preamble = b"\x00" * 128
+    """Write a full Part-10 file (meta, and a preamble of zeros — see
+    dicomfs.clear_preamble), across pydicom 2 and 3."""
+    ds.preamble = None
     try:
         ds.save_as(path, enforce_file_format=True)   # pydicom >= 3
     except TypeError:

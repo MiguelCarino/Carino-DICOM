@@ -24,6 +24,7 @@ desktop/out/
 /received/
 /outgoing/
 /sent/
+/quarantine/
 /logs/
 
 # OS cruft

@@ -318,6 +318,24 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   through the ordinary destination list must match its AE title exactly (or
   uniquely ignoring case), and is refused if any routing rule de-identifies for
   that destination, because a retrieve sends the stored, identified file.
+- **A stored instance is never silently replaced by a different object.** A
+  resend under a stored SOP Instance UID is compared with the stored copy on its
+  data set. The same object leaves the file untouched. A different object (the
+  "retrieve a study, plant a payload, store it back" attack) is kept apart. By
+  default the stored copy stays and the incoming one goes to
+  `scp.quarantine_dir`, which is never indexed, retrieved or forwarded. An error
+  is logged and an `instance.conflict` audit record names both SHA-256 digests.
+  `scp.on_conflict: replace` swaps which copy stays; both are still kept. This
+  applies to C-STORE and STOW-RS alike.
+- **No file leaves with a non-zero preamble.** The 128-byte Part 10 preamble is
+  free for the application to use. A Windows executable header there makes one
+  file a valid DICOM object and a runnable program at once (CVE-2019-11687).
+  Every file this appliance writes gets the zeros PS3.10 recommends: received,
+  posted, converted and de-identified. A STOW-RS part that arrived with anything
+  else is logged. Files handed out by WADO-RS and the dashboard download are
+  zeroed on the way out too, because the outgoing and sent folders hold files
+  somebody else wrote. A DICOM/TIFF dual-format file loses its TIFF side when it
+  passes through here; that is the trade.
 - **Every listener claims its port exclusively before binding it.** This matters
   on Windows and nowhere else. Winsock's `SO_REUSEADDR` means *sharing
   permitted* rather than the POSIX "rebind through TIME_WAIT", and every

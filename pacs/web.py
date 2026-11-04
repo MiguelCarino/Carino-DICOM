@@ -94,6 +94,18 @@ def _host_name(host_header: str) -> str:
     return h.rstrip(".") if h.endswith(".") and h != "." else h
 
 
+def _inline_disposition(name: str) -> str:
+    """Content-Disposition: inline for *name*, as send_file's download_name gave
+    it: a plain quoted name when it is ASCII, RFC 5987 encoding otherwise."""
+    from urllib.parse import quote
+    name = "".join(ch for ch in name if ch not in "\r\n")
+    try:
+        name.encode("ascii")
+    except UnicodeEncodeError:
+        return "inline; filename*=UTF-8''" + quote(name)
+    return 'inline; filename="' + name.replace("\\", "").replace('"', "") + '"'
+
+
 def create_app(server: PacsServer) -> Flask:
     from . import dicomweb          # pulls pydicom in; keep it off the CLI's import path
 
@@ -982,6 +994,10 @@ def create_app(server: PacsServer) -> Flask:
             if (_get(new_doc, "scu", "on_success") != _get(old_doc, "scu", "on_success")
                     and _get(new_doc, "scu", "on_success") in ("move", "delete")):
                 gates.append(("studies.delete", "scu.on_success"))
+            # 'replace' lets a sender overwrite what the archive holds.
+            if (_get(new_doc, "scp", "on_conflict") != _get(old_doc, "scp", "on_conflict")
+                    and _get(new_doc, "scp", "on_conflict") == "replace"):
+                gates.append(("studies.delete", "scp.on_conflict"))
             for sec, key in _PATH_FIELDS:
                 if _get(new_doc, sec, key) != _get(old_doc, sec, key):
                     gates.append(("studies.delete", f"{sec}.{key}"))
@@ -2041,8 +2057,24 @@ def create_app(server: PacsServer) -> Flask:
         fp = server.study_dicom_file(group, path, name)
         if not fp:
             return _cors(jsonify(error="not found")), 404
-        return _cors(send_file(fp, mimetype="application/dicom",
-                               as_attachment=False, download_name=os.path.basename(fp)))
+        # Streamed rather than send_file'd so the preamble can be zeroed on the
+        # way out (dicomfs.servable_chunks): this hands a Part 10 file to a
+        # workstation, and the preamble is the part that could make it a program.
+        from .dicomfs import servable_chunks
+        try:
+            size = os.path.getsize(fp)
+            body = servable_chunks(fp)
+            first = next(body)
+        except (OSError, StopIteration):
+            return _cors(jsonify(error="not found")), 404
+
+        def _all():
+            yield first
+            yield from body
+        resp = app.response_class(_all(), mimetype="application/dicom")
+        resp.headers["Content-Length"] = str(size)
+        resp.headers["Content-Disposition"] = _inline_disposition(os.path.basename(fp))
+        return _cors(resp)
 
     # ---- conditional routing ----------------------------------------------
     @app.get("/api/routing")

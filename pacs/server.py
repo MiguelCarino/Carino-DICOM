@@ -693,6 +693,9 @@ class PacsServer:
                 journal=self.journal,
                 max_associations=s.get("max_associations"),
                 max_per_host=s.get("max_per_host"),
+                quarantine_dir=self.cfg.resolved("scp", "quarantine_dir"),
+                on_conflict=s.get("on_conflict", "keep"),
+                audit=self.audit,
             )
             self.scp.start()
 

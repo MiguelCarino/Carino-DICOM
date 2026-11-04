@@ -5,6 +5,24 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+### Security
+- **A different object under a stored SOP Instance UID no longer replaces the stored one.**
+  C-STORE and STOW-RS compare a resend with the stored copy on its data set (not the File
+  Meta group). An identical resend leaves the file untouched. A different one is kept
+  apart: by default the stored copy stays and the incoming one goes to the new
+  `scp.quarantine_dir` (`./quarantine`, never indexed, retrieved or forwarded), with an
+  error in the log and an `instance.conflict` audit record holding both SHA-256 digests.
+  `scp.on_conflict: replace` keeps the old behaviour of storing the newcomer, but the
+  previous copy goes to the quarantine instead of being lost. This closes the "retrieve,
+  plant a payload, store back under the same UIDs" attack. Before this change a
+  different object with the same PatientID overwrote the stored copy with nothing logged
+  (`pacs/scp.py` `file_instance`).
+- **Preambles are zeroed.** Every file written gets the 128 zero bytes PS3.10
+  recommends, and WADO-RS and the dashboard download zero a non-zero preamble on the way
+  out. Before this change a STOW-RS part kept whatever preamble it was posted with, so a
+  DICOM/executable polyglot (CVE-2019-11687) was stored and handed back out intact
+  (`pacs/dicomfs.py`).
+
 ### Added
 - **Fleet layout in the bundled editor** (re-synced to upstream's page-type work). Its
   modules move from the header into a slice bar under the shared Carino navbar, and each

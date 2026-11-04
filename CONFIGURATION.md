@@ -337,6 +337,50 @@ switches the guard off. Validation requires a finite number ≥ 0 (`scp.min_free
 must be a number >= 0`), so a Save can no longer persist `"two"` and take the
 receiver down.
 
+### `scp.on_conflict`
+
+`"keep"` | `"replace"` · default `"keep"`
+
+What happens when an object arrives, over C-STORE or STOW-RS, under the SOP
+Instance UID of one already stored and the two differ. A resend of the same
+object is compared on its data set (the File Meta group, which names the sender,
+is left out). If it matches, the stored file is left untouched and nothing else
+happens.
+
+A different object under a stored UID is never written over the old one
+silently. A modality does not edit an image it has already sent. The published
+attack against unauthenticated archives is to retrieve a study, plant a payload
+in it and store it back under the same UIDs, so it waits for the next person who
+opens it. In either mode **both copies are kept**, an error is logged, and an
+`instance.conflict` audit record gives both SHA-256 digests and the quarantined
+file's name:
+
+- `keep`: the stored copy stays in the archive and the incoming one goes to
+  [`scp.quarantine_dir`](#scpquarantine_dir). The sender is still told Success:
+  the object is safe on disk, and a failure status would only make a modality
+  resend it forever. The index and order matching never hear about it.
+- `replace`: the incoming copy is stored and the previous one goes to the
+  quarantine. Use this only where senders really do resend corrected objects
+  under the same UIDs. Changing to `replace` on the dashboard needs the
+  `studies.delete` capability.
+
+A resend in another transfer syntax counts as different, even when the pixels
+are the same. Proving that would mean decoding both, and keeping both copies
+loses nothing. Validated: `scp.on_conflict must be keep|replace`.
+
+### `scp.quarantine_dir`
+
+`path` · default `"./quarantine"`
+
+Where the copy that `scp.on_conflict` did not keep is written, as
+`<UTC time>_<random>_<SOP Instance UID>_incoming.dcm` (or `_replaced.dcm`). Nothing
+in this folder is indexed, retrieved or forwarded, and nothing deletes from it.
+Review and clear it by hand. Validation refuses an empty value, and a folder that
+is the same as, inside or around `scp.storage_dir`, `scu.watch_dir`,
+`scu.sent_dir` or `scu.pending_dir`, because a copy there would be retrieved or
+sent on. Re-pointing it on the dashboard needs `studies.delete`, like every other
+folder.
+
 ### `scp.allowed_aets`
 
 `list of strings` · default `[]` · see [`allowed_aets`](#allowed_aets)

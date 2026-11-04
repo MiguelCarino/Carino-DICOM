@@ -70,6 +70,8 @@ DEFAULTS: dict[str, Any] = {
         "storage_dir": "./received",
         "organize": True,
         "min_free_gb": 2,       # refuse C-STORE when the storage volume drops below this (0 = off)
+        "on_conflict": "keep",  # a different object under a stored SOP Instance UID: keep | replace
+        "quarantine_dir": "./quarantine",  # where the copy that is not kept goes; never retrieved
         "allowed_aets": [],
         "tls": False,           # serve DICOM over TLS
         "tls_cert": "",         # server certificate (PEM)
@@ -271,7 +273,8 @@ DEFAULTS: dict[str, Any] = {
     "setup_completed": "",      # UTC stamp of the run that finished the service chooser; "" = never, so the chooser is offered
 }
 
-_PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"),
+_PATH_FIELDS = [("scp", "storage_dir"), ("scp", "quarantine_dir"),
+                ("scu", "watch_dir"), ("scu", "sent_dir"),
                 ("scu", "pending_dir"), ("ris", "store_dir"), ("index", "path"),
                 ("audit", "dir")]
 
@@ -1329,6 +1332,21 @@ def _check_review_rules(data: dict, base_dir: str) -> None:
                     f"outgoing folder, or a separate folder, works.")
             if key == "sent_dir" and _nested(other, st):
                 raise ValueError("scu.sent_dir and scp.storage_dir are the same folder or nested")
+    quarantine = data["scp"].get("quarantine_dir")
+    if isinstance(quarantine, str):
+        if not quarantine.strip():
+            raise ValueError("scp.quarantine_dir is empty — a conflicting copy needs somewhere to go")
+        qu = _norm_dir(quarantine, base_dir)
+        # Inside a storage folder a quarantined copy is indexed and can be
+        # retrieved; inside the outgoing folder it is forwarded. Either undoes it.
+        for sec, key in (("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"),
+                         ("scu", "pending_dir")):
+            v = data.get(sec, {}).get(key)
+            if isinstance(v, str) and v.strip() and _nested(qu, _norm_dir(v, base_dir)):
+                raise ValueError(
+                    f"scp.quarantine_dir and {sec}.{key} are the same folder or one is inside the "
+                    f"other. Quarantined copies would be retrieved or forwarded from there. Give "
+                    f"the quarantine its own folder.")
 
 
 def validate(data: dict, base_dir: Optional[str] = None) -> None:
@@ -1356,6 +1374,8 @@ def validate(data: dict, base_dir: Optional[str] = None) -> None:
         raise ValueError("AE titles must be 16 characters or fewer")
     if data["scu"]["on_success"] not in ("keep", "move", "delete"):
         raise ValueError("scu.on_success must be keep|move|delete")
+    if data["scp"].get("on_conflict", "keep") not in ("keep", "replace"):
+        raise ValueError("scp.on_conflict must be keep|replace")
     try:
         if float(data["scu"]["poll_interval"]) < 1:
             raise ValueError

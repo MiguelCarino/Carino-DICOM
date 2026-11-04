@@ -45,7 +45,7 @@ from pydicom.dataset import Dataset
 
 from .dicomfs import servable as _servable
 from .scp import _RESOURCE_ERRNOS, dest_path, valid_uid
-from .dicomfs import save_dicom
+from .dicomfs import clear_preamble, servable_chunks
 
 URL_PREFIX = "/dicom-web"
 
@@ -506,12 +506,10 @@ def _stream_parts(parts: list[tuple[str, str]], boundary: str, log, stats) -> It
     for path, content_type in parts:
         yield _multipart_headers(boundary, content_type)
         try:
-            with open(path, "rb") as fh:
-                while True:
-                    chunk = fh.read(_CHUNK)
-                    if not chunk:
-                        break
-                    yield chunk
+            # servable_chunks zeroes a preamble that is not already zero: the
+            # files in the outgoing and sent folders were written by somebody else.
+            for chunk in servable_chunks(path, _CHUNK):
+                yield chunk
         except OSError as exc:
             # Aborting mid-body leaves the client with an unterminated multipart,
             # which is exactly right: it must fail loudly, not silently receive a
@@ -672,9 +670,28 @@ def store_instance(server, ds: Dataset, source: str = "STOW-RS") -> str:
         server.log.warn(f"{source}: {os.path.basename(path)} replaces an instance with a "
                         f"different PatientID (same SOP Instance UID) — check the sender",
                         kind="store", path=path)
-    # Through the same crash-safe writer as C-STORE: a failed re-post never
-    # truncates the good copy, and a failed first post leaves nothing behind.
-    save_dicom(ds, path)
+    # A posted part is a whole Part 10 file, preamble included, which a C-STORE
+    # never carries. It is zeroed on the way to disk (dicomfs.clear_preamble);
+    # one that held anything is worth a line in the log.
+    if clear_preamble(ds):
+        server.log.warn(f"{source}: {os.path.basename(path)} arrived with a non-empty "
+                        f"preamble from {_remote()} — stored with the preamble zeroed",
+                        kind="store", path=path)
+    # Through the same writer as C-STORE: crash-safe, and a different object
+    # under a stored SOP Instance UID never silently replaces it.
+    from .scp import CONFLICT_POLICIES, KEPT, default_quarantine_dir, file_instance
+    qdir = cfg.resolve_path(str(cfg.scp.get("quarantine_dir", "") or "")) \
+        or default_quarantine_dir(root)
+    policy = cfg.scp.get("on_conflict", "keep")
+    outcome = file_instance(ds, path, quarantine_dir=qdir,
+                            policy=policy if policy in CONFLICT_POLICIES else "keep",
+                            log=server.log, audit=getattr(server, "audit", None),
+                            source=source, sender=_remote())
+    if outcome == KEPT:
+        # The archive is unchanged, so neither the index nor order matching
+        # hears about a copy that was not stored. The client is told it was
+        # stored: it is, in quarantine, and the error in the log says where.
+        return path
 
     # The index is written synchronously here, unlike the C-STORE path's queued
     # write: a STOW client routinely queries for what it just posted, and a
@@ -698,10 +715,17 @@ def store_instance(server, ds: Dataset, source: str = "STOW-RS") -> str:
 
     server.log.info(
         f"Stored {getattr(ds, 'Modality', '?')} {os.path.basename(path)} "
-        f"via {source} from {request.remote_addr or '?'}",
+        f"via {source} from {_remote()}",
         kind="store", path=path,
     )
     return path
+
+
+def _remote() -> str:
+    try:
+        return request.remote_addr or "?"
+    except RuntimeError:        # called outside a request (tests, scripts)
+        return "?"
 
 
 def _space_ok(storage_dir: str, min_free_mb: int) -> bool:
