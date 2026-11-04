@@ -1357,13 +1357,54 @@ body.contact-lost .kv dd { opacity: .35; filter: grayscale(1); }
 tr.dest-suspect .d-host, tr.dest-suspect .d-port { border-color: var(--warn); }
 .dest-warn-note { color: var(--warn); white-space: pre-line; }
 
-/* "Modalities at this site" picker (Settings → Worklist and orders, and the setup chooser). */
-.mod-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0; }
 .mod-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: .8rem; white-space: nowrap; }
-.mod-more > summary { cursor: pointer; color: var(--muted); font-size: .8rem; margin-top: 6px; }
+
+/* "Modalities at this site" picker (Settings → Worklist and orders, and the setup chooser):
+   filter + All/Ticked switch over one scrolling list, code column first. */
+.mp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 2px 0 8px; }
+.mp-bar .mp-filter { flex: 1 1 220px; max-width: 360px; font-family: var(--sans); }
+.mp-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.mp-seg button {
+  background: transparent; border: 0; color: var(--muted); font: inherit; font-size: .76rem;
+  padding: 6px 12px; cursor: pointer;
+}
+.mp-seg button + button { border-left: 1px solid var(--border); }
+.mp-seg button:hover { color: var(--text); }
+.mp-seg button[aria-pressed="true"] { color: var(--accent); background: var(--accent-faint); }
+.mp-seg button:focus-visible, .mp-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mp-count { color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.mp-clear {
+  background: transparent; border: 0; padding: 2px 0; color: var(--accent); font: inherit;
+  font-size: .76rem; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.mp-clear[hidden] { display: none; }
+.mp-list {
+  max-height: 320px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 4px 0;
+}
+.mp-head {
+  position: sticky; top: -4px; z-index: 1; background: var(--inset);
+  padding: 8px 12px 4px; color: var(--muted); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+}
+/* Above `.mp-list label.mp-row`'s display:grid, or a filtered-out row stays on screen. */
+.mp-head[hidden], .mp-list label.mp-row[hidden], .mp-empty[hidden] { display: none; }
+.mp-list label.mp-row {
+  display: grid; grid-template-columns: auto 7.5em minmax(0, 1fr); align-items: center; gap: 10px;
+  margin: 0; padding: 6px 12px; color: var(--text); font-size: .82rem; cursor: pointer;
+}
+.mp-list label.mp-row:hover { background: var(--panel-2); }
+.mp-list label.mp-row.on .mp-code { color: var(--accent); }
+.mp-list label.mp-row input[type="checkbox"] { margin: 0; padding: 0; }
+.mp-code { font-family: var(--mono); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.mp-name { min-width: 0; color: var(--muted); overflow-wrap: break-word; }
+.mp-row.on .mp-name { color: var(--text); }
+.mp-empty { margin: 0; padding: 14px 12px; color: var(--muted); font-size: .8rem; }
+@media (max-width: 520px) {
+  .mp-bar .mp-filter { flex-basis: 100%; max-width: none; }
+  .mp-list label.mp-row { grid-template-columns: auto 5.8em minmax(0, 1fr); gap: 8px; padding: 7px 10px; }
+  .mp-head { padding: 8px 10px 4px; }
+}
 .setup-mods { margin: 16px 0 0; }
 .setup-mods h3 { margin: 0 0 4px; font-size: 1rem; }
 tr.mod-suspect .m-mod { border-color: var(--warn); }
 .settings fieldset.wide-set { grid-column: 1 / -1; }
-.settings label.mod-chip { flex-direction: row; margin: 0; gap: 6px; color: var(--text); font-size: .8rem; }
-.settings label.mod-chip input[type="checkbox"] { flex: 0 0 auto; }

@@ -663,42 +663,106 @@ function siteModalities() {
   const list = lastStatus && Array.isArray(lastStatus.site_modalities) ? lastStatus.site_modalities : [];
   return new Set(list.map((c) => String(c).toUpperCase()));
 }
-// The usual imaging rooms first; the rest of the 79 sit behind "Show all codes".
+// The usual imaging rooms head the list; the rest of the 79 follow in code order.
 const COMMON_MODALITIES = ["US", "CT", "MR", "CR", "DX", "MG", "XA", "RF", "NM", "PT"];
+/* One list, a filter box and an All / Ticked switch. Nothing ticked means every code is allowed,
+   so the count line says that in words instead of "0 selected". */
 function buildModalityPicker(el, selected) {
   if (!el) return;
   const chosen = new Set((selected || []).map((c) => String(c).toUpperCase()));
   el.textContent = "";
   const all = modalityChoices();
-  const box = ([code, label]) => {
-    const l = document.createElement("label");
-    l.className = "mod-chip";
-    l.title = label;
-    const i = document.createElement("input");
-    i.type = "checkbox";
-    i.value = code;
-    i.checked = chosen.has(code);
-    l.append(i, " " + modalityLabel(code, label));
-    return l;
+  const mk = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
   };
-  const common = document.createElement("div");
-  common.className = "mod-chips";
-  all.filter(([c]) => COMMON_MODALITIES.includes(c)).forEach((m) => common.appendChild(box(m)));
-  const more = document.createElement("details");
-  more.className = "mod-more";
-  const sum = document.createElement("summary");
-  sum.textContent = T("Show all codes");
-  const rest = document.createElement("div");
-  rest.className = "mod-chips";
-  all.filter(([c]) => !COMMON_MODALITIES.includes(c)).forEach((m) => rest.appendChild(box(m)));
-  // A saved code from the long list is open on arrival, so nobody saves over it unseen.
-  more.open = [...chosen].some((c) => !COMMON_MODALITIES.includes(c));
-  more.append(sum, rest);
-  el.append(common, more);
+
+  const bar = mk("div", "mp-bar");
+  const q = mk("input", "list-filter mp-filter");
+  q.type = "search";
+  q.placeholder = T("Filter by code or name");
+  q.setAttribute("aria-label", T("Filter by code or name"));
+  q.autocomplete = "off";
+  q.spellcheck = false;
+  const seg = mk("div", "mp-seg");
+  seg.setAttribute("role", "group");
+  const btnAll = mk("button", "", T("All"));
+  const btnOn = mk("button", "", T("Ticked only"));
+  [btnAll, btnOn].forEach((b) => { b.type = "button"; seg.appendChild(b); });
+  const count = mk("span", "mp-count");
+  count.setAttribute("aria-live", "polite");
+  const clear = mk("button", "mp-clear", T("Untick all"));
+  clear.type = "button";
+  bar.append(q, seg, count, clear);
+
+  const list = mk("div", "mp-list");
+  list.setAttribute("role", "group");
+  const rows = [];
+  const heads = [];
+  const section = (title, items) => {
+    const h = mk("div", "mp-head", title);
+    list.appendChild(h);
+    const mine = [];
+    items.forEach(([code, label]) => {
+      const row = mk("label", "mp-row");
+      const i = document.createElement("input");
+      i.type = "checkbox";
+      i.value = code;
+      i.dataset.mod = code;
+      i.checked = chosen.has(code);
+      row.append(i, mk("span", "mp-code", code), mk("span", "mp-name", label));
+      row.dataset.find = (code + " " + label).toLowerCase();
+      list.appendChild(row);
+      rows.push(row);
+      mine.push(row);
+    });
+    heads.push([h, mine]);
+  };
+  section(T("Common"), all.filter(([c]) => COMMON_MODALITIES.includes(c)));
+  section(T("Other codes"), all.filter(([c]) => !COMMON_MODALITIES.includes(c)));
+  const empty = mk("p", "mp-empty", T("No modality matches the filter."));
+  list.appendChild(empty);
+
+  let onlyTicked = false;
+  const apply = () => {
+    const needle = q.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach((r) => {
+      const ok = (!needle || r.dataset.find.includes(needle))
+        && (!onlyTicked || r.querySelector("input").checked);
+      r.hidden = !ok;
+      r.classList.toggle("on", r.querySelector("input").checked);
+      if (ok) shown++;
+    });
+    heads.forEach(([h, mine]) => { h.hidden = !mine.some((r) => !r.hidden); });
+    empty.hidden = shown > 0;
+    const n = rows.filter((r) => r.querySelector("input").checked).length;
+    count.textContent = n ? TN(n, "{n} modalities ticked") : T("None ticked — every modality is allowed");
+    clear.hidden = !n;
+    btnAll.setAttribute("aria-pressed", String(!onlyTicked));
+    btnOn.setAttribute("aria-pressed", String(onlyTicked));
+  };
+  q.addEventListener("input", apply);
+  // Esc empties the filter first, so it never closes the dialog under a half-typed search.
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && q.value) { e.stopPropagation(); e.preventDefault(); q.value = ""; apply(); }
+  });
+  btnAll.addEventListener("click", () => { onlyTicked = false; apply(); });
+  btnOn.addEventListener("click", () => { onlyTicked = true; apply(); });
+  clear.addEventListener("click", () => {
+    rows.forEach((r) => { r.querySelector("input").checked = false; });
+    onlyTicked = false;
+    apply();
+  });
+  list.addEventListener("change", apply);
+  el.append(bar, list);
+  apply();
 }
 function pickerValue(el) {
   if (!el) return [];
-  const on = new Set([...el.querySelectorAll("input:checked")].map((i) => i.value));
+  const on = new Set([...el.querySelectorAll("input[data-mod]:checked")].map((i) => i.value));
   return modalityChoices().map(([c]) => c).filter((c) => on.has(c));   // standard order, stable diffs
 }
 function fillModalityChoices() {

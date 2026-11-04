@@ -69,6 +69,13 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   the upstream CHANGELOG covers only the last two.
 
 ### Changed
+- **"Modalities at this site" is a list with a filter.** Settings → Worklist and orders,
+  and the setup chooser, used to show 79 pills, with most behind "Show all codes". Now
+  there is a filter box (by code or name), an All / Ticked only switch, and one scrolling
+  list: common rooms first, then the other codes, each row with its code in a column and
+  its name beside it. The count line says "None ticked — every modality is allowed" when
+  nothing is ticked, which is what an empty list means. "Untick all" clears the list.
+  The saved value is unchanged (`ris.modalities`, in standard order).
 - **The bundled editor's reports download as PDF files** (re-synced to upstream v1.2.0,
   `5cb03f9`). The tag dump, the Overview's report and the Comparison report no longer open the
   print dialog: they are laid out at A4, cut into pages between table rows and saved as
@@ -87,6 +94,9 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   an untouched save's dataset rather than the whole file, and checks that identity.
 
 ### Fixed
+- **The dashboard loads its own fonts again.** `index.html` still linked
+  `editor/fonts.css`, which the editor re-sync removed, so the dashboard fell back to
+  system fonts and logged a stylesheet error. It now links `fonts/carino-fonts.css`.
 - **On Windows a link planted at a log, audit or journal path was written through.** The dated
   activity log, the audit trail and the hold-and-forward journal refused a symlink only through
   `O_NOFOLLOW`, which Windows lacks, so there they appended to whatever the link named. They now
