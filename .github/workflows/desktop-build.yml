@@ -142,6 +142,14 @@ jobs:
           pip install --only-binary=:all: -r requirements.txt pyinstaller
           pyinstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi --noconfirm
 
+      # Written from the environment PyInstaller just froze, so it names the exact
+      # wheels (and the C libraries inside them) this leg ships. Kept out of
+      # desktop/dist, whose contents the verify step checks against a manifest.
+      - name: Write this leg's SBOM
+        run: |
+          mkdir -p sbom
+          python packaging/make_sbom.py --out "sbom/carino-dicom-${{ matrix.id }}.spdx.json"
+
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm install
@@ -263,6 +271,7 @@ jobs:
             desktop/dist/*.dmg
             desktop/dist/*.zip
             desktop/dist/*.exe
+            sbom/*.spdx.json
 
   # Assembling a release by hand is what has kept the download page pinned to an
   # old version: six artifact bundles to fetch, unzip and re-attach, every time,

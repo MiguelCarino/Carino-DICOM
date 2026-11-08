@@ -34,6 +34,15 @@ RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
  && /opt/venv/bin/pip install --no-cache-dir --only-binary=:all: -r requirements.txt
 
+# The image's bill of materials, written by the venv it describes: the exact
+# wheels installed above, the C libraries inside them, and the bundled editor's
+# vendored files. Only these three inputs are needed; the result is copied into
+# the runtime stage as /app/carino-dicom.spdx.json.
+COPY packaging/make_sbom.py packaging/
+COPY pacs/__init__.py pacs/
+COPY pacs/web/editor/sbom.spdx.json pacs/web/editor/
+RUN /opt/venv/bin/python packaging/make_sbom.py --out /build/carino-dicom.spdx.json
+
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime
@@ -79,6 +88,7 @@ COPY docker/ /app/docker/
 # `pacs init` looks for config.example.json one level above the package, and
 # AGPL-3.0-or-later means the licence travels with the distributed program.
 COPY config.example.json LICENSE /app/
+COPY --from=builder /build/carino-dicom.spdx.json /app/
 # The manual, served at /manual/. A container is the deployment most likely to
 # be on a segment with no route out, and the manual is where the token rule and
 # the two hold causes are explained. pacs.web.MANUAL_DIR finds it here.

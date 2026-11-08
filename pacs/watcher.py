@@ -336,6 +336,7 @@ class FolderWatcher:
         received. *path* is what the operator sees in the log — with a scrubbed
         copy in flight it is not the file on the wire."""
         errors = []
+        converted = []
         link_down = False
         for dest in nodes:
             if self._stop.is_set():
@@ -353,16 +354,19 @@ class FolderWatcher:
                 link_down = link_down or bool(getattr(res, "link", False))
                 errors.append(f"{dest.host}:{dest.port} {res.message}"
                               if len(nodes) > 1 else res.message)
+            elif getattr(res, "transcoded", ""):
+                converted.append(res.transcoded)
         if link_down:
             self._pass_dead.add(dest_name)
         if errors:
             self._note_failure(path, fails, dest_name, "; ".join(errors), interval)
         else:
             self._note_success(path, entry, fails, dest_name,
-                               self._node_fingerprint(nodes))
+                               self._node_fingerprint(nodes),
+                               transcoded=", ".join(dict.fromkeys(converted)))
 
     def _note_success(self, path: str, entry: dict, fails: dict, dest_name: str,
-                      fingerprint: str = "") -> None:
+                      fingerprint: str = "", transcoded: str = "") -> None:
         entry["sent"].append(dest_name)
         # Which MACHINE took it, beside the name that was dialled — see
         # _reopen_repointed for why the name alone is not a delivery record.
@@ -375,7 +379,11 @@ class FolderWatcher:
                 "epoch": int(time.time()), "file": os.path.basename(path),
                 "dest": dest_name, "ok": True, "error": "",
             }
-        self.log.info(f"Sent {os.path.basename(path)} -> {dest_name}", kind="send")
+        # A decompressed delivery says so on the line that records it: the far
+        # side holds the same image in another encoding, and whoever compares
+        # the two archives' file sizes later should not have to guess why.
+        self.log.info(f"Sent {os.path.basename(path)} -> {dest_name}"
+                      + (f" (sent decompressed: {transcoded})" if transcoded else ""), kind="send")
 
     def _note_failure(self, path: str, fails: dict, dest_name: str,
                       message: str, interval: float) -> None:

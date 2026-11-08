@@ -1833,13 +1833,27 @@ class PacsServer:
                          "ts_name": ts_name(ts), "instances": counts.get((c["sop"], ts), 0),
                          "reference": bool(c.get("reference")), "result": c["result"],
                          "accepted": c["result"] == 0})
+        # A pair refused only for its transfer syntax, whose SOP class the node
+        # takes uncompressed (the Implicit VR reference context), is not a
+        # failed send when this install can decode it: c_store proposes
+        # uncompressed beside it and sends a decompressed copy. Marked rather
+        # than dropped, so the table still shows what the node refused.
+        from .connections import TS_NOT_SUPPORTED, decodable
+        plain_ok = {r["sop"] for r in rows if r["reference"] and r["accepted"]}
+        for r in rows:
+            r["decompressed"] = bool(not r["reference"] and not r["accepted"]
+                                     and r["result"] == TS_NOT_SUPPORTED
+                                     and r["sop"] in plain_ok and decodable([r["ts"]]))
         real = [r for r in rows if not r["reference"]]
-        refused = [r for r in real if not r["accepted"]]
+        refused = [r for r in real if not r["accepted"] and not r["decompressed"]]
+        converted = [r for r in real if r["decompressed"]]
         what = "stored here" if from_archive else "of the common image types"
         if refused:
             msg = f"{d.name} would refuse {len(refused)} of {len(real)} kind(s) of object {what}"
         else:
             msg = f"{d.name} accepts all {len(real)} kind(s) of object {what}"
+        if converted:
+            msg += f" ({len(converted)} only decompressed)"
         if res["truncated"]:
             msg += f" (stopped after {res['batches']} associations)"
         (self.log.warn if refused else self.log.info)(f"Connection check {d.name}: {msg}", kind="echo")
@@ -2301,7 +2315,9 @@ class PacsServer:
                     "dest": dname, "ok": bool(res.ok), "error": "" if res.ok else res.message,
                 }
             if res.ok:
-                self.log.info(f"Sent {os.path.basename(fp)} -> {dname}", kind="send")
+                self.log.info(f"Sent {os.path.basename(fp)} -> {dname}"
+                              + (f" (sent decompressed: {res.transcoded})"
+                                 if getattr(res, "transcoded", "") else ""), kind="send")
             else:
                 self.log.warn(f"Send {os.path.basename(fp)} -> {dname}: {res.message}", kind="send")
             return bool(res.ok)
@@ -3891,7 +3907,10 @@ class PacsServer:
                             res = c_store(d, payload, aet, tls_context=ctx)
                             if res.ok:
                                 ok += 1
-                                self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}", kind="send")
+                                self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}"
+                                              + (f" (sent decompressed: {res.transcoded})"
+                                                 if getattr(res, "transcoded", "") else ""),
+                                              kind="send")
                             else:
                                 fail += 1
                                 self.log.warn(f"Send {os.path.basename(fp)} -> {d.name}: "

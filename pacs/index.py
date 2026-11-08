@@ -1277,7 +1277,8 @@ class InstanceIndex:
     def syntax_pairs(self) -> list[dict]:
         """Every (SOP class, transfer syntax) the archive holds, with how many
         files carry it, commonest first — what a destination has to accept for
-        everything here to be sendable (the sender never transcodes)."""
+        everything here to be sendable as stored (the sender falls back to
+        decompressing only where the node takes uncompressed; pacs.transcode)."""
         return [{"sop": r["sop_class_uid"], "ts": r["transfer_syntax_uid"], "count": int(r["n"])}
                 for r in self._read(
                     "SELECT sop_class_uid, transfer_syntax_uid, COUNT(*) AS n FROM instances "

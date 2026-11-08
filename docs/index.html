@@ -420,7 +420,7 @@
             <li id="tl-qr"><b>Query/Retrieve SCP</b> — C-FIND / C-MOVE / C-GET, Patient and Study Root,
               answered from a sqlite index of what is on disk; failed sub-operations are named, never dropped.</li>
             <li id="tl-web"><b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS under <code>/dicom-web</code>,
-              exact-match CORS allow-list, no wildcard. Rendered/thumbnail/transcoding answer 406 rather than fake it.</li>
+              exact-match CORS allow-list, no wildcard. Rendered/thumbnail answer 406 rather than fake it; transfer syntaxes convert losslessly or not at all.</li>
             <li id="tl-mwl"><b>MWL + HL7</b> — Modality Worklist C-FIND SCP, HL7 <code>ORM^O01</code> over MLLP,
               accession-number reconciliation. Image delivery is never gated on an order match.</li>
             <li id="tl-deid"><b>De-identification</b> — PS3.15 Annex E Basic profile on forward, with the

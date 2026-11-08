@@ -131,7 +131,7 @@ dashboard or from the command line without the dashboard.
 | Auto-send (outbound, no listener) | — | `CARINOSCU` | `scu` |
 
 - **Receive and store:** accepts every storage class and transfer syntax and
-  stores objects **as received**. Nothing is ever transcoded. It filters by
+  stores objects **as received**; the stored file is never transcoded. It filters by
   calling AE, and stops accepting new images when free disk space drops below
   `scp.min_free_gb`.
 - **Forward, with rules:** watches a folder and sends each stable file to its
@@ -146,8 +146,15 @@ dashboard or from the command line without the dashboard.
   removed**, so someone still has to look at the images.
 - **Query/Retrieve and DICOMweb:** C-FIND/C-MOVE/C-GET and QIDO/WADO/STOW, both
   answered from one SQLite index. A retrieve reports missing files as failed
-  sub-operations rather than under-counting. Rendering and transcoding requests
-  get a `406` instead of an approximation.
+  sub-operations rather than under-counting. Rendering requests get a `406`
+  instead of an approximation.
+- **Lossless-only transcoding on the way out:** a destination, C-MOVE target or
+  C-GET requestor that takes only uncompressed gets an in-memory decompressed
+  copy (same SOP Instance UID, logged as sent decompressed), and WADO-RS honours
+  `transfer-syntax=` by decompressing or by re-encoding as RLE, JPEG-LS or JPEG
+  2000 Lossless. Nothing is ever encoded lossy; a decompressed lossy image keeps
+  its Lossy Image Compression flag. `pacs transcode --list` shows which codecs
+  this install has.
 - **Virtual print receiver:** captures films from print-only modalities as a PDF
   or Secondary Capture. A film carries no structured identity, so it waits in
   **Pending** for an operator to identify it and is never forwarded
@@ -315,9 +322,30 @@ Third-party files keep their own terms:
 | [`pacs/web/editor/vendor/`](pacs/web/editor/vendor/) | `dcmjs`, `lossless-min.js`, OpenJPEG and CharLS WASM decoders | MIT / BSD, per package | `LICENSE-*.txt` in that directory |
 | [`pacs/web/editor/vendor/tesseract/`](pacs/web/editor/vendor/tesseract/) | Tesseract.js 7.0.0 OCR engine and the tessdata_fast English model, for Find burned-in text | Apache-2.0, with BSD / MIT / zlib / IJG / libpng libraries compiled in | `LICENSE-*.txt` in that directory; [`vendor/README.md`](pacs/web/editor/vendor/README.md) lists each |
 
-`pynetdicom` and `pydicom` (MIT) are installed from PyPI and are not included in
-this repository. A frozen bundle that includes them must also include their
-licence notices.
+The Python dependencies are installed from PyPI (`requirements.txt`) and are not
+included in this repository. A frozen bundle that includes them must also include
+their licence notices:
+
+| Package | Used for | Licence |
+| --- | --- | --- |
+| `pydicom`, `pynetdicom` | DICOM files and networking | MIT |
+| `flask` (with `werkzeug`, `jinja2`, `click`, `itsdangerous`, `markupsafe`) | the dashboard | BSD-3-Clause |
+| `blinker` (Flask's signals) | the dashboard | MIT |
+| `pillow` | rendering, print films, 8-bit JPEG decode | MIT-CMU |
+| `psutil` | disk and network readings | BSD-3-Clause |
+| `cryptography` | `pacs tls-cert` | Apache-2.0 OR BSD-3-Clause |
+| `cffi`, `pycparser` (cryptography's) | `pacs tls-cert` | MIT-0, BSD-3-Clause |
+| `numpy` | pixel arrays for transcoding | BSD-3-Clause (with 0BSD, MIT, Zlib, CC0-1.0 parts) |
+| `pylibjpeg` | codec plugin layer | MIT |
+| `pylibjpeg-openjpeg` | JPEG 2000 / HTJ2K decode, JPEG 2000 Lossless encode | MIT; bundles OpenJPEG, BSD-2-Clause |
+| `pylibjpeg-rle` | RLE Lossless | MIT |
+| `pyjpegls` | JPEG-LS Lossless encode and decode | MIT; bundles CharLS, BSD-3-Clause |
+| `pylibjpeg-libjpeg` | JPEG Lossless, 12-bit JPEG Extended and JPEG-LS decode | GPL-3.0; bundles libjpeg (Thomas Richter), GPL-3.0 |
+
+`pylibjpeg-libjpeg` is the one copyleft dependency. GPL-3.0 code may be combined
+with this AGPL-3.0 work (AGPL-3.0 §13), and the combination is distributed under
+the AGPL. A relicensed build (see below) has to leave it out; the engine then
+reports JPEG Lossless as not decodable and sends it as stored.
 
 > A future **2.0.0** may relicense to MPL-2.0. Contributions are accepted on that
 > understanding.

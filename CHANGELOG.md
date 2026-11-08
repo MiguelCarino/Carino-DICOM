@@ -24,6 +24,50 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   (`pacs/dicomfs.py`).
 
 ### Added
+- **Lossless-only transfer-syntax transcoding on the way out.** The receiver still stores
+  every object exactly as it arrived; what changes is sending and serving. A destination,
+  C-MOVE target or C-GET requestor that accepts an instance's SOP class only uncompressed
+  now gets an in-memory copy decompressed to Explicit (or Implicit) VR Little Endian, under
+  the same SOP Instance UID, instead of a refusal. The sender proposes the stored syntax
+  first and uncompressed beside it, and the stored syntax wins wherever it is accepted. The
+  send result, the "Sent" log line and the connection journal say "sent decompressed".
+  WADO-RS honours `transfer-syntax=` by decompressing or re-encoding as RLE, JPEG-LS or JPEG
+  2000 Lossless, and serves frames of compressed instances as `application/octet-stream`.
+  Nothing is ever encoded lossy, and a lossy image is never re-encoded into another lossy
+  syntax. Every encode is verified pixel for pixel before it leaves. Colour is decoded to
+  its stored values (YBR_FULL stays YBR_FULL), so a lossless image is never rounded through
+  RGB under its original UID. A decompressed lossy image keeps Lossy Image Compression = `01`
+  (PS3.3 C.7.6.1.1.5). Decoding is capped at 1 GiB of pixels, two conversions at a time.
+  "What it accepts" now counts a syntax this install can decode as sent decompressed rather
+  than refused. `pacs transcode IN OUT --to …` does the same to a file, and
+  `pacs transcode --list` shows which codecs are installed (`pacs/transcode.py`).
+  New dependencies:
+  - numpy, pylibjpeg, pylibjpeg-openjpeg and pylibjpeg-rle.
+  - pyjpegls, except on CPython 3.14, which has no wheel; JPEG-LS still decodes there.
+  - pylibjpeg-libjpeg, for JPEG Lossless decode. It is GPL-3.0, which AGPL-3.0 §13 allows
+    to be combined (see the README's licence table).
+
+  A missing codec is reported, never an import error: those instances are sent and served
+  as stored, as before.
+- **HTJ2K and lossless Compress in the bundled editor** (re-synced to upstream's
+  Unreleased). The editor now opens, displays, redacts and decompresses High-Throughput
+  JPEG 2000 (`.201`, `.202`, `.203`) where it refused them, and a `.203` file is no longer
+  taken for ordinary JPEG 2000. Its Image edits card gains **Compress**: JPEG-LS Lossless
+  or JPEG 2000 Lossless, offered only for uncompressed or lossless sources, with every
+  frame decoded back and compared with the original values before the file changes.
+  `pacs/web/editor/vendor/` swaps the decode-only codec builds for the full ones
+  (`openjpegwasm.*`, `charlswasm.*`, 117 KB and 72 KB more WebAssembly, still loaded only
+  on demand) and moves codec-openjpeg to 1.3.6 (OpenJPEG 2.5.0 → 2.5.4). Nothing
+  off-origin; `pacs/web.py` already serves `.wasm` as `application/wasm`.
+- **A software bill of materials for every build** (`packaging/make_sbom.py`). SPDX 2.3,
+  written from the environment being shipped rather than committed, because
+  requirements.txt gives ranges. It lists every installed Python distribution reachable
+  from requirements.txt with its version, declared licence and purl. It also lists the C
+  libraries compiled into those wheels, with versions read from the libraries at run time
+  where they report one: OpenJPEG, CharLS, libjpeg, libjpeg-turbo and Pillow's other
+  codecs, OpenSSL. The bundled editor's own SBOM (`pacs/web/editor/sbom.spdx.json`,
+  upstream's, with a SHA-1/SHA-256 per vendored file) is folded in. `tests/test_sbom.py`
+  checks the result, including that every bundled file still matches its checksum.
 - **Fleet layout in the bundled editor** (re-synced to upstream's page-type work). Its
   modules move from the header into a slice bar under the shared Carino navbar, and each
   module has its own link (`#overview`, `#edit`, `#extract`, `#create`); the existing

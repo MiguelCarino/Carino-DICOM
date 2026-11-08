@@ -231,8 +231,18 @@ as received without transcoding. Owns the disk-space guard and the
 Patient/Study/Series foldering.
 
 **`pacs/scu.py`** — Storage SCU. C-STORE one file to a remote node, and C-ECHO.
-Requests the instance's own transfer syntax; if a remote refuses it, the send
-fails loudly rather than transcoding behind your back.
+Proposes the instance's own transfer syntax first and, for a compressed one this
+install can decode, Explicit and Implicit VR Little Endian beside it. A remote
+that takes only uncompressed gets a decompressed in-memory copy, and the
+`SendResult` (and the "Sent" log line) says so; anything else it refuses fails
+loudly, as before.
+
+**`pacs/transcode.py`** — the only place transfer syntaxes are converted, and
+the rules for it: decompression always, compression to lossless syntaxes only,
+never lossy-to-lossy, same SOP Instance UID with every encode verified pixel for
+pixel, the lossy flag carried, a decoded-size cap, never the stored file. Probes
+pydicom once for which codecs are installed; a missing one is a refusal, never
+an ImportError.
 
 **`pacs/watcher.py`** — the auto-send daemon. Polls the outgoing folder (polling,
 not inotify: identical on every OS and reliable on network shares), waits for a
@@ -278,10 +288,11 @@ leniency is deliberate and belongs only to worklists.)
 **`pacs/dicomweb.py`** — DICOMweb (PS3.18) as a Flask blueprint: QIDO-RS,
 WADO-RS and STOW-RS under `/dicom-web`, so OHIF, Weasis and similar viewers work
 over HTTP or HTTPS. Queries come from the index, retrievals stream off disk, and
-stores go through the same filing a C-STORE uses. `/rendered`, `/thumbnail`,
-bulkdata URIs and transfer-syntax transcoding are deliberately absent, and
-anything the server cannot produce is answered 406 rather than faked — a
-half-working viewer is worse than an absent feature.
+stores go through the same filing a C-STORE uses. `/rendered`, `/thumbnail` and
+bulkdata URIs are deliberately absent, and anything the server cannot produce is
+answered 406 rather than faked — a half-working viewer is worse than an absent
+feature. A `transfer-syntax=` other than the stored one is converted through
+`pacs/transcode.py`, within its rules, or refused with the reason.
 
 **`pacs/index.py`** — SQLite instance index, one row per stored file, with study
 and series answers derived by aggregation so a summary cannot drift from the
@@ -349,8 +360,9 @@ associations in both directions (the listeners register handlers through
 turns an entry into a sentence and a fix. The sentences are mirrored in
 `js/06-logs.js` so the dashboard can translate them; `tests/test_connections.py`
 fails if the two drift. A fix may only name a setting that exists — this PACS
-has no transfer-syntax setting and never transcodes, so those remedies are on
-the other machine and say so.
+has no transfer-syntax setting and converts only to uncompressed, and only when
+the far side takes that, so the other remedies are on the other machine and say
+so.
 
 **`pacs/logbuf.py`** — one thread-safe ring buffer every component logs through,
 so the dashboard can poll a single stream. Also appends to a dated file per day,

@@ -740,7 +740,7 @@ openssl rand -base64 32</code></pre>
         <dt>CORS</dt>
         <dd><code>cors_origins</code>は<strong>完全一致</strong>で照合され（スキーム + ホスト + ポート）、既定では空なので、一覧にないオリジンへ何かが返されることはありません。パターン構文はありません。ただしリテラルの<code>*</code>は<em>有効</em>で、それは運用者が自分でそう入力したからです。それ以降はすべてのオリジンに応答が返り、運用者が開いたどのページからでも、このPCのアーカイブを読めてしまいます。ビューアを名指しで指定してください。</dd>
         <dt>できないこと</dt>
-        <dd><code>/rendered</code>、<code>/thumbnail</code>、bulkdataのURI、転送構文どうしのトランスコードは実装しておらず、<code>406</code>を返します。中途半端に動くビューアは、機能がないことより悪いです。作れないものを偽ることは絶対にありません。</dd>
+        <dd><code>/rendered</code>、<code>/thumbnail</code>、bulkdataのURIは実装しておらず、<code>406</code>を返します。中途半端に動くビューアは、機能がないことより悪いです。作れないものを偽ることは絶対にありません。保存形式と異なる<code>transfer-syntax=</code>は、展開するか可逆で再符号化（RLE、JPEG-LS、JPEG 2000 Lossless）して応えます。非可逆の転送構文には決して変換せず、その場合は理由を添えた<code>406</code>を返します。</dd>
       </dl>
     </div>
 

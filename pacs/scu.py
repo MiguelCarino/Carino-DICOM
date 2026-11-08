@@ -1,9 +1,14 @@
 """Storage SCU — the "send" half.
 
 C-STORE a single .dcm file to a remote node, and C-ECHO to test connectivity.
-We request the instance's own transfer syntax (compressed objects are sent
-as-is; pynetdicom does not transcode), so if a remote refuses that syntax the
-store fails loudly rather than silently corrupting data.
+We propose the instance's own transfer syntax first, so a compressed object
+goes out exactly as it was received whenever the remote takes it. Beside it, for
+a compressed instance this install can decode, we also propose Explicit and
+Implicit VR Little Endian (pacs.transcode.fallback_syntaxes): a remote that
+accepts only uncompressed gets an in-memory decompressed copy under the same SOP
+Instance UID, and the result says so. Anything else it refuses — no common
+syntax, or none we can produce — still fails loudly rather than sending
+something the remote did not agree to. Nothing here ever lossy-encodes.
 """
 
 from __future__ import annotations
@@ -22,8 +27,10 @@ from pydicom.uid import ImplicitVRLittleEndian
 from pynetdicom import AE, evt
 from pynetdicom.sop_class import Verification
 
+from . import transcode
 from .assocwords import describe_reject, reject_parts
-from .connections import TS_NOT_SUPPORTED, note_outgoing, requested_contexts, ts_name
+from .connections import (EXPLICIT_LE, IMPLICIT_LE, TS_NOT_SUPPORTED, UNCOMPRESSED, note_outgoing,
+                          requested_contexts, ts_name)
 
 # C-STORE statuses that are "stored, with a caveat" — treat as success.
 # Reading them as failure would cost more than the caveat: the sender never
@@ -81,6 +88,11 @@ class SendResult:
     # rather than this one instance — the watcher stops dialling that node for
     # the rest of a pass on it.
     link: bool = False
+    # Set when the instance went out in another transfer syntax than it is
+    # stored in: "JPEG Lossless → Explicit VR Little Endian". Empty for the
+    # ordinary send-as-stored. The callers put it on their "Sent" line, so a
+    # decompressed delivery is never mistaken for a byte-identical one.
+    transcoded: str = ""
 
 
 # A transfer is allowed this many bytes per second on top of the base timeout
@@ -195,11 +207,22 @@ def _why_not_established(assoc, dest: "Destination", calling_aet: str, timeout) 
             if ctx and all(c["result"] == TS_NOT_SUPPORTED for c in ctx):
                 # PS3.8 9.3.3.2 reason 4: the kind of object is fine, its
                 # encoding is not — a different fix from a wrong port.
-                tss = ", ".join(dict.fromkeys(ts_name(t) for c in ctx for t in c["proposed"]))
+                proposed = list(dict.fromkeys(t for c in ctx for t in c["proposed"]))
+                stored = [t for t in proposed if t not in UNCOMPRESSED]
+                tss = ", ".join(ts_name(t) for t in (stored or proposed))
+                if stored and any(t in UNCOMPRESSED for t in proposed):
+                    return (f"{scheme}association with {where} accepted this kind of object but "
+                            f"neither as {tss} nor uncompressed — enable {tss} or uncompressed "
+                            f"(Explicit or Implicit VR Little Endian) on {dest.aet}")
+                if stored:
+                    # A compressed syntax with no decoder installed: the old
+                    # behaviour, and the old advice, plus why.
+                    return (f"{scheme}association with {where} accepted this kind of object but "
+                            f"not as {tss}, and this PACS cannot convert it (no decoder for {tss} "
+                            f"is installed) — enable {tss} on {dest.aet}, or have the modality "
+                            f"send uncompressed")
                 return (f"{scheme}association with {where} accepted this kind of object but not as "
-                        f"{tss}, and this PACS sends images as they were received (it does not "
-                        f"convert them) — enable {tss} on {dest.aet}, or have the modality send "
-                        f"uncompressed")
+                        f"{tss} — enable {tss} on {dest.aet}")
             return (f"{scheme}association with {where} accepted but nothing we proposed was "
                     f"(no common presentation context), so it was aborted — it does not take this "
                     f"kind of object. If {dest.port} is a worklist or query port rather than its "
@@ -231,7 +254,7 @@ def _open(ae: AE, dest: "Destination", calling_aet: str, tls_context, timeout, s
     context answers (connections.requested_contexts), which outlive an
     association aborted because none was accepted — exactly the case whose
     reason is in them. *annotate(contexts)* may mark them before they are
-    journaled."""
+    journaled, and may return a line for the journal entry's detail."""
     try:
         assoc = _associate(ae, dest, tls_context)
     except (ssl.SSLError, OSError) as exc:
@@ -247,11 +270,10 @@ def _open(ae: AE, dest: "Destination", calling_aet: str, tls_context, timeout, s
                       detail=str(exc))
         return None, f"invalid AE title: {exc}", []
     contexts = requested_contexts(assoc)
-    if annotate is not None:
-        annotate(contexts)
+    detail = annotate(contexts) if annotate is not None else None
     if assoc.is_established:
         note_outgoing(service=service, dest=dest, calling=calling_aet, outcome="accepted",
-                      contexts=contexts)
+                      contexts=contexts, detail=detail or "")
         return assoc, "", contexts
     why = _why_not_established(assoc, dest, calling_aet, timeout)
     outcome = _outcome(assoc, dest, timeout)
@@ -526,8 +548,17 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         ae = _make_ae(calling_aet, timeout)
     except (ValueError, TypeError) as exc:
         return SendResult(False, f"invalid calling AE title: {exc}")
+    # The stored syntax first, each fallback in a context of its own. One
+    # context per syntax rather than one context offering all three because an
+    # acceptor answers a context with ONE syntax (PS3.8 9.3.3.2): offered
+    # together, a node that takes JPEG Lossless might still pick Explicit, and
+    # we would decompress an image the far side could have had as stored.
+    # Separate, the stored one wins wherever it is accepted, and the journal
+    # records exactly which syntaxes the node refused.
+    proposals = [str(ts)] + transcode.fallback_syntaxes(ts)
     try:
-        ae.add_requested_context(sop_class, ts)
+        for t in proposals:
+            ae.add_requested_context(sop_class, t)
     except ValueError as exc:
         # An over-long or malformed UI value is refused here, before any socket
         # is opened. dcmread accepted it and is_dicom accepted it, so a file
@@ -541,17 +572,53 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     except OSError:
         size = 0
     ae.dimse_timeout = ae.network_timeout = timeout + size / _MIN_RATE
-    assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "send")
+
+    def journal_note(contexts):
+        # What the journal entry for this association says beyond the
+        # per-context answers: that the instance is going out decompressed.
+        mine = [c for c in contexts if c["sop"] == str(sop_class) and c["result"] == 0]
+        target = transcode.send_target(ts, {c["accepted"] for c in mine})
+        if target:
+            return f"sent decompressed: {ts_name(ts)} refused, uncompressed accepted"
+        return None
+
+    assoc, why, _ctx = _open(ae, dest, calling_aet, tls_context, timeout, "send",
+                             annotate=journal_note)
     if why:
         return SendResult(False, why, link=True)
     try:
+        accepted = {str(c.transfer_syntax[0]) for c in assoc.accepted_contexts
+                    if str(c.abstract_syntax) == str(sop_class) and c.transfer_syntax}
+        target = transcode.send_target(ts, accepted)
+        converted = ""
+        if target:
+            # Decompressed only now, with the answer in hand: a node that takes
+            # the stored syntax never costs a decode. The copy is the dataset
+            # read above, which nothing else holds; the file is untouched.
+            try:
+                ds = transcode.transcode(ds, target, in_place=True)
+            except transcode.TranscodeError as exc:
+                return SendResult(False, (
+                    f"{dest.aet} accepts this kind of object only uncompressed, not as "
+                    f"{ts_name(ts)}, and it could not be decompressed here: {exc}"))
+            # pynetdicom writes Implicit itself when only that was accepted.
+            sent_as = EXPLICIT_LE if EXPLICIT_LE in accepted else IMPLICIT_LE
+            converted = f"{ts_name(ts)} → {ts_name(sent_as)}"
+            grown = transcode.decoded_size(ds)
+            if grown > size:
+                assoc.dimse_timeout = assoc.network_timeout = timeout + grown / _MIN_RATE
         status = assoc.send_c_store(ds)
         if not status:
             return SendResult(False, "no C-STORE response (timeout/abort)", link=True)
         code = status.Status
         if code == 0x0000 or code in _WARNING_STATUSES:
-            return SendResult(True, "stored" if code == 0x0000 else f"stored (warning 0x{code:04X})")
-        return SendResult(False, f"C-STORE failed (0x{code:04X})")
+            msg = "stored" if code == 0x0000 else f"stored (warning 0x{code:04X})"
+            if converted:
+                msg += (f", sent decompressed ({converted}): {dest.aet} does not accept "
+                        f"{ts_name(ts)}")
+            return SendResult(True, msg, transcoded=converted)
+        return SendResult(False, f"C-STORE failed (0x{code:04X})"
+                          + (f" (sent decompressed, {converted})" if converted else ""))
     except Exception as exc:                    # noqa: BLE001 - see below
         # pynetdicom RAISES rather than answering with a status for an instance
         # it cannot put on the wire: no (0008,0018), file meta carrying no
@@ -588,10 +655,11 @@ def c_check(dest: Destination, calling_aet: str, pairs, timeout: int = 10,
     presentation context of its own, because an acceptor answers a context
     with one transfer syntax at most (PS3.8 9.3.3.2): offering a SOP class with
     all its syntaxes at once would say which one it prefers, not which ones it
-    refuses, and c_store proposes only the file's own. Every SOP class is also
-    offered once in Implicit VR Little Endian, the syntax every SCP must take
-    (PS3.5 10.1), marked ``reference`` — it tells "refuses JPEG Lossless" from
-    "refuses CT", which have different fixes.
+    refuses, and c_store sends the file's own whenever it is accepted. Every
+    SOP class is also offered once in Implicit VR Little Endian, the syntax
+    every SCP must take (PS3.5 10.1), marked ``reference`` — it tells "refuses
+    JPEG Lossless" from "refuses CT", which have different fixes, and it is
+    the answer that decides whether c_store's decompressed fallback will work.
 
     ``{"ok", "message", "contexts", "batches", "truncated"}``: *ok* is whether
     the node answered at all; what it refused is in *contexts*, read by

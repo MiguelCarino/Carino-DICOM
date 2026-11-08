@@ -13,3 +13,46 @@ psutil>=5.9
 # stock Windows machine, and PyCA cryptography ships wheels for every platform
 # this runs on. If it is missing, tls-cert prints the equivalent openssl line.
 cryptography>=42
+# ---- Transfer-syntax transcoding (pacs/transcode.py) ------------------------
+# Only the send paths and WADO-RS use these, and only when the other side will
+# not take an instance as it is stored: the SCU falls back to Explicit VR Little
+# Endian, and WADO-RS honours a transfer-syntax= the client asks for. Every one
+# is optional at runtime — transcode.py probes what is importable once and a
+# missing codec turns into the same loud "cannot convert" the engine gave before
+# these existed, never an ImportError at startup — but they are listed here
+# because a default install that can decode nothing would fall back to nothing.
+# Each has binary wheels for manylinux x86_64/aarch64, macOS arm64/x86_64 and
+# Windows x64 on CPython 3.10-3.13, which the Dockerfile's --only-binary=:all:
+# depends on.
+#
+# pydicom's pixel handlers are numpy arrays; nothing decodes or encodes without
+# it. BSD-3-Clause.
+numpy>=1.24
+# The plugin layer pydicom 3 finds the three codecs below through (their entry
+# points). Pure Python, MIT.
+pylibjpeg>=2
+# JPEG 2000 and HTJ2K, decode and lossless encode. MIT wrapper around OpenJPEG
+# (BSD-2-Clause), compiled into the wheel. pydicom 3 needs 2.2 to encode; 2.4
+# is the first release with wheels for CPython 3.13.
+pylibjpeg-openjpeg>=2.4
+# RLE Lossless, decode and encode, in Rust. pydicom also has a pure-Python RLE
+# codec; this one is the same output at a fraction of the time on a 500-slice
+# CT. MIT. 2.1 is the first release with CPython 3.13 wheels.
+pylibjpeg-rle>=2.1
+# JPEG-LS, decode and lossless encode. MIT wrapper around CharLS (BSD-3-Clause).
+# It publishes no wheels for CPython 3.14 yet, and building it from source needs
+# CMake and a C++ compiler, which setup.sh must not demand — so on 3.14+ it is
+# skipped: JPEG-LS still DECODES there (pylibjpeg-libjpeg below reads it), it
+# just cannot be produced. 1.5 is the first release with CPython 3.13 wheels.
+pyjpegls>=1.5; python_version < "3.14"
+# JPEG Lossless (Process 14, .57 and SV1 .70) and JPEG Extended 12-bit decode —
+# the syntaxes CR, DX and older CT send most, which nothing above reads (Pillow
+# reads 8-bit baseline only) — and a second JPEG-LS decoder. Decode only: we
+# never encode JPEG. GPL-3.0-only, with Thomas Richter's libjpeg (the ISO
+# reference implementation, also GPL-3.0) compiled in. The engine is
+# AGPL-3.0-or-later, and AGPL-3.0 §13 expressly permits combining with a
+# GPL-3.0 work, so linking it changes nothing for anyone running this as
+# distributed; a downstream that relicenses (the README's possible MPL-2.0)
+# has to drop it, and transcode.py then reports JPEG Lossless as not decodable.
+# 2.3 is the first release with CPython 3.13 wheels.
+pylibjpeg-libjpeg>=2.3

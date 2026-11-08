@@ -482,7 +482,7 @@ def test_wado_accept_and_transfer_syntax():
         assert env.client.get(url, headers={"Accept": "image/jpeg"}).status_code == 406
         assert env.client.get(url, headers={
             "Accept": 'multipart/related; type="application/dicom+xml"'}).status_code == 406
-        # We never transcode: asking for a syntax we did not store is a 406.
+        # A lossy syntax is never produced: asking for JPEG Baseline is a 406.
         assert env.client.get(url, headers={
             "Accept": 'multipart/related; type="application/dicom"; '
                       'transfer-syntax=1.2.840.10008.1.2.4.50'}).status_code == 406
@@ -560,7 +560,7 @@ def test_wado_frames():
         env.close()
 
 
-def test_wado_frames_compressed_are_not_transcoded():
+def test_wado_frames_compressed_are_served_as_stored():
     env = Env()
     try:
         from pydicom.encaps import encapsulate
@@ -579,9 +579,15 @@ def test_wado_frames_compressed_are_not_transcoded():
         assert r.status_code == 200, r.get_data(as_text=True)
         assert 'type="image/jpeg"' in r.headers["Content-Type"]
         assert _split_multipart(r) == [frame]
-        # A client that will only take raw pixels must be told we cannot make them.
+        # A client that will only take raw pixels gets them decoded when the
+        # codestream decodes (tests/test_transcode.py). This one is not JPEG,
+        # and a frame that will not decode must never come back as a 200.
+        r = env.client.get(url, headers={
+            "Accept": 'multipart/related; type="application/octet-stream"'})
+        assert r.status_code in (406, 500), r.status_code
+        # Frames are never re-compressed into another codec.
         assert env.client.get(url, headers={
-            "Accept": 'multipart/related; type="application/octet-stream"'}).status_code == 406
+            "Accept": 'multipart/related; type="image/jls"'}).status_code == 406
     finally:
         env.close()
 

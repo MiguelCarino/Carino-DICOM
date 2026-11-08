@@ -868,9 +868,11 @@ openssl rand -base64 32</code></pre>
           escribiste tú: a partir de ahí se refleja cualquier origen y cualquier página que visite el
           operador podría leer el archivo desde esta máquina. Mejor nombra el visor.</dd>
         <dt>Qué no hace</dt>
-        <dd><code>/rendered</code>, <code>/thumbnail</code>, URIs de <em>bulkdata</em> y la conversión
-          entre sintaxis de transferencia no están implementados y responden <code>406</code>. Un visor a
-          medias es peor que una función ausente: lo que no se puede producir no se finge.</dd>
+        <dd><code>/rendered</code>, <code>/thumbnail</code> y las URIs de <em>bulkdata</em> no están
+          implementados y responden <code>406</code>. Un visor a medias es peor que una función
+          ausente: lo que no se puede producir no se finge. Un <code>transfer-syntax=</code> distinto del
+          guardado se atiende descomprimiendo o recodificando sin pérdida (RLE, JPEG-LS, JPEG 2000
+          Lossless); nunca a una sintaxis con pérdida, que sigue siendo un <code>406</code> que dice por qué.</dd>
       </dl>
     </div>
 

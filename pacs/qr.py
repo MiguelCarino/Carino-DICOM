@@ -51,8 +51,9 @@ from pynetdicom.sop_class import (
     Verification,
 )
 
+from . import transcode
 from .assocwords import caller_of, listener_refusal
-from .connections import listener_handlers
+from .connections import listener_handlers, ts_name
 from .dicomfs import within_roots
 from .logbuf import LogBuffer
 from .netclaim import cap_per_host, claim, limit_listener
@@ -579,6 +580,14 @@ class QrSCP:
                 yield None, None
                 return
         kwargs["contexts"] = contexts or _fallback_contexts()
+        # pynetdicom opens the sub-association itself and never hands it to
+        # this handler, but it passes these kwargs to AE.associate(), which
+        # takes event handlers. EVT_ACCEPTED fires on the requestor before
+        # associate() returns, so by the time the first instance is asked for
+        # below the holder knows what the destination accepted — which is what
+        # decides whether an instance goes out as stored or decompressed.
+        sub: dict = {}
+        kwargs["evt_handlers"] = [(evt.EVT_ACCEPTED, lambda e: sub.setdefault("assoc", e.assoc))]
         yield dest["host"], int(dest["port"]), kwargs
 
         if refuse:
@@ -596,7 +605,8 @@ class QrSCP:
         self.log.info(f"C-MOVE {level} from {who} @ {addr} → {dest_aet} "
                       f"({dest['host']}:{dest['port']}): {len(rows)} instance(s)", kind="qr")
         yield len(rows)
-        yield from self._yield_instances(rows, event, stopping, who, f"C-MOVE → {dest_aet}")
+        yield from self._yield_instances(rows, event, stopping, who, f"C-MOVE → {dest_aet}",
+                                         store=lambda: (sub.get("assoc"), "scu"))
 
     def _handle_get(self, event):
         """Sub-operation count first, then one pending yield per instance —
@@ -631,11 +641,24 @@ class QrSCP:
             self.get_count += 1
         self.log.info(f"C-GET {level} from {who} @ {addr}: {len(rows)} instance(s)", kind="qr")
         yield len(rows)
-        yield from self._yield_instances(rows, event, stopping, who, "C-GET")
+        # C-GET stores back over the requesting association, in the role the
+        # requestor granted per SOP class (PS3.4 C.4.3, PS3.7 D.3.3.4): it is
+        # the Storage SCP, so we are the SCU — pynetdicom's as_scu on our side.
+        yield from self._yield_instances(rows, event, stopping, who, "C-GET",
+                                         store=lambda: (event.assoc, "scu"))
 
-    def _yield_instances(self, rows: list[dict], event, stopping, who: str, what: str):
+    def _yield_instances(self, rows: list[dict], event, stopping, who: str, what: str,
+                         store: Optional[Callable] = None):
         """Shared body of C-MOVE and C-GET: read each matched instance and hand
         it to pynetdicom as a pending sub-operation.
+
+        *store* returns ``(association, role)`` for the association the
+        sub-operations travel on. An instance whose stored syntax that
+        association did not accept for its SOP class, but which it accepted
+        uncompressed, is decompressed in memory first (pacs.transcode) — the
+        same fallback as scu.c_store, under the same rules. One that cannot be
+        decompressed is a failed sub-operation named in the Failed SOP Instance
+        UID List, never quietly skipped.
 
         A row whose file we cannot read is NOT skipped — it is held back and
         reported at the end as a failed sub-operation with its SOP Instance UID
@@ -668,6 +691,7 @@ class QrSCP:
 
         broken: list[tuple[str, str]] = []
         sent = 0
+        decompressed: dict = {}         # stored syntax -> instances sent decompressed
         for row in rows:
             if event.is_cancelled or stopping.is_set():
                 with self._lock:
@@ -717,12 +741,36 @@ class QrSCP:
                 self.log.error(f"{what}: cannot read {os.path.basename(path) or path}: "
                                f"{exc}", kind="qr", path=path)
                 continue
+            stored_ts = str(getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "") or "")
+            target = transcode.send_target(
+                stored_ts, _accepted_syntaxes(store, str(getattr(ds, "SOPClassUID", "") or "")))
+            if target:
+                try:
+                    ds = transcode.transcode(ds, target, in_place=True)
+                except transcode.TranscodeError as exc:
+                    broken.append((uid, str(row.get("SOPClassUID") or "")))
+                    self.log.error(f"{what}: {os.path.basename(path)} is {ts_name(stored_ts)}, the "
+                                   f"destination accepts it only uncompressed, and it could not be "
+                                   f"decompressed here: {exc}", kind="qr", path=path)
+                    continue
+                if stored_ts not in decompressed:
+                    # Said at the first one, not only in the summary, so a
+                    # retrieve that is cancelled half-way still left the record.
+                    self.log.info(f"{what}: the destination does not accept "
+                                  f"{ts_name(stored_ts)}; those instances are sent decompressed "
+                                  f"({ts_name(target)}, same SOP Instance UIDs, stored files "
+                                  f"untouched)", kind="qr")
+                decompressed[stored_ts] = decompressed.get(stored_ts, 0) + 1
             sent += 1
             yield 0xFF00, ds
 
         with self._lock:
             self.sent_count += sent
             self.failed_count += len(broken)
+        if decompressed:
+            self.log.info(f"{what}: {sum(decompressed.values())} of {sent} instance(s) sent "
+                          f"decompressed ({', '.join(f'{n} {ts_name(t)}' for t, n in decompressed.items())})",
+                          kind="qr")
         if not broken:
             return                          # pynetdicom sends the final status
         self.log.error(f"{what}: {len(broken)} of {len(rows)} instance(s) could not be "
@@ -948,13 +996,17 @@ def _fallback_contexts() -> list:
 
 def _retrieve_contexts(rows: list[dict]) -> list:
     """Presentation contexts for a C-MOVE sub-association: one per distinct
-    (SOP class, transfer syntax) actually present in the matched instances.
+    (SOP class, transfer syntax) actually present in the matched instances,
+    then — for SOP classes held in a compressed syntax this install can decode
+    — Explicit and Implicit VR Little Endian as well.
 
     Built from the index rows rather than by opening files — the index already
-    stores both UIDs.  We propose the instances' own transfer syntaxes because
-    pynetdicom does not transcode; offering anything else would only produce a
-    context the store cannot use."""
+    stores both UIDs.  The stored syntaxes come first and fill the 128-context
+    budget first: they are the ones every instance can travel in untouched, and
+    a fallback is worth proposing only where it can be used, which is why it is
+    offered only beside a syntax transcode.can_decode() can turn into it."""
     seen: list[tuple[str, str]] = []
+    extra: list[tuple[str, str]] = []
     for row in rows:
         sop = str(row.get("SOPClassUID") or "")
         ts = str(row.get("TransferSyntaxUID") or "")
@@ -963,6 +1015,36 @@ def _retrieve_contexts(rows: list[dict]) -> list:
         pair = (sop, ts)
         if pair not in seen:
             seen.append(pair)
+        for t in transcode.fallback_syntaxes(ts):
+            if (sop, t) not in extra:
+                extra.append((sop, t))
         if len(seen) >= _MAX_CONTEXTS:
             break
+    for pair in extra:
+        if len(seen) >= _MAX_CONTEXTS:
+            break
+        if pair not in seen:
+            seen.append(pair)
     return [build_context(sop, ts) for sop, ts in seen]
+
+
+def _accepted_syntaxes(store: Optional[Callable], sop: str) -> set:
+    """Transfer syntaxes the store association accepted for *sop* in the role
+    we send in, or an empty set when there is no association to ask — in which
+    case send_target() says "as stored" and nothing changes from before."""
+    if store is None or not sop:
+        return set()
+    try:
+        assoc, role = store()
+        out = set()
+        for cx in (assoc.accepted_contexts if assoc is not None else []):
+            if str(cx.abstract_syntax) != sop or not cx.transfer_syntax:
+                continue
+            if role == "scp" and not cx.as_scp:
+                continue
+            if role == "scu" and not cx.as_scu:
+                continue
+            out.add(str(cx.transfer_syntax[0]))
+        return out
+    except Exception:
+        return set()

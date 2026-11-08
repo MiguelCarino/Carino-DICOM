@@ -859,9 +859,11 @@ openssl rand -base64 32</code></pre>
           digitou: dali em diante toda origem é refletida e qualquer página que o operador visite
           poderia ler o acervo desta máquina. Prefira nomear o visualizador.</dd>
         <dt>O que ele não faz</dt>
-        <dd><code>/rendered</code>, <code>/thumbnail</code>, URIs de <em>bulkdata</em> e conversão entre
-          sintaxes de transferência não estão implementados e respondem <code>406</code>. Um visualizador
-          pela metade é pior que um recurso ausente: o que não pode ser produzido não é fingido.</dd>
+        <dd><code>/rendered</code>, <code>/thumbnail</code> e URIs de <em>bulkdata</em> não estão
+          implementados e respondem <code>406</code>. Um visualizador pela metade é pior que um recurso
+          ausente: o que não pode ser produzido não é fingido. Um <code>transfer-syntax=</code> diferente
+          do guardado é atendido descomprimindo ou recodificando sem perda (RLE, JPEG-LS, JPEG 2000
+          Lossless); nunca para uma sintaxe com perda, que continua sendo um <code>406</code> que diz por quê.</dd>
       </dl>
     </div>
 

@@ -294,12 +294,15 @@ const CONN_TEXT = {
   out_sop_refused: [
     "{dest} does not accept {sops}.",
     "Check that {host}:{port} is the right service on {dest}. If it is, ask whoever runs it to enable this, or stop routing these images to {dest} (Configuration → Routing)."],
+  out_ts_sent_decompressed: [
+    "{dest} accepts {sop} only uncompressed; images stored here as {tss} are sent to it decompressed.",
+    "Nothing to change: the copy stored here stays as it was received, and the image sent is the same. To have them arrive as stored, enable {tss} on {dest}."],
   out_ts_only_uncompressed: [
     "{dest} accepts {sop} only uncompressed; images stored here as {tss} are refused.",
-    "This PACS sends each image exactly as it was received and cannot convert it, so these cannot be sent as they are. Enable {tss} on {dest}, or have the modality send uncompressed images."],
+    "No decoder for {tss} is installed on this PACS, so these cannot be sent decompressed either. Enable {tss} on {dest}, or have the modality send uncompressed images."],
   out_ts_refused: [
     "{dest} accepts {sop}, but not as {tss}.",
-    "This PACS sends each image exactly as it was received and cannot convert it, so it cannot be sent as it is. Enable {tss} on {dest}, or have the modality send it in a transfer syntax {dest} accepts."],
+    "This PACS converts an image only to uncompressed, and only when {dest} takes that, so it cannot be sent as it is. Enable {tss} on {dest}, or have the modality send it in a transfer syntax {dest} accepts."],
   out_ctx_refused: [
     "{dest} refused {sops} ({reason}).",
     ""],

@@ -290,7 +290,13 @@ second pass to clear the stability gate.
 `scu.c_store` reads the file whole — pixels included, because this dataset *is*
 the payload — before associating, so an unreadable file is reported without a
 socket being opened and the transfer syntax proposed is the one the file
-genuinely carries. `0xB000/0xB006/0xB007` count as success: reading a "stored,
+genuinely carries. When that syntax is compressed and `pacs.transcode` can
+decode it, Explicit and Implicit VR Little Endian are proposed too, each in a
+context of its own so the stored syntax wins wherever the node takes it. Only a
+node that accepted nothing but uncompressed gets a decompressed in-memory copy;
+`SendResult.transcoded` names the conversion, the "Sent" line in the log carries
+it, and the connection journal's entry says "sent decompressed". The file in
+`outgoing/` is never touched. `0xB000/0xB006/0xB007` count as success: reading a "stored,
 with a caveat" as failure would mean the destination is never written down as
 done and the study never becomes archivable — a permanent resend loop against a
 node that already holds the images.
@@ -654,16 +660,23 @@ instance.
    calls `index.query_instances(filters=..., limit=0)` — everything, no paging.
 3. `_retrieve_contexts(rows)` builds the sub-association's presentation contexts
    straight out of the rows' `sop_class_uid` and `transfer_syntax_uid` columns.
-   No file is opened to work out what to propose; the index already knows, and
-   pynetdicom does not transcode, so proposing anything else would only produce
-   a context the destination cannot use. Capped at `_MAX_CONTEXTS`, which is the
-   DICOM ceiling per association.
+   No file is opened to work out what to propose; the index already knows. Each
+   SOP class held in a compressed syntax `transcode.can_decode()` accepts is
+   also offered in Explicit and Implicit VR Little Endian, after every stored
+   pair, so the fallback never crowds out a syntax an instance can travel in
+   untouched. Capped at `_MAX_CONTEXTS`, which is the DICOM ceiling per
+   association. pynetdicom never hands the handler the sub-association, so the
+   handler passes an `EVT_ACCEPTED` hook through the kwargs it yields and reads
+   the accepted contexts off that.
 4. The destination tuple is yielded, with `tls_args` built from
    `PacsServer._scu_tls_context` so an outbound C-MOVE presents exactly the
    client certificate an outbound auto-forward would.
 5. `_yield_instances` is shared with C-GET: `dcmread(path)` per row, yield
-   `0xFF00` with the dataset. A file that cannot be read is **not skipped** —
-   its SOP Instance UID is collected in `broken` and the generator ends with
+   `0xFF00` with the dataset — decompressed in memory first when the store
+   association took that SOP class only uncompressed (`transcode.send_target`),
+   with one log line at the first such instance and a count at the end. A file
+   that cannot be read, or cannot be decompressed, is **not skipped** — its SOP
+   Instance UID is collected in `broken` and the generator ends with
    `0xA702` (nothing sent) or `0xB000` (some sent) carrying the Failed SOP
    Instance UID List, so the SCU learns exactly which images it did not get.
 
@@ -717,8 +730,12 @@ paging must not happen, because a page boundary hands a viewer a study short by
 however many instances with a 200 on it.
 
 `_retrieve()` then checks `Accept`, checks each row's stored transfer syntax
-against any the client demanded (a mismatch is 406 — this server does not
-transcode), and runs every path through `servable()`, which is `safe_within()`
+against any the client demanded — a mismatch is converted when
+`transcode.check()` allows it (decompression, or a lossless re-encode with an
+installed encoder) and is a 406 naming why when it does not (a lossy target, no
+codec, too large to decode). The decision is made for every row before a byte
+is sent; a single instance is converted before the status line, a study one
+part at a time as the stream reaches it. Every path goes through `servable()`, which is `safe_within()`
 against the three storage roots plus `os.path.isfile`. Files that are gone are
 counted and the response becomes 206, the standard's way of saying "this is the
 study minus what we could not read". `_multipart_response` streams a generator

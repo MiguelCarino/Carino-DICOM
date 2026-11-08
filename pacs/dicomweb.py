@@ -8,9 +8,19 @@ C-STORE uses so a study posted by a viewer is indistinguishable from one pushed
 by a modality.
 
 Deliberately NOT implemented, because a half-working viewer is worse than an
-absent feature: /rendered (needs a codec + windowing pipeline), /thumbnail,
-bulkdata URIs, and transcoding between transfer syntaxes. Anything we cannot
-produce is answered 406, never faked.
+absent feature: /rendered (needs a windowing pipeline), /thumbnail and bulkdata
+URIs. Anything we cannot produce is answered 406, never faked.
+
+Transfer syntaxes are converted on request, within pacs.transcode's rules and
+nowhere else: an instance retrieve whose Accept names a ``transfer-syntax=``
+other than the stored one gets an in-memory copy decompressed to Explicit (or
+Implicit) VR Little Endian, or losslessly re-encoded as RLE, JPEG-LS, JPEG 2000
+or HTJ2K Lossless where this install has the encoder, under the same SOP
+Instance UID. Frames of a compressed instance can likewise be had as native
+``application/octet-stream``. A lossy target, a codec that is not installed or
+an image too large to decode in memory is still a 406, and the message says
+which. ``transfer-syntax=*`` — and no parameter at all — still means "as
+stored", which is always the cheapest answer and never touches a pixel.
 
 Missing for the same reason but less visibly: the OPTIONS capabilities
 description of PS3.18 8.9, DELETE, patient-level resources, UPS-RS, matching on
@@ -43,6 +53,8 @@ from pydicom import dcmread
 from pydicom.datadict import keyword_for_tag, tag_for_keyword
 from pydicom.dataset import Dataset
 
+from . import transcode
+from .connections import ts_name
 from .dicomfs import servable as _servable
 from .scp import _RESOURCE_ERRNOS, dest_path, valid_uid
 from .dicomfs import clear_preamble, servable_chunks
@@ -88,8 +100,9 @@ _UNCOMPRESSED_TS = {
 }
 
 # PS3.18 Table 8.7.3-5: encapsulated pixel data is handed back as-stored under
-# the media type of its encoding. We never transcode, so this map is the whole
-# of our frame-format support.
+# the media type of its encoding. Frames are only ever re-encoded the other way
+# — decoded to application/octet-stream — so this map is also the whole of the
+# compressed frame formats we serve.
 _TS_MEDIA = {
     "1.2.840.10008.1.2.4.50": "image/jpeg",
     "1.2.840.10008.1.2.4.51": "image/jpeg",
@@ -503,19 +516,31 @@ def _stream_parts(parts: list[tuple[str, str]], boundary: str, log, stats) -> It
     stream. Boundaries alone delimit the parts, which is what the standard
     requires anyway.
     """
-    for path, content_type in parts:
+    for part in parts:
+        path, content_type = part[0], part[1]
+        # A third member, when present, makes the part's bytes instead of the
+        # file: a callable (a transcode done as the stream reaches it, so a
+        # study converts one instance at a time) or bytes already made.
+        make = part[2] if len(part) > 2 else None
         yield _multipart_headers(boundary, content_type)
         try:
-            # servable_chunks zeroes a preamble that is not already zero: the
-            # files in the outgoing and sent folders were written by somebody else.
-            for chunk in servable_chunks(path, _CHUNK):
-                yield chunk
-        except OSError as exc:
+            if make is None:
+                # servable_chunks zeroes a preamble that is not already zero: the
+                # files in the outgoing and sent folders were written by somebody else.
+                for chunk in servable_chunks(path, _CHUNK):
+                    yield chunk
+            else:
+                data = make if isinstance(make, (bytes, bytearray)) else make()
+                view = memoryview(data)
+                for at in range(0, len(view), _CHUNK):
+                    yield bytes(view[at:at + _CHUNK])
+        except (OSError, transcode.TranscodeError) as exc:
             # Aborting mid-body leaves the client with an unterminated multipart,
             # which is exactly right: it must fail loudly, not silently receive a
-            # study with an image missing.
+            # study with an image missing — or one in a syntax it did not ask for.
             stats.bump("errors")
-            log.error(f"DICOMweb retrieve aborted — could not read {path}: {exc}", kind="dicomweb")
+            log.error(f"DICOMweb retrieve aborted — could not "
+                      f"{'read' if make is None else 'convert'} {path}: {exc}", kind="dicomweb")
             raise
         yield b"\r\n"
         stats.bump("retrieved")
@@ -535,6 +560,46 @@ def _multipart_response(parts: list[tuple[str, str]], part_type: str, status: in
     body = _stream_parts(parts, boundary, log, stats)
     ct = f'multipart/related; type="{part_type}"; boundary={boundary}'
     return Response(body, status=status, mimetype=None, content_type=ct)
+
+
+# --------------------------------------------------------------- transcoding
+def _pick_target(stored: str, wanted: list) -> tuple[Optional[str], str]:
+    """The first syntax in *wanted* (the client's preference order) that an
+    instance stored as *stored* can be converted to here, or (None, why the
+    most preferred one cannot). Header-free: transcode.check() rules on the
+    two UIDs and on which codecs are installed, nothing else."""
+    first = ""
+    for want in wanted:
+        try:
+            transcode.check(stored, want)
+            return want, ""
+        except transcode.TranscodeError as exc:
+            first = first or str(exc)
+    return None, first
+
+
+def _transcoded_bytes(path: str, target: str) -> bytes:
+    """The Part 10 bytes of the instance at *path* converted to *target*.
+
+    The file is read, the copy is converted in memory and written to a buffer;
+    the file itself is never opened for writing. The preamble is zeroed on the
+    way out for the same reason servable_chunks() zeroes it. Raises
+    TranscodeError, or OSError for a file that cannot be read."""
+    try:
+        ds = dcmread(path)
+    except OSError:
+        raise
+    except Exception as exc:
+        raise transcode.TranscodeError("failed", f"unreadable ({exc})") from exc
+    out = transcode.transcode(ds, target, in_place=True)
+    clear_preamble(out)
+    buf = io.BytesIO()
+    out.save_as(buf, **_SAVE_KW)
+    return buf.getvalue()
+
+
+# 406 for what cannot be produced, 500 for what should have been and was not.
+_TRANSCODE_STATUS = {"failed": 500, "not_lossless": 500}
 
 
 # --------------------------------------------------------------- multipart in
@@ -1135,20 +1200,57 @@ def create_blueprint(server) -> Blueprint:
             return _error(406, 'only multipart/related; type="application/dicom" is available')
         if not rows:
             return _error(404, f"no instances found for {label}")
-        parts, missing = [], 0
+        parts, missing, converting = [], 0, 0
         for row in rows:
             path = row.get("path", "")
             ts = row.get("TransferSyntaxUID") or "1.2.840.10008.1.2.1"
+            target = None
             if wanted_ts is not None and ts not in wanted_ts:
-                return _error(406, f"instances are stored as {ts}; this server does not transcode")
+                # Decided for every row before a byte is sent, so a study in
+                # mixed syntaxes is refused whole on the first instance that
+                # cannot be converted, never half-delivered.
+                target, why = _pick_target(ts, wanted_ts)
+                if target is None:
+                    return _error(406, f"an instance is stored as {ts_name(ts)} ({ts}) and "
+                                       f"cannot be converted to what was asked for: {why}")
             if not servable(path):
                 missing += 1
                 server.log.warn(f"DICOMweb retrieve: {label} references a file that is gone "
                                 f"or outside the storage folders ({path})", kind="dicomweb")
                 continue
-            parts.append((path, f'application/dicom; transfer-syntax={ts}'))
+            if target is None:
+                parts.append((path, f'application/dicom; transfer-syntax={ts}'))
+                continue
+            try:
+                # The size cap needs the header, so it is asked here too: a
+                # study is refused up front rather than cut off at the one
+                # instance too large to decode.
+                transcode.check_size(dcmread(path, stop_before_pixels=True))
+            except transcode.TranscodeError as exc:
+                return _error(406, f"an instance stored as {ts_name(ts)} cannot be converted "
+                                   f"to {ts_name(target)}: {exc}")
+            except Exception:
+                pass                    # unreadable: the conversion below says so
+            converting += 1
+            parts.append((path, f'application/dicom; transfer-syntax={target}',
+                          (lambda p=path, t=target: _transcoded_bytes(p, t))))
         if not parts:
             return _error(404, f"no readable instances for {label}")
+        if len(parts) == 1 and len(parts[0]) > 2:
+            # One instance: converted before the status line goes out, so a
+            # failure is a status the client can read instead of a cut stream.
+            try:
+                parts = [(parts[0][0], parts[0][1], parts[0][2]())]
+            except transcode.TranscodeError as exc:
+                stats.bump("errors")
+                server.log.warn(f"DICOMweb retrieve: {label}: {exc}", kind="dicomweb")
+                return _error(_TRANSCODE_STATUS.get(exc.reason, 406), str(exc))
+            except OSError as exc:
+                stats.bump("errors")
+                return _error(404, f"no readable instances for {label} ({exc})")
+        if converting:
+            server.log.info(f"DICOMweb retrieve: {label}: {converting} instance(s) converted "
+                            f"to the transfer syntax the client asked for", kind="dicomweb")
         # 206 is the standard's way of saying "this is the study, minus what we
         # could not read" — better than a 200 that quietly under-delivers.
         return _multipart_response(parts, "application/dicom",
@@ -1218,9 +1320,14 @@ def create_blueprint(server) -> Blueprint:
     def wado_frames(study, series, sop, frames):
         """WADO-RS frame retrieval. Frame numbers are 1-based, as in PS3.3.
 
-        The part media type follows the instance's transfer syntax and never the
-        client's preference, so an Accept naming anything else is a 406 rather
-        than a transcode. A frame number the instance does not have is a 404 —
+        The part media type follows the instance's transfer syntax, with one
+        exception: frames of a compressed instance are decoded to native
+        application/octet-stream (Explicit VR Little Endian, PS3.18 Table
+        8.7.3-4) when that is what the client asks for and the codec is
+        installed (pacs.transcode.decode_frames, which also refuses a YBR source
+        whose decoded colour space would not match its metadata). Any other
+        media type is a 406 — frames are never re-compressed. A frame number
+        the instance does not have is a 404 —
         the frame genuinely does not exist — while a list that is not numbers is
         a 400, because that request never parsed.
         """
@@ -1237,25 +1344,50 @@ def create_blueprint(server) -> Blueprint:
             return _error(404, f"instance {sop} not found")
         row = rows[0]
         ts = row.get("TransferSyntaxUID") or ""
+        accept = request.headers.get("Accept", "")
         media = _frame_media(ts)
-        if media is None:
-            return _error(406, f"frames of {ts} instances are not served (no transcoding)")
         # Labelled with the syntax the BYTES are in: native pixels are always
         # handed back little-endian explicit (pydicom has already inflated a
         # deflated file), which is the one syntax Table 8.7.3-4 allows here.
         part_ts = _NATIVE_FRAME_TS if ts in _UNCOMPRESSED_TS else ts
-        if not _accepts_frames(request.headers.get("Accept", ""), media, part_ts):
-            return _error(406, f'only multipart/related; type="{media}"; transfer-syntax={part_ts} '
-                               f'is available for these frames')
+        decode = False
+        if media is None or not _accepts_frames(accept, media, part_ts):
+            native = "application/octet-stream"
+            if (media is not None and ts not in _UNCOMPRESSED_TS
+                    and _accepts_frames(accept, native, _NATIVE_FRAME_TS)):
+                try:
+                    transcode.check(ts, _NATIVE_FRAME_TS)
+                except transcode.TranscodeError as exc:
+                    return _error(406, f"frames of this {ts_name(ts)} instance cannot be "
+                                       f"decoded to {native}: {exc}")
+                decode, media, part_ts = True, native, _NATIVE_FRAME_TS
+            elif media is None:
+                return _error(406, f"frames of {ts_name(ts)} ({ts}) instances are not served")
+            else:
+                also = (f', or type="application/octet-stream"; transfer-syntax={_NATIVE_FRAME_TS}'
+                        if ts not in _UNCOMPRESSED_TS and transcode.can_decode(ts) else "")
+                return _error(406, f'only multipart/related; type="{media}"; transfer-syntax={part_ts}'
+                                   f'{also} is available for these frames (frames are never '
+                                   f're-compressed)')
         try:
             ds = dcmread(row["path"])
             total = int(getattr(ds, "NumberOfFrames", 1) or 1)
             if len(wanted) > max(total, 1) * 4:
                 return _error(400, f"{len(wanted)} frames requested from a {total}-frame instance")
-            data = (_uncompressed_frames(ds, wanted) if ts in _UNCOMPRESSED_TS
-                    else _encapsulated_frames(ds, wanted))
+            if decode:
+                for n in wanted:
+                    if n < 1 or n > total:
+                        raise IndexError(f"frame {n} is out of range (1-{total})")
+                data = transcode.decode_frames(ds, wanted)
+            else:
+                data = (_uncompressed_frames(ds, wanted) if ts in _UNCOMPRESSED_TS
+                        else _encapsulated_frames(ds, wanted))
         except IndexError as exc:
             return _error(404, str(exc))
+        except transcode.TranscodeError as exc:
+            stats.bump("errors")
+            server.log.warn(f"DICOMweb frames: {row['path']}: {exc}", kind="dicomweb")
+            return _error(_TRANSCODE_STATUS.get(exc.reason, 406), str(exc))
         except Exception as exc:
             stats.bump("errors")
             server.log.warn(f"DICOMweb frames: {row['path']}: {exc}", kind="dicomweb")

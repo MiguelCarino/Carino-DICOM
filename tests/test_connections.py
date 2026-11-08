@@ -113,7 +113,12 @@ def test_a_remote_that_refuses_our_calling_ae():
         remote.close()
 
 
-def test_a_remote_that_takes_the_class_but_not_the_files_transfer_syntax():
+def test_a_remote_that_takes_the_class_but_not_the_files_transfer_syntax(monkeypatch):
+    # With no decoder installed: the sender then proposes the stored syntax
+    # alone, as it always did. (With one, it also proposes uncompressed and
+    # sends decompressed — tests/test_transcode.py.)
+    from pacs import transcode
+    monkeypatch.setattr(transcode, "capabilities", lambda: {"decode": {}, "encode": {}})
     tmp = _tmpdir()
     remote = Remote([(SecondaryCaptureImageStorage, [ExplicitVRLittleEndian])])
     try:
@@ -123,7 +128,7 @@ def test_a_remote_that_takes_the_class_but_not_the_files_transfer_syntax():
             assert not res.ok
             # The send's own error says it is the encoding, not the port.
             assert "not as JPEG Lossless SV1" in res.message, res.message
-            assert "does not convert" in res.message, res.message
+            assert "cannot convert it (no decoder" in res.message, res.message
             (e,) = j.entries()
         assert e["outcome"] == "none_accepted", e
         (ctx,) = e["contexts"]
@@ -133,9 +138,8 @@ def test_a_remote_that_takes_the_class_but_not_the_files_transfer_syntax():
         assert f["code"] == "out_ts_refused", f
         assert f["say"] == ("OLD_PACS accepts Secondary Capture Image Storage, but not as "
                             "JPEG Lossless SV1."), f["say"]
-        # The sender proposes only the file's own syntax; the fix must not
-        # promise a conversion that does not happen.
-        assert "cannot convert" in f["fix"], f["fix"]
+        # The fix must not promise a conversion that does not happen.
+        assert "converts an image only to uncompressed" in f["fix"], f["fix"]
         assert SECRET not in json.dumps(j.entries()) and "P-SECRET-1" not in json.dumps(j.entries())
     finally:
         remote.close()
@@ -405,9 +409,12 @@ def test_the_self_test_leaves_no_incoming_row():
 
 
 # ------------------------------------------------- the check, over HTTP
-def test_check_names_what_a_destination_would_refuse():
+def test_check_names_what_a_destination_would_refuse(monkeypatch):
     """Two kinds of object in the archive; the destination takes Secondary
-    Capture only uncompressed, so the JPEG Lossless one would fail."""
+    Capture only uncompressed, so the JPEG Lossless one would fail — when this
+    install cannot decode it (the next test is the same node with a decoder)."""
+    from pacs import transcode
+    monkeypatch.setattr(transcode, "capabilities", lambda: {"decode": {}, "encode": {}})
     srv, client, tmp = _pacs(index={"enabled": True, "rescan_on_start": False})
     remote = Remote([(SecondaryCaptureImageStorage, [ExplicitVRLittleEndian, ImplicitVRLittleEndian])])
     try:
@@ -425,6 +432,34 @@ def test_check_names_what_a_destination_would_refuse():
         assert [(p["ts"], p["instances"]) for p in refused] == [(JPEGLosslessSV1, 1)], r["pairs"]
         body = json.dumps(client.get("/api/connections", headers=_H).get_json())
         assert SECRET not in body and "P-SECRET-1" not in body
+    finally:
+        remote.close()
+        _done(srv, tmp)
+
+
+def test_check_counts_a_decodable_syntax_as_sent_decompressed():
+    """The same archive and node as above, on an install that can decode JPEG
+    Lossless: the sender falls back to uncompressed, so the check says the
+    node takes everything, one kind only decompressed, and why."""
+    from pacs import transcode
+    if not transcode.can_decode(JPEGLosslessSV1):
+        import pytest
+        pytest.skip("no JPEG Lossless decoder installed")
+    srv, client, tmp = _pacs(index={"enabled": True, "rescan_on_start": False})
+    remote = Remote([(SecondaryCaptureImageStorage, [ExplicitVRLittleEndian, ImplicitVRLittleEndian])])
+    try:
+        here = Destination("RX", "127.0.0.1", srv.cfg.scp["port"], srv.cfg.scp["aet"])
+        for i, ts in enumerate((JPEGLosslessSV1, ExplicitVRLittleEndian)):
+            assert c_store(here, _instance(tmp, ts, f"i{i}.dcm"), "MOD1", timeout=5).ok
+        assert srv.index is not None and srv.index.flush()
+        dest = {"name": "OLD_PACS", "host": "127.0.0.1", "port": remote.port, "aet": "REMOTE"}
+        r = client.post("/api/connections/check", json=dest, headers=_H).get_json()
+        assert r["reachable"] and r["ok"], r
+        assert r["message"] == ("OLD_PACS accepts all 2 kind(s) of object stored here "
+                                "(1 only decompressed)"), r["message"]
+        assert [(f["code"], f["level"]) for f in r["findings"]] == [
+            ("out_ts_sent_decompressed", "info")], r["findings"]
+        assert [p["ts"] for p in r["pairs"] if p["decompressed"]] == [JPEGLosslessSV1], r["pairs"]
     finally:
         remote.close()
         _done(srv, tmp)

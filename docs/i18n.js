@@ -459,10 +459,10 @@ const RICH = {
         ru: '<b>Query/Retrieve SCP</b> — C-FIND / C-MOVE / C-GET, Patient и Study Root, ответы из sqlite-индекса того, что лежит на диске; неудавшиеся суб-операции перечисляются поимённо и никогда не теряются.',
     },
     '#tl-web': {
-        es: '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS bajo <code>/dicom-web</code>, lista CORS de coincidencia exacta, sin comodines. Rendered/thumbnail/transcodificación responden 406 en vez de fingirlo.',
-        'pt-BR': '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS em <code>/dicom-web</code>, lista CORS de correspondência exata, sem curinga. Rendered/thumbnail/transcodificação respondem 406 em vez de fingir.',
-        ja: '<b>DICOMweb</b> — <code>/dicom-web</code>配下でQIDO-RS・WADO-RS・STOW-RS。CORSは完全一致の許可リストのみでワイルドカードなし。rendered/thumbnail/トランスコードは偽らず406を返します。',
-        ru: '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS по пути <code>/dicom-web</code>, точный список разрешённых CORS-источников, без подстановочных знаков. Rendered/thumbnail/перекодирование отвечают 406, а не подделывают результат.',
+        es: '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS bajo <code>/dicom-web</code>, lista CORS de coincidencia exacta, sin comodines. Rendered/thumbnail responden 406 en vez de fingirlo; las sintaxis de transferencia se convierten sin pérdida o no se convierten.',
+        'pt-BR': '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS em <code>/dicom-web</code>, lista CORS de correspondência exata, sem curinga. Rendered/thumbnail respondem 406 em vez de fingir; as sintaxes de transferência são convertidas sem perda ou não são convertidas.',
+        ja: '<b>DICOMweb</b> — <code>/dicom-web</code>配下でQIDO-RS・WADO-RS・STOW-RS。CORSは完全一致の許可リストのみでワイルドカードなし。rendered/thumbnailは偽らず406を返します。転送構文の変換は可逆のみで、それ以外は行いません。',
+        ru: '<b>DICOMweb</b> — QIDO-RS, WADO-RS, STOW-RS по пути <code>/dicom-web</code>, точный список разрешённых CORS-источников, без подстановочных знаков. Rendered/thumbnail отвечают 406, а не подделывают результат; синтаксисы передачи преобразуются только без потерь или не преобразуются вовсе.',
     },
     '#tl-mwl': {
         es: '<b>MWL + HL7</b> — SCP C-FIND de Modality Worklist, HL7 <code>ORM^O01</code> sobre MLLP, conciliación por número de accession. La entrega de imágenes nunca depende de que exista una orden.',

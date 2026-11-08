@@ -10,8 +10,11 @@
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
     python -m pacs tls-cert   # self-signed HTTPS certificate for the dashboard
+    python -m pacs transcode IN OUT --to <uid|name>   # lossless-only, on a copy
+    python -m pacs transcode --list                   # what this install can decode/encode
 
-Every subcommand loads the config named by -c/--config as its first act, and
+Every subcommand but `transcode` (which touches two files and nothing else)
+loads the config named by -c/--config as its first act, and
 only two of them write it back on their own: `init --token`, which mints
 web.auth_token and saves, and `tls-cert --enable`, which points web.tls_cert /
 web.tls_key at the pair it just made. (`serve` rewrites it too, but through the dashboard —
@@ -540,6 +543,67 @@ def cmd_tls_cert(args) -> int:
     return 0
 
 
+def cmd_transcode(args) -> int:
+    """Convert one DICOM file to another transfer syntax, under the same rules
+    as the send and WADO-RS paths (pacs.transcode): decompression always,
+    compression to a lossless syntax only, same SOP Instance UID.
+
+    IN is only read. OUT is never IN, and an existing OUT is left alone without
+    --force: a typo that swapped the two must not cost the original. Exit 0
+    written, 2 refused or impossible — the reason is printed either way. No
+    config is read: this is a file tool, and an appliance whose config does not
+    load can still use it.
+    """
+    from . import transcode
+    from .dicomfs import save_dicom
+
+    if args.list:
+        rows = transcode.describe()
+        w = max(len(r["name"]) for r in rows) + 2
+        print(f"{'transfer syntax':<{w}} {'decode':<22} encode")
+        for row in rows:
+            dec = ", ".join(row["decode"]) or "-"
+            if row["encode"] is None:
+                enc = "never (lossy)" if row["lossy"] else "never"
+            else:
+                enc = ", ".join(row["encode"]) or "-"
+            print(f"{row['name']:<{w}} {dec:<22} {enc}")
+        print(f"Explicit/Implicit VR Little Endian: always (decompression target). "
+              f"Decoded size cap: {transcode.MAX_DECOMPRESSED_BYTES // (1024 * 1024)} MiB.")
+        return 0
+    if not (args.input and args.output and args.to):
+        print("Give IN, OUT and --to, or --list.", file=sys.stderr)
+        return 2
+    try:
+        target = transcode.resolve(args.to)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    src, dst = os.path.abspath(args.input), os.path.abspath(args.output)
+    if os.path.exists(dst) and os.path.samefile(src, dst):
+        print("OUT is IN: the stored file is never rewritten in place.", file=sys.stderr)
+        return 2
+    if os.path.exists(dst) and not args.force:
+        print(f"{dst} already exists — left alone. Pass --force to replace it.", file=sys.stderr)
+        return 2
+    from pydicom import dcmread
+    try:
+        ds = dcmread(src)
+    except Exception as exc:
+        print(f"{src}: unreadable ({exc})", file=sys.stderr)
+        return 2
+    try:
+        out = transcode.transcode(ds, target, in_place=True)
+    except transcode.TranscodeError as exc:
+        print(f"{src}: {exc}", file=sys.stderr)
+        return 2
+    save_dicom(out, dst)
+    lossy = " (lossy history kept: Lossy Image Compression = 01)" \
+        if str(getattr(out, "LossyImageCompression", "") or "") == "01" else ""
+    print(f"Wrote {dst} as {transcode.ts_name(target)}{lossy}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pacs", description=f"{APP_NAME} — simple DICOM store PACS")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
@@ -623,6 +687,18 @@ def build_parser() -> argparse.ArgumentParser:
     tc.add_argument("--enable", action="store_true",
                     help="also set web.tls, web.tls_cert and web.tls_key in the config")
     tc.set_defaults(func=cmd_tls_cert)
+
+    tr = sub.add_parser("transcode", help="convert a DICOM file to another transfer syntax "
+                                          "(lossless only; the input is never modified)")
+    tr.add_argument("input", nargs="?", metavar="IN")
+    tr.add_argument("output", nargs="?", metavar="OUT")
+    tr.add_argument("--to", help="target: a UID, a pydicom keyword (JPEGLSLossless), a name "
+                                 "('JPEG 2000 Lossless') or explicit / implicit / rle / jpegls / "
+                                 "j2k / htj2k")
+    tr.add_argument("--force", action="store_true", help="replace an existing OUT")
+    tr.add_argument("--list", action="store_true",
+                    help="list what this install can decode and encode, and exit")
+    tr.set_defaults(func=cmd_transcode)
 
     i = sub.add_parser("init", help="scaffold config.json and its folders")
     # store_true, not a value: a token typed on a command line lands in shell

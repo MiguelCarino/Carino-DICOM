@@ -51,7 +51,9 @@ function renderDestCheck(box, dest, r) {
   head.className = "conn-check-head " + (r.ok ? "ok" : "bad");
   const name = dest.name || dest.host;
   const real = (r.pairs || []).filter((p) => !p.reference);
-  const refused = real.filter((p) => !p.accepted).length;
+  // "decompressed": refused as stored, taken uncompressed, and this engine can decode it, so a send
+  // goes out decompressed (pacs/transcode.py) — not a refusal.
+  const refused = real.filter((p) => !p.accepted && !p.decompressed).length;
   if (!r.reachable) head.textContent = TF("{name} could not be checked", { name: name });
   else if (refused && r.from_archive) head.textContent = TF("{name} would refuse {k} of {n} kinds of object stored here", { name: name, k: refused, n: real.length });
   else if (refused) head.textContent = TF("{name} would refuse {k} of the {n} common image types", { name: name, k: refused, n: real.length });
@@ -83,7 +85,7 @@ function renderDestCheck(box, dest, r) {
   const body = document.createElement("tbody");
   real.forEach((p) => {
     const tr = document.createElement("tr");
-    tr.className = p.accepted ? "good" : "bad";
+    tr.className = p.accepted || p.decompressed ? "good" : "bad";
     const ref = (r.pairs || []).find((q) => q.reference && q.sop === p.sop);
     const cells = [p.sop_name || p.sop, p.ts_name || p.ts,
       p.accepted ? T("accepted") : T(CONN_RESULT[p.result] || String(p.result))];
@@ -95,7 +97,8 @@ function renderDestCheck(box, dest, r) {
       tr.appendChild(td);
     });
     // The Implicit VR Little Endian answer for the same class, which tells "not this encoding" from "not this class".
-    if (ref && !p.accepted) tr.lastChild.textContent += " · " + (ref.accepted ? T("uncompressed accepted") : T("uncompressed refused too"));
+    if (p.decompressed) tr.lastChild.textContent += " · " + T("sent decompressed");
+    else if (ref && !p.accepted) tr.lastChild.textContent += " · " + (ref.accepted ? T("uncompressed accepted") : T("uncompressed refused too"));
     body.appendChild(tr);
   });
   tbl.appendChild(body);

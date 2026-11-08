@@ -76,6 +76,19 @@ there is no money to pay one from.
 
 ---
 
+## What is in a build (SBOM)
+
+Every container image and installer carries an SPDX 2.3 software bill of materials,
+written at build time by `packaging/make_sbom.py` from the environment being shipped:
+`/app/carino-dicom.spdx.json` in the image, and `carino-dicom-<platform>.spdx.json`
+beside the installers on each GitHub release. It lists each Python distribution at its
+installed version with its declared licence and purl. It also lists the C libraries
+compiled into those wheels (OpenJPEG, CharLS, libjpeg, libjpeg-turbo, Pillow's other
+codecs, OpenSSL), with CPE identifiers where the library reports its version. The bundled
+editor's vendored bundles and fonts are included with a SHA-1/SHA-256 per file. For
+"are we affected by CVE-X", that file is the answer for one specific build, which a
+requirements file with version ranges cannot be.
+
 ## What is protected
 
 ### The dashboard and DICOMweb API
@@ -336,6 +349,21 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   zeroed on the way out too, because the outgoing and sent folders hold files
   somebody else wrote. A DICOM/TIFF dual-format file loses its TIFF side when it
   passes through here; that is the trade.
+- **Transcoding is lossless-only, on the way out, on a copy.** The receiver
+  stores every object as it arrived. The sender, the C-MOVE/C-GET
+  sub-operations and WADO-RS may decompress an in-memory copy for a peer that
+  takes only uncompressed, or re-encode it in a lossless syntax a WADO-RS
+  client asked for — never in a lossy one, and never a lossy image into another
+  lossy syntax (`pacs/transcode.py`). The SOP Instance UID is kept, so every
+  encode is decoded again and compared pixel for pixel before it leaves: a
+  codec that lost a bit under a kept UID would be an undetectable substitution.
+  A decompressed lossy image keeps Lossy Image Compression = `01`. The codecs
+  (OpenJPEG, CharLS, libjpeg, pylibjpeg-rle) are compiled C/C++/Rust that parse
+  codestreams somebody else wrote, so they are reached only when a peer or a
+  client cannot take the stored form, never on receipt; decoding is refused
+  above 1 GiB of pixels and at most two run at once, so a request for a large
+  study in another syntax cannot exhaust memory. They are third-party native
+  code and are kept current through `requirements.txt` like everything else.
 - **Every listener claims its port exclusively before binding it.** This matters
   on Windows and nowhere else. Winsock's `SO_REUSEADDR` means *sharing
   permitted* rather than the POSIX "rebind through TIME_WAIT", and every

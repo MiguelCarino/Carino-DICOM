@@ -429,21 +429,26 @@ _TEXT = {
         "{dest} does not accept {sops}.",
         "Check that {host}:{port} is the right service on {dest}. If it is, ask whoever runs it to "
         "enable this, or stop routing these images to {dest} (Configuration → Routing)."),
+    "out_ts_sent_decompressed": (
+        "{dest} accepts {sop} only uncompressed; images stored here as {tss} are sent to it "
+        "decompressed.",
+        "Nothing to change: the copy stored here stays as it was received, and the image sent is "
+        "the same. To have them arrive as stored, enable {tss} on {dest}."),
     "out_ts_only_uncompressed": (
         "{dest} accepts {sop} only uncompressed; images stored here as {tss} are refused.",
-        "This PACS sends each image exactly as it was received and cannot convert it, so these "
-        "cannot be sent as they are. Enable {tss} on {dest}, or have the modality send "
-        "uncompressed images."),
+        "No decoder for {tss} is installed on this PACS, so these cannot be sent decompressed "
+        "either. Enable {tss} on {dest}, or have the modality send uncompressed images."),
     "out_ts_refused": (
         "{dest} accepts {sop}, but not as {tss}.",
-        "This PACS sends each image exactly as it was received and cannot convert it, so it "
-        "cannot be sent as it is. Enable {tss} on {dest}, or have the modality send it in a "
+        "This PACS converts an image only to uncompressed, and only when {dest} takes that, so "
+        "it cannot be sent as it is. Enable {tss} on {dest}, or have the modality send it in a "
         "transfer syntax {dest} accepts."),
     "out_ctx_refused": ("{dest} refused {sops} ({reason}).", ""),
 }
 
 # How loud each one is on the dashboard.
 _LEVEL = {"in_ok": "ok", "out_ok": "ok", "in_called_mismatch": "info", "in_ended_abort": "info",
+          "out_ts_sent_decompressed": "info",
           "in_busy": "warn", "out_busy": "warn"}
 
 # The Settings group each listener's allow-list lives in, by its dashboard title.
@@ -638,8 +643,9 @@ def _context_findings(e: dict, v: dict) -> list[dict]:
     if check:
         # The check offers each stored syntax in a context of its own, so a
         # class can be accepted in one syntax and refused in another — and the
-        # sender proposes only the file's own (scu.c_store), so every refused
-        # pair is a set of images that will fail.
+        # sender proposes the file's own syntax plus, when it can decode it,
+        # uncompressed (scu.c_store), so every refused pair is a set of images
+        # that will fail or will travel decompressed; _ts_finding says which.
         for sop in dict.fromkeys(c["sop"] for c in ctx):
             if sop in refused:
                 continue
@@ -664,8 +670,21 @@ def _ts_finding(v: dict, sop: str, bad: list, good: list) -> dict:
     # and telling the modality to send uncompressed would change nothing.
     only_plain = (good and all(c["accepted"] in UNCOMPRESSED for c in good)
                   and not any(t in UNCOMPRESSED for t in uids))
+    if only_plain and decodable(uids):
+        # The sender proposes uncompressed beside a syntax it can decode and
+        # falls back to it (scu.c_store), so this is how those images travel,
+        # not a failure. Imported here: transcode imports this module.
+        return _finding("out_ts_sent_decompressed", {**v, "sop": sop_name(sop), "tss": tss})
     code = "out_ts_only_uncompressed" if only_plain else "out_ts_refused"
     return _finding(code, {**v, "sop": sop_name(sop), "tss": tss})
+
+
+def decodable(uids) -> bool:
+    """Whether every one of these transfer syntaxes can be decompressed here,
+    so a node taking only uncompressed still gets the image (pacs.transcode)."""
+    from .transcode import can_decode
+    uids = list(uids)
+    return bool(uids) and all(can_decode(t) for t in uids)
 
 
 def describe(entry: dict, here: Optional[dict] = None) -> dict:

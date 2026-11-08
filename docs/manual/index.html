@@ -816,9 +816,11 @@ openssl rand -base64 32</code></pre>
           typed it: from then on every origin is reflected and any page the operator visits could read
           the archive off this machine. Name the viewer instead.</dd>
         <dt>What it does not do</dt>
-        <dd><code>/rendered</code>, <code>/thumbnail</code>, bulkdata URIs and transcoding between
-          transfer syntaxes are not implemented and answer <code>406</code>. A half-working viewer is
-          worse than an absent feature: anything that cannot be produced is never faked.</dd>
+        <dd><code>/rendered</code>, <code>/thumbnail</code> and bulkdata URIs are not implemented and
+          answer <code>406</code>. A half-working viewer is worse than an absent feature: anything that
+          cannot be produced is never faked. A <code>transfer-syntax=</code> other than the stored one
+          is honoured by decompressing, or by re-encoding losslessly (RLE, JPEG-LS, JPEG 2000
+          Lossless) — never into a lossy syntax, which stays a <code>406</code> that says why.</dd>
       </dl>
     </div>
 
