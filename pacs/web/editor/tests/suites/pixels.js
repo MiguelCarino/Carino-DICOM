@@ -202,7 +202,7 @@
 
     // ---- malformed input degrades instead of exploding ----------------------
     for (const id of ['truncated-pixels', 'window-width-zero', 'jpeg2000-unsupported',
-                      'j2k-truncated', 'htj2k-unsupported', 'mpeg2-unsupported']) {
+                      'j2k-truncated', 'htj2k-unreadable', 'mpeg2-unsupported']) {
       const c = byId[id];
       let res, err = '';
       try { ({ res } = await dec(id)); } catch (e) { err = e.message || String(e); }
@@ -217,7 +217,7 @@
     // decode() answers a truncated or garbage codestream with width 0 and an
     // empty buffer instead of raising, so "no error" here would mean the app
     // fell into the raw path holding nothing and drew whatever it found.
-    for (const id of ['jpeg2000-unsupported', 'j2k-truncated', 'htj2k-unsupported']) {
+    for (const id of ['jpeg2000-unsupported', 'j2k-truncated', 'htj2k-unreadable']) {
       let res = null;
       try { ({ res } = await dec(id)); } catch (_) {}
       ok(`${id}: refuses rather than returning pixels`,
@@ -225,13 +225,22 @@
          res ? (res.error ? `pixels=${res.pixels === undefined ? 'none' : 'present'}` : 'no error') : 'null');
     }
     {
-      // Part 15 has to be refused by transfer syntax. Its codestream carries the
-      // same FF 4F FF 51 magic as Part 1, so a magic-byte test would hand it to
-      // OpenJPEG, which cannot decode it and does not say so.
+      // Part 15 is recognised by transfer syntax. Its codestream carries the same
+      // FF 4F FF 51 magic as Part 1, so a magic-byte test would report a broken
+      // HTJ2K file as a broken ordinary JPEG 2000.
       let res = null;
-      try { ({ res } = await dec('htj2k-unsupported')); } catch (_) {}
-      ok('htj2k-unsupported: names High-Throughput rather than blaming the codestream',
-         !!res && /High-Throughput|201/i.test(res.error || ''), res ? res.error : 'null');
+      try { ({ res } = await dec('htj2k-unreadable')); } catch (_) {}
+      ok('htj2k-unreadable: names High-Throughput rather than plain JPEG 2000',
+         !!res && /High-Throughput/i.test(res.error || ''), res ? res.error : 'null');
+    }
+    {
+      // All three HTJ2K syntaxes are flagged, .203 included: it once missed the
+      // flag and reached the decoder on its magic bytes alone.
+      for (const ts of ['1.2.840.10008.1.2.4.201', '1.2.840.10008.1.2.4.202', '1.2.840.10008.1.2.4.203']) {
+        const t = previewTransferSyntax({ '00020010': { vr: 'UI', Value: [ts] } });
+        ok(`${ts}: recognised as HTJ2K`, t.isHtj2k === true && t.isJ2k === false,
+           `isHtj2k=${t.isHtj2k} isJ2k=${t.isJ2k}`);
+      }
     }
 
     // ---- a codestream that disagrees with its own header --------------------

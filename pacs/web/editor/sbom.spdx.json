@@ -1,0 +1,1596 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Carino DICOM Editor 1.2.0 third-party components",
+  "documentNamespace": "https://dcm.carino.systems/spdx/carino-dicom-editor-1.2.0-4ac2013d3404a42d6d8e7d7c8d4dc975",
+  "creationInfo": {
+    "created": "2026-11-08T07:16:25Z",
+    "creators": [
+      "Tool: tools/make-sbom.mjs"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-carino-dicom-editor",
+      "name": "Carino DICOM Editor",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "git+https://github.com/MiguelCarino/Carino-DICOM-Editor",
+      "licenseConcluded": "MPL-2.0",
+      "licenseDeclared": "MPL-2.0",
+      "copyrightText": "Copyright (c) 2026 Miguel Carino",
+      "filesAnalyzed": false,
+      "supplier": "Person: Miguel Carino",
+      "comment": "Only third-party components are listed below; the editor's own sources are not enumerated."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-dcmjs",
+      "name": "dcmjs",
+      "versionInfo": "0.29.8",
+      "downloadLocation": "https://registry.npmjs.org/dcmjs/-/dcmjs-0.29.8.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/dcmjs@0.29.8"
+        }
+      ],
+      "comment": "jsDelivr build of build/dcmjs.js",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "92d4762db99e19ecb3e750c2e1ebbe6081b23160"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-pako",
+      "name": "pako",
+      "versionInfo": "2.0.4",
+      "downloadLocation": "https://registry.npmjs.org/pako/-/pako-2.0.4.tgz",
+      "licenseConcluded": "MIT AND Zlib",
+      "licenseDeclared": "MIT AND Zlib",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/pako@2.0.4"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-loglevelnext",
+      "name": "loglevelnext",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/shellscape/loglevelnext",
+      "licenseConcluded": "MPL-2.0",
+      "licenseDeclared": "MPL-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/loglevelnext"
+        }
+      ],
+      "comment": "major version 3, bundled into dcmjs; see vendor/README.md on MPL-2.0 alongside the host licence"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-core-js",
+      "name": "core-js",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/zloirock/core-js",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/core-js"
+        }
+      ],
+      "comment": "via @babel/runtime-corejs3, bundled into dcmjs"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-jpeg-lossless-decoder-js",
+      "name": "jpeg-lossless-decoder-js",
+      "versionInfo": "2.1.2",
+      "downloadLocation": "https://registry.npmjs.org/jpeg-lossless-decoder-js/-/jpeg-lossless-decoder-js-2.1.2.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/jpeg-lossless-decoder-js@2.1.2"
+        }
+      ],
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "fcd53fb83d3a2daafa3291073e9dd3cc0ea86c85"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-codec-openjpeg",
+      "name": "@cornerstonejs/codec-openjpeg",
+      "versionInfo": "1.3.6",
+      "downloadLocation": "https://registry.npmjs.org/@cornerstonejs/codec-openjpeg/-/codec-openjpeg-1.3.6.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40cornerstonejs/codec-openjpeg@1.3.6"
+        }
+      ],
+      "comment": "full build (decoder and encoder); also decodes HTJ2K (Part 15)",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "29de9d15c0412d1c0c221fdfdd666b393f18f48f"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openjpeg",
+      "name": "OpenJPEG",
+      "versionInfo": "2.5.4",
+      "downloadLocation": "git+https://github.com/uclouvain/openjpeg@v2.5.4",
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/uclouvain/openjpeg@v2.5.4"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:uclouvain:openjpeg:2.5.4:*:*:*:*:*:*:*"
+        }
+      ],
+      "comment": "version as reported by the module (getVersion)"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-codec-charls",
+      "name": "@cornerstonejs/codec-charls",
+      "versionInfo": "1.2.3",
+      "downloadLocation": "https://registry.npmjs.org/@cornerstonejs/codec-charls/-/codec-charls-1.2.3.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40cornerstonejs/codec-charls@1.2.3"
+        }
+      ],
+      "comment": "full build (decoder and encoder)",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "7c472c05a949e09fe697b775e5620625ce8e2748"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-charls",
+      "name": "CharLS",
+      "versionInfo": "2.4.1",
+      "downloadLocation": "git+https://github.com/team-charls/charls@2.4.1",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/team-charls/charls@2.4.1"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:team-charls:charls:2.4.1:*:*:*:*:*:*:*"
+        }
+      ],
+      "comment": "version as reported by the module (getVersion)"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-html2canvas",
+      "name": "html2canvas",
+      "versionInfo": "1.4.1",
+      "downloadLocation": "https://registry.npmjs.org/html2canvas/-/html2canvas-1.4.1.tgz",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/html2canvas@1.4.1"
+        }
+      ],
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "46e8c5d8e4a799ad4a6638f7f915ff8d52b4c1f9"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tslib",
+      "name": "tslib",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/microsoft/tslib",
+      "licenseConcluded": "0BSD",
+      "licenseDeclared": "0BSD",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/tslib"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tesseract-js",
+      "name": "tesseract.js",
+      "versionInfo": "7.0.0",
+      "downloadLocation": "https://registry.npmjs.org/tesseract.js/-/tesseract.js-7.0.0.tgz",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/tesseract.js@7.0.0"
+        }
+      ],
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "d7fa8fd93b89af66383798939c5aaf1720332023"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-regenerator-runtime",
+      "name": "regenerator-runtime",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/facebook/regenerator",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/regenerator-runtime"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-buffer",
+      "name": "buffer",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/feross/buffer",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/buffer"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ieee754",
+      "name": "ieee754",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/feross/ieee754",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/ieee754"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlibjs",
+      "name": "zlib.js",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/imaya/zlib.js",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/zlibjs"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tesseract-js-core",
+      "name": "tesseract.js-core",
+      "versionInfo": "7.0.0",
+      "downloadLocation": "https://registry.npmjs.org/tesseract.js-core/-/tesseract.js-core-7.0.0.tgz",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/tesseract.js-core@7.0.0"
+        }
+      ],
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "da5f655d6a24722a065bdd74c475a34788e2abb8"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tesseract",
+      "name": "Tesseract OCR",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/tesseract-ocr/tesseract",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-leptonica",
+      "name": "Leptonica",
+      "versionInfo": "4af068b5",
+      "downloadLocation": "git+https://github.com/DanBloomberg/leptonica@4af068b5",
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/DanBloomberg/leptonica@4af068b5"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlib",
+      "name": "zlib",
+      "versionInfo": "21767c65",
+      "downloadLocation": "git+https://github.com/madler/zlib@21767c65",
+      "licenseConcluded": "Zlib",
+      "licenseDeclared": "Zlib",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/madler/zlib@21767c65"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libpng",
+      "name": "libpng",
+      "versionInfo": "a37d4836",
+      "downloadLocation": "git+https://github.com/glennrp/libpng@a37d4836",
+      "licenseConcluded": "libpng-2.0",
+      "licenseDeclared": "libpng-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/glennrp/libpng@a37d4836"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libjpeg",
+      "name": "libjpeg (IJG)",
+      "versionInfo": "9a",
+      "downloadLocation": "git+https://github.com/LuaDist/libjpeg@6c0fcb8d",
+      "licenseConcluded": "IJG",
+      "licenseDeclared": "IJG",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/LuaDist/libjpeg@6c0fcb8d"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libtiff",
+      "name": "libtiff",
+      "versionInfo": "b51bb157",
+      "downloadLocation": "git+https://gitlab.com/libtiff/libtiff@b51bb157",
+      "licenseConcluded": "libtiff",
+      "licenseDeclared": "libtiff",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libwebp",
+      "name": "libwebp",
+      "versionInfo": "20ef03ee",
+      "downloadLocation": "git+https://github.com/webmproject/libwebp@20ef03ee",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/webmproject/libwebp@20ef03ee"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-giflib",
+      "name": "giflib",
+      "versionInfo": "fa376720",
+      "downloadLocation": "git+https://github.com/mirrorer/giflib@fa376720",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/mirrorer/giflib@fa376720"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openlibm",
+      "name": "OpenLibm",
+      "versionInfo": "ae2d9169",
+      "downloadLocation": "git+https://github.com/JuliaMath/openlibm@ae2d9169",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/JuliaMath/openlibm@ae2d9169"
+        }
+      ],
+      "comment": "MIT, BSD and ISC by file, some public domain: vendor/tesseract/LICENSE-tesseract-core-libs.txt"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tessdata-fast",
+      "name": "tessdata_fast eng.traineddata",
+      "versionInfo": "4.0.0",
+      "downloadLocation": "git+https://github.com/tesseract-ocr/tessdata_fast@87416418",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/tesseract-ocr/tessdata_fast@87416418"
+        }
+      ],
+      "comment": "gzip -9 -n of eng.traineddata, last changed in commit 923915d4",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "5480b929389e03f4b08a4f40a3c9f0a738759086"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ibm-plex",
+      "name": "IBM Plex Sans and IBM Plex Mono",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/IBM/plex",
+      "licenseConcluded": "OFL-1.1",
+      "licenseDeclared": "OFL-1.1",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "comment": "subsetted WOFF2",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "69dfcac46684e57f2a4d90ca9c926fc84e903d5b"
+      }
+    },
+    {
+      "SPDXID": "SPDXRef-Package-red-hat-fonts",
+      "name": "Red Hat Display and Red Hat Text",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "git+https://github.com/RedHatOfficial/RedHatFont",
+      "licenseConcluded": "OFL-1.1",
+      "licenseDeclared": "OFL-1.1",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": true,
+      "supplier": "NOASSERTION",
+      "comment": "subsetted WOFF2",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "3a66dd8e7ec3dfd6df6bfb109029516834578369"
+      }
+    }
+  ],
+  "files": [
+    {
+      "SPDXID": "SPDXRef-File-1",
+      "fileName": "./vendor/dcmjs.min.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "77b883ca41668f71f655f5906e860d1f8c5df26a"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "45a905340a3d4f6e61a07b6e8371a7460e9f19245c395d2300519825e037dce1"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-2",
+      "fileName": "./vendor/lossless-min.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ff8c877752e9c9fc89c46f01c044b8cc7c3b8d0a"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7a50162e3ce1f1e45c6d45161918281f34079a223cc7329518a2aa89390e9658"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-3",
+      "fileName": "./vendor/openjpegwasm.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ede7628bd2a294d0126c5a7c7c0d5de32f3a6650"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7da697c067da8c0ee0dd81071bc6cca0ab17a93b70274945e03c690ee89c163a"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-4",
+      "fileName": "./vendor/openjpegwasm.wasm",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "abab7eff7859f9cbeec970573ac44f77149fa68a"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "77084ac4c723115ee2b883b818fbcbf6a918c3242b5704989b5f53e0e4a5025b"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-5",
+      "fileName": "./vendor/charlswasm.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "5716487451ce92def5a11ea4ece2c9806f15c7e9"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ee6df2795a97451fdbaffee674f0da4fd7b1d7d6432bc3daaf7c25854824cf57"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-6",
+      "fileName": "./vendor/charlswasm.wasm",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "b768180d4c645d5a9084bd29e3fdfe841c88efa3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "4428c65c6e826578dab17115463b30bda97222d95a6789a7d950e91511016631"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-7",
+      "fileName": "./vendor/html2canvas.min.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "b987dc0cc6cfcdc2e34499375f505470c5adb891"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e87e550794322e574a1fda0c1549a3c70dae5a93d9113417a429016838eab8cb"
+        }
+      ],
+      "licenseConcluded": "MIT",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-8",
+      "fileName": "./vendor/tesseract/tesseract.min.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "11c1561c020d63683436d257afcf1cede180bde5"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "000c27d9cd0def655f77b36c72a389c0ab13793aa31cb4d7aab56d09c0afbc7e"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-9",
+      "fileName": "./vendor/tesseract/worker.min.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "fcdfc690d75dfa8d3e121b0b35b463f7dcabfc38"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-10",
+      "fileName": "./vendor/tesseract/tesseract-core-lstm.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "a3046ca0d8571c4b27460a5fd1392e321d35576b"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "6510efc4e8b45c5465df30679b9911ffe0071cd2ee982fa064e6f5136ef2de85"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-11",
+      "fileName": "./vendor/tesseract/tesseract-core-lstm.wasm",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "71ac12f4138748c1c0d3e066b1760351bcffe933"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "66b17df6e20c5329a17ffa9c202a47eaa3e32500b253d4c7f38e7f2bc01457c3"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-12",
+      "fileName": "./vendor/tesseract/tesseract-core-simd-lstm.js",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ad0e73bd4f26966e1284a09b9ab25a59f1f7139c"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e48e2f02ddae3716c8dd24bf41cd290d4efa96892d689cdc4013c2545d63f469"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-13",
+      "fileName": "./vendor/tesseract/tesseract-core-simd-lstm.wasm",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "aba3e2e1c89c1bc2554fb261c9435096c47c92c5"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "34e8d50cac216427d86bf397d610fdd9f49492539bbcdfbfccc4eda20c810bea"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-14",
+      "fileName": "./vendor/tesseract/eng.traineddata.gz",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "93b6521e93e399b6dca4e2785529d443dd1157e4"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "2a66ec904bc0e7657b27e200a874c01e1bc8a58b756cbbaa9afbae736fa50edc"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-15",
+      "fileName": "./fonts/IBMPlexMono-400-cyrillic.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "9836f315b5c3b9c898b910dd61b70991ca1c6965"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7635422bd10ddbbcb0e0caa1154b928298f5c8319b8c00b30978d4395f4783ce"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-16",
+      "fileName": "./fonts/IBMPlexMono-400-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "4af8cef522bd8912cb2fad41e06b9025640feb62"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "6bc0f226a5b7884a8170e3f62c63d7675609d4631bdc5931b5cdab81821f00eb"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-17",
+      "fileName": "./fonts/IBMPlexMono-400-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "bb87500e3204a3a7c65d6633c79c5c840c3be8d3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "08949f728dc52d528e69b1667d15c89a5686a4ee9a296ff90983985f99c380f7"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-18",
+      "fileName": "./fonts/IBMPlexMono-700-cyrillic.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "45ed6d7826aec42dbe2a58d19b251d9f45963cc6"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "104701bedfa06b56abba3e273f3ed74d7235d02c00ddc6ca942d65e2940fe6fe"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-19",
+      "fileName": "./fonts/IBMPlexMono-700-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "15aaeeab351ae92b9e34b35e3b643a5545dad346"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-20",
+      "fileName": "./fonts/IBMPlexMono-700-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "223677cfccb782c2e4209a71bb75aaea4509ac71"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "4f84d86cfd060f4ded334358ff8a4c81d4db2ed5addd568359d693f44a87765a"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-21",
+      "fileName": "./fonts/IBMPlexSans-400-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "69ec30990085277e6b32769c26764ce80f70d9e3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d160e20920ae4d6556518d352d3af27a74e9b0de3d8fe17b1c1044fc75aa2f81"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-22",
+      "fileName": "./fonts/IBMPlexSans-400-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d8b4e62dbb826591e45b6b7245edbca76b4f48a4"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-23",
+      "fileName": "./fonts/IBMPlexSans-500-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "69ec30990085277e6b32769c26764ce80f70d9e3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d160e20920ae4d6556518d352d3af27a74e9b0de3d8fe17b1c1044fc75aa2f81"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-24",
+      "fileName": "./fonts/IBMPlexSans-500-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d8b4e62dbb826591e45b6b7245edbca76b4f48a4"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-25",
+      "fileName": "./fonts/IBMPlexSans-700-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "69ec30990085277e6b32769c26764ce80f70d9e3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "d160e20920ae4d6556518d352d3af27a74e9b0de3d8fe17b1c1044fc75aa2f81"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-26",
+      "fileName": "./fonts/IBMPlexSans-700-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d8b4e62dbb826591e45b6b7245edbca76b4f48a4"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-27",
+      "fileName": "./fonts/IBMPlexSans-cyrillic.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d60fe850d102bb1db73f3fc83f92fc92ef2df900"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9409ee21811f0f5272b7e1d828fe8838005b0573481ef906e7e55b63f6610ab0"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-28",
+      "fileName": "./fonts/RedHatDisplay-900-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "04dbf7ac1a6ca611fb7cca2d560a655cbf80e2c8"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "500d3bfa4e42db97b676a8f1ae3fea651011fd4b73fee592b80b242353da9ead"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-29",
+      "fileName": "./fonts/RedHatDisplay-900-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "43d38cfadbcb133f9360291536c1c669103e8697"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "f7a7830b81e351f89b91f0201de71c8d937e25df5a3e31ecca9b4ee877abedb7"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-30",
+      "fileName": "./fonts/RedHatText-400-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ac1dc64da52a789ac0f6d41ab43d7322becd1459"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "61aba01cad113acf71205cfe135b3ca84d1d66cfdaf5d59591decb836d798363"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-31",
+      "fileName": "./fonts/RedHatText-400-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "26011f05431d0490127fb90f46d762d78a7a132e"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "59826f39dcb265c6aa94d978cc0941a083df5acc7f447324ecf6f58ad19d6b7c"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-32",
+      "fileName": "./fonts/RedHatText-500-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ac1dc64da52a789ac0f6d41ab43d7322becd1459"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "61aba01cad113acf71205cfe135b3ca84d1d66cfdaf5d59591decb836d798363"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-33",
+      "fileName": "./fonts/RedHatText-500-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "26011f05431d0490127fb90f46d762d78a7a132e"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "59826f39dcb265c6aa94d978cc0941a083df5acc7f447324ecf6f58ad19d6b7c"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-34",
+      "fileName": "./fonts/RedHatText-700-latin-ext.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "ac1dc64da52a789ac0f6d41ab43d7322becd1459"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "61aba01cad113acf71205cfe135b3ca84d1d66cfdaf5d59591decb836d798363"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-File-35",
+      "fileName": "./fonts/RedHatText-700-latin.woff2",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "26011f05431d0490127fb90f46d762d78a7a132e"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "59826f39dcb265c6aa94d978cc0941a083df5acc7f447324ecf6f58ad19d6b7c"
+        }
+      ],
+      "licenseConcluded": "OFL-1.1",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-carino-dicom-editor"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-dcmjs"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-dcmjs",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-1"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-dcmjs",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-pako"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-dcmjs",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-loglevelnext"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-dcmjs",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-core-js"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-jpeg-lossless-decoder-js"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-jpeg-lossless-decoder-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-2"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-codec-openjpeg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-openjpeg",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-3"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-openjpeg",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-4"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-openjpeg",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-openjpeg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-codec-charls"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-charls",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-5"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-charls",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-6"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-codec-charls",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-charls"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-html2canvas"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-html2canvas",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-7"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-html2canvas",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-tslib"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-tesseract-js"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-8"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-9"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-regenerator-runtime"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-buffer"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-ieee754"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-zlibjs"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-tesseract-js-core"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-10"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-11"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-12"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-13"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-tesseract"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-leptonica"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-zlib"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-libpng"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-libjpeg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-libtiff"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-giflib"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tesseract-js-core",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-openlibm"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-tessdata-fast"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-tessdata-fast",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-14"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-ibm-plex"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-15"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-16"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-17"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-18"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-19"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-20"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-21"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-22"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-23"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-24"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-25"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-26"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-ibm-plex",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-27"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-carino-dicom-editor",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-red-hat-fonts"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-28"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-29"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-30"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-31"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-32"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-33"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-34"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-red-hat-fonts",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-35"
+    }
+  ]
+}

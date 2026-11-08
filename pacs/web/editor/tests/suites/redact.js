@@ -87,14 +87,16 @@
       ['1.2.840.10008.1.2.4.91', 'JPEG 2000', true, true],
       ['1.2.840.10008.1.2.4.80', 'JPEG-LS Lossless', true, true],
       ['1.2.840.10008.1.2.4.81', 'JPEG-LS Near-Lossless', true, true],
+      ['1.2.840.10008.1.2.4.201', 'HTJ2K Lossless', true, true],
+      ['1.2.840.10008.1.2.4.202', 'HTJ2K Lossless RPCL', true, true],
+      ['1.2.840.10008.1.2.4.203', 'HTJ2K', true, true],
     ]) {
       const s = redactionSupport(mkMeta(ts));
       ok(`support: ${label} can be redacted`, s.ok === wantOk && s.converts === wantConv,
          `ok=${s.ok} converts=${s.converts}`);
     }
     for (const [ts, label, namePat] of [
-      ['1.2.840.10008.1.2.4.201', 'High-Throughput JPEG 2000', /High-Throughput/],
-      ['1.2.840.10008.1.2.4.202', 'High-Throughput JPEG 2000 RPCL', /High-Throughput/],
+      ['1.2.840.10008.1.2.4.110', 'JPEG XL', /JPEG XL/],
       ['1.2.840.10008.1.2.4.100', 'MPEG-2', /MPEG-2/],
       ['1.2.840.10008.1.2.4.102', 'MPEG-4', /MPEG-4/],
     ]) {
@@ -511,13 +513,13 @@
       const jls = Forge.build({ ts: '1.2.840.10008.1.2.4.80', rows: Forge.H, cols: Forge.W,
                                 pi: 'MONOCHROME2', ba: 16, bs: 12, hb: 11, pr: 0,
                                 encapsulated: [new Uint8Array([0xFF, 0xD8, 0xFF, 0xF7, 0, 0, 0, 0]).buffer] });
-      // The first three now reach a decoder and fail inside it; only HTJ2K and
-      // MPEG are refused on the transfer syntax alone. Both shapes have to leave
-      // the dataset exactly as they found it.
+      // All but MPEG reach a decoder and fail inside it; MPEG is refused on the
+      // transfer syntax alone. Both shapes have to leave the dataset exactly as
+      // they found it.
       for (const [id, bytes, pat] of [
         ['jpeg2000-unsupported', byId['jpeg2000-unsupported'].bytes, /JPEG 2000/],
         ['j2k-truncated', byId['j2k-truncated'].bytes, /JPEG 2000/],
-        ['htj2k-unsupported', byId['htj2k-unsupported'].bytes, /High-Throughput/],
+        ['htj2k-unreadable', byId['htj2k-unreadable'].bytes, /High-Throughput/],
         ['mpeg2-unsupported', byId['mpeg2-unsupported'].bytes, /MPEG-2/],
         ['jpeg-ls', jls, /JPEG-LS/],
       ]) {
@@ -954,10 +956,13 @@
       await install(byId['j2k-mono16-b12'].bytes, 'btn-j2k.dcm');
       ok('and enabled on JPEG 2000, now that it decodes',
          document.getElementById('imgRedact').disabled === false);
-      await install(byId['htj2k-unsupported'].bytes, 'btn-no.dcm');
+      await install(byId['htj2k-mono16-b12'].bytes, 'btn-htj2k.dcm');
+      ok('and enabled on High-Throughput JPEG 2000',
+         document.getElementById('imgRedact').disabled === false);
+      await install(byId['mpeg2-unsupported'].bytes, 'btn-no.dcm');
       const b = document.getElementById('imgRedact');
-      ok('and disabled on High-Throughput JPEG 2000', b.disabled === true);
-      ok('with a title that says why', /High-Throughput/.test(b.title), b.title);
+      ok('and disabled on MPEG-2', b.disabled === true);
+      ok('with a title that says why', /MPEG-2/.test(b.title), b.title);
       // It sits in the card with the rotate/flip buttons, which refuse for the
       // same reason and through the same support check.
       ok('and refuses alongside the transforms it shares a decoder with',

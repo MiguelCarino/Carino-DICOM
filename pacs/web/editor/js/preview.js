@@ -168,11 +168,13 @@ function loadVendorScript(src) {
 }
 
 // locateFile points emscripten at vendor/*.wasm (else resolved against the page). print/printErr
-// are silenced because OpenJPEG logs several [INFO] lines per decoded frame.
+// are silenced because OpenJPEG logs several [INFO] lines per decoded frame. These are the full
+// builds (decoder and encoder): js/compression.js encodes with the same modules. OpenJPEG has read
+// HTJ2K (Part 15) since 2.5.0; the vendored 2.5.4 carries that decoder's later fixes.
 let _openJpeg = null;
 async function loadOpenJpeg() {
   if (_openJpeg) return _openJpeg;
-  await loadVendorScript('./vendor/openjpegwasm_decode.js');
+  await loadVendorScript('./vendor/openjpegwasm.js');
   if (typeof window.OpenJPEGWASM !== 'function') throw new Error('OpenJPEGWASM did not load');
   _openJpeg = await window.OpenJPEGWASM({ locateFile: (p) => 'vendor/' + p, print() {}, printErr() {} });
   return _openJpeg;
@@ -181,21 +183,23 @@ async function loadOpenJpeg() {
 let _charls = null;
 async function loadCharls() {
   if (_charls) return _charls;
-  await loadVendorScript('./vendor/charlswasm_decode.js');
+  await loadVendorScript('./vendor/charlswasm.js');
   if (typeof window.CharLSWASM !== 'function') throw new Error('CharLSWASM did not load');
   _charls = await window.CharLSWASM({ locateFile: (p) => 'vendor/' + p, print() {}, printErr() {} });
   return _charls;
 }
 
-// Decode one fragment with 'j2k' or 'jls'. Returns { bytes, info, planar }; throws if the module
-// fails to load or rejects the stream. bytes is a copy: the decoder's view into the wasm heap is
-// invalidated by delete() and can detach on heap growth.
+// Decode one fragment with 'j2k', 'htj2k' or 'jls'. Returns { bytes, info, planar }; throws if the
+// module fails to load or rejects the stream. bytes is a copy: the decoder's view into the wasm heap
+// is invalidated by delete() and can detach on heap growth. 'htj2k' is OpenJPEG too, kept apart
+// so its errors say High-Throughput and so the syntax, not the magic bytes, picks the branch.
 async function wasmDecodeFrame(kind, frag) {
   const src = ArrayBuffer.isView(frag)
     ? new Uint8Array(frag.buffer, frag.byteOffset, frag.byteLength)
     : new Uint8Array(frag);
-  const mod = kind === 'j2k' ? await loadOpenJpeg() : await loadCharls();
-  const dec = kind === 'j2k' ? new mod.J2KDecoder() : new mod.JpegLSDecoder();
+  const j2k = kind === 'j2k' || kind === 'htj2k';
+  const mod = j2k ? await loadOpenJpeg() : await loadCharls();
+  const dec = j2k ? new mod.J2KDecoder() : new mod.JpegLSDecoder();
   try {
     dec.getEncodedBuffer(src.length).set(src);
     dec.decode();
@@ -247,16 +251,19 @@ const REDACT_JPEG_LOSSLESS_TS = new Set(['1.2.840.10008.1.2.4.57', '1.2.840.1000
 const REDACT_ENCAP_RAW_TS = '1.2.840.10008.1.2.1.98';
 const REDACT_JPEG_BITMAP_TS = new Set(['1.2.840.10008.1.2.4.50', '1.2.840.10008.1.2.4.51']);
 const REDACT_J2K_TS = new Set(['1.2.840.10008.1.2.4.90', '1.2.840.10008.1.2.4.91']);
+// HTJ2K (PS3.5 A.4.11): lossless, lossless with RPCL progression, and lossless-or-lossy. All three
+// carry the same Part 15 codestream, which opens with Part 1's FF 4F FF 51 magic, so they are told
+// apart by transfer syntax only. OpenJPEG decodes both kinds; the label is what differs.
+const REDACT_HTJ2K_TS = new Set(['1.2.840.10008.1.2.4.201', '1.2.840.10008.1.2.4.202',
+                                 '1.2.840.10008.1.2.4.203']);
 const REDACT_JPEG_LS_TS = new Set(['1.2.840.10008.1.2.4.80', '1.2.840.10008.1.2.4.81']);
 // Syntaxes refused by name. To add a codec, remove its row here and handle it in decodeStoredFrames.
 const REDACT_NO_CODEC = {
-  '1.2.840.10008.1.2.4.201': 'High-Throughput JPEG 2000', '1.2.840.10008.1.2.4.202': 'High-Throughput JPEG 2000',
   '1.2.840.10008.1.2.4.100': 'MPEG-2', '1.2.840.10008.1.2.4.101': 'MPEG-2',
   '1.2.840.10008.1.2.4.102': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.103': 'MPEG-4 AVC/H.264',
   '1.2.840.10008.1.2.4.104': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.105': 'MPEG-4 AVC/H.264',
   '1.2.840.10008.1.2.4.106': 'MPEG-4 AVC/H.264', '1.2.840.10008.1.2.4.107': 'HEVC/H.265',
   '1.2.840.10008.1.2.4.108': 'HEVC/H.265',
-  '1.2.840.10008.1.2.4.203': 'High-Throughput JPEG 2000',
   '1.2.840.10008.1.2.4.92': 'JPEG 2000 Part 2 multi-component', '1.2.840.10008.1.2.4.93': 'JPEG 2000 Part 2 multi-component',
   '1.2.840.10008.1.2.4.110': 'JPEG XL', '1.2.840.10008.1.2.4.111': 'JPEG XL', '1.2.840.10008.1.2.4.112': 'JPEG XL',
   '1.2.840.10008.1.2.8.1': 'Deflated Image Frame Compression',
@@ -278,9 +285,9 @@ function metaTS(meta) {
 function redactionSupport(meta) {
   const ts = metaTS(meta);
   if (REDACT_RAW_TS.has(ts)) return { ok: true, ts, converts: false, depthLoss: false };
-  // J2K and JPEG-LS (incl. lossy .91/.81) decode at full precision, so no depth loss.
+  // J2K, HTJ2K and JPEG-LS (incl. lossy .91/.203/.81) decode at full precision, so no depth loss.
   if (ts === REDACT_RLE_TS || ts === REDACT_ENCAP_RAW_TS || REDACT_JPEG_LOSSLESS_TS.has(ts)
-      || REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts))
+      || REDACT_J2K_TS.has(ts) || REDACT_HTJ2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts))
     return { ok: true, ts, converts: true, depthLoss: false };
   if (REDACT_JPEG_BITMAP_TS.has(ts)) return { ok: true, ts, converts: true, depthLoss: true };
   return { ok: false, ts, converts: false, depthLoss: false,
@@ -423,13 +430,18 @@ async function storedJpegLosslessFrames(perFrame, g) {
   return { ...g.base, frames, planar: 0, raw: false };
 }
 
-// JPEG 2000 / JPEG-LS: full precision and sign kept. OpenJPEG undoes the YBR_RCT/ICT transform
-// (an MCT in the codestream), so those are written back as RGB; YBR_FULL and RGB carry no MCT
-// (PS3.5 8.2.4) and keep their label.
+// Error label for a failed decode of each WASM kind; the HTJ2K one names High-Throughput so it is
+// never mistaken for ordinary JPEG 2000.
+const WASM_DECODE_LABEL = { j2k: 'JPEG 2000 decode failed', htj2k: 'High-Throughput JPEG 2000 decode failed',
+                            jls: 'JPEG-LS decode failed' };
+
+// JPEG 2000 / HTJ2K / JPEG-LS: full precision and sign kept. OpenJPEG undoes the
+// YBR_RCT/ICT transform (an MCT in the codestream), so those are written back as RGB; YBR_FULL and
+// RGB carry no MCT (PS3.5 8.2.4) and keep their label.
 async function storedWasmFrames(ts, perFrame, g) {
   const { rows, cols, ba, spp, pi } = g.base;
-  const kind = REDACT_J2K_TS.has(ts) ? 'j2k' : 'jls';
-  const label = T(kind === 'j2k' ? 'JPEG 2000 decode failed' : 'JPEG-LS decode failed');
+  const kind = REDACT_J2K_TS.has(ts) ? 'j2k' : REDACT_HTJ2K_TS.has(ts) ? 'htj2k' : 'jls';
+  const label = T(WASM_DECODE_LABEL[kind]);
   const frames = [];
   for (const frag of perFrame) {
     let dec;
@@ -448,7 +460,7 @@ async function storedWasmFrames(ts, perFrame, g) {
     frames.push(g.asSamples(bytes));
   }
   return { ...g.base, frames, planar: 0, raw: false,
-           pi: (kind === 'j2k' && spp === 3 && /^YBR_(RCT|ICT)$/i.test(String(pi).trim())) ? 'RGB' : pi };
+           pi: (kind !== 'jls' && spp === 3 && /^YBR_(RCT|ICT)$/i.test(String(pi).trim())) ? 'RGB' : pi };
 }
 
 // Baseline / extended JPEG: browser decode is 8-bit only, so 12-bit data loses depth across the
@@ -520,7 +532,8 @@ async function decodeStoredFrames(d, meta) {
   if (ts === REDACT_RLE_TS) return storedRleFrames(perFrame, g);
   if (ts === REDACT_ENCAP_RAW_TS) return storedEncapsulatedRawFrames(perFrame, g);
   if (REDACT_JPEG_LOSSLESS_TS.has(ts)) return storedJpegLosslessFrames(perFrame, g);
-  if (REDACT_J2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts)) return storedWasmFrames(ts, perFrame, g);
+  if (REDACT_J2K_TS.has(ts) || REDACT_HTJ2K_TS.has(ts) || REDACT_JPEG_LS_TS.has(ts))
+    return storedWasmFrames(ts, perFrame, g);
   if (REDACT_JPEG_BITMAP_TS.has(ts)) return storedBitmapJpegFrames(perFrame, g);
 
   const codec = REDACT_NO_CODEC[ts] || ts || 'unknown transfer syntax';
@@ -540,8 +553,9 @@ function previewTransferSyntax(meta) {
     isJpegLossless: REDACT_JPEG_LOSSLESS_TS.has(ts),
     isJpegLs: REDACT_JPEG_LS_TS.has(ts),
     isJ2k: REDACT_J2K_TS.has(ts),
-    // HTJ2K (Part 15) shares J2K's magic but OpenJPEG 2.x can't decode it; refuse it by name.
-    isHtj2k: ts === '1.2.840.10008.1.2.4.201' || ts === '1.2.840.10008.1.2.4.202',
+    // HTJ2K (Part 15) shares J2K's magic. All three syntaxes: .203 (lossless or lossy) once missed
+    // this flag and reached the decoder by magic bytes alone, labelled as ordinary JPEG 2000.
+    isHtj2k: REDACT_HTJ2K_TS.has(ts),
     isRle: ts === REDACT_RLE_TS,
     isBigEndian: ts === '1.2.840.10008.1.2.2',
   };
@@ -622,13 +636,13 @@ async function previewDecodeJpegFamily(buf, tsi, img) {
   }
 }
 
-// JPEG 2000 frame. Returns { done } (an error result) or { bytes, rgb }.
-async function previewDecodeJ2k(buf, img) {
+// JPEG 2000 or HTJ2K frame (kind 'j2k' / 'htj2k'). Returns { done } (an error result) or { bytes, rgb }.
+async function previewDecodeJ2k(buf, img, kind = 'j2k') {
   const { rows, cols, ba, spp, numFrames } = img;
-  const label = T('JPEG 2000 decode failed');
+  const label = T(WASM_DECODE_LABEL[kind]);
   if (!buf) return { done: { error: `${label}: no pixel fragment for this frame`, numFrames } };
   let dec;
-  try { dec = await wasmDecodeFrame('j2k', buf); }
+  try { dec = await wasmDecodeFrame(kind, buf); }
   catch (e) { return { done: { error: `${label}: ${e.message}`, numFrames } }; }
   const bad = codecFrameMismatch(dec.info, dec.bytes, rows, cols, ba, spp);
   if (bad) return { done: { error: `${label}: ${bad}`, numFrames } };
@@ -834,13 +848,11 @@ async function decodeDicomPixels(d, frameIndex = 0, { meta = null, wcOvr, wwOvr 
     codec.planar = r.planar;
   }
 
-  // Before the J2K branch: HTJ2K has the same FF 4F FF 51 magic and is already in j2kFrames.
-  if (tsi.isHtj2k) {
-    return { error: T('High-Throughput JPEG 2000 (1.2.840.10008.1.2.4.201/202) is not supported'), numFrames };
-  }
-
-  if (j2kFrames.length || tsi.isJ2k) {
-    const r = await previewDecodeJ2k(previewEncapsulatedFrame(px, j2kFrames, numFrames, fi), img);
+  // HTJ2K has the same FF 4F FF 51 magic and is already in j2kFrames; the transfer syntax decides
+  // how it is labelled, so a failure names High-Throughput rather than Part 1 JPEG 2000.
+  if (j2kFrames.length || tsi.isJ2k || tsi.isHtj2k) {
+    const r = await previewDecodeJ2k(previewEncapsulatedFrame(px, j2kFrames, numFrames, fi), img,
+                                     tsi.isHtj2k ? 'htj2k' : 'j2k');
     if (r.done) return r.done;
     codec.bytes = r.bytes;
     codec.rgb = r.rgb;

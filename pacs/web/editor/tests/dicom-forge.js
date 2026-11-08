@@ -335,9 +335,10 @@
 
   // ------------------------------------------------ checked-in codestreams --
 
-  // JPEG 2000 and JPEG-LS are the two syntaxes this file cannot forge itself:
-  // the app vendors decode-only WASM, so there is no encoder in the browser to
-  // write one with. These five streams were produced out of band, from the very
+  // JPEG 2000, HTJ2K and JPEG-LS are the syntaxes this file does not forge
+  // itself: it builds its corpus before the app's codecs load, and a stream made
+  // by the module under test would prove little about it. These seven streams
+  // were produced out of band, from the very
   // rasters pattern() and colorPattern() build below, by
   // tests/fixtures/make-codec-fixtures.mjs — regenerate them with that script
   // rather than by hand, and read the oracle-strength note in tests/README.md
@@ -363,6 +364,27 @@
     'Lw8XxPs4vZ5ZglnPuzj+z+0cBFnNCd8WsMUJxxBqH8HziIPnGDahma5jmSP9PmKirYhuV0rgTGNLw+oTh9QrA+cUIhm8yayO' +
     'I52bCxmI/3X2Dl6XnwN7Xy+EA8sB8Hv3QsAMmJfvaUQfpyQsTNoPsAjmwRXPwCJ+AvD7QQAiGbzJrI6XfyQoBKPBOX+H/ZVW' +
     'Zp24D5kfZ2kgsfShJCxNB8D5BcD5BIBfp8eImBCcdrKpg52WqQEEKAYagf/Z';
+  // Encoded by OpenJPH, read by the app's OpenJPEG: two implementations of Part 15.
+  const HTJ2K_MONO16_B12 =
+    '/0//UQApQAAAAAAgAAAAIAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAABCwEB/1AACAACAAAABv9SAAwAAgABAAMEBEAB/1wA' +
+    'DSBocHBwcHBwaGho/2QAFwABT3BlbkpQSCBWZXIgMC4zMS4wLv+QAAoAAAAAATYAAf+TwALftLo1yvP0LMIH+MCn6/8/8fWe' +
+    'IODgHYL8CdohQFmXAMABa0ABacABaQCYN+HkBba0RTMKOMKIe/4eOGMBGzcAAENUIz5AUAHecMRrBCMEgXs3APRymCIVQG/Q' +
+    'G/rFACCMGJM3AMABdXAAWxAAWmDK4RQp8LsAAECBsgMaAQAAAChQAAAAChTGIkkZUe1AJCCyQWSBSBWcSp0ADCJPmOJ3e8go' +
+    'SxlgMub8PyMHQCKBvZkAGshHPqBR2WXiEIJ+gFDcGEuYAMAC7SABa0ACuO/9XgMDAAAAAACIIW8MDAwMDAwMDAwMWg3IL57W' +
+    '8Lv/CgCJfTjhOWnp6enFPTVjBcMLdgH9X+8vzBurHZD5+/1wBxgWlGMBvrwA9s46+Px+6AigdylEegD/2Q==';
+  const HTJ2K_RGB_RCT =
+    '/0//UQAvQAAAAAAgAAAAIAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAADBwEBBwEBBwEB/1AACAACAAAAA/9SAAwAAgABAQME' +
+    'BEAB/1wADSBQWFhYWFhYUFBQ/2QAFwABT3BlbkpQSCBWZXIgMC4zMS4wLv+QAAoAAAAAArMAAf+TwBawtUJpY9i/VP8x20fO' +
+    'MaH9ABoAANa3AMAWyCixeBsyOQACG50XdhZ0FnT+ArWXAIATOADAFrgAAQIAgdBTo6BzoAyASssAjFwgAa84AMAK2AFfACqA' +
+    'EnUVUgIk/Qsu0Rs2AFBlDYEA0jQAAVNcIKs4AJ4nAvhLKdEbNgDACrgBaUAKkEhaVxcH8A4YkzUASFdaFxsswRIswfJS7jjh' +
+    'ezcAhlFI8QAQkzUAwAq4AVoAoCgAoCiEkEK1AMEysAyWYPnAEIFN1gDAC1IAWvACrAb0QEBBIIAA8FvKCIKioKBj0nsARkiO' +
+    'I0AARQAAAig+DkD0+T27TjR3XABm+H0AYVVIAG/ZAMALQgBdVACqHkZ/GA0cAPw/AcUBgtJ4AAAeAIwABAgAOgBCAAoAAAAA' +
+    'AMpSSiml/AAAPfsAAPZdrWcANFSsMGayAaAIP4MqMBBv2ADAC0oAW4AAEAIAIQAQAgAh54SUlJACuAAAAAAAAGUppZRS/gAA' +
+    'Hv2AAHsu1rOAGipUrbEBwBdDAF1UAVx4j2+AAAAAdzLiakp8lOomnajThTtRpwo6dpL0uAAP6gEAfB+IFACwihixqjHiL/oS' +
+    'VTl1791Tp17LkOoOoADHc4/hABTaGDgQHQEA+OR/4wGARAAA7wBMAMAVsAXewBOAfr+/h7/+DIyjgQJ5APx8fg4HAAAAAAAA' +
+    'AAAAAPj/f/9//3/75JPfsk9+yT37JPZYAASyyyyyyuyyyyyyyuuuuuuqyu5GMQGctwL+/H+AEFYAwBdjAF1wAOAGABsAbACw' +
+    'AcAGABsAbACwc/AktjkslsclktjkslsclktjkslsclktjkqUxCPvAQAAAAAAAP9//3//f/7wk9+yT37JPfsk9lgABLLLLLLK' +
+    '7LLLLLLK66666666kgL/2Q==';
   const JLS_MONO16_B12 =
     '/9j/9wALDAAgACABAREA/9oACAEBAAAAAECBBBAAAAAAFSghyDIF/v19vl7vV5vN3u11ulzuVxuFvt9ttlrtVpwPIECCCEIQ' +
     'iIiIiJJJJJIHIJJJKqqqqqqDYKqqqr/+DMP/f/9AgkQXhdBHCR//f/wgf/9//2ED/3//fhB//3//RB//f/9xD/9//3iH/3//' +
@@ -1266,19 +1288,56 @@
       });
     }
 
-    // ---- High-Throughput JPEG 2000, which stays refused ---------------------
-    // Part 15 shares the FF 4F FF 51 magic with Part 1 but not the block coder,
-    // and OpenJPEG 2.x does not implement it. The refusal has to be by transfer
-    // syntax; a magic-byte test would hand this straight to the wrong decoder.
+    // ---- High-Throughput JPEG 2000 (Part 15), all three syntaxes --------------
+    // HTJ2K opens with Part 1's FF 4F FF 51, so only the transfer syntax tells
+    // the two apart. .201 and .202 are the lossless pair (.202 promises RPCL
+    // progression, which OpenJPH writes by default, so one stream serves both);
+    // .203 may be lossless or lossy, and is the one the app once failed to flag.
+    {
+      const s = new Uint16Array(n);
+      for (let i = 0; i < n; i++) s[i] = Math.round(p[i] * 4095);
+      for (const [ts, id, title] of [
+        ['1.2.840.10008.1.2.4.201', 'htj2k-mono16-b12', 'HTJ2K Lossless, 12 bits in 16'],
+        ['1.2.840.10008.1.2.4.202', 'htj2k-rpcl-mono16-b12', 'HTJ2K Lossless RPCL, 12 bits in 16'],
+      ]) {
+        add({
+          id, title,
+          note: 'Same ramp as the JPEG 2000 case, through the High-Throughput block coder. ' +
+                'Encoded by OpenJPH and read by OpenJPEG, so the two would have to share a bug.',
+          w: W, h: H,
+          bytes: build({ ts, rows: H, cols: W, pi: 'MONOCHROME2',
+                         ba: 16, bs: 12, hb: 11, pr: 0, wc: 2048, ww: 4096, modality: 'CT',
+                         encapsulated: [b64ToBytes(HTJ2K_MONO16_B12)] }),
+          ref: { kind: 'mono', samples: s, pi: 'MONOCHROME2', wc: 2048, ww: 4096 },
+        });
+      }
+    }
+    {
+      const rgb = colorPattern(W, H);
+      add({
+        id: 'htj2k-rgb-rct',
+        title: 'HTJ2K (.203), RGB with the reversible colour transform',
+        note: 'Under 1.2.840.10008.1.2.4.203, the syntax that may be lossy, carrying a lossless ' +
+              'stream. Tagged YBR_RCT and decoded to RGB, as for Part 1.',
+        w: W, h: H,
+        bytes: build({ ts: '1.2.840.10008.1.2.4.203', rows: H, cols: W, pi: 'YBR_RCT', spp: 3,
+                       ba: 8, bs: 8, hb: 7, pr: 0, planar: 0, modality: 'XC',
+                       encapsulated: [b64ToBytes(HTJ2K_RGB_RCT)] }),
+        ref: { kind: 'rgb', rgb },
+      });
+    }
+
+    // ---- an HTJ2K header with nothing behind it -----------------------------
+    // The HTJ2K counterpart of jpeg2000-unsupported: the error has to name
+    // High-Throughput, so nobody reads it as a fault in an ordinary JPEG 2000.
     {
       const ht = new Uint8Array(64);
       ht.set([0xFF, 0x4F, 0xFF, 0x51], 0);
       add({
-        id: 'htj2k-unsupported',
-        title: 'High-Throughput JPEG 2000 (1.2.840.10008.1.2.4.201)',
-        note: 'Named in the refusal so the user can tell it apart from ordinary JPEG 2000, ' +
-              'which this tool does decode.',
-        w: W, h: H, broken: true, expectError: /High-Throughput|201/i,
+        id: 'htj2k-unreadable',
+        title: 'High-Throughput JPEG 2000 with an unreadable codestream',
+        note: 'Named in the error so the user can tell it apart from ordinary JPEG 2000.',
+        w: W, h: H, broken: true, expectError: /High-Throughput/i,
         bytes: build({ ts: '1.2.840.10008.1.2.4.201', rows: H, cols: W, pi: 'MONOCHROME2',
                        ba: 16, bs: 12, hb: 11, pr: 0, encapsulated: [ht.buffer] }),
         ref: null,

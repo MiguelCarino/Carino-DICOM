@@ -466,7 +466,7 @@ function syncImgEditCard() {
   // Undo names its op in the title, not the label (static i18n markup, would wrap).
   const b = entry.pixelBackup;
   imgEditUndo.classList.toggle('hidden', !b);
-  if (b) imgEditUndo.title = T(b.op === 'decompress' ? 'Decompress' : PIXEL_OPS[b.op].label);
+  if (b) imgEditUndo.title = T(b.op === 'decompress' ? 'Decompress' : b.op === 'compress' ? 'Compress' : PIXEL_OPS[b.op].label);
   syncCompressionRow(entry);
 }
 
@@ -493,6 +493,24 @@ function syncCompressionRow(entry) {
   all.classList.toggle('hidden', n < 2);
   all.textContent = T('All {n}').replace('{n}', n);
   all.title = T('Decompress every loaded file that is compressed');
+  syncCompressRow(entry);
+}
+
+// Compress line: the lossless target, this file, and every file that can take it.
+function syncCompressRow(entry) {
+  const row = $('imgCompressRow');
+  if (!row) return;
+  const target = $('imgCompressTs').value;
+  const can = compressSupport(entry, target);
+  row.classList.toggle('hidden', !can.info.hasPixels);
+  const one = $('imgCompress');
+  one.disabled = !can.ok;
+  one.title = can.ok ? T('Rewrite this file\'s pixels losslessly compressed; every frame is decoded back and checked before it is kept') : can.why;
+  const n = files.filter(f => compressSupport(f, target).ok).length;
+  const all = $('imgCompressAll');
+  all.classList.toggle('hidden', n < 2);
+  all.textContent = T('All {n}').replace('{n}', n);
+  all.title = T('Compress every loaded file that can be compressed losslessly');
 }
 
 // Decompress one file or all; files that cannot be converted are listed in the log, not fatal.
@@ -523,6 +541,40 @@ $('imgDecompress')?.addEventListener('click', () => {
   if (entry) runDecompress([entry]);
 });
 $('imgDecompressAll')?.addEventListener('click', () => runDecompress(files.filter(f => decompressSupport(f).ok)));
+
+// Compress one file or all, losslessly; as for decompression, a file that cannot be is logged, not fatal.
+async function runCompress(list, target) {
+  const go = async () => {
+    let done = 0, before = 0, after = 0;
+    for (const entry of list) {
+      const res = await compressDicom(entry, target);
+      if (res.error) { log(`✗ ${entry.name}: ${res.error}`); continue; }
+      done++; before += res.before; after += res.after;
+      log(`⇱ ${entry.name}: ${res.from} → ${res.to}`);
+    }
+    const mb = n => (n / 1048576).toFixed(1);
+    toast(`${T('Compressed')} ${done}/${list.length} · ${mb(before)} → ${mb(after)} MB`);
+    renderTable();
+    if (typeof renderOverview === 'function') renderOverview();
+    if (dict) await drawPreview(dict, currentFrame);
+    syncImgEditCard();
+    showDownload();
+  };
+  confirmDanger(T('The pixels are rewritten losslessly compressed. Every frame is decoded back and compared with the original values before it is kept, so the image does not change; the SOP Instance UID stays the same. Not every viewer reads every compression.'),
+                go, 'Compress');
+}
+$('imgCompress')?.addEventListener('click', () => {
+  const entry = files[currentFileIdx];
+  if (entry) runCompress([entry], $('imgCompressTs').value);
+});
+$('imgCompressAll')?.addEventListener('click', () => {
+  const target = $('imgCompressTs').value;
+  runCompress(files.filter(f => compressSupport(f, target).ok), target);
+});
+$('imgCompressTs')?.addEventListener('change', () => {
+  const entry = files[currentFileIdx];
+  if (entry) syncCompressRow(entry);
+});
 
 // Decode, transform, retag, then redraw everything that reads the dataset; logged like redaction.
 async function runImgEdit(opKey) {

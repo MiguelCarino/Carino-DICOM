@@ -39,18 +39,30 @@ reads; no browser requests them.
 | --- | --- | --- | --- | --- |
 | `dcmjs.min.js` | [dcmjs](https://github.com/dcmjs-org/dcmjs) | 0.29.8 | MIT | `LICENSE-dcmjs.txt` |
 | `lossless-min.js` | [jpeg-lossless-decoder-js](https://github.com/rii-mango/JPEGLosslessDecoderJS) | 2.1.2 | MIT | `LICENSE-jpeg-lossless-decoder-js.txt` |
-| `openjpegwasm_decode.js` | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codecs) | 1.3.0 | MIT | `LICENSE-codec-openjpeg.txt` |
-| `openjpegwasm_decode.wasm` | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codecs) | 1.3.0 | MIT | `LICENSE-codec-openjpeg.txt` |
-| `charlswasm_decode.js` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 | MIT | `LICENSE-codec-charls.txt` |
-| `charlswasm_decode.wasm` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 | MIT | `LICENSE-codec-charls.txt` |
+| `openjpegwasm.js` | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codecs) | 1.3.6 (OpenJPEG 2.5.4) | MIT | `LICENSE-codec-openjpeg.txt` |
+| `openjpegwasm.wasm` | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codecs) | 1.3.6 (OpenJPEG 2.5.4) | MIT | `LICENSE-codec-openjpeg.txt` |
+| `charlswasm.js` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 (CharLS 2.4.1) | MIT | `LICENSE-codec-charls.txt` |
+| `charlswasm.wasm` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 (CharLS 2.4.1) | MIT | `LICENSE-codec-charls.txt` |
 | `html2canvas.min.js` | [html2canvas](https://github.com/niklasvh/html2canvas) | 1.4.1 | MIT | `LICENSE-html2canvas.txt` |
 
-The two `*wasm_decode.*` pairs are the JPEG 2000 and JPEG-LS decoders. They are
+The two `*wasm.*` pairs are the JPEG 2000 and JPEG-LS codecs. They are
 WebAssembly, they are loaded lazily — nothing fetches either one until a study of
-that transfer syntax is opened — and they are **decode-only** builds on purpose:
-the full builds carry encoders this editor never calls, for 112 KB and 72 KB more
-of binary. Do not rename the four files; `locateFile` is what resolves a `.wasm`
-beside its loader, and upstream's names are what keep a refresh diffable.
+that transfer syntax is opened or the editor's **Compress** is pressed — and they
+are the **full** builds, decoder and encoder in one module: the editor's lossless
+Compress calls `J2KEncoder` and `JpegLSEncoder`. (Until then this tree shipped the
+decode-only builds, 117 KB and 72 KB smaller.) The same OpenJPEG module decodes
+High-Throughput JPEG 2000 (`.201`–`.203`), which it has done since 2.5.0; 1.3.6 is
+the first codec-openjpeg on OpenJPEG 2.5.4. Its tarball ships no `LICENSE`, so
+`LICENSE-codec-openjpeg.txt` is the MIT text at the root of the cornerstonejs/codecs
+monorepo, unchanged from 1.3.0's. Do not rename the four files; `locateFile` is
+what resolves a `.wasm` beside its loader, and upstream's names are what keep a
+refresh diffable.
+
+`../sbom.spdx.json` is upstream's SPDX 2.3 bill of materials for this directory and
+`../fonts/`, with a checksum for every shipped file. It is copied verbatim like the
+rest of the tree, and `packaging/make_sbom.py` folds it into the engine's own
+`carino-dicom.spdx.json`. Re-sync it with the bundles it describes, never edit it
+here: upstream's `node tools/make-sbom.mjs --check` is what proves it current.
 
 A `.wasm` has to be served as `application/wasm` or the streaming compiler will
 not take it. `pacs/web.py` registers that MIME type at import rather than trusting
@@ -73,8 +85,8 @@ notice clauses are about:
 
 | Compiled inside the `.wasm` | Licence | Text |
 | --- | --- | --- |
-| [OpenJPEG](https://github.com/uclouvain/openjpeg) (inside `openjpegwasm_decode.wasm`) | BSD 2-Clause | `LICENSE-openjpeg.txt` |
-| [CharLS](https://github.com/team-charls/charls) (inside `charlswasm_decode.wasm`) | BSD 3-Clause | `LICENSE-charls.txt` |
+| [OpenJPEG](https://github.com/uclouvain/openjpeg) (inside `openjpegwasm.wasm`) | BSD 2-Clause | `LICENSE-openjpeg.txt` |
+| [CharLS](https://github.com/team-charls/charls) (inside `charlswasm.wasm`) | BSD 3-Clause | `LICENSE-charls.txt` |
 
 `dcmjs.min.js` is the jsDelivr build of `dcmjs@0.29.8/build/dcmjs.js`, which is
 a bundle: three of its dependencies are compiled into the file we ship, so their
@@ -155,12 +167,13 @@ going stale against the code is the failure mode this table exists to prevent:
 
     npm pack @cornerstonejs/codec-openjpeg@<version>
     tar xzf cornerstonejs-codec-openjpeg-<version>.tgz
-    cp package/dist/openjpegwasm_decode.js package/dist/openjpegwasm_decode.wasm .
-    cp package/LICENSE LICENSE-codec-openjpeg.txt
+    cp package/dist/openjpegwasm.js package/dist/openjpegwasm.wasm .
+    # 1.3.6 ships no LICENSE: take the monorepo's and diff it against the old one
+    curl -o LICENSE-codec-openjpeg.txt https://raw.githubusercontent.com/cornerstonejs/codecs/main/LICENSE
 
     npm pack @cornerstonejs/codec-charls@<version>
     tar xzf cornerstonejs-codec-charls-<version>.tgz
-    cp package/dist/charlswasm_decode.js package/dist/charlswasm_decode.wasm .
+    cp package/dist/charlswasm.js package/dist/charlswasm.wasm .
     cp package/LICENSE LICENSE-codec-charls.txt
 
 The two BSD texts are not in either tarball — the wrappers ship their own MIT

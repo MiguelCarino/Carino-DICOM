@@ -1,5 +1,6 @@
 // Compression: what a file's Pixel Data is encoded with, whether that encoding lost anything, what
-// can go wrong in other viewers, and a way back to plain uncompressed pixels (Explicit VR LE).
+// can go wrong in other viewers, a way back to plain uncompressed pixels (Explicit VR LE), and a
+// lossless way forward (JPEG-LS or JPEG 2000, proved by decoding every frame back before keeping it).
 //
 // Lossless is judged from three places, strongest first: the codestream itself (JPEG-LS NEAR,
 // JPEG Lossless point transform, JPEG 2000 wavelet), the transfer syntax (PS3.5 Table A-1), and the Lossy Image Compression flag
@@ -55,7 +56,7 @@ for (const ts of ['59', '60', '61', '62', '63', '64', '65', '66'])
 const JPEG_LOSSLESS_TS = new Set(['1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.58', '1.2.840.10008.1.2.4.70']);
 
 // (0028,2114) Lossy Image Compression Method defined terms (PS3.3 C.7.6.1.1.5.1).
-const LOSSY_METHOD = { jls: 'ISO_14495_1', j2k: 'ISO_15444_1', jpeg: 'ISO_10918_1' };
+const LOSSY_METHOD = { jls: 'ISO_14495_1', j2k: 'ISO_15444_1', htj2k: 'ISO_15444_15', jpeg: 'ISO_10918_1' };
 
 // JPEG-LS (ISO 14495-1): SOF55 gives precision, SOS carries NEAR (0 = lossless).
 function jlsHeader(buf) {
@@ -293,7 +294,8 @@ async function decompressDicom(entry) {
     setTag(d, '00282110', 'CS', '01');
     if (!lookupTag(d, '00282112')?.Value?.length && info.ratio) setTag(d, '00282112', 'DS', info.ratio.toFixed(2));
     const fam = info.ts.startsWith('1.2.840.10008.1.2.4.8') ? 'jls'
-              : /^1\.2\.840\.10008\.1\.2\.4\.(9|20)/.test(info.ts) ? 'j2k' : 'jpeg';
+              : /^1\.2\.840\.10008\.1\.2\.4\.20/.test(info.ts) ? 'htj2k'
+              : /^1\.2\.840\.10008\.1\.2\.4\.9/.test(info.ts) ? 'j2k' : 'jpeg';
     if (!lookupTag(d, '00282114')?.Value?.length) setTag(d, '00282114', 'CS', LOSSY_METHOD[fam]);
   }
   meta['00020010'] = { vr: 'UI', Value: ['1.2.840.10008.1.2.1'] };
@@ -306,6 +308,168 @@ async function decompressDicom(entry) {
 }
 const DECOMPRESS_RESTORE_TAGS = ['00280100', '00280101', '00280102', '00280103', '00280004', '00280006',
                                  '7FE00001', '7FE00002', '00282110', '00282112', '00282114'];
+
+// ---- Lossless compression ----
+// The two syntaxes this tool writes. Both are lossless by definition (PS3.5 A.4.3, A.4.4: the
+// .80 and .90 UIDs admit only reversible streams), both are in the vendored dcmjs writer's
+// encapsulation list (DCMJS_ENCAPSULATED_TS), and both encoders are already loaded for decoding.
+// HTJ2K is not offered: OpenJPEG only decodes it, and dcmjs would not encapsulate it.
+const COMPRESS_TARGETS = {
+  '1.2.840.10008.1.2.4.80': { name: 'JPEG-LS Lossless', kind: 'jls' },
+  '1.2.840.10008.1.2.4.90': { name: 'JPEG 2000 Lossless', kind: 'j2k' },
+};
+// Photometric interpretations a lossless encode keeps as they are. JPEG 2000's encoder applies
+// the reversible colour transform to every 3-sample image, so its RGB is relabelled YBR_RCT
+// (PS3.5 8.2.4); YBR_FULL would be transformed twice, so only JPEG-LS takes it (PS3.5 8.2.3).
+const COMPRESS_PI = {
+  jls: new Set(['MONOCHROME1', 'MONOCHROME2', 'PALETTE COLOR', 'RGB', 'YBR_FULL']),
+  j2k: new Set(['MONOCHROME1', 'MONOCHROME2', 'PALETTE COLOR', 'RGB']),
+};
+
+// The photometric interpretation of the samples decodeStoredFrames will return.
+function compressSourcePI(ts, piTag) {
+  const pi = String(piTag || '').trim().toUpperCase();
+  return /^YBR_(RCT|ICT)$/.test(pi) && /^1\.2\.840\.10008\.1\.2\.4\.(9[01]|20[123])$/.test(ts) ? 'RGB' : pi;
+}
+
+// Whether compressDicom can run, from headers alone (for buttons). target is a COMPRESS_TARGETS UID.
+function compressSupport(entry, target) {
+  const info = compressionInfo(entry);
+  const t = COMPRESS_TARGETS[target];
+  if (!t) return { ok: false, info, why: T('This tool does not write that transfer syntax.') };
+  if (!info.hasPixels) return { ok: false, info, why: T('This file has no Pixel Data.') };
+  if (info.ts === target) return { ok: false, info, why: T('Already in that compression.') };
+  // Re-encoding a lossy stream keeps its loss and hides it under a lossless UID; decompressing is
+  // the honest way to change its encoding, and it stays flagged.
+  if (info.compressed && info.lossless !== true)
+    return { ok: false, info, why: T('Only uncompressed or losslessly compressed images are compressed again: this one is lossy, or cannot be shown to be lossless.') };
+  const sup = redactionSupport(entry.meta);
+  if (!sup.ok) return { ok: false, info, why: `${T('This browser has no decoder for this compression.')} (${sup.codec})` };
+  if (sup.depthLoss) return { ok: false, info, why: T('Only uncompressed or losslessly compressed images are compressed again: this one is lossy, or cannot be shown to be lossless.') };
+  const pm = readPixelModuleAttrs(entry.dict);
+  // A lossless J2K/HTJ2K colour image is tagged YBR_RCT but decodes to RGB (storedWasmFrames).
+  const pi = compressSourcePI(info.ts, pm.pi);
+  if (pm.ba !== 8 && pm.ba !== 16) return { ok: false, info, why: `Bits Allocated ${pm.ba}: ${T('only 8- and 16-bit samples are compressed.')}` };
+  // A high bit below the top of Bits Stored, Bits Stored past Bits Allocated, or 8 bits stored in
+  // 16 (the codecs hand back one byte per sample for that) is a layout the encoders' sample model
+  // does not describe.
+  if (!(pm.bs >= 2 && pm.bs <= pm.ba && pm.hb === pm.bs - 1) || (pm.ba === 16 && pm.bs <= 8))
+    return { ok: false, info, why: T('The pixel layout (Bits Stored, High Bit) is not one these encoders describe.') };
+  if (!COMPRESS_PI[t.kind].has(pi) || pm.spp !== (/^(RGB|YBR_FULL)$/.test(pi) ? 3 : 1))
+    return { ok: false, info, why: `${pi || '—'}: ${T('this photometric interpretation cannot be written in that compression.')}` };
+  // CharLS has no signed samples; JPEG-LS in DICOM leaves them to convention, which viewers disagree on.
+  if (t.kind === 'jls' && pm.pr === 1) return { ok: false, info, why: T('Signed pixel values: JPEG-LS cannot carry them. JPEG 2000 Lossless can.') };
+  return { ok: true, info, target: t };
+}
+
+// Every sample fits in Bits Stored. Bits above it (old overlays, stray padding) are not part of
+// the image, and the encoders would either drop them or refuse; either way the file would change.
+function samplesFitBits(frames, bs, signed) {
+  const lo = signed ? -(2 ** (bs - 1)) : 0, hi = signed ? 2 ** (bs - 1) - 1 : 2 ** bs - 1;
+  for (const fr of frames) for (let i = 0; i < fr.length; i++) if (fr[i] < lo || fr[i] > hi) return false;
+  return true;
+}
+
+// Decomposition levels a frame can take: OpenJPEG refuses more than log2 of the shorter side.
+const j2kLevels = (w, h) => Math.max(0, Math.min(5, Math.floor(Math.log2(Math.min(w, h)))));
+
+// Encode one interleaved frame. Returns a copy of the codestream (the encoder's view into the wasm
+// heap dies with delete()). Throws on any encoder error.
+async function wasmEncodeFrame(kind, samples, fi) {
+  const mod = kind === 'j2k' ? await loadOpenJpeg() : await loadCharls();
+  const enc = kind === 'j2k' ? new mod.J2KEncoder() : new mod.JpegLSEncoder();
+  try {
+    enc.getDecodedBuffer(fi).set(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
+    if (kind === 'j2k') { enc.setQuality(true, 0); enc.setDecompositions(j2kLevels(fi.width, fi.height)); }
+    else { enc.setNearLossless(0); if (fi.componentCount === 3) enc.setInterleaveMode(2); }
+    enc.encode();
+    const out = enc.getEncodedBuffer();
+    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+  } finally { enc.delete(); }
+}
+
+// Rewrite one file's Pixel Data losslessly compressed. Every frame is decoded back and compared
+// with the samples it came from before anything is changed, so a file is only ever replaced by one
+// that holds the same values. Same SOP Instance UID: a lossless change of transfer syntax is not a
+// new image (PS3.5 8.2, as for decompressDicom). Undo goes through undoPixelTransform (op 'compress').
+async function compressDicom(entry, target) {
+  const can = compressSupport(entry, target);
+  if (!can.ok) return { error: can.why };
+  const d = entry.dict;
+  const meta = entry.meta || (entry.meta = {});
+  const kind = can.target.kind;
+
+  const src = await decodeStoredFrames(d, meta);
+  if (src.error) return { error: src.error };
+  const frameBytes = src.rows * src.cols * src.spp * Math.ceil(src.ba / 8);
+  const sizeBad = frameSizeProblem(src.frames, frameBytes);
+  if (sizeBad) return { error: sizeBad };
+  const signed = src.pr === 1;
+  if (!samplesFitBits(src.frames, src.bs, signed))
+    return { error: T('Some pixel values do not fit in Bits Stored, so a compressed copy would not hold the same values.') };
+
+  // Raw files keep their stored layout (decodeStoredFrames), so a planar colour frame is
+  // interleaved here: both encoders take RGBRGB…, and the result is written with (0028,0006) = 0.
+  const interleave = (fr) => {
+    if (!(src.raw && src.planar === 1 && src.spp === 3)) return fr;
+    const n = src.rows * src.cols, out = new (fr.constructor)(fr.length);
+    for (let c = 0; c < 3; c++) for (let i = 0; i < n; i++) out[i * 3 + c] = fr[c * n + i];
+    return out;
+  };
+  const fi = { width: src.cols, height: src.rows, bitsPerSample: src.bs, componentCount: src.spp,
+               isSigned: signed };
+  const encoded = [];
+  let after = 0;
+  for (let f = 0; f < src.frames.length; f++) {
+    const frame = interleave(src.frames[f]);
+    let buf;
+    try { buf = await wasmEncodeFrame(kind, frame, fi); }
+    catch (e) { return { error: `${T('Compression failed')} (${can.target.name}): ${e?.message || e}` }; }
+    // The proof: decode what was just written, sample for sample. Anything else is a refusal.
+    let back;
+    try { back = await wasmDecodeFrame(kind, buf); }
+    catch (e) { return { error: `${T('Compression failed')} (${can.target.name}): ${e?.message || e}` }; }
+    const got = back.bytes, want = new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+    const g8 = new Uint8Array(got);
+    // Planar is only meaningful for colour: CharLS reports a greyscale stream as interleave mode 0.
+    let same = g8.length === want.length && (src.spp === 1 || back.planar === 0);
+    for (let i = 0; same && i < want.length; i++) if (g8[i] !== want[i]) same = false;
+    if (!same) return { error: `${T('Compression failed')} (${can.target.name}): ${T('frame {n} did not decode back to the same values.').replace('{n}', f + 1)}` };
+    // Fragments must be even-length (PS3.5 A.4); both codecs end on a two-byte marker, but pad anyway.
+    if (buf.byteLength % 2) { const p = new Uint8Array(buf.byteLength + 1); p.set(new Uint8Array(buf)); buf = p.buffer; }
+    encoded.push(buf);
+    after += buf.byteLength;
+  }
+
+  markSeed(entry);
+  entry.pixelBackup = {
+    op: 'compress',
+    px: getTag(d, '7FE00010'),
+    tags: Object.fromEntries(DECOMPRESS_RESTORE_TAGS.map(t => [t, getTag(d, t)])),
+    seqs: {},
+    tsEl: meta['00020010'],
+    retagged: true,
+  };
+  entry.redactBackup = null;
+
+  setTag(d, '7FE00010', 'OB', encoded);
+  setTag(d, '00280100', 'US', src.ba);
+  setTag(d, '00280101', 'US', src.bs);
+  setTag(d, '00280102', 'US', src.hb);
+  setTag(d, '00280103', 'US', src.pr);
+  const pi = String(src.pi || '').trim().toUpperCase();
+  setTag(d, '00280004', 'CS', kind === 'j2k' && src.spp === 3 ? 'YBR_RCT' : pi);
+  if (src.spp === 3) setTag(d, '00280006', 'US', 0); else delTag(d, '00280006');
+  delTag(d, '7FE00001'); delTag(d, '7FE00002');   // a stale Extended Offset Table would misplace frames
+  // (0028,2110) is left as it is: "01" stays "01" (once lossy, always flagged), and nothing new was lost.
+  meta['00020010'] = { vr: 'UI', Value: [target] };
+
+  reseedKeepingEdits(entry);
+  if (files[currentFileIdx] === entry) resetEditHistory?.();
+  datasetDirty = true;
+  return { from: can.info.name, to: can.target.name, frames: encoded.length,
+           before: can.info.storedBytes || frameBytes * src.frames.length, after };
+}
 
 // Decoded stored values of two files, compared sample by sample. Tells "same pixels, different
 // encoding" apart from "different pixels" — the byte-level tag compare cannot.

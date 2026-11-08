@@ -1,4 +1,4 @@
-// Compression detection (js/compression.js) and the way back to uncompressed.
+// Compression detection (js/compression.js), the way back to uncompressed, and lossless compression.
 //
 // The codestreams below were encoded once, outside the app, from a synthetic 32x32 signed "CT" slice
 // (-2000 padding outside a circle, as scanners write it; no patient ever existed):
@@ -219,6 +219,99 @@
       const r = await decompressDicom(e);
       ok('.98 unwraps to plain Explicit VR LE with every value exact', !r.error && ts(reread(e)) === '1.2.840.10008.1.2.1'
          && samples(reread(e).dict).every((x, i) => x === ref[i]), r.error);
+    }
+
+    // ---- lossless compression ------------------------------------------------
+    // The oracle is the forge's reference image, computed from the samples and
+    // never from a codec, plus the stored values themselves where there is no
+    // colour or windowing to go through.
+    {
+      const JLS = '1.2.840.10008.1.2.4.80', J2K = '1.2.840.10008.1.2.4.90';
+      const corpus = await Forge.corpus();
+      const cid = (id) => corpus.find(c => c.id === id);
+      const asFile = async (c, n) => {
+        await handleFiles([new File([c.bytes], `cmp-${n}.dcm`)]);
+        return files[files.length - 1];
+      };
+      const shows = async (e, c) => {
+        const r = await decodeDicomPixels(e.dict, 0, { meta: e.meta });
+        if (!r || r.error) return (r && r.error) || 'no image';
+        return Forge.compare(r.pixels, Forge.expected(c.ref, c.w, c.h), c.tol) || null;
+      };
+      const stored = async (e) => (await decodeStoredFrames(e.dict, e.meta || {})).frames;
+      const sameSamples = (a, b) => a.length === b.length && a.every((fr, f) => fr.length === b[f].length && fr.every((v, i) => v === b[f][i]));
+
+      // Signed 16-bit CT: JPEG 2000 carries it, JPEG-LS is refused by name.
+      await load(ct({ n: 30, seriesUID: ROOT + '9.1', pixels: ref, wc: 40, ww: 400 }));
+      const sct = by(30);
+      ok('compress: JPEG-LS refuses signed pixels and says JPEG 2000 can',
+         !compressSupport(sct, JLS).ok && /JPEG 2000/.test(compressSupport(sct, JLS).why), compressSupport(sct, JLS).why);
+      ok('compress: JPEG 2000 Lossless accepts signed pixels', compressSupport(sct, J2K).ok, compressSupport(sct, J2K).why);
+      const uidBefore = String(lookupTag(sct.dict, '00080018').Value[0]);
+      const rs = await compressDicom(sct, J2K);
+      ok('compress: signed CT to JPEG 2000 Lossless', !rs.error && metaTS(sct.meta) === J2K, rs.error);
+      ok('compress: every signed value comes back exact', sameSamples(await stored(sct), [ref]));
+      ok('compress: the SOP Instance UID is unchanged', String(lookupTag(sct.dict, '00080018').Value[0]) === uidBefore);
+      ok('compress: it is reported as JPEG 2000 and lossless',
+         compressionInfo(sct).name === 'JPEG 2000 Lossless' && compressionInfo(sct).lossless === true, compressionLabel(compressionInfo(sct)));
+      {
+        const m = reread(sct);
+        ok('compress: the written file carries the new syntax', ts(m) === J2K, ts(m));
+        const back = await decodeStoredFrames(m.dict, m.meta);
+        ok('compress: the written file decodes to the same values', !back.error && sameSamples(back.frames, [ref]), back.error);
+      }
+      ok('compress: Undo puts the uncompressed pixels and syntax back',
+         undoPixelTransform(sct) && metaTS(sct.meta) === '1.2.840.10008.1.2.1' && sameSamples(await stored(sct), [ref]));
+
+      // Unsigned 12-in-16, JPEG-LS, then on to JPEG 2000 (a lossless source).
+      {
+        const c = cid('mono2-u16-b12');
+        const e = await asFile(c, 31);
+        const want = await stored(e);
+        const r = await compressDicom(e, JLS);
+        ok('compress: 12-bit greyscale to JPEG-LS Lossless', !r.error && metaTS(e.meta) === JLS, r.error);
+        ok('compress: its stored values are exact', sameSamples(await stored(e), want));
+        ok('compress: and it shows as the reference image', (await shows(e, c)) === null, await shows(e, c));
+        const r2 = await compressDicom(e, J2K);
+        ok('compress: a lossless JPEG-LS file can be recompressed as JPEG 2000', !r2.error && metaTS(e.meta) === J2K, r2.error);
+        ok('compress: still exact after two encodings', sameSamples(await stored(e), want));
+        ok('compress: the same syntax again is refused', !compressSupport(e, J2K).ok);
+      }
+      // Colour, planar configuration 1: interleaved on the way in, relabelled YBR_RCT by JPEG 2000.
+      for (const [target, pi] of [[JLS, 'RGB'], [J2K, 'YBR_RCT']]) {
+        const c = cid('rgb-planar1');
+        const e = await asFile(c, target === JLS ? 32 : 33);
+        const r = await compressDicom(e, target);
+        const piNow = String(lookupTag(e.dict, '00280004').Value[0]).trim();
+        ok(`compress: planar RGB to ${COMPRESS_TARGETS[target].name}`, !r.error && metaTS(e.meta) === target, r.error);
+        ok(`compress: ${COMPRESS_TARGETS[target].name} is labelled ${pi}, interleaved`,
+           piNow === pi && String(lookupTag(e.dict, '00280006')?.Value?.[0]) === '0', piNow);
+        ok(`compress: ${COMPRESS_TARGETS[target].name} RGB shows as the reference image`, (await shows(e, c)) === null, await shows(e, c));
+      }
+      // HTJ2K in, JPEG-LS out: the new decoder feeding the encoder.
+      {
+        const c = cid('htj2k-mono16-b12');
+        const e = await asFile(c, 34);
+        const r = await compressDicom(e, JLS);
+        ok('compress: HTJ2K Lossless to JPEG-LS Lossless', !r.error && metaTS(e.meta) === JLS, r.error);
+        ok('compress: and it shows as the reference image', (await shows(e, c)) === null, await shows(e, c));
+      }
+      // Refusals leave the file alone.
+      ok('compress: a lossy JPEG 2000 is refused', !compressSupport(by(4), JLS).ok && !compressSupport(by(4), J2K).ok,
+         compressSupport(by(4), JLS).why);
+      ok('compress: lossy baseline JPEG is refused', !compressSupport(await asFile(cid('jpeg-baseline'), 35), J2K).ok);
+      {
+        const px = new Uint16Array(32 * 32).fill(100);
+        px[5] = 5000;  // above 12 bits stored: an overlay bit, or garbage
+        await load(ct({ n: 36, seriesUID: ROOT + '9.2', pr: 0, bs: 12, hb: 11, intercept: 0, pixels: px }));
+        const e = by(36);
+        const r = await compressDicom(e, JLS);
+        ok('compress: values above Bits Stored are refused, not dropped',
+           !!r.error && /Bits Stored/.test(r.error) && metaTS(e.meta) === '1.2.840.10008.1.2.1', r.error || 'no error');
+      }
+      ok('compress: a target this tool does not write is refused', !compressSupport(sct, '1.2.840.10008.1.2.4.201').ok);
+      // The controls.
+      ok('compress: the controls exist', !!$('imgCompress') && !!$('imgCompressAll') && $('imgCompressTs')?.options.length === 2);
     }
   } catch (e) {
     ok('compression suite ran without throwing', false, e.stack || e.message);

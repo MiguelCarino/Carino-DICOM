@@ -1368,6 +1368,9 @@
     .img-comp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
     .img-comp-k { font: 600 var(--fs-label) var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
     .img-comp-v { font: 500 var(--fs-sm) var(--mono, var(--sans)); color: var(--text); flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+    .img-comp-row + .img-comp-row, .img-comp-notes + .img-comp-row { margin-top: 8px; }
+    .img-comp-sel { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: transparent;
+                    color: var(--text-sec); font: 500 var(--fs-label) var(--sans); max-width: 100%; }
     .img-comp-notes { margin: 6px 0 0; padding-left: 14px; font: 500 var(--fs-label) var(--sans); color: var(--text-muted); line-height: 1.5; }
     .img-comp-notes:empty { display: none; }
     .img-comp-notes li.warn { color: var(--warn); }

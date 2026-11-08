@@ -574,8 +574,9 @@
             <button class="btn hidden" id="imgRedactUndo" data-i18n>↺ Undo redaction</button>
           </div>
           <div class="img-edit-note" id="imgEditNote" data-i18n>Applied to the stored pixels of this file, every frame. Rows, Columns, Pixel Spacing and the patient geometry follow.</div>
-          <!-- Compression: what the pixels are encoded with, and the way back to uncompressed (same pixels,
-               new transfer syntax). Notes and warnings are filled by syncImgEditCard. -->
+          <!-- Compression: what the pixels are encoded with, the way back to uncompressed and a lossless
+               way forward (same pixels, new transfer syntax). Notes and warnings are filled by
+               syncImgEditCard. -->
           <div class="img-comp" id="imgComp">
             <div class="img-comp-row">
               <span class="img-comp-k" data-i18n>Compression</span>
@@ -584,6 +585,16 @@
               <button class="btn btn-xs hidden" id="imgDecompressAll"></button>
             </div>
             <ul class="img-comp-notes" id="imgCompNotes"></ul>
+            <!-- Lossless compression: the target syntax names stay English, like the tag table's. -->
+            <div class="img-comp-row hidden" id="imgCompressRow">
+              <span class="img-comp-k" data-i18n>Compress</span>
+              <select class="img-comp-sel" id="imgCompressTs" aria-label="Lossless compression">
+                <option value="1.2.840.10008.1.2.4.80">JPEG-LS Lossless</option>
+                <option value="1.2.840.10008.1.2.4.90">JPEG 2000 Lossless</option>
+              </select>
+              <button class="btn btn-xs" id="imgCompress" data-i18n>Compress</button>
+              <button class="btn btn-xs hidden" id="imgCompressAll"></button>
+            </div>
           </div>
         </div>
 
