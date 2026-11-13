@@ -189,7 +189,9 @@ meanings.
 
 There is no second, plaintext port. A plaintext peer cannot talk to a TLS listener
 and vice versa, so flipping `tls` breaks every modality that has not been
-reconfigured. The context is TLS 1.2 minimum, and the startup line reports
+reconfigured. The context is TLS 1.2 minimum; TLS 1.2 suites are ECDHE/DHE with AES-GCM or
+ChaCha20-Poly1305 only (PS3.15 B.13), so a peer that can offer only CBC suites fails the
+handshake. The startup line reports
 `[DICOM-TLS]`, or `[DICOM-TLS (mutual)]` when `tls_ca` is set.
 
 `tls_ca` deserves its own warning on the receiving side: setting it loads the CA

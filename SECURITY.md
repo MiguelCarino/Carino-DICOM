@@ -299,7 +299,9 @@ Separate from the operational log, which is a 500-entry ring buffer answering
   outbound side (Storage SCU) can verify the remote against a CA or the system
   trust store, present its own certificate for mutual TLS, or — for self-signed
   test setups — skip verification, which you should not do on a real network.
-  TLS 1.2 is the enforced floor. A destination marked `tls` is **never** dialled
+  TLS 1.2 is the enforced floor, and at TLS 1.2 only forward-secret AEAD suites
+  (ECDHE/DHE with AES-GCM or ChaCha20-Poly1305, PS3.15 B.13) are offered or
+  accepted, in both directions. A destination marked `tls` is **never** dialled
   in plaintext: when no client TLS context can be built, the send, the C-MOVE
   and every probe fail (and are retried, and show as stuck) instead of falling
   back to an unencrypted association.

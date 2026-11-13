@@ -36,7 +36,7 @@ and each one has been wrong here at least once.
    both declare `Requires-Python >=3.10`. If either library moves its floor,
    three documents and the CI matrix move with it.
 2. **`pip install -r requirements.txt` produces a working environment.** The
-   manifest declares `pydicom>=3.0` and `pynetdicom>=3.0` — the majors whose
+   manifest declares `pydicom>=3.0.2` and `pynetdicom>=3.0` — the majors whose
    APIs the code actually uses. CI installs from this file rather than from a
    list of its own, so a regression here turns the build red instead of being
    discovered by a stranger.

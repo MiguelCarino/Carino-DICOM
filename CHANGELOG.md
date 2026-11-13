@@ -6,6 +6,17 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 ## [Unreleased]
 
 ### Security
+- **DICOM-TLS takes the same cipher suites as the dashboard.** Every DICOM listener and
+  every outbound association now offers and accepts, at TLS 1.2, only ECDHE/DHE suites
+  with AES-GCM or ChaCha20-Poly1305, as PS3.15 B.13 (Modified BCP 195) asks. Before this
+  change they used OpenSSL's default list, which still included six CBC suites; only the
+  dashboard was restricted. TLS 1.3 is unchanged. **A peer that can offer only CBC suites
+  now fails the handshake**, and Activity → Connections reports it as a failed TLS
+  handshake (`pacs/tlsutil.py` `AEAD_CIPHERS`).
+- **pydicom 3.0.2 is the floor.** `requirements.txt` asked for `pydicom>=3.0`, which a
+  resolver could satisfy with 3.0.0 or 3.0.1; 3.0.2 carries a path-traversal fix in the
+  File-set (DICOMDIR) code, CVE-2026-32711. This engine does not read File-sets, so the
+  change is a precaution.
 - **A different object under a stored SOP Instance UID no longer replaces the stored one.**
   C-STORE and STOW-RS compare a resend with the stored copy on its data set (not the File
   Meta group). An identical resend leaves the file untouched. A different one is kept

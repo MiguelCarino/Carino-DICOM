@@ -16,9 +16,14 @@ import os
 import socket
 import ssl
 
-# TLS 1.2 suites for the dashboard: forward secrecy and AEAD only. TLS 1.3 has
-# its own fixed list in OpenSSL and is not affected by this string.
-WEB_CIPHERS = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!eNULL:!MD5:!DSS:!SHA1"
+# TLS 1.2 suites for every context built here, the dashboard's and the DICOM
+# listeners' and dialler's alike: forward secrecy and AEAD only, which is what
+# PS3.15 B.13 (Modified BCP 195) asks for — no CBC, no static-RSA key exchange.
+# TLS 1.3 has its own fixed list in OpenSSL and is not affected by this string.
+# A peer that can offer only CBC suites fails the handshake rather than being
+# given one.
+AEAD_CIPHERS = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!eNULL:!MD5:!DSS:!SHA1"
+WEB_CIPHERS = AEAD_CIPHERS
 
 
 def server_context(certfile: str, keyfile: str, ca: str = "") -> ssl.SSLContext:
@@ -32,6 +37,7 @@ def server_context(certfile: str, keyfile: str, ca: str = "") -> ssl.SSLContext:
         raise ValueError("TLS receiver needs both a certificate and a private key")
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.set_ciphers(AEAD_CIPHERS)
     ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
     if ca:
         # A CA on the receiver side means: require + verify client certs (mTLS).
@@ -54,6 +60,7 @@ def client_context(verify: bool = True, ca: str = "", certfile: str = "", keyfil
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.set_ciphers(AEAD_CIPHERS)
     if verify:
         if ca:
             ctx.load_verify_locations(cafile=ca)

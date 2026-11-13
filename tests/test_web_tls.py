@@ -378,5 +378,76 @@ def test_forwarded_headers_are_trusted_only_behind_proxy(tmp_path, behind):
     assert ("Secure" in cookie) is behind, cookie
 
 
+# ---- the DICOM contexts ------------------------------------------------------
+# The listeners and the dialler take the same suites as the dashboard (PS3.15
+# B.13): forward secrecy and AEAD, so no CBC suite is offered or accepted.
+
+def _weak_tls12(ctx: ssl.SSLContext) -> list:
+    return [c["name"] for c in ctx.get_ciphers()
+            if c["protocol"] != "TLSv1.3"
+            and (not c["name"].startswith(("ECDHE", "DHE"))
+                 or not any(a in c["name"] for a in ("GCM", "CHACHA20", "CCM")))]
+
+
+def test_dicom_contexts_offer_only_forward_secret_aead_suites(tmp_path):
+    cert, key, _ = _pair(str(tmp_path))
+    for ctx in (tlsutil.server_context(cert, key), tlsutil.client_context(verify=False)):
+        assert ctx.minimum_version == ssl.TLSVersion.TLSv1_2
+        assert ctx.get_ciphers(), "no suites left at all"
+        assert _weak_tls12(ctx) == []
+
+
+def _handshake(server_ctx: ssl.SSLContext, client_ctx: ssl.SSLContext) -> str:
+    """One TLS handshake over loopback; the negotiated suite, or raises."""
+    with socket.socket() as lsock:
+        lsock.bind(("127.0.0.1", 0))
+        lsock.listen(1)
+        port = lsock.getsockname()[1]
+
+        def serve():
+            try:
+                conn, _ = lsock.accept()
+                with conn:
+                    conn.settimeout(5)
+                    with server_ctx.wrap_socket(conn, server_side=True) as tls:
+                        tls.recv(1)
+            except (OSError, ssl.SSLError):
+                pass
+
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+                with client_ctx.wrap_socket(raw, server_hostname="localhost") as tls:
+                    name = tls.cipher()[0]
+                    tls.sendall(b"x")
+                    return name
+        finally:
+            t.join(5)
+
+
+def test_dicom_listener_refuses_a_cbc_only_peer(tmp_path):
+    cert, key, _ = _pair(str(tmp_path))
+    server = tlsutil.server_context(cert, key)
+
+    def tls12_client(ciphers):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        ctx.set_ciphers(ciphers)
+        return ctx
+
+    try:
+        cbc = tls12_client("ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256:"
+                           "ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256")
+    except ssl.SSLError:
+        pytest.skip("this OpenSSL cannot offer a CBC suite")
+    with pytest.raises((ssl.SSLError, ConnectionError)):
+        _handshake(server, cbc)
+    # An AEAD suite at TLS 1.2 still connects: the floor is the suite, not 1.3.
+    assert "GCM" in _handshake(server, tls12_client("ECDHE+AESGCM"))
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
