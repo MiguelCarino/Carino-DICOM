@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Where the library tags sit, and that the app still sees them.
 //
 // dcmjs, the de-identification profile and the tag dictionary are 1.4 MB of

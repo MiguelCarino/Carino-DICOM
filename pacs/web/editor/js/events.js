@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Main UI event wiring (drop, pickers, bulk actions, compare, search) and tab switching.
 // ---- Events ----
 window.addEventListener('dragover', e => { e.preventDefault(); body.classList.add('dragging'); });
@@ -81,6 +85,11 @@ anonymizeBtn.addEventListener('click', () => {
     } catch (err) { log('✗ ' + (err.message || err)); toast?.(err.message || String(err), 8000); return; }
     // remapUIDs ignores the profile table, so skipping it is what implements Retain UIDs.
     if (!deidOptions.has('rtnUIDsOpt')) remapUIDs();
+    {
+      const optNames = [...deidOptions].map(o => DEID_OPTION_CODES[o][1]);
+      noteChangeAll(files, 'deid', 'De-identified: DICOM PS3.15 Basic Profile' + (optNames.length ? ` + ${optNames.join(' + ')}` : '')
+        + (deidOptions.has('rtnUIDsOpt') ? ', UIDs kept' : ', UIDs remapped'));
+    }
     reseedAllPending();
     syncToUI();
     // Burned-in pixel identity needs per-image judgement, so point at Redact instead of guessing.
@@ -111,6 +120,7 @@ randomizeBtn.addEventListener('click', () => {
     // Not de-identification, so a ticked Retain UIDs (left from an earlier Anonymize) does not
     // apply: a fake patient must never share the real study's UIDs.
     remapUIDs({ honourOptions: false });
+    noteChangeAll(files, 'fake', 'Fake patient (test data): made-up name, IDs, birth date and study dates; new UIDs');
     reseedAllPending();
     syncToUI();
     log(T('Randomized all files'));
@@ -222,6 +232,8 @@ $('swapOk').addEventListener('click', () => {
   }
   swapPatients(ia, ib, withAcc);
   if (newUIDs) remapUIDs({ honourOptions: false });
+  const swapText = 'Patient swapped with the other loaded study' + (withAcc ? ', Accession Number included' : '') + (newUIDs ? ', new UIDs' : '');
+  noteChangeAll([...ia, ...ib].map(i => files[i]), 'swap', swapText);
   reseedAllPending();
   syncToUI();
   if ([...ia, ...ib].some(i => isYes(files[i].dict, '00280301')))

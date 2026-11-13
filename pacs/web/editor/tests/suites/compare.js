@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Comparing is a second column in the editor's table, not a second screen.
 //
 // So the things worth asserting are the ones that only hold if it really is the

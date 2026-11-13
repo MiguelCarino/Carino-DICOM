@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Extractor tab: render DICOM files to PNG images.
 // ---- Extractor ----
 // Files dropped here. The open study is not copied in: extractorItems() reads it fresh, so its

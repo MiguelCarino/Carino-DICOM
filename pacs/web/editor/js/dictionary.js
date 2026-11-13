@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Tag-table filter categories that the group rule in catFor() gets wrong.
 // Names and VRs come from dicom-dictionary.js; this file only says which chip a tag sits under.
 const TAG_CATS = {

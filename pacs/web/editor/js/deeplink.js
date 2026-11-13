@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Deep-link loader: open a study from Carino DICOM (PACS) or a forged sample/test case.
 // The hash may name a module first (#edit&sample=ct); js/events.js routes that part, and every
 // parser below looks for its own key after a "#" or "&", so either order works.

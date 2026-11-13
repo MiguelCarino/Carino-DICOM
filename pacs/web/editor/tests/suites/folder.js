@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // A study is a folder, not a tidy list of *.dcm.
 //
 // What comes off a burned CD or out of a PACS export is a tree of extensionless

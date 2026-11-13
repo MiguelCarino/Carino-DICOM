@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Find burned-in text: on-device OCR that proposes boxes for the redaction workspace.
 // Nothing here writes pixels. It reads every frame, marks the words that match this file's
 // own identifying attributes, and hands the boxes to redactUI; Apply still goes through

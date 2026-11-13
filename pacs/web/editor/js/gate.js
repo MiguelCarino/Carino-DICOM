@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Input gate: until every script has run, user input could reach a handler whose helpers live in a later file.
 // DOMContentLoaded fires only after all parser-inserted scripts (defer included) have executed.
 (function () {

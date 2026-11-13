@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // DOM handles, global state, per-file working copies, tag/path helpers and UID prefix detection.
 // ---- Elements ----
 const $ = (id) => document.getElementById(id);
@@ -392,6 +396,7 @@ function applyPrefixToAll(newP) {
       if (mi?.Value) mi.Value = mi.Value.map(rewrite);
     }
     reseedAllPending();
+    noteChangeAll(files, 'uid', `UID root moved: ${oldP || '(none)'} → ${newP} (${n} UIDs across ${m} files)`);
     sharedUIDPrefix = newP;
     uidPrefixInput.value = newP;
     uidPatternDisplay.textContent = `${newP}.*`;

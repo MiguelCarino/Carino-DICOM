@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Regression cases for the October 2026 review: every fix applied from it has an assertion
 // here that checks the corrected behaviour (never the old one). Grouped by area; each case
 // forges its own file with tests/dicom-forge.js and drives the real code path (the Anonymize

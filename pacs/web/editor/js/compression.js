@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Compression: what a file's Pixel Data is encoded with, whether that encoding lost anything, what
 // can go wrong in other viewers, a way back to plain uncompressed pixels (Explicit VR LE), and a
 // lossless way forward (JPEG-LS or JPEG 2000, proved by decoding every frame back before keeping it).

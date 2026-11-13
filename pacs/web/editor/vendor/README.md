@@ -43,7 +43,7 @@ reads; no browser requests them.
 | `openjpegwasm.wasm` | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codecs) | 1.3.6 (OpenJPEG 2.5.4) | MIT | `LICENSE-codec-openjpeg.txt` |
 | `charlswasm.js` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 (CharLS 2.4.1) | MIT | `LICENSE-codec-charls.txt` |
 | `charlswasm.wasm` | [@cornerstonejs/codec-charls](https://github.com/cornerstonejs/codecs) | 1.2.3 (CharLS 2.4.1) | MIT | `LICENSE-codec-charls.txt` |
-| `html2canvas.min.js` | [html2canvas](https://github.com/niklasvh/html2canvas) | 1.4.1 | MIT | `LICENSE-html2canvas.txt` |
+| `../carino-html2canvas.js` (fleet copy) | [html2canvas](https://github.com/niklasvh/html2canvas) | 1.4.1 | MIT | `LICENSE-html2canvas.txt` |
 
 The two `*wasm.*` pairs are the JPEG 2000 and JPEG-LS codecs. They are
 WebAssembly, they are loaded lazily — nothing fetches either one until a study of
@@ -69,14 +69,16 @@ not take it. `pacs/web.py` registers that MIME type at import rather than trusti
 the host to know it: Python reads `/etc/mime.types` on Linux and the registry on
 Windows, and `.wasm` is frequently absent from the latter.
 
-`html2canvas.min.js` draws the editor's reports (tag dump, Overview, Compare) page by
-page so `js/render.js` can write them into a PDF the operator downloads, instead of
-opening the print dialog. It is upstream's `dist/html2canvas.min.js`, unmodified, and
-like the codecs it is fetched only when a report is made. It makes no request of its
-own: the report it draws carries its pictures as `data:` URLs and its fonts from
-`../fonts/`. tslib's helpers are compiled into it; their 0BSD notice is the second
-comment in the file and ships inside it, which is all 0BSD asks. The MIT notice that
-does bind the shipped binary and image is `LICENSE-html2canvas.txt`.
+html2canvas draws the editor's reports (tag dump, Overview, Compare, Change report) page
+by page into the PDF the operator downloads. It is no longer vendored in this directory:
+upstream's shared report engine (`../carino-pdf.js`) loads its own copy,
+`../carino-html2canvas.js`, which sits beside it and is copied verbatim with the rest of
+the tree. That copy is html2canvas's own `dist/html2canvas.min.js`, unmodified, and like
+the codecs it is fetched only when a report is made. It makes no request of its own: the
+report it draws carries its pictures as `data:` URLs and its fonts from `../fonts/`.
+tslib's helpers are compiled into it; their 0BSD notice is the second comment in the file
+and ships inside it, which is all 0BSD asks. The MIT notice that does bind the shipped
+binary and image stays here as `LICENSE-html2canvas.txt`.
 
 Those MIT notices cover the emscripten wrappers only. The C libraries compiled
 *into* the `.wasm` are separate works under separate terms, and shipping a

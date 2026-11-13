@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Browser self-test (#selftest): runs tests/suites in the visitor's browser and reports
 // which transfer syntaxes / photometric interpretations this browser decodes.
 // Page-load route only: suites mutate session state, so it never runs over an open study
@@ -6,7 +10,7 @@
 // Must match tests/suites (a browser cannot glob it); tests/suites/selftest.js checks this.
 // Ordered parse -> decode -> display -> edit -> export, not alphabetically.
 const SELFTEST_SUITES = ['boot', 'loading', 'folder', 'pixels', 'viewer', 'presentation', 'render', 'phone',
-                         'sequences', 'series', 'edits', 'imgedit', 'compression', 'compare', 'pdf', 'deid', 'swap',
+                         'sequences', 'series', 'edits', 'imgedit', 'compression', 'compare', 'pdf', 'changes', 'deid', 'swap',
                          'redact', 'samples', 'eyephoto', 'zip'];
 // Suites the visitor's self-test leaves out, and why; tests/suites/selftest.js counts these as
 // listed. ocr: it would fetch the ~8 MB OCR engine and model, which the page promises to load

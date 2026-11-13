@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Create → Eye photo: camera JPEGs and PNGs become Ophthalmic Photography 8 Bit images.
 //
 // What a wrong converter gets wrong, and so what this checks: the SOP class and Modality (OP,

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // A de-identification option has to be worth the code it writes into the file.
 //
 // PS3.15 Table E.1-1 carries a column per optional profile, and every option a

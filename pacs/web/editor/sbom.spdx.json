@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "Carino DICOM Editor 1.2.0 third-party components",
-  "documentNamespace": "https://dcm.carino.systems/spdx/carino-dicom-editor-1.2.0-4ac2013d3404a42d6d8e7d7c8d4dc975",
+  "documentNamespace": "https://dcm.carino.systems/spdx/carino-dicom-editor-1.2.0-102c53ac53825a450fcbab54e00d38ad",
   "creationInfo": {
-    "created": "2026-11-08T07:16:25Z",
+    "created": "2026-11-10T19:43:47Z",
     "creators": [
       "Tool: tools/make-sbom.mjs"
     ]
@@ -243,6 +243,7 @@
           "referenceLocator": "pkg:npm/html2canvas@1.4.1"
         }
       ],
+      "comment": "fleet copy loaded by carino-pdf.js (canonical in Branding)",
       "licenseInfoFromFiles": [
         "NOASSERTION"
       ],
@@ -716,7 +717,7 @@
     },
     {
       "SPDXID": "SPDXRef-File-7",
-      "fileName": "./vendor/html2canvas.min.js",
+      "fileName": "./carino-html2canvas.js",
       "checksums": [
         {
           "algorithm": "SHA1",

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Softcopy Presentation States (PS3.3 A.33, PS3.4 N.2): which loaded PR refers to which image, and
 // its grayscale pipeline (Modality LUT, VOI window, Presentation LUT shape) or Palette Color LUT.
 // Spatial and annotation parts (displayed area, rotation, graphics) are not applied.

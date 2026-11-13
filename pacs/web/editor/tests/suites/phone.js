@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // The page at phone width (390x844), in a same-origin iframe of that size, since run.sh's window
 // is 1280x720 and #selftest's is whatever the visitor has. Oracle: the frame's own geometry.
 // `html, body { overflow: hidden }` means anything past the right edge cannot be scrolled to, so

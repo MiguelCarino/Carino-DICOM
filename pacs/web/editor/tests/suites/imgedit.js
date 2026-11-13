@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Rotate and flip written into the stored pixels: does the picture actually
 // turn, in every frame, in the file's own numbers — and does the geometry that
 // describes it turn with it?

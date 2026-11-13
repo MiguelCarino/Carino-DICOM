@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /* =====================================================================
    DICOM PS3.6 Data Dictionary — complete tag -> [name, VR] lookup.
    Auto-generated from the Innolitics dicom-standard machine-readable

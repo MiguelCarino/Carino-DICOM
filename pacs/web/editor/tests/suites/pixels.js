@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Decoder-level checks: does decodeDicomPixels() get the numbers out of the file?
 //
 // This suite deliberately stops short of display. For greyscale it asserts on

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // A DICOM dataset is a tree, and the Edit table has to be one too.
 //
 // A sequence used to render as a single row holding a run of backslashes, with

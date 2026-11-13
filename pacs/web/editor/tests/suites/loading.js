@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Loading a study reads ahead of the parser, and nothing may fall out of order.
 //
 // handleFiles used to read one file, parse it, and only then ask the disk for

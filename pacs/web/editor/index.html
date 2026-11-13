@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+     License, v. 2.0. If a copy of the MPL was not distributed with this
+     file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
 <html lang="en">
 <head>
     <link rel="icon" type="image/webp" href="logo.webp">
@@ -27,6 +30,7 @@
   <script src="carino-navbar.js" data-app="DCM" data-repo="Carino-DICOM-Editor" data-license="MPL-2.0" defer></script>
   <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
   <script src="carino-ui.js" defer></script>
+  <script src="carino-pdf.js" defer></script>
   <script src="carino-lang.js" defer></script>
   <script src="i18n.js" defer></script>
   <!-- Theme before first paint, so neither theme flashes the other:
@@ -403,6 +407,7 @@
               <button id="exportJsonBtn" class="tb-menu-item" title="Export tags as JSON">JSON</button>
               <button id="exportCsvBtn" class="tb-menu-item" title="Export tags as CSV">CSV</button>
               <button id="printTagsBtn" class="tb-menu-item" title="Download all tags as a PDF" data-i18n>📄 PDF</button>
+              <button id="changeReportBtn" class="tb-menu-item" title="A PDF of everything this session changed: each source file, the file it is saved as, and every difference" data-i18n>📋 Change report</button>
               <!-- Shown only on dcm.carino.systems (js/events.js): Files admits that origin, not the PACS's LAN copy. -->
               <button id="openInFilesBtn" class="tb-menu-item" hidden data-i18n>Open in Files</button>
             </div>
@@ -983,6 +988,28 @@
     </div>
   </div>
 
+  <!-- Every PDF report is previewed here first (js/report-preview.js); Download writes the PDF. -->
+  <!-- Report preview: the fleet's .rpv layout (carino-ui.css): controls in the left column, Print and
+       Download at its foot, the document on the right. js/report-preview.js drives it. -->
+  <div class="rpv-scrim" id="rpOverlay" hidden>
+    <div class="rpv" role="dialog" aria-modal="true" aria-labelledby="rpTitle">
+      <aside class="rpv-side">
+        <div class="rpv-head">
+          <h2 class="rpv-title" id="rpTitle" data-i18n>Report preview</h2>
+          <button class="modal-x rpv-x" id="rpClose" type="button" title="Close" aria-label="Close">✕</button>
+        </div>
+        <p class="rpv-status" id="rpStatus" role="status" aria-live="polite"></p>
+        <div class="rpv-opts" id="rpOpts" hidden></div>
+        <p class="rpv-name" id="rpName"></p>
+        <div class="rpv-actions">
+          <button class="btn" id="rpPrint" type="button" disabled data-i18n>🖨 Print</button>
+          <button class="btn btn-primary primary" id="rpDownload" type="button" disabled>Download PDF</button>
+        </div>
+      </aside>
+      <div class="rpv-stage rpv-fit" id="rpStage"><iframe id="rpFrame" class="rpv-frame" title="Report preview"></iframe></div>
+    </div>
+  </div>
+
   <!-- Browser self-test (#selftest), reached from the Info dropdown and tests/gallery.html; never in a
        normal session because the suites load their own files. See runSelfTest(). -->
   <div class="selftest hidden" id="selftest">
@@ -1043,6 +1070,8 @@
 <script src="js/dictionary.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/render.js"></script>
+<script src="js/report-preview.js"></script>
+<script src="js/changes.js"></script>
 <script src="js/preview.js"></script>
 <script src="js/anonymize.js"></script>
 <script src="js/image-edits.js"></script>

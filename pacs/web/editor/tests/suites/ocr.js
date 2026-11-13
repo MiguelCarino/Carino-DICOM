@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // @realtime: the OCR engine runs in a Web Worker, which headless Chromium's virtual clock does
 // not wait for, so run.sh hands this suite to tests/realtime.py (which also checks that no
 // request, the worker's included, leaves the origin). Not in #selftest: see SELFTEST_SKIPPED.

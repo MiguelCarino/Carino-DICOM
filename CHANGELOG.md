@@ -35,6 +35,17 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   (`pacs/dicomfs.py`).
 
 ### Added
+- **Change report, and a preview before every report, in the bundled editor** (re-synced to
+  upstream `3a78a84`). Export ▸ Change report lists what a session did to each loaded file:
+  the source file and the file a download writes (name, size, SHA-256, transfer syntax, SOP
+  Instance UID, whether Pixel Data was rewritten), the actions taken in order, and every tag
+  that differs, with a switch that hides the before-values that could name the patient.
+  Every report (tag dump, Overview, Comparison, Change report) now opens in a preview laid
+  out as the file will be, and downloads as PDF or as a self-contained HTML file. The
+  reports are drawn by upstream's shared engine, so `editor/carino-pdf.js` and
+  `editor/carino-html2canvas.js` arrive and `editor/vendor/html2canvas.min.js` goes; the
+  library is the same html2canvas 1.4.1, still fetched only when a report is made and
+  making no request of its own. The editor's own source files now carry the MPL-2.0 notice.
 - **Lossless-only transfer-syntax transcoding on the way out.** The receiver still stores
   every object exactly as it arrived; what changes is sending and serving. A destination,
   C-MOVE target or C-GET requestor that accepts an instance's SOP class only uncompressed
