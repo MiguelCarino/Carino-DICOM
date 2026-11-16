@@ -2179,7 +2179,8 @@ One entry looks like this:
   "enabled": false,
   "tls": false,
   "no_ris": false,
-  "emergency_trigger": false
+  "emergency_trigger": false,
+  "compress_lossless": false
 }
 ```
 
@@ -2323,6 +2324,45 @@ copied into the outgoing folder with these names **pinned** onto its send state,
 normal retry pipeline back-fills the primary when it returns. The node that actually
 triggered the outage stays pinned even if the flag is later cleared, because it is the one
 the operator is waiting on.
+
+### `destinations[].compress_lossless`
+
+`boolean` · default `false`
+
+Compress on the way out, losslessly, for this node only. An instance stored uncompressed
+(Explicit or Implicit VR Little Endian) is proposed as **JPEG-LS Lossless** first, then
+**JPEG 2000 Lossless**, then as stored, each in a presentation context of its own. When
+the node accepts one of the lossless syntaxes, the instance goes out as an in-memory encode
+in it; when it accepts neither, it goes out as stored, exactly as with the flag off.
+
+It is for a branch forwarding to a central archive over a slow uplink. Modalities, CT
+especially, mostly send uncompressed, and JPEG-LS typically makes CT two to three times
+smaller with every pixel unchanged.
+
+The rules are the ones `pacs/transcode.py` applies everywhere else:
+
+- **Lossless only.** No lossy syntax is ever proposed, whatever the node accepts.
+- **Same SOP Instance UID.** The far side's duplicate check sees the instance it knows.
+- **Verified.** Every encode is decoded again and compared with the source pixels before
+  it is sent. An encode that does not match, or an image the codec cannot hold (JPEG-LS
+  above 16 bits, 1-bit pixels), is not sent compressed: the next accepted lossless
+  syntax is tried, then the stored one. The Send line then says `sent as stored, could
+  not compress: …`.
+- **The stored file is never touched.**
+- **Bounded memory.** Above 1 GiB of decoded pixels nothing is proposed but the stored
+  syntax, and at most two transcodes run at once across the appliance.
+
+An instance stored compressed is sent as before (as stored, or decompressed for a node
+that takes only uncompressed); it is never re-encoded. Objects without Pixel Data (SR,
+KO, presentation states) are sent as stored. With no JPEG-LS or JPEG 2000 encoder on
+this install (`pacs transcode --list`) the flag does nothing.
+
+A compressed delivery says so on its log line, e.g. `Sent ct.dcm -> Central (sent
+compressed: Explicit VR Little Endian → JPEG-LS Lossless)`, and in Activity →
+Connections as `sending compressed: …`.
+
+Not on the Destinations card yet: set it in `config.json`. A dashboard Save keeps it.
+Type-checked as a boolean, like the other flags.
 
 ### `destinations[].ephemeral`
 

@@ -135,7 +135,7 @@ READ_ACTIONS = frozenset({STUDY_READ})
 # would otherwise read as "changed" on a Save that touched nothing — refusing a
 # profile without destinations.write and putting a phantom change in the trail.
 _DEST_ROW_DEFAULTS = {"tls": False, "no_ris": False, "emergency_trigger": False,
-                      "ephemeral": False}
+                      "ephemeral": False, "compress_lossless": False}
 
 
 def _rows_with_defaults(doc: dict) -> dict:

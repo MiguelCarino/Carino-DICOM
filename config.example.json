@@ -166,6 +166,8 @@
       "tls": false,
       "no_ris": false,
       "emergency_trigger": false,
+      "_comment_compress_lossless": "true: offer an instance stored uncompressed as JPEG-LS Lossless, then JPEG 2000 Lossless, ahead of its stored syntax, and send a lossless in-memory encode (same SOP Instance UID, verified pixel for pixel) when the node accepts one. Falls back to the stored syntax when it does not. Never lossy. For forwarding over a slow uplink.",
+      "compress_lossless": false,
       "_comment_ephemeral": "written by `pacs serve --dev-peer` on the rows that point at the disposable test archive; they are removed when it is discarded. Do not set it by hand.",
       "ephemeral": false
     }

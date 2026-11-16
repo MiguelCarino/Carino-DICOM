@@ -190,7 +190,7 @@ def test_duplicate_destination_names_are_refused():
 
 def test_destination_flags_are_booleans_too():
     node = {"name": "PACS", "host": "h", "port": 104, "aet": "A"}
-    for flag in ("enabled", "tls", "no_ris", "emergency_trigger"):
+    for flag in ("enabled", "tls", "no_ris", "emergency_trigger", "compress_lossless"):
         data = copy.deepcopy(DEFAULTS)
         data["destinations"] = [dict(node, **{flag: "false"})]
         try:

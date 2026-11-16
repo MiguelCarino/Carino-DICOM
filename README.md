@@ -136,10 +136,13 @@ dashboard or from the command line without the dashboard.
   `scp.min_free_gb`.
 - **Forward, with rules:** watches a folder and sends each stable file to its
   destinations. Delivery is tracked per destination, failures retry with
-  backoff, and progress survives a restart. Routing rules match on modality,
-  AE, station, patient ID or description. If no rule applies, the study goes to
-  **every** destination, because a study must never end up going nowhere.
-  *Explain route* shows which rule a study would hit.
+  backoff, and progress survives a restart. A destination can opt in to
+  `compress_lossless`, which sends uncompressed instances as JPEG-LS (or JPEG
+  2000) Lossless when the node accepts it, for branches on a slow uplink.
+  Routing rules match on modality, AE, station, patient ID or description. If
+  no rule applies, the study goes to **every** destination, because a study
+  must never end up going nowhere. *Explain route* shows which rule a study
+  would hit.
 - **De-identify on forward:** `basic` (PS3.15 Annex E) or `strict`. Only the copy
   that leaves is changed; the stored original is never rewritten. Pseudonyms are
   HMAC-derived, so set `deid.secret`. **Text burned into the pixels is not

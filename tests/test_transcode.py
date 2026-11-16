@@ -1,5 +1,5 @@
 """Tests for pacs.transcode and the three places that use it: the Storage SCU's
-uncompressed fallback, the Q/R SCP's C-MOVE/C-GET sub-operations, and WADO-RS.
+uncompressed fallback and its opt-in lossless compression (compress_lossless), the Q/R SCP's C-MOVE/C-GET sub-operations, and WADO-RS.
 
 The compressed sources are pydicom's own bundled test files (JPEG Lossless SV1,
 JPEG Baseline, RLE, JPEG-LS, JPEG 2000), so the decoders are exercised on
@@ -27,8 +27,8 @@ import pydicom                                                       # noqa: E40
 import pytest                                                        # noqa: E402
 from pydicom import dcmread                                          # noqa: E402
 from pydicom.dataset import Dataset, FileMetaDataset                 # noqa: E402
-from pydicom.uid import (ExplicitVRLittleEndian, ImplicitVRLittleEndian,  # noqa: E402
-                         JPEG2000, JPEG2000Lossless, JPEGBaseline8Bit, JPEGLSLossless,
+from pydicom.uid import (CTImageStorage, ExplicitVRLittleEndian,  # noqa: E402
+                         ImplicitVRLittleEndian, JPEG2000, JPEG2000Lossless, JPEGBaseline8Bit, JPEGLSLossless,
                          MRImageStorage, RLELossless, SecondaryCaptureImageStorage,
                          generate_uid)
 from pynetdicom import AE, build_role, evt                           # noqa: E402
@@ -367,6 +367,258 @@ def test_scu_names_both_refusals_when_uncompressed_is_refused_too():
         res = c_store(node.dest(), _copy_bundled(tmp, "MR_small_RLE.dcm"), "CARINOSCU", timeout=10)
         assert not res.ok and res.link
         assert "neither as RLE Lossless nor uncompressed" in res.message, res.message
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ------------------------------------------------------------- the SCU, compress_lossless
+def _ct_file(tmp, ts=ExplicitVRLittleEndian, signed=True, name="ct.dcm"):
+    """A 16-bit CT slice stored uncompressed: signed, 12 bits stored, the way
+    most CT arrives at a branch. Returns (path, dataset as written, pixels)."""
+    ds, arr = _native(bits=16, frames=1, rows=128, cols=128)
+    ds.SOPClassUID = ds.file_meta.MediaStorageSOPClassUID = CTImageStorage
+    ds.Modality = "CT"
+    ds.file_meta.TransferSyntaxUID = ts
+    if signed:
+        ds.PixelRepresentation = 1
+        arr = arr.astype(np.int16) // 2 - 1024     # -1024..1023, inside 12 bits signed
+        ds.PixelData = arr.tobytes()
+    del ds.NumberOfFrames
+    arr = arr.reshape(128, 128)
+    # An element whose VR an Implicit VR file does not record (US or SS) and a
+    # sequence: the two things a change from Implicit to Explicit VR has to
+    # get right on the way to JPEG-LS.
+    ds.SmallestImagePixelValue = int(arr.min())
+    ref = Dataset()
+    ref.ReferencedSOPClassUID, ref.ReferencedSOPInstanceUID = CTImageStorage, generate_uid()
+    ds.ReferencedImageSequence = [ref]
+    path = os.path.join(tmp, name)
+    ds.save_as(path, enforce_file_format=True)
+    return path, dcmread(path), arr
+
+
+def _compressing(dest):
+    dest.compress_lossless = True
+    return dest
+
+
+def test_compress_syntaxes_only_for_uncompressed_pixels(monkeypatch):
+    _need_encode(JPEGLSLossless)
+    _need_encode(JPEG2000Lossless)
+    ds, _ = _native()
+    assert T.compress_syntaxes(ds, ExplicitVRLittleEndian) == [JPEGLSLossless, JPEG2000Lossless]
+    assert T.compress_syntaxes(ds, ImplicitVRLittleEndian) == [JPEGLSLossless, JPEG2000Lossless]
+    # Stored compressed: sent as stored, never re-encoded.
+    for ts in (RLELossless, JPEGLSLossless, JPEGBaseline8Bit, JPEG2000, T.BIG_ENDIAN, T.DEFLATED_LE):
+        assert T.compress_syntaxes(ds, ts) == [], ts
+    nopix = Dataset()
+    nopix.SOPClassUID = SecondaryCaptureImageStorage
+    assert T.compress_syntaxes(nopix, ExplicitVRLittleEndian) == []
+    monkeypatch.setattr(T, "MAX_DECOMPRESSED_BYTES", 1024)
+    assert T.compress_syntaxes(ds, ExplicitVRLittleEndian) == []
+    monkeypatch.undo()
+    monkeypatch.setattr(T, "capabilities", lambda: {"decode": {}, "encode": {JPEG2000Lossless: ["x"]}})
+    assert T.compress_syntaxes(ds, ExplicitVRLittleEndian) == [JPEG2000Lossless]
+    # Never a lossy syntax, whatever is installed.
+    assert not set(T.FORWARD_COMPRESSION) & (set(T.LOSSY_METHOD) | T.ALWAYS_LOSSY)
+
+
+def test_destination_flag_is_off_unless_literally_true():
+    base = {"name": "C", "host": "h", "port": 104, "aet": "A"}
+    assert Destination.from_dict(base).compress_lossless is False
+    assert Destination.from_dict({**base, "compress_lossless": True}).compress_lossless is True
+    assert Destination.from_dict({**base, "compress_lossless": "false"}).compress_lossless is False
+    import copy
+    from pacs.config import DEFAULTS, validate
+    data = copy.deepcopy(DEFAULTS)
+    data["destinations"] = [{**base, "compress_lossless": "true"}]
+    with pytest.raises(ValueError, match="compress_lossless"):
+        validate(data)
+
+
+@pytest.mark.parametrize("stored", [ExplicitVRLittleEndian, ImplicitVRLittleEndian])
+def test_scu_compresses_to_jpeg_ls_for_a_node_that_takes_it(stored):
+    _need_encode(JPEGLSLossless)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEGLSLossless, JPEG2000Lossless,
+                                                  ExplicitVRLittleEndian, ImplicitVRLittleEndian))
+    try:
+        path, ds, arr = _ct_file(tmp, ts=stored)
+        before = open(path, "rb").read()
+        j = C.ConnectionJournal()
+        old = C.sender_journal()
+        C.install_sender_journal(j)
+        try:
+            res = c_store(_compressing(node.dest()), path, "CARINOSCU", timeout=10)
+        finally:
+            C.install_sender_journal(old)
+        assert res.ok, res.message
+        assert res.compressed and res.transcoded == f"{C.ts_name(stored)} → JPEG-LS Lossless"
+        assert res.sent_note == f"sent compressed: {res.transcoded}"
+        assert "sent compressed losslessly" in res.message
+        ((ts, got),) = node.got
+        assert ts == JPEGLSLossless
+        assert str(got.file_meta.TransferSyntaxUID) == JPEGLSLossless
+        assert got.SOPInstanceUID == ds.SOPInstanceUID
+        assert got.pixel_array.dtype == arr.dtype
+        assert np.array_equal(got.pixel_array, arr), "pixels changed on the way"
+        assert got.SmallestImagePixelValue == int(arr.min())
+        assert (got.ReferencedImageSequence[0].ReferencedSOPInstanceUID
+                == ds.ReferencedImageSequence[0].ReferencedSOPInstanceUID)
+        assert "LossyImageCompression" not in got or got.LossyImageCompression != "01"
+        assert open(path, "rb").read() == before, "the stored file was modified"
+        (entry,) = j.entries()
+        assert "sending compressed" in entry["detail"]
+        assert [c["proposed"] for c in entry["contexts"]] == [
+            [JPEGLSLossless], [JPEG2000Lossless], [stored]]
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_falls_back_to_jpeg_2000_lossless():
+    _need_encode(JPEG2000Lossless)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEG2000Lossless, ExplicitVRLittleEndian))
+    try:
+        path, ds, arr = _ct_file(tmp)
+        res = c_store(_compressing(node.dest()), path, "CARINOSCU", timeout=10)
+        assert res.ok and res.compressed, res
+        ((ts, got),) = node.got
+        assert ts == JPEG2000Lossless
+        assert got.SOPInstanceUID == ds.SOPInstanceUID
+        assert np.array_equal(got.pixel_array, arr)
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_sends_as_stored_when_the_node_refuses_compression():
+    _need_encode(JPEGLSLossless)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(ExplicitVRLittleEndian,))
+    try:
+        path, _ds, arr = _ct_file(tmp)
+        res = c_store(_compressing(node.dest()), path, "CARINOSCU", timeout=10)
+        assert res.ok and res.message == "stored" and res.transcoded == "" and not res.compressed, res
+        assert res.sent_note == ""
+        ((ts, got),) = node.got
+        assert ts == ExplicitVRLittleEndian
+        assert np.array_equal(got.pixel_array, arr)
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_does_not_compress_unless_the_destination_asks():
+    _need_encode(JPEGLSLossless)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEGLSLossless, ExplicitVRLittleEndian))
+    try:
+        path, _ds, _arr = _ct_file(tmp)
+        res = c_store(node.dest(), path, "CARINOSCU", timeout=10)
+        assert res.ok and res.transcoded == "", res
+        ((ts, _got),) = node.got
+        assert ts == ExplicitVRLittleEndian
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_never_re_encodes_a_compressed_instance():
+    _need_decode(RLELossless)
+    _need_encode(JPEGLSLossless)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(MRImageStorage, tss=(JPEGLSLossless, RLELossless))
+    try:
+        res = c_store(_compressing(node.dest()), _copy_bundled(tmp, "MR_small_RLE.dcm"),
+                      "CARINOSCU", timeout=10)
+        assert res.ok and res.transcoded == "", res
+        ((ts, _got),) = node.got
+        assert ts == RLELossless
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_sends_as_stored_when_the_encode_is_refused(monkeypatch):
+    _need_encode(JPEGLSLossless)
+    real = T.transcode
+    tried = []
+
+    def refuse(ds, target, **kw):
+        tried.append(target)
+        real(ds, target, **kw)          # leaves the in-place copy compressed ...
+        raise T.TranscodeError("not_lossless", "the encoding did not decode back")  # ... then fails
+    monkeypatch.setattr(T, "transcode", refuse)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEGLSLossless, JPEG2000Lossless,
+                                                  ExplicitVRLittleEndian))
+    try:
+        path, _ds, arr = _ct_file(tmp)
+        before = open(path, "rb").read()
+        res = c_store(_compressing(node.dest()), path, "CARINOSCU", timeout=10)
+        assert res.ok and not res.compressed and res.transcoded == "", res
+        assert "sent as stored: could not compress" in res.message, res.message
+        assert res.sent_note == ("sent as stored, could not compress: "
+                                 "the encoding did not decode back"), res.sent_note
+        assert tried == [t for t in (JPEGLSLossless, JPEG2000Lossless) if T.can_encode(t)]
+        ((ts, got),) = node.got
+        assert ts == ExplicitVRLittleEndian
+        assert np.array_equal(got.pixel_array, arr)
+        assert open(path, "rb").read() == before
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_scu_fails_loudly_when_only_compressed_is_accepted_and_the_encode_is_refused(monkeypatch):
+    _need_encode(JPEGLSLossless)
+
+    def refuse(ds, target, **kw):
+        raise T.TranscodeError("unsupported", "JPEG-LS Lossless cannot hold this image")
+    monkeypatch.setattr(T, "transcode", refuse)
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEGLSLossless,))
+    try:
+        path, _ds, _arr = _ct_file(tmp)
+        res = c_store(_compressing(node.dest()), path, "CARINOSCU", timeout=10)
+        assert not res.ok
+        assert "only as JPEG-LS Lossless" in res.message and "cannot hold" in res.message, res.message
+        assert node.got == []
+    finally:
+        node.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_forwarding_to_a_compress_lossless_destination_delivers_identical_pixels():
+    """The whole forwarding path: a config row with compress_lossless, the
+    watcher's pass, a pynetdicom archive that accepts JPEG-LS, and the Sent
+    line in the log."""
+    _need_encode(JPEGLSLossless)
+    from test_routing import FakeLog, dest, make_config, scan
+    from pacs.watcher import FolderWatcher
+    node = _OnlyUncompressed(CTImageStorage, tss=(JPEGLSLossless, ExplicitVRLittleEndian))
+    tmp = tempfile.mkdtemp(prefix="carino-tc-")
+    try:
+        cfg = make_config(tmp, [dest("Central", "127.0.0.1", node.port, "PLAIN",
+                                     compress_lossless=True)])
+        study = os.path.join(cfg.resolved("scu", "watch_dir"), "study")
+        os.makedirs(study)
+        sources = [_ct_file(study, name=f"{i}.dcm") for i in range(3)]
+        w = FolderWatcher(cfg, FakeLog())
+        scan(w, 3)
+        assert len(node.got) == 3, w.log.entries
+        by_uid = {got.SOPInstanceUID: (ts, got) for ts, got in node.got}
+        for _path, ds, arr in sources:
+            ts, got = by_uid[ds.SOPInstanceUID]
+            assert ts == JPEGLSLossless
+            assert np.array_equal(got.pixel_array, arr)
+        sent = [m for lvl, m, _f in w.log.entries if m.startswith("Sent ")]
+        assert len(sent) == 3 and all(
+            m.endswith("(sent compressed: Explicit VR Little Endian → JPEG-LS Lossless)")
+            for m in sent), sent
     finally:
         node.close()
         shutil.rmtree(tmp, ignore_errors=True)

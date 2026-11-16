@@ -170,7 +170,7 @@ def test_flags_the_dashboard_fills_in_are_not_a_destination_change():
     srv, c = _setup(strip_from_it=("destinations.write",))
     body = c.get("/api/config").get_json()
     body["destinations"][0].update(tls=False, no_ris=False, emergency_trigger=False,
-                                   ephemeral=False)
+                                   ephemeral=False, compress_lossless=False)
     body["scp"]["aet"] = "RENAMED"
     r = c.post("/api/config", json=body, headers=WRITE)
     assert r.status_code == 200, r.get_json()

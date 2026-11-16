@@ -239,6 +239,8 @@ function addDestRow(d) {
   // Set by the dev peer, which deletes these rows on discard; a Save must return it unchanged
   // (the whole-document-save hazard in CONTRIBUTING.md).
   tr.dataset.ephemeral = d.ephemeral ? "1" : "";
+  // Set in config.json only (no column yet); a Save must hand it back or it silently turns off.
+  tr.dataset.compress = d.compress_lossless === true ? "1" : "";
   if (d.ephemeral) {
     // Flag it visibly so nobody turns it into a real destination; it stays editable for the demo recipe.
     const why = T("Created by the dev peer — this row is deleted when the peer is discarded. Do not reuse it for a real node.");
@@ -900,6 +902,7 @@ function collectDests() {
       no_ris: tr.querySelector(".d-noris").checked,
       emergency_trigger: tr.querySelector(".d-emg").checked,
       ephemeral: tr.dataset.ephemeral === "1",
+      ...(tr.dataset.compress === "1" ? { compress_lossless: true } : {}),
     }))
     // Only a completely blank row is ignored; a partly filled one is refused by validateRows()
     // before the Save, instead of vanishing with the node it was meant to be.

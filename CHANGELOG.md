@@ -35,6 +35,16 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   (`pacs/dicomfs.py`).
 
 ### Added
+- **Lossless compression on forward, per destination.** `destinations[].compress_lossless`
+  (default `false`) proposes an instance stored uncompressed as JPEG-LS Lossless, then
+  JPEG 2000 Lossless, ahead of its stored syntax, and sends an in-memory encode when the
+  node accepts one. Same SOP Instance UID, every encode decoded and compared with the
+  source pixels before it leaves, the stored file untouched, never lossy. A node that
+  accepts neither, or an image the codec cannot hold, gets the stored syntax as before.
+  The Send line says `sent compressed: … → JPEG-LS Lossless`. For branches forwarding to
+  a central archive over a slow uplink, where JPEG-LS typically makes CT two to three
+  times smaller (`pacs/scu.py` `c_store`, `pacs/transcode.py` `compress_syntaxes`). Set
+  in `config.json`; the Destinations card keeps it on Save but has no column for it yet.
 - **Change report, and a preview before every report, in the bundled editor** (re-synced to
   upstream `3a78a84`). Export ▸ Change report lists what a session did to each loaded file:
   the source file and the file a download writes (name, size, SHA-256, transfer syntax, SOP

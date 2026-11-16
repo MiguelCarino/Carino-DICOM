@@ -1732,7 +1732,8 @@ def validate(data: dict, base_dir: Optional[str] = None) -> None:
         # "false" there reads as TRUE — so a Save would strip the operator's own
         # destination on the next discard, and leave the peer's aimed at an
         # archive that no longer exists.
-        for flag in ("enabled", "tls", "no_ris", "emergency_trigger", "ephemeral"):
+        for flag in ("enabled", "tls", "no_ris", "emergency_trigger", "ephemeral",
+                     "compress_lossless"):
             if flag in d and not isinstance(d[flag], bool):
                 raise ValueError(
                     f"destination '{d.get('name')}' has a non-boolean '{flag}' ({d[flag]!r}) — "

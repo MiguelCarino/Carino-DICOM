@@ -2316,8 +2316,8 @@ class PacsServer:
                 }
             if res.ok:
                 self.log.info(f"Sent {os.path.basename(fp)} -> {dname}"
-                              + (f" (sent decompressed: {res.transcoded})"
-                                 if getattr(res, "transcoded", "") else ""), kind="send")
+                              + (f" ({res.sent_note})"
+                                 if getattr(res, "sent_note", "") else ""), kind="send")
             else:
                 self.log.warn(f"Send {os.path.basename(fp)} -> {dname}: {res.message}", kind="send")
             return bool(res.ok)
@@ -3908,8 +3908,8 @@ class PacsServer:
                             if res.ok:
                                 ok += 1
                                 self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}"
-                                              + (f" (sent decompressed: {res.transcoded})"
-                                                 if getattr(res, "transcoded", "") else ""),
+                                              + (f" ({res.sent_note})"
+                                                 if getattr(res, "sent_note", "") else ""),
                                               kind="send")
                             else:
                                 fail += 1

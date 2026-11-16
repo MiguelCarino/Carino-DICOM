@@ -8,7 +8,11 @@ changes is the way out, in three places and only on demand:
 
 * the Storage SCU (scu.c_store) and the Q/R SCP's C-MOVE/C-GET sub-operations
   (qr.py) offer Explicit and Implicit VR Little Endian beside the stored syntax,
-  and decompress an in-memory copy when the far side accepts only those;
+  and decompress an in-memory copy when the far side accepts only those; and
+  for a destination with ``compress_lossless`` on, the SCU also proposes
+  JPEG-LS and JPEG 2000 Lossless ahead of an uncompressed stored syntax and
+  sends a lossless in-memory encode when one of them is accepted
+  (compress_syntaxes);
 * WADO-RS (dicomweb.py) honours ``transfer-syntax=`` in Accept instead of
   answering 406 for every syntax it did not happen to store;
 * ``pacs transcode`` does the same to a file on the command line.
@@ -213,6 +217,32 @@ def fallback_syntaxes(ts: str) -> list[str]:
     return [EXPLICIT_LE, IMPLICIT_LE]
 
 
+# What the Storage SCU proposes, in this order, for a destination with
+# ``compress_lossless`` on. JPEG-LS first: on CT and MR it compresses about as
+# well as JPEG 2000 Lossless at a fraction of the CPU, and it is what most
+# archives that take any lossless syntax take. JPEG 2000 Lossless for the
+# nodes that take only that. RLE is left out (it saves little on 12-bit
+# noise-floor pixels) and so is HTJ2K (few archives accept it yet).
+FORWARD_COMPRESSION = (JPEG_LS_LOSSLESS, JPEG_2000_LOSSLESS)
+
+
+def compress_syntaxes(ds, ts: str) -> list[str]:
+    """The lossless syntaxes a sender may propose AHEAD of *ts* for *ds*, in
+    preference order, or [] when compressing is not on the table: *ts* is
+    already compressed (sent as stored, never re-encoded), or the retired Big
+    Endian; there is no Pixel Data to compress; the pixels would decode above
+    MAX_DECOMPRESSED_BYTES; or this install has neither encoder. Anything the
+    encoder still turns down once it sees the pixels (JPEG-LS above 16 bits,
+    1-bit pixels) is :func:`transcode`'s TranscodeError, and the sender falls
+    back to the stored syntax."""
+    ts = str(ts or "")
+    if ts not in DECOMPRESS_TARGETS or "PixelData" not in ds:
+        return []
+    if decoded_size(ds) > MAX_DECOMPRESSED_BYTES:
+        return []
+    return [t for t in FORWARD_COMPRESSION if can_encode(t)]
+
+
 def send_target(stored_ts: str, accepted: set) -> Optional[str]:
     """What to send an instance stored as *stored_ts* as, given the transfer
     syntaxes the far side *accepted* for its SOP class: None to send it as
@@ -375,7 +405,7 @@ def transcode(ds, target_ts: str, *, in_place: bool = False):
         out = ds if in_place else copy.deepcopy(ds)
         out.file_meta.TransferSyntaxUID = target
         _mark_written(out)
-        return out
+        return _encoded_as(out, source, target)
 
     if source in NATIVE and target in DECOMPRESS_TARGETS:
         # Native to native: pydicom re-encodes the VRs on write and the pixel
@@ -383,7 +413,7 @@ def transcode(ds, target_ts: str, *, in_place: bool = False):
         out = ds if in_place else copy.deepcopy(ds)
         out.file_meta.TransferSyntaxUID = target
         _mark_written(out)
-        return out
+        return _encoded_as(out, source, target)
 
     check_size(ds)
     lossy = source_is_lossy(ds, source)
@@ -404,6 +434,33 @@ def transcode(ds, target_ts: str, *, in_place: bool = False):
             raise TranscodeError("failed", (
                 f"{ts_name(source)} → {ts_name(target)} failed: {exc}")) from exc
     _mark_written(out)
+    return _encoded_as(out, source, target)
+
+
+def _implicit(ts: str) -> bool:
+    return ts == IMPLICIT_LE
+
+
+def _encoded_as(ds, source: str, target: str):
+    """*ds*, or a fresh Dataset holding the same elements, so that nothing in
+    it still claims the source's VR encoding once the syntax changed between
+    Implicit and Explicit VR.
+
+    A dataset read from an Implicit VR file remembers that (its original
+    encoding, and the deprecated is_implicit_VR), and pydicom keeps that
+    memory through compress() and a change of (0002,0010). pynetdicom's
+    send_c_store() believes the memory over the File Meta: an Implicit VR CT
+    compressed to JPEG-LS went out on the Implicit VR context, encapsulated
+    pixels and all. A new container starts with no memory, so the writer
+    takes the encoding from the transfer syntax, converting each element
+    (raw ones included, which carry their own encoding)."""
+    if _implicit(source) == _implicit(target):
+        return ds
+    from pydicom.dataset import Dataset
+    out = Dataset()
+    for elem in ds:                     # iterating converts raw elements
+        out.add(elem)
+    out.file_meta = ds.file_meta
     return out
 
 

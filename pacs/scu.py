@@ -9,6 +9,15 @@ accepts only uncompressed gets an in-memory decompressed copy under the same SOP
 Instance UID, and the result says so. Anything else it refuses — no common
 syntax, or none we can produce — still fails loudly rather than sending
 something the remote did not agree to. Nothing here ever lossy-encodes.
+
+The other direction is opt-in, per destination (``compress_lossless``): an
+instance stored uncompressed is offered as JPEG-LS Lossless, then JPEG 2000
+Lossless, ahead of its stored syntax, and goes out as an in-memory lossless
+encode — same SOP Instance UID, decoded and compared before it is sent — when
+the remote accepts one (pacs.transcode.compress_syntaxes). A remote that takes
+neither, or an image the encoder will not hold, gets the stored syntax as
+before. It exists for a branch forwarding over a slow uplink: CT is usually
+two to three times smaller in JPEG-LS, and the picture is the same.
 """
 
 from __future__ import annotations
@@ -47,6 +56,8 @@ class Destination:
     port: int
     aet: str
     tls: bool = False  # connect to this node over TLS
+    # Offer an uncompressed instance as JPEG-LS / JPEG 2000 Lossless first.
+    compress_lossless: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "Destination":
@@ -58,7 +69,8 @@ class Destination:
         operator could recognise in a line that says a study was sent.
         """
         return cls(name=d.get("name", d["host"]), host=d["host"], port=int(d["port"]),
-                   aet=d["aet"], tls=bool(d.get("tls", False)))
+                   aet=d["aet"], tls=bool(d.get("tls", False)),
+                   compress_lossless=d.get("compress_lossless", False) is True)
 
 
 class TLSRequired(OSError):
@@ -93,6 +105,23 @@ class SendResult:
     # ordinary send-as-stored. The callers put it on their "Sent" line, so a
     # decompressed delivery is never mistaken for a byte-identical one.
     transcoded: str = ""
+    # True when *transcoded* is a lossless COMPRESSION (compress_lossless),
+    # False when it is a decompression.
+    compressed: bool = False
+    # Why a compress_lossless destination got the stored syntax although it
+    # accepted a lossless one: the encoder refused the image.
+    not_compressed: str = ""
+
+    @property
+    def sent_note(self) -> str:
+        """"sent compressed: A → B" / "sent decompressed: A → B" / "sent as
+        stored, could not compress: why", or "" for an ordinary send as stored
+        — what the callers' "Sent" lines put in brackets."""
+        if self.transcoded:
+            return f"sent {'compressed' if self.compressed else 'decompressed'}: {self.transcoded}"
+        if self.not_compressed:
+            return f"sent as stored, could not compress: {self.not_compressed}"
+        return ""
 
 
 # A transfer is allowed this many bytes per second on top of the base timeout
@@ -555,7 +584,13 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     # we would decompress an image the far side could have had as stored.
     # Separate, the stored one wins wherever it is accepted, and the journal
     # records exactly which syntaxes the node refused.
-    proposals = [str(ts)] + transcode.fallback_syntaxes(ts)
+    #
+    # With compress_lossless, the lossless syntaxes go AHEAD of an uncompressed
+    # stored one, each in its own context for the same reason: the acceptor
+    # answers each separately, and the first one it took is the one sent. A
+    # node that refuses them all still has the stored syntax to accept.
+    compress = transcode.compress_syntaxes(ds, ts) if dest.compress_lossless else []
+    proposals = compress + [str(ts)] + transcode.fallback_syntaxes(ts)
     try:
         for t in proposals:
             ae.add_requested_context(sop_class, t)
@@ -577,7 +612,11 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         # What the journal entry for this association says beyond the
         # per-context answers: that the instance is going out decompressed.
         mine = [c for c in contexts if c["sop"] == str(sop_class) and c["result"] == 0]
-        target = transcode.send_target(ts, {c["accepted"] for c in mine})
+        took = {c["accepted"] for c in mine}
+        squeeze = next((t for t in compress if t in took), None)
+        if squeeze:
+            return f"sending compressed: {ts_name(ts)} → {ts_name(squeeze)} (lossless)"
+        target = transcode.send_target(ts, took)
         if target:
             return f"sent decompressed: {ts_name(ts)} refused, uncompressed accepted"
         return None
@@ -589,8 +628,35 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
     try:
         accepted = {str(c.transfer_syntax[0]) for c in assoc.accepted_contexts
                     if str(c.abstract_syntax) == str(sop_class) and c.transfer_syntax}
-        target = transcode.send_target(ts, accepted)
+        squeezable = [t for t in compress if t in accepted]
+        target = None if squeezable else transcode.send_target(ts, accepted)
         converted = ""
+        squeeze = None
+        why_not = ""                    # the last encode refused, if any
+        # Encoded only now, like the decompression below: the contexts the
+        # remote accepted decide the syntax, and a remote that took none of the
+        # lossless ones never costs an encode. transcode() keeps the SOP
+        # Instance UID, and decodes the result again and compares it with the
+        # source pixels; anything short of identical is refused, and the next
+        # accepted syntax (or the stored one) is tried instead.
+        for t in squeezable:
+            try:
+                ds = transcode.transcode(ds, t, in_place=True)
+                squeeze, converted = t, f"{ts_name(ts)} → {ts_name(t)}"
+                break
+            except transcode.TranscodeError as exc:
+                why_not = str(exc)
+                # A failed encode or comparison may have left the in-place copy
+                # half changed; the file on disk is the one thing known good.
+                try:
+                    ds = dcmread(filepath)
+                except Exception as rexc:
+                    return SendResult(False, f"unreadable ({rexc})")
+        if squeezable and not squeeze and str(ts) not in accepted:
+            return SendResult(False, (
+                f"{dest.aet} accepted this kind of object only as "
+                f"{', '.join(ts_name(t) for t in squeezable)}, not as {ts_name(ts)}, and it "
+                f"could not be compressed here: {why_not}"))
         if target:
             # Decompressed only now, with the answer in hand: a node that takes
             # the stored syntax never costs a decode. The copy is the dataset
@@ -613,12 +679,19 @@ def c_store(dest: Destination, filepath: str, calling_aet: str, timeout: int = 3
         code = status.Status
         if code == 0x0000 or code in _WARNING_STATUSES:
             msg = "stored" if code == 0x0000 else f"stored (warning 0x{code:04X})"
+            if squeeze:
+                return SendResult(True, msg + f", sent compressed losslessly ({converted})",
+                                  transcoded=converted, compressed=True)
+            if why_not:
+                return SendResult(True, msg + f", sent as stored: could not compress ({why_not})",
+                                  not_compressed=why_not)
             if converted:
                 msg += (f", sent decompressed ({converted}): {dest.aet} does not accept "
                         f"{ts_name(ts)}")
             return SendResult(True, msg, transcoded=converted)
+        how = "compressed" if squeeze else "decompressed"
         return SendResult(False, f"C-STORE failed (0x{code:04X})"
-                          + (f" (sent decompressed, {converted})" if converted else ""))
+                          + (f" (sent {how}, {converted})" if converted else ""))
     except Exception as exc:                    # noqa: BLE001 - see below
         # pynetdicom RAISES rather than answering with a status for an instance
         # it cannot put on the wire: no (0008,0018), file meta carrying no
