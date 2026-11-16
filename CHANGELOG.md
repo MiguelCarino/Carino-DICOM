@@ -135,6 +135,11 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   the upstream CHANGELOG covers only the last two.
 
 ### Changed
+- **The bundled editor's share card** (re-synced to upstream `cc7abd2`). `index.html`
+  names a 1200×630 `og.jpg` as its Open Graph / Twitter preview image, and the image is
+  copied beside the page. Metadata only: the URL is upstream's absolute
+  `https://dcm.carino.systems/og.jpg`, which link previewers read and no browser requests,
+  so the editor served from this engine still makes no off-origin request.
 - **"Modalities at this site" is a list with a filter.** Settings → Worklist and orders,
   and the setup chooser, used to show 79 pills, with most behind "Show all codes". Now
   there is a filter box (by code or name), an All / Ticked only switch, and one scrolling
