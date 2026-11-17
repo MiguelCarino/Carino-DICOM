@@ -90,14 +90,15 @@ jobs:
             eb: "--win --x64"
             expect: |
               Carino-DICOM-Setup-1.4.0-x64.exe
-          - id: win-arm64
-            os: windows-11-arm
-            eb: "--win --arm64"
-            experimental: true
-            expect: |
-              Carino-DICOM-Setup-1.4.0-arm64.exe
+          # No win-arm64 leg. pylibjpeg-openjpeg, pylibjpeg-rle, pylibjpeg-libjpeg
+          # and pyjpegls publish no win_arm64 wheels, so --only-binary cannot
+          # freeze the engine on windows-11-arm. Carino-DICOM-Setup-<v>-arm64.exe
+          # is built on a Windows ARM machine and attached to the release by
+          # hand; the release job's --clobber never touches it, because no leg
+          # here produces that name. Restore the leg (os: windows-11-arm,
+          # eb: "--win --arm64", experimental: true) once those wheels exist.
     runs-on: ${{ matrix.os }}
-    # The two arm64 legs are new and have not gone green yet, so they are allowed
+    # An experimental leg (linux-arm64) is allowed
     # to fail a manual smoke run without taking the run down with them. A tag build
     # is never forgiving: a v* push that publishes a release with an installer
     # missing must go red. Drop `experimental` from a leg once it has passed once.
@@ -306,6 +307,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # merge-multiple keeps each artifact's own folders: since the SBOM
+          # joined the upload, every artifact is rooted at the repository
+          # (desktop/dist/..., sbom/...), so dist/* would be two folders and
+          # gh release upload refuses a folder. Flatten to the files.
+          find dist -mindepth 2 -type f -exec mv -n -t dist {} +
+          find dist -mindepth 1 -type d -empty -delete
+          if [ -n "$(find dist -mindepth 1 -type d)" ]; then
+            echo "::error::two legs produced the same file name"; find dist; exit 1
+          fi
           ls -l dist
           # A hyphen in the tag means a pre-release: v1.1.0-rc03 is one, v1.1.0
           # is not. That is the convention this repo already follows by hand, and
