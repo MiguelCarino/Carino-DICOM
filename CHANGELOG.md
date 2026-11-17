@@ -5,6 +5,8 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-17
+
 ### Security
 - **DICOM-TLS takes the same cipher suites as the dashboard.** Every DICOM listener and
   every outbound association now offers and accepts, at TLS 1.2, only ECDHE/DHE suites
