@@ -96,13 +96,32 @@ def _license(dist: md.Distribution) -> str:
     return "NOASSERTION"
 
 
-def _requirement_names(text: str) -> list[str]:
+def _marker_applies(marker: str) -> bool:
+    """Whether a requirements.txt environment marker holds for this interpreter.
+
+    Uses `packaging` (pip, pytest and PyInstaller all bring it). Without it the
+    requirement counts as applicable, which is the stricter answer."""
+    try:
+        from packaging.markers import Marker
+    except ImportError:
+        return True
+    return Marker(marker).evaluate()
+
+
+def _requirement_names(text: str, *, applicable_only: bool = False) -> list[str]:
+    """Distribution names in requirements.txt.
+
+    applicable_only drops a requirement whose environment marker is false here
+    (pyjpegls on CPython 3.14+): pip skipped it, so it is not missing."""
     names = []
     for line in text.splitlines():
         line = line.split("#", 1)[0].strip()
         if not line or line.startswith("-"):
             continue
-        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", line)
+        spec, _, marker = line.partition(";")
+        if applicable_only and marker.strip() and not _marker_applies(marker.strip()):
+            continue
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", spec.strip())
         if m:
             names.append(m.group(1))
     return names
@@ -288,7 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="carino-dicom.spdx.json", help="where to write the SBOM")
     args = ap.parse_args(argv)
     doc = build()
-    missing = [n for n in _requirement_names((ROOT / "requirements.txt").read_text(encoding="utf-8"))
+    missing = [n for n in _requirement_names((ROOT / "requirements.txt").read_text(encoding="utf-8"),
+                                             applicable_only=True)
                if _norm(n) not in {p["SPDXID"].removeprefix("SPDXRef-Package-pypi-") for p in doc["packages"]}]
     if missing:
         # An SBOM written from the wrong interpreter would silently list nothing.

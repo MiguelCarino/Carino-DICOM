@@ -91,6 +91,12 @@ def test_deterministic_for_one_environment():
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
+def test_a_requirement_pip_skipped_here_is_not_missing():
+    text = 'alpha>=1\nbeta>=2; python_version < "3"\ngamma; python_version >= "3"  # note\n'
+    assert make_sbom._requirement_names(text) == ["alpha", "beta", "gamma"]
+    assert make_sbom._requirement_names(text, applicable_only=True) == ["alpha", "gamma"]
+
+
 def test_main_writes_a_file(tmp_path):
     out = tmp_path / "sbom.json"
     assert make_sbom.main(["--out", str(out)]) == 0

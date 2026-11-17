@@ -1,0 +1,5 @@
+# The bundled editor is a byte copy of DICOM-editor, and its sbom.spdx.json
+# pins a SHA-256 per file (tests/test_sbom.py checks them). Without this, a
+# Windows checkout with core.autocrlf rewrites its text files to CRLF: the
+# checksums stop matching, and the Windows installer ships the altered bytes.
+pacs/web/editor/** -text

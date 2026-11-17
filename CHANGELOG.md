@@ -196,6 +196,12 @@ Licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
   system that accepts non-UTF-8 names; each now checks what the platform can do. Index tests close
   their database before Windows deletes the folder, and the same-size replacement test no longer
   depends on two random UIDs having the same length.
+- **The Windows build ships the bundled editor byte for byte.** A Windows checkout rewrote the
+  editor's text files to CRLF, so the installer carried files that no longer matched the
+  editor's own SBOM checksums. `.gitattributes` now marks `pacs/web/editor/` as binary.
+- **`make_sbom` works on CPython 3.14.** It treated pyjpegls, which `requirements.txt` skips on
+  3.14 and later, as missing and wrote no SBOM; a requirement whose marker excludes the running
+  interpreter is no longer counted as missing.
 
 ## [1.3.0] — 2026-10-16
 
