@@ -2,10 +2,10 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "Carino DICOM Editor 1.2.0 third-party components",
-  "documentNamespace": "https://dcm.carino.systems/spdx/carino-dicom-editor-1.2.0-102c53ac53825a450fcbab54e00d38ad",
+  "name": "Carino DICOM Editor 1.3.0 third-party components",
+  "documentNamespace": "https://dcm.carino.systems/spdx/carino-dicom-editor-1.3.0-e3b1fc48cef1f9ba808f82e83df67d55",
   "creationInfo": {
-    "created": "2026-11-10T19:43:47Z",
+    "created": "2026-11-17T15:58:30Z",
     "creators": [
       "Tool: tools/make-sbom.mjs"
     ]
@@ -14,7 +14,7 @@
     {
       "SPDXID": "SPDXRef-Package-carino-dicom-editor",
       "name": "Carino DICOM Editor",
-      "versionInfo": "1.2.0",
+      "versionInfo": "1.3.0",
       "downloadLocation": "git+https://github.com/MiguelCarino/Carino-DICOM-Editor",
       "licenseConcluded": "MPL-2.0",
       "licenseDeclared": "MPL-2.0",
