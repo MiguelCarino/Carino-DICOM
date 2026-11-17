@@ -33,12 +33,6 @@
 
 const I18N = {
     es: {
-        // ── Navbar greeting (rendered by carino-navbar.js via window.t) ──
-        'Late shift.': 'Turno nocturno.',
-        'Good morning.': 'Buenos días.',
-        'Good afternoon.': 'Buenas tardes.',
-        'Good evening.': 'Buenas noches.',
-
         // ── Sidebar ──
         'Services': 'Servicios',
         'History': 'Historial',
@@ -1276,11 +1270,6 @@ const I18N = {
     },
 
     'pt-BR': {
-        'Late shift.': 'Turno da noite.',
-        'Good morning.': 'Bom dia.',
-        'Good afternoon.': 'Boa tarde.',
-        'Good evening.': 'Boa noite.',
-
         'Services': 'Serviços',
         'History': 'Histórico',
         'Orders': 'Pedidos',
@@ -2487,11 +2476,6 @@ const I18N = {
     },
 
     ja: {
-        'Late shift.': '夜勤お疲れさま。',
-        'Good morning.': 'おはようございます。',
-        'Good afternoon.': 'こんにちは。',
-        'Good evening.': 'こんばんは。',
-
         'Services': 'サービス',
         'History': '履歴',
         'Orders': 'オーダ',
@@ -3698,11 +3682,6 @@ const I18N = {
     },
 
     ru: {
-        'Late shift.': 'Ночная смена.',
-        'Good morning.': 'Доброе утро.',
-        'Good afternoon.': 'Добрый день.',
-        'Good evening.': 'Добрый вечер.',
-
         'Services': 'Службы',
         'History': 'История',
         'Orders': 'Заявки',
